@@ -35,9 +35,10 @@ export function createGenerateImportMap(
       addScopedExternals(importMap, chunkBundles);
       addshareScopeExternals(importMap, chunkBundles);
       addGlobalSharedExternals(importMap, chunkBundles);
+      addRemoteInfos(importMap, chunkBundles);
+
       addChunkImports(importMap, chunkBundles);
 
-      addRemoteInfos(importMap);
       return Promise.resolve(importMap);
     } catch (e) {
       return Promise.reject(e);
@@ -252,11 +253,12 @@ export function createGenerateImportMap(
    * @param importMap
    * @returns
    */
-  function addRemoteInfos(importMap: ImportMap): void {
+  function addRemoteInfos(importMap: ImportMap, chunkBundles: Record<string, Set<string>>): void {
     const remotes = ports.remoteInfoRepo.getAll();
 
     for (const [remoteName, remote] of Object.entries(remotes)) {
       addRemoteExposedModules(importMap, remoteName, remote);
+      registerBundleChunks(chunkBundles, remoteName, 'mapping-or-exposed');
     }
   }
 
@@ -284,20 +286,21 @@ export function createGenerateImportMap(
   }
 
   function addChunkImports(importMap: ImportMap, chunkBundles: Record<string, Set<string>>) {
-    const chunkImports = Object.entries(chunkBundles).reduce((imports, [remoteName, bundles]) => {
+    Object.entries(chunkBundles).forEach(([remoteName, bundles]) => {
       const baseUrl = getScope('CHUNKS', remoteName);
 
-      Array.from(bundles).forEach(bundleName => {
+      const imports = Array.from(bundles).reduce((_imports, bundleName) => {
         ports.sharedChunksRepo.tryGet(remoteName, bundleName).ifPresent(files => {
           files.forEach(file => {
-            imports[toChunkImport(file)] = _path.join(baseUrl, file);
+            _imports[toChunkImport(file)] = _path.join(baseUrl, file);
           });
         });
-      });
-      return imports;
-    }, {} as Imports);
+        return _imports;
+      }, {} as Imports);
 
-    addToGlobal(importMap, chunkImports);
+      addToScope(importMap, baseUrl, imports);
+    });
+
     return importMap;
   }
 
