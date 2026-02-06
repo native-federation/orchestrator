@@ -128,6 +128,10 @@ export function createGenerateImportMap(
         let targetFileUrl: string = _path.join(scope, version.remotes[0]!.file);
         version.remotes[0]!.cached = true;
 
+        if (version.action === 'share') {
+          registerBundleChunks(chunkBundles, version.remotes[0]!.name, version.remotes[0]!.bundle);
+        }
+
         if (version.action === 'skip') {
           if (!override) {
             override = findOverride(external, shareScope, externalName) ?? 'NOT_AVAILABLE';
@@ -137,6 +141,7 @@ export function createGenerateImportMap(
               overrideScope = getScope(shareScope, override.remotes[0]!.name, externalName);
             targetFileUrl = _path.join(overrideScope, override.remotes[0]!.file);
             override.remotes[0]!.cached = true;
+
             version.remotes[0]!.cached = false;
           }
         }
