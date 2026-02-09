@@ -1,4 +1,4 @@
-import type { ImportMap, Imports } from 'lib/1.domain/import-map/import-map.contract';
+import type { ImportMap } from 'lib/1.domain/import-map/import-map.contract';
 import type { RemoteEntry, SharedInfoActions } from 'lib/1.domain';
 import type { LoggingConfig } from '../../config/log.contract';
 import * as _path from 'lib/utils/path';
@@ -30,7 +30,7 @@ export function createConvertToImportMap(
 
     const remoteEntryScope = _path.getScope(remoteEntry.url);
 
-    const chunkBundles = new Set<string>();
+    const chunkBundles = new Set<string>(['mapping-or-exposed']);
     remoteEntry.shared.forEach(external => {
       // Scoped externals
       if (!external.singleton) {
@@ -124,19 +124,21 @@ export function createConvertToImportMap(
   function addChunkImports(
     importMap: ImportMap,
     remoteName: string,
-    baseUrl: string,
+    remoteEntryScope: string,
     chunkBundles: Set<string>
   ) {
-    const chunkImports = Array.from(chunkBundles).reduce((imports, bundleName) => {
+    Array.from(chunkBundles).forEach(bundleName => {
       ports.sharedChunksRepo.tryGet(remoteName, bundleName).ifPresent(files => {
         files.forEach(file => {
-          imports[toChunkImport(file)] = _path.join(baseUrl, file);
+          addToScopes(
+            remoteEntryScope,
+            toChunkImport(file),
+            _path.join(remoteEntryScope, file),
+            importMap
+          );
         });
       });
-      return imports;
-    }, {} as Imports);
-
-    importMap.imports = { ...importMap.imports, ...chunkImports };
+    });
     return importMap;
   }
 }
