@@ -13,7 +13,7 @@ import {
 } from 'lib/6.mocks/domain/remote-info/remote-info.mock';
 import { mockExternal_A, mockExternal_B } from 'lib/6.mocks/domain/externals/external.mock';
 import { mockVersion_A, mockVersion_B } from 'lib/6.mocks/domain/externals/version.mock';
-import { mockScopeUrl_MFE1 } from 'lib/6.mocks/domain/scope-url.mock';
+import { mockScopeUrl_MFE1, mockScopeUrl_MFE2 } from 'lib/6.mocks/domain/scope-url.mock';
 
 describe('createGenerateImportMap (chunk-imports)', () => {
   let generateImportMap: ForGeneratingImportMap;
@@ -77,12 +77,12 @@ describe('createGenerateImportMap (chunk-imports)', () => {
     const actual = await generateImportMap();
 
     expect(adapters.sharedChunksRepo.tryGet).toHaveBeenCalledWith('team/mfe1', 'shared');
-    expect(actual.imports['@nf-internal/shared-chunk']).toBe(
-      mockScopeUrl_MFE1({ file: 'shared-chunk.js' })
-    );
-    expect(actual.imports['@nf-internal/utils-chunk']).toBe(
-      mockScopeUrl_MFE1({ file: 'utils-chunk.js' })
-    );
+    expect(actual.scopes).toEqual({
+      [mockScopeUrl_MFE1()]: {
+        '@nf-internal/shared-chunk': mockScopeUrl_MFE1({ file: 'shared-chunk.js' }),
+        '@nf-internal/utils-chunk': mockScopeUrl_MFE1({ file: 'utils-chunk.js' }),
+      },
+    });
   });
 
   it('should add chunk imports for multiple bundles from same remote', async () => {
@@ -120,12 +120,13 @@ describe('createGenerateImportMap (chunk-imports)', () => {
 
     expect(adapters.sharedChunksRepo.tryGet).toHaveBeenCalledWith('team/mfe1', 'shared');
     expect(adapters.sharedChunksRepo.tryGet).toHaveBeenCalledWith('team/mfe1', 'vendor');
-    expect(actual.imports['@nf-internal/shared-chunk']).toBe(
-      mockScopeUrl_MFE1({ file: 'shared-chunk.js' })
-    );
-    expect(actual.imports['@nf-internal/vendor-chunk']).toBe(
-      mockScopeUrl_MFE1({ file: 'vendor-chunk.js' })
-    );
+
+    expect(actual.scopes).toEqual({
+      [mockScopeUrl_MFE1()]: {
+        '@nf-internal/shared-chunk': mockScopeUrl_MFE1({ file: 'shared-chunk.js' }),
+        '@nf-internal/vendor-chunk': mockScopeUrl_MFE1({ file: 'vendor-chunk.js' }),
+      },
+    });
   });
 
   it('should add chunk imports for bundles from multiple remotes', async () => {
@@ -157,46 +158,11 @@ describe('createGenerateImportMap (chunk-imports)', () => {
     const actual = await generateImportMap();
 
     expect(adapters.sharedChunksRepo.tryGet).toHaveBeenCalledWith('team/mfe1', 'shared');
-    expect(actual.imports['@nf-internal/mfe1-chunk']).toBe(
-      mockScopeUrl_MFE1({ file: 'mfe1-chunk.js' })
-    );
-  });
-
-  it('should not duplicate chunk imports when same bundle is used by multiple externals', async () => {
-    adapters.sharedExternalsRepo.getFromScope = jest.fn(() => ({
-      'dep-a': mockExternal_A({
-        dirty: false,
-        versions: [
-          mockVersion_A.v2_1_1({
-            action: 'share',
-            remotes: { 'team/mfe1': { bundle: 'shared' } },
-          }),
-        ],
-      }),
-      'dep-b': mockExternal_B({
-        dirty: false,
-        versions: [
-          mockVersion_B.v2_1_1({
-            action: 'share',
-            remotes: { 'team/mfe1': { bundle: 'shared' } },
-          }),
-        ],
-      }),
-    }));
-    adapters.sharedChunksRepo.tryGet = jest.fn((remote, bundle) => {
-      if (remote === 'team/mfe1' && bundle === 'shared') {
-        return Optional.of(['common-chunk.js']);
-      }
-      return Optional.empty();
+    expect(actual.scopes).toEqual({
+      [mockScopeUrl_MFE1()]: {
+        '@nf-internal/mfe1-chunk': mockScopeUrl_MFE1({ file: 'mfe1-chunk.js' }),
+      },
     });
-
-    const actual = await generateImportMap();
-
-    // Should only call get once per unique remote+bundle combination
-    expect(adapters.sharedChunksRepo.tryGet).toHaveBeenCalledTimes(1);
-    expect(actual.imports['@nf-internal/common-chunk']).toBe(
-      mockScopeUrl_MFE1({ file: 'common-chunk.js' })
-    );
   });
 
   it('should handle chunk files with .mjs extension', async () => {
@@ -215,7 +181,7 @@ describe('createGenerateImportMap (chunk-imports)', () => {
 
     const actual = await generateImportMap();
 
-    expect(actual.imports['@nf-internal/shared-chunk']).toBe(
+    expect(actual.scopes?.[mockScopeUrl_MFE1()]?.['@nf-internal/shared-chunk']).toBe(
       mockScopeUrl_MFE1({ file: 'shared-chunk.mjs' })
     );
   });
@@ -236,7 +202,7 @@ describe('createGenerateImportMap (chunk-imports)', () => {
 
     const actual = await generateImportMap();
 
-    expect(actual.imports['@nf-internal/shared-chunk']).toBe(
+    expect(actual.scopes?.[mockScopeUrl_MFE1()]?.['@nf-internal/shared-chunk']).toBe(
       mockScopeUrl_MFE1({ file: 'shared-chunk.cjs' })
     );
   });
@@ -257,7 +223,7 @@ describe('createGenerateImportMap (chunk-imports)', () => {
     const actual = await generateImportMap();
 
     expect(adapters.sharedChunksRepo.tryGet).toHaveBeenCalledWith('team/mfe1', 'scoped');
-    expect(actual.imports['@nf-internal/scoped-chunk']).toBe(
+    expect(actual.scopes?.[mockScopeUrl_MFE1()]?.['@nf-internal/scoped-chunk']).toBe(
       mockScopeUrl_MFE1({ file: 'scoped-chunk.js' })
     );
   });

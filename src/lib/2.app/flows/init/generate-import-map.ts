@@ -303,7 +303,7 @@ export function createGenerateImportMap(
         return _imports;
       }, {} as Imports);
 
-      addToScope(importMap, baseUrl, imports);
+      if (Object.keys(imports).length > 0) addToScope(importMap, baseUrl, imports);
     });
 
     return importMap;

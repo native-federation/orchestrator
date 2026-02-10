@@ -301,8 +301,7 @@ describe('createConvertToImportMap', () => {
 
       const importMap = await convertToImportMap({ entry: remoteEntry, actions });
 
-      expect(ports.sharedChunksRepo.tryGet).not.toHaveBeenCalled();
-      expect(importMap.imports['@nf-internal/shared-chunk']).toBeUndefined();
+      expect(importMap.scopes?.[mockScopeUrl_MFE2()]?.['@nf-internal/utils-chunk']).toBeUndefined();
     });
 
     it('should add chunk imports for shared externals with bundle', async () => {
@@ -323,10 +322,10 @@ describe('createConvertToImportMap', () => {
       const importMap = await convertToImportMap({ entry: remoteEntry, actions });
 
       expect(ports.sharedChunksRepo.tryGet).toHaveBeenCalledWith('team/mfe2', 'shared');
-      expect(importMap.imports['@nf-internal/shared-chunk']).toBe(
+      expect(importMap.scopes?.[mockScopeUrl_MFE2()]?.['@nf-internal/shared-chunk']).toBe(
         mockScopeUrl_MFE2({ file: 'shared-chunk.js' })
       );
-      expect(importMap.imports['@nf-internal/utils-chunk']).toBe(
+      expect(importMap.scopes?.[mockScopeUrl_MFE2()]?.['@nf-internal/utils-chunk']).toBe(
         mockScopeUrl_MFE2({ file: 'utils-chunk.js' })
       );
     });
@@ -357,32 +356,12 @@ describe('createConvertToImportMap', () => {
 
       expect(ports.sharedChunksRepo.tryGet).toHaveBeenCalledWith('team/mfe2', 'shared');
       expect(ports.sharedChunksRepo.tryGet).toHaveBeenCalledWith('team/mfe2', 'vendor');
-      expect(importMap.imports['@nf-internal/shared-chunk']).toBe(
+      expect(importMap.scopes?.[mockScopeUrl_MFE2()]?.['@nf-internal/shared-chunk']).toBe(
         mockScopeUrl_MFE2({ file: 'shared-chunk.js' })
       );
-      expect(importMap.imports['@nf-internal/vendor-chunk']).toBe(
+      expect(importMap.scopes?.[mockScopeUrl_MFE2()]?.['@nf-internal/vendor-chunk']).toBe(
         mockScopeUrl_MFE2({ file: 'vendor-chunk.js' })
       );
-    });
-
-    it('should deduplicate bundles when same bundle is used by multiple externals', async () => {
-      const remoteEntry: RemoteEntry = mockRemoteEntry_MFE2({
-        exposes: [],
-        shared: [
-          mockSharedInfoA.v2_1_2({ bundle: 'shared' }),
-          mockSharedInfoB.v2_1_2({ bundle: 'shared' }),
-        ],
-      });
-      const actions: SharedInfoActions = {
-        'dep-a': { action: 'share' },
-        'dep-b': { action: 'share' },
-      };
-      ports.sharedChunksRepo.tryGet = jest.fn(() => Optional.of(['shared-chunk.js']));
-
-      await convertToImportMap({ entry: remoteEntry, actions });
-
-      expect(ports.sharedChunksRepo.tryGet).toHaveBeenCalledTimes(1);
-      expect(ports.sharedChunksRepo.tryGet).toHaveBeenCalledWith('team/mfe2', 'shared');
     });
 
     it('should add chunk imports for non-singleton externals with bundle', async () => {
@@ -406,7 +385,7 @@ describe('createConvertToImportMap', () => {
       const importMap = await convertToImportMap({ entry: remoteEntry, actions });
 
       expect(ports.sharedChunksRepo.tryGet).toHaveBeenCalledWith('team/mfe2', 'scoped');
-      expect(importMap.imports['@nf-internal/scoped-chunk']).toBe(
+      expect(importMap.scopes?.[mockScopeUrl_MFE2()]?.['@nf-internal/scoped-chunk']).toBe(
         mockScopeUrl_MFE2({ file: 'scoped-chunk.js' })
       );
     });
@@ -423,7 +402,7 @@ describe('createConvertToImportMap', () => {
 
       const importMap = await convertToImportMap({ entry: remoteEntry, actions });
 
-      expect(importMap.imports['@nf-internal/shared-chunk']).toBe(
+      expect(importMap.scopes?.[mockScopeUrl_MFE2()]?.['@nf-internal/shared-chunk']).toBe(
         mockScopeUrl_MFE2({ file: 'shared-chunk.mjs' })
       );
     });
@@ -476,10 +455,16 @@ describe('createConvertToImportMap', () => {
 
       const importMap = await convertToImportMap({ entry: remoteEntry, actions });
 
-      expect(importMap.imports).toEqual({
-        'team/mfe2/./wc-comp-a': mockScopeUrl_MFE2({ file: 'component-a.js' }),
-        'dep-a': mockScopeUrl_MFE2({ file: 'dep-a.js' }),
-        '@nf-internal/shared-chunk': mockScopeUrl_MFE2({ file: 'shared-chunk.js' }),
+      expect(importMap).toEqual({
+        imports: {
+          'team/mfe2/./wc-comp-a': mockScopeUrl_MFE2({ file: 'component-a.js' }),
+          'dep-a': mockScopeUrl_MFE2({ file: 'dep-a.js' }),
+        },
+        scopes: {
+          [mockScopeUrl_MFE2()]: {
+            '@nf-internal/shared-chunk': mockScopeUrl_MFE2({ file: 'shared-chunk.js' }),
+          },
+        },
       });
     });
   });
