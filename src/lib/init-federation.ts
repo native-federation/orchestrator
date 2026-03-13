@@ -1,4 +1,4 @@
-import type { LoadRemoteModule, NativeFederationResult } from './init-federation.contract';
+import type { LoadRemoteModuleOf, NativeFederationResult } from './init-federation.contract';
 import type { NFOptions } from './2.app/config/config.contract';
 import { createInitFlow, INIT_FLOW_FACTORY } from './5.di/flows/init.factory';
 import { createDriving } from './5.di/driving.factory';
@@ -36,12 +36,10 @@ const initFederation = (
         adapters,
         loadRemoteModule,
         as: <TModule = unknown>() => ({
-          loadRemoteModule: loadRemoteModule as LoadRemoteModule<TModule>,
+          loadRemoteModule: loadRemoteModule as LoadRemoteModuleOf<TModule>,
+          load: loadRemoteModule as LoadRemoteModuleOf<TModule>,
         }),
-        remote: <TModule = unknown>(remoteName: string) => ({
-          loadModule: (exposedModule: string) =>
-            loadRemoteModule(remoteName, exposedModule) as Promise<TModule>,
-        }),
+        load: loadRemoteModule,
       };
 
       const initRemoteEntry = async (
