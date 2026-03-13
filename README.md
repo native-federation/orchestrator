@@ -89,7 +89,7 @@ The quickstart is intended for experimenting. For production environments it is 
 import { initFederation } from '@softarc/native-federation-orchestrator';
 import { consoleLogger, localStorageEntry } from '@softarc/native-federation-orchestrator/options';
 
-const { loadRemoteModule } = await initFederation(
+const { loadRemoteModule, load } = await initFederation(
   // Manifest
   {
     'team/mfe1': 'http://localhost:3000/remoteEntry.json',
@@ -105,7 +105,7 @@ const { loadRemoteModule } = await initFederation(
 );
 
 // Load specific modules
-const ButtonComponent = await loadRemoteModule('team/mfe1', './Button');
+const ButtonComponent = await load('team/mfe1', './Button');
 const HeaderComponent = await loadRemoteModule('team/mfe2', './Header');
 ```
 
