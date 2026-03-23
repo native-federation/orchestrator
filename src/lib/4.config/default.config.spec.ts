@@ -47,6 +47,7 @@ describe('DefaultConfig', () => {
         strict: {
           strictRemoteEntry: false,
           strictExternalCompatibility: false,
+          strictExternalSameVersionCompatibility: false,
           strictExternalVersion: false,
           strictImportMap: false,
         },

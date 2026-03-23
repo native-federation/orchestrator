@@ -30,6 +30,7 @@ describe('config.mode', () => {
     expect(config.strict).toEqual({
       strictRemoteEntry: false,
       strictExternalCompatibility: false,
+      strictExternalSameVersionCompatibility: false,
       strictExternalVersion: false,
       strictImportMap: false,
     });

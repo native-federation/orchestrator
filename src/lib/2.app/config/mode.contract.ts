@@ -7,6 +7,7 @@ export type ModeProfileConfig = {
 export type ModeStrictnessConfig = {
   strictRemoteEntry: boolean;
   strictExternalCompatibility: boolean;
+  strictExternalSameVersionCompatibility: boolean;
   strictExternalVersion: boolean;
   strictImportMap: boolean;
 };

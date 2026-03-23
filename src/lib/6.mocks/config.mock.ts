@@ -22,6 +22,7 @@ export const mockConfig = (): ConfigContract => ({
   strict: {
     strictRemoteEntry: false,
     strictExternalCompatibility: false,
+    strictExternalSameVersionCompatibility: false,
     strictExternalVersion: false,
     strictImportMap: false,
   },
