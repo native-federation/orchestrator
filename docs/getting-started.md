@@ -412,14 +412,15 @@ await esbuild.build({
 
 ## Loading Remote Modules
 
-The `loadRemoteModule` function exposed by `initFederation`, accepts a remote name and exposed module path and returns a Promise:
+The `loadRemoteModule` function exposed by `initFederation` (also aliased as `load`) accepts a remote name and exposed module path and returns a Promise:
 
 ```javascript
 
-const { as, loadRemoteModule, remote, config } = await initFederation(manifest, {/* options */ });
+const { as, loadRemoteModule, load, remote, config } = await initFederation(manifest, {/* options */ });
 
 // Basic usage - loads module for side effects (e.g., custom element registration)
 await loadRemoteModule('team/button', './Button');
+await load('team/button', './Button');
 
 // If the module exports something directly, you can access it
 const buttonModule = await loadRemoteModule('team/button', './Button');
