@@ -1,5 +1,7 @@
 # Native federation orchestrator
 
+🎉 **v4.0 is here — the orchestrator is now stable and ready for production use!**
+
 A lightweight **runtime micro frontend orchestrator** that loads micro frontends built with native federation into any web page. It can cache dependencies across page reloads, making it perfect for traditional server-rendered hosts (PHP, Java, Rails, etc.) that refresh on navigation.
 
 > Read more in this in-depth article: [Migrating a stateful monolith to micro frontend architecture using native federation.](https://medium.com/@auke997/migrating-a-stateful-monolith-to-micro-frontends-using-native-federation-0572a1e181b4)
@@ -20,7 +22,9 @@ The library runs in the browser to orchestrate the integration of micro frontend
 
 ### Extends the Native Federation Ecosystem
 
-This library provides an alternative runtime to [@softarc/native-federation-runtime](https://www.npmjs.com/package/@softarc/native-federation-runtime), extending native federation capabilities specifically for non-SPA environments while maintaining full compatibility with the broader ecosystem. It can load any remotes that have been built using [@softarc/native-federation](https://www.npmjs.com/package/@softarc/native-federation) and expose a `remoteEntry.json` metadata file.
+This library provides an alternative runtime to [@softarc/native-federation-runtime](https://www.npmjs.com/package/@softarc/native-federation-runtime), extending native federation capabilities while maintaining full compatibility with the broader ecosystem. It can load any remotes that have been built using [@softarc/native-federation](https://www.npmjs.com/package/@softarc/native-federation) and expose a `remoteEntry.json` metadata file.
+
+> Note: The orchestrator is fully backwards compatible and also works with native federation v3 remotes!
 
 ### What makes this orchestrator different?
 
@@ -60,7 +64,7 @@ Get up and running in under 2 minutes:
     </script>
 
     <!-- Include the orchestrator runtime -->
-    <script src="https://unpkg.com/@softarc/native-federation-orchestrator@1.1.5/quickstart.mjs"></script>
+    <script src="https://unpkg.com/@softarc/native-federation-orchestrator@4.0.0/quickstart.mjs"></script>
   </head>
   <body>
     <!-- Use your loaded components -->
@@ -78,7 +82,7 @@ Your micro frontends are now loaded and ready to use. The runtime handles the wh
 
 ```html
 <!-- Development and quick testing -->
-<script src="https://unpkg.com/@softarc/native-federation-orchestrator@1.1.5/quickstart.mjs"></script>
+<script src="https://unpkg.com/@softarc/native-federation-orchestrator@4.0.0/quickstart.mjs"></script>
 ```
 
 ## Advanced Usage
@@ -113,12 +117,12 @@ const HeaderComponent = await loadRemoteModule('team/mfe2', './Header');
 
 ## Documentation
 
-| Guide                                                                                                                                   | Description                                |
-| --------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------ |
-| [🚀 Getting Started](https://github.com/topicusonderwijs/@softarc/native-federation-orchestrator/blob/main/docs/getting-started.md)     | Detailed setup instructions and examples   |
-| [🏗️ Architecture](https://github.com/topicusonderwijs/@softarc/native-federation-orchestrator/blob/main/docs/architecture.md)           | Understanding the native federation domain |
-| [⚙️ Configuration](https://github.com/topicusonderwijs/@softarc/native-federation-orchestrator/blob/main/docs/config.md)                | Complete configuration reference           |
-| [🔄 Version Resolution](https://github.com/topicusonderwijs/@softarc/native-federation-orchestrator/blob/main/docs/version-resolver.md) | How dependency conflicts are resolved      |
+| Guide                                                                                                         | Description                                |
+| ------------------------------------------------------------------------------------------------------------- | ------------------------------------------ |
+| [🚀 Getting Started](https://github.com/native-federation/orchestrator/blob/main/docs/getting-started.md)     | Detailed setup instructions and examples   |
+| [🏗️ Architecture](https://github.com/native-federation/orchestrator/blob/main/docs/architecture.md)           | Understanding the native federation domain |
+| [⚙️ Configuration](https://github.com/native-federation/orchestrator/blob/main/docs/config.md)                | Complete configuration reference           |
+| [🔄 Version Resolution](https://github.com/native-federation/orchestrator/blob/main/docs/version-resolver.md) | How dependency conflicts are resolved      |
 
 ## Native Federation Ecosystem
 
