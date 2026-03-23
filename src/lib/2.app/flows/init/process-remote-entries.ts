@@ -141,7 +141,7 @@ export function createProcessRemoteEntries(
         }] Required version-range '${
           remote.requiredVersion
         }' does not match cached version-range '${matchingVersion.remotes[0]!.requiredVersion}'`;
-        if (config.strict.strictExternalCompatibility) {
+        if (config.strict.strictExternalSameVersionCompatibility) {
           config.log.error(2, errorMsg);
           throw new NFError(`Could not process remote '${remoteEntry.name}'`);
         }

@@ -232,7 +232,7 @@ describe('createProcessRemoteEntries - global', () => {
       );
     });
     it('should throw an error if the requiredVersions differs if strictVersion and in strict mode', async () => {
-      config.strict.strictExternalCompatibility = true;
+      config.strict.strictExternalSameVersionCompatibility = true;
       adapters.sharedExternalsRepo.tryGet = jest.fn(
         (): Optional<SharedExternal> =>
           Optional.of(
