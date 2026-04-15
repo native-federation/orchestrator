@@ -124,6 +124,14 @@ const HeaderComponent = await loadRemoteModule('team/mfe2', './Header');
 | [⚙️ Configuration](https://github.com/native-federation/orchestrator/blob/main/docs/config.md)                | Complete configuration reference           |
 | [🔄 Version Resolution](https://github.com/native-federation/orchestrator/blob/main/docs/version-resolver.md) | How dependency conflicts are resolved      |
 
+## Example repositories
+
+| Guide                                                                                                          | Description                                                                               |
+| -------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
+| [📖 Vanilla JS/HTML host](https://github.com/Aukevanoost/native-federation-examples/tree/orchestrator)         | Shows how the orchestrator can be used in a simple HTML page.                             |
+| [📖 Angular host (native-federation v3)](https://github.com/Aukevanoost/native-federation-examples-ng)         | Shows how the orchestrator can be used in an Angular monorepo using Native-federation v3. |
+| [📖 Angular host (native-federation v4)](https://github.com/Aukevanoost/native-federation-examples-ng/tree/v4) | Shows how the orchestrator can be used in an Angular monorepo using Native-federation v4. |
+
 ## Native Federation Ecosystem
 
 This library is part of the broader native federation
