@@ -40,6 +40,7 @@ import type { NFEventRegistry } from 'lib/1.domain/registry/event-registry.contr
   await initFederation(manifest, {
     logger: consoleLogger,
     logLevel: 'warn',
+    sse: true,
     ...useShimImportMap({ shimMode: false }),
   }).then(loaders => {
     if ((window as any).__NF_REGISTRY__ !== undefined) {
