@@ -15,7 +15,7 @@ export const createModeConfig = (override: ModeOptions): ModeConfig => {
           strictRemoteEntry: override.strict?.strictRemoteEntry ?? false,
           strictExternalCompatibility: override.strict?.strictExternalCompatibility ?? false,
           strictExternalSameVersionCompatibility:
-            override.strict?.strictExternalCompatibility ?? false,
+            override.strict?.strictExternalSameVersionCompatibility ?? false,
           strictExternalVersion: override.strict?.strictExternalVersion ?? false,
           strictImportMap: override.strict?.strictImportMap ?? false,
         };
