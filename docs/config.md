@@ -50,6 +50,7 @@ The native-federation library uses importmaps under the hood for module resolvin
 export type ImportMapOptions = {
     loadModuleFn?: (url: string) => Promise<unknown>
     setImportMapFn?: (importMap: ImportMap, opts?: { override?: boolean }) => Promise<ImportMap>
+    reloadBrowserFn?: () => void
 }
 ```
 

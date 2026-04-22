@@ -312,10 +312,14 @@ For example. if a mfe on page A uses the same dependency as a mfe on page B. It 
 Import map configuration determines how the browser loads JavaScript modules. This choice affects browser compatibility and loading performance.
 
 ```javascript
+import {
+  useDefaultImportMap,
+  useShimImportMap,
+} from '@softarc/native-federation-orchestrator/options';
+
+// Use native browser import maps (default)
 await initFederation(manifest, {
-  // Use native browser import maps (default)
-  importMapType: 'importmap',
-  loadModuleFn: url => import(url),
+  ...useDefaultImportMap(),
 });
 
 // OR for older browser support:
@@ -416,7 +420,7 @@ The `loadRemoteModule` function exposed by `initFederation` (also aliased as `lo
 
 ```javascript
 
-const { as, loadRemoteModule, load, remote, config } = await initFederation(manifest, {/* options */ });
+const { as, loadRemoteModule, load, initRemoteEntry, config } = await initFederation(manifest, {/* options */ });
 
 // Basic usage - loads module for side effects (e.g., custom element registration)
 await loadRemoteModule('team/button', './Button');
@@ -428,9 +432,8 @@ const buttonModule = await loadRemoteModule('team/button', './Button');
 // Type-safe usage with TypeScript
 const typedComponent = await as<ButtonComponent>().loadRemoteModule('team/button', './Button');
 
-// Remote-specific loader
-const buttonRemote = remote<ButtonComponent>('team/button');
-const button = await buttonRemote.loadModule('./Button');
+// Dynamically add a remote after initialization (see docs/version-resolver.md#dynamic-init)
+await initRemoteEntry('http://localhost:5000/remoteEntry.json', 'team/dashboard');
 
 // Reading the configuration
 console.log(config); // type: ConfigContract
@@ -471,23 +474,38 @@ initFederation(
 
 And then the `bootstrap.ts` to allow the use of the `loadRemoteModule`.
 
-```javascript
+```typescript
 import { bootstrapApplication } from '@angular/platform-browser';
 import { ApplicationConfig, InjectionToken, provideZoneChangeDetection } from '@angular/core';
 import { AppComponent } from './app/app.component';
 import { LoadRemoteModule } from '@softarc/native-federation-orchestrator';
 
-export const MODULE_LOADER = new InjectionToken() < LoadRemoteModule < unknown >> 'MODULE_LOADER';
+export const MODULE_LOADER = new InjectionToken<LoadRemoteModule>('MODULE_LOADER');
 
-const appConfig = (loader: LoadRemoteModule<unknown>): ApplicationConfig => ({
+const appConfig = (loader: LoadRemoteModule): ApplicationConfig => ({
   providers: [
     { provide: MODULE_LOADER, useValue: loader },
     provideZoneChangeDetection({ eventCoalescing: true }),
   ],
 });
 
-export const bootstrap = (loader: LoadRemoteModule<unknown>) =>
+export const bootstrap = (loader: LoadRemoteModule) =>
   bootstrapApplication(AppComponent, appConfig(loader)).catch(err => console.error(err));
+```
+
+`LoadRemoteModule` is itself a generic call signature (`<TModule = unknown>(remoteName, exposedModule) => Promise<TModule>`), so consumers pass the module type at the call site rather than on the type:
+
+```typescript
+const button = await loader<ButtonComponent>('team/button', './Button');
+```
+
+If you instead want to bind the module type to the loader variable itself, use `LoadRemoteModuleOf<TModule>`:
+
+```typescript
+import { LoadRemoteModuleOf } from '@softarc/native-federation-orchestrator';
+
+const loadButton: LoadRemoteModuleOf<ButtonComponent> = loader;
+const button = await loadButton('team/button', './Button'); // typed as ButtonComponent
 ```
 
 ## Examples

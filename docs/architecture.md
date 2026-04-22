@@ -75,11 +75,17 @@ Each micro frontend provides a **remoteEntry.json** file that describes its avai
   "shared": [
     {
       "packageName": "react",
+      "outFileName": "react.js",
       "version": "18.2.0",
       "requiredVersion": "^18.0.0",
-      "singleton": true
+      "singleton": true,
+      "strictVersion": true,
+      "bundle": "browser-react"
     }
-  ]
+  ],
+  "chunks": {
+    "browser-react": ["chunk-ABCD1234.js"]
+  }
 }
 ```
 
@@ -88,6 +94,7 @@ Each micro frontend provides a **remoteEntry.json** file that describes its avai
 - **name**: The name of the remote
 - **exposes**: Available components for consumption
 - **shared**: Dependencies that can be shared with other micro frontends, also referred to as "externals".
+- **chunks**: Optional map of bundle names to the internal chunk files that back those bundles. Used to wire up internal imports so that shared externals resolve their transitive chunks without duplicate downloads (see [Shared Chunks](#shared-chunks)).
 
 ### 3. Optimized Dependency Resolution
 
@@ -153,6 +160,7 @@ classDiagram
         name: string
         exposes: ExposesInfo[]
         shared: SharedInfo[]
+        chunks?: Map<.string, string[]>
     }
     class ExposesInfo{
         key: string
@@ -167,6 +175,7 @@ classDiagram
         packageName: string
         outFileName: string
         shareScope?: string
+        bundle?: string
         dev?: object
     }
 ```
@@ -184,7 +193,8 @@ classDiagram
       "strictVersion": false,
       "singleton": true,
       "packageName": "dep-a",
-      "outFileName": "dep-a.js"
+      "outFileName": "dep-a.js",
+      "bundle": "browser-dep-a"
     },
     {
       "version": "4.5.6",
@@ -194,7 +204,11 @@ classDiagram
       "packageName": "dep-b",
       "outFileName": "dep-b.js"
     }
-  ]
+  ],
+  "chunks": {
+    "browser-dep-a": ["chunk-ABCD1234.js"],
+    "mapping-or-exposed": []
+  }
 }
 ```
 
@@ -209,7 +223,31 @@ classDiagram
 | shareScope      | Allows for sharing dependencies in a specific group instead of globally, allowing for clusters of shared externals. the `"strict"` shareScope is a special scope. |
 | packageName     | Dependency identifier for resolution                                                                                                                              |
 | outFileName     | File path relative to the micro frontend's scope                                                                                                                  |
+| bundle          | Optional name of the internal chunk bundle this external belongs to. Resolves via the `chunks` map on the same remoteEntry (see [Shared Chunks](#shared-chunks)). |
 | dev             | Optional development configuration containing entryPoint information                                                                                              |
+
+#### <a id="shared-chunks"></a> Shared Chunks
+
+When `@softarc/native-federation` builds a remote it may split the shared externals (and exposed modules) into several internal chunks for code-sharing reasons. These chunks don't correspond to an npm package name, but the shared externals still need to resolve imports into them.
+
+The `chunks` map on the remoteEntry.json links a logical **bundle name** (e.g. `browser-angular_common`) to the list of chunk files that make up that bundle:
+
+```json
+{
+  "chunks": {
+    "browser-angular_common": ["chunk-KNRTCTBX.js"],
+    "browser-angular_core": [
+      "chunk-LMMPSTGA.js",
+      "chunk-EFELGE5F.js"
+    ],
+    "mapping-or-exposed": []
+  }
+}
+```
+
+Each shared external that belongs to a bundle references it through its `bundle` property (e.g. `"bundle": "browser-angular_common"`). During import-map generation the orchestrator looks up the chunk files for every bundle referenced by a shared or scoped external on that remote and adds them to the remote's scope as `@nf-internal/<chunk-name>` entries, so the bundled code can resolve its internal imports against the remote that actually served them.
+
+The `mapping-or-exposed` bundle is always implicitly registered for every remote, it contains chunks shared between the exposed modules and the mappings (shared externals) of a single remote.
 
 ### Understanding the stored remoteEntries
 
@@ -291,6 +329,7 @@ classDiagram
         strictVersion: boolean
         cached: boolean
         name: string
+        bundle?: string
     }
     class ScopedExternals {
         Map<.string, ScopedExternal>
@@ -301,6 +340,7 @@ classDiagram
     class ScopedVersion{
         tag: string
         file: string
+        bundle?: string
     }
 ```
 
@@ -418,7 +458,10 @@ The final import map provides the browser with optimized module resolution instr
     // Scoped externals
     "https://example.org/mfe1/": {
       "dep-b": "https://example.org/mfe1/dep-b.js",
-      "dep-c": "https://example.org/mfe1/dep-c.js"
+      "dep-c": "https://example.org/mfe1/dep-c.js",
+
+      // Chunks backing the bundles referenced by this remote's shared externals
+      "@nf-internal/chunk-ABCD1234": "https://example.org/mfe1/chunk-ABCD1234.js"
     },
     "https://example.org/mfe2/": {
       "dep-c": "https://example.org/mfe1/dep-c.js"

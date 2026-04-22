@@ -16,7 +16,8 @@ Whenever a remote is bundled, Native-federation includes a metadata file called 
     ├── 📄 remoteEntry.json
     ├── 📄 button.js
     ├── 📄 dependency-a.js
-    └── 📄 dependency-b.js
+    ├── 📄 dependency-b.js
+    └── 📄 chunk-ABCD1234.js
 ```
 
 The `remoteEntry.json` contains a translation of the `federation.config.js` and serves as metadata file to explain to the orchestrator which remotes can be shared and which have to be scoped:
@@ -45,9 +46,14 @@ The `remoteEntry.json` contains a translation of the `federation.config.js` and 
       "requiredVersion": "~2.1.0",
       "singleton": true,
       "strictVersion": true,
-      "version": "2.1.2"
+      "version": "2.1.2",
+      "bundle": "browser-dep-b"
     }
-  ]
+  ],
+  "chunks": {
+    "browser-dep-b": ["chunk-ABCD1234.js"],
+    "mapping-or-exposed": []
+  }
 }
 ```
 
@@ -57,6 +63,7 @@ These properties are very important for the orchestrator, here is what they mean
 - **singleton:** Should the orchestrator share this external with other remotes or use it only for this remote?
 - **strictVersion:** Does the remote accept versions of this external that are outside of the accepted range (requiredVersion).
 - **version:** The version of the external.
+- **bundle:** (Optional) name of the internal chunk bundle this external belongs to, resolved via the `chunks` map on the same remoteEntry. See [Shared Chunks](./architecture.md#shared-chunks) for details.
 
 ## Understanding Import Maps
 
