@@ -162,8 +162,8 @@ URLs without a hash are simply omitted from the `integrity` block (matching the 
 
 **Enforcement** depends on the import-map runtime:
 
-- With `useShimImportMap()` ([es-module-shims](https://www.npmjs.com/package/es-module-shims)) the `integrity` block is fully enforced today — modules with a mismatched hash fail to load.
-- With `useDefaultImportMap()` (native browser `import()`) the `integrity` block is honored when the [import-map integrity proposal](https://github.com/WICG/import-maps/issues/174) ships in the user's browser. On older browsers it is silently ignored, so the import map remains backwards-compatible.
+- With `useShimImportMap()` ([es-module-shims](https://www.npmjs.com/package/es-module-shims)) the `integrity` block is fully enforced — modules with a mismatched hash fail to load.
+- With `useDefaultImportMap()` (native browser `import()`) the `integrity` block is enforced by browsers that ship the [import-map `integrity` key](https://developer.mozilla.org/en-US/docs/Web/HTML/Reference/Elements/script/type/importmap#integrity), now part of the [WHATWG HTML spec](https://html.spec.whatwg.org/multipage/webappapis.html#normalizing-a-module-integrity-map) ([whatwg/html#10269](https://github.com/whatwg/html/pull/10269), merged May 2024). Available in Chrome/Edge 127+, Firefox 138+, and Safari 18+. On older browsers the block is silently ignored, so the import map remains backwards-compatible.
 
 ### Pinning `remoteEntry.json` and `manifest.json`
 
