@@ -46,9 +46,9 @@ export const createDynamicInitFlow = ({
   const processDynamicRemoteEntry = async (remoteEntry: RemoteEntry) => {
     return flow.updateCache(remoteEntry).then(flow.convertToImportMap).then(flow.commitChanges);
   };
-  const initRemoteEntry: DynamicInitFlow = (remoteEntryUrl, remoteName) =>
+  const initRemoteEntry: DynamicInitFlow = (remoteEntryUrl, remote) =>
     flow
-      .getRemoteEntry(remoteEntryUrl, remoteName)
+      .getRemoteEntry(remoteEntryUrl, remote)
       .then(entry => entry.map(processDynamicRemoteEntry).orElse(Promise.resolve()))
       .then(() => ({
         config,

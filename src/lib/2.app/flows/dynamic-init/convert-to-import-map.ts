@@ -29,17 +29,15 @@ export function createConvertToImportMap(
     }
 
     const remoteEntryScope = _path.getScope(remoteEntry.url);
+    const integrityMap = remoteEntry.integrity;
 
     const chunkBundles = new Set<string>(['mapping-or-exposed']);
     remoteEntry.shared.forEach(external => {
       // Scoped externals
       if (!external.singleton) {
-        addToScopes(
-          remoteEntryScope,
-          external.packageName,
-          _path.join(remoteEntryScope, external.outFileName),
-          importMap
-        );
+        const url = _path.join(remoteEntryScope, external.outFileName);
+        addToScopes(remoteEntryScope, external.packageName, url, importMap);
+        addIntegrity(importMap, url, integrityMap, external.outFileName);
         if (external?.bundle) chunkBundles.add(external?.bundle);
         return;
       }
@@ -72,31 +70,27 @@ export function createConvertToImportMap(
 
       //  Scoped shared externals
       if (actions[external.packageName]!.action === 'scope') {
-        addToScopes(
-          remoteEntryScope,
-          external.packageName,
-          _path.join(remoteEntryScope, external.outFileName),
-          importMap
-        );
+        const url = _path.join(remoteEntryScope, external.outFileName);
+        addToScopes(remoteEntryScope, external.packageName, url, importMap);
+        addIntegrity(importMap, url, integrityMap, external.outFileName);
         return;
       }
 
       // Shared externals with shareScope
       if (external.shareScope) {
-        addToScopes(
-          remoteEntryScope,
-          external.packageName,
-          _path.join(remoteEntryScope, external.outFileName),
-          importMap
-        );
+        const url = _path.join(remoteEntryScope, external.outFileName);
+        addToScopes(remoteEntryScope, external.packageName, url, importMap);
+        addIntegrity(importMap, url, integrityMap, external.outFileName);
         return;
       }
 
       // Default case: shared globally
-      importMap.imports[external.packageName] = _path.join(remoteEntryScope, external.outFileName);
+      const url = _path.join(remoteEntryScope, external.outFileName);
+      importMap.imports[external.packageName] = url;
+      addIntegrity(importMap, url, integrityMap, external.outFileName);
     });
 
-    addChunkImports(importMap, remoteEntry.name, remoteEntryScope, chunkBundles);
+    addChunkImports(importMap, remoteEntry, remoteEntryScope, chunkBundles);
   }
 
   function addToScopes(
@@ -118,27 +112,37 @@ export function createConvertToImportMap(
       const moduleName = _path.join(remoteEntry.name, exposed.key);
       const moduleUrl = _path.join(scope, exposed.outFileName);
       importMap.imports[moduleName] = moduleUrl;
+      addIntegrity(importMap, moduleUrl, remoteEntry.integrity, exposed.outFileName);
     });
   }
 
   function addChunkImports(
     importMap: ImportMap,
-    remoteName: string,
+    remoteEntry: RemoteEntry,
     remoteEntryScope: string,
     chunkBundles: Set<string>
   ) {
     Array.from(chunkBundles).forEach(bundleName => {
-      ports.sharedChunksRepo.tryGet(remoteName, bundleName).ifPresent(files => {
+      ports.sharedChunksRepo.tryGet(remoteEntry.name, bundleName).ifPresent(files => {
         files.forEach(file => {
-          addToScopes(
-            remoteEntryScope,
-            toChunkImport(file),
-            _path.join(remoteEntryScope, file),
-            importMap
-          );
+          const url = _path.join(remoteEntryScope, file);
+          addToScopes(remoteEntryScope, toChunkImport(file), url, importMap);
+          addIntegrity(importMap, url, remoteEntry.integrity, file);
         });
       });
     });
     return importMap;
+  }
+
+  function addIntegrity(
+    importMap: ImportMap,
+    url: string,
+    integrityMap: Record<string, string> | undefined,
+    file: string
+  ): void {
+    const hash = integrityMap?.[file];
+    if (!hash) return;
+    if (!importMap.integrity) importMap.integrity = {};
+    importMap.integrity[url] = hash;
   }
 }

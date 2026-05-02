@@ -161,6 +161,7 @@ classDiagram
         exposes: ExposesInfo[]
         shared: SharedInfo[]
         chunks?: Map<.string, string[]>
+        integrity?: Map<.string, string>
     }
     class ExposesInfo{
         key: string
@@ -208,9 +209,17 @@ classDiagram
   "chunks": {
     "browser-dep-a": ["chunk-ABCD1234.js"],
     "mapping-or-exposed": []
+  },
+  "integrity": {
+    "component-a.js": "sha384-…",
+    "dep-a.js": "sha384-…",
+    "dep-b.js": "sha384-…",
+    "chunk-ABCD1234.js": "sha384-…"
   }
 }
 ```
+
+The optional `integrity` map (added by `@softarc/native-federation` when built with `integrity: true`) carries an SRI hash per emitted file, keyed by `outFileName`. The orchestrator resolves these to absolute URLs and emits them under the `integrity` block of the generated import map. See [Security — Subresource Integrity](./security.md#subresource-integrity) for the end-to-end trust chain.
 
 #### Shared External Properties
 
@@ -269,6 +278,7 @@ classDiagram
     class RemoteInfo {
         scopeUrl: string
         exposes: RemoteModule[]
+        integrity?: Map<.string, string>
     }
 
     class RemoteModule{
@@ -466,6 +476,11 @@ The final import map provides the browser with optimized module resolution instr
     "https://example.org/mfe2/": {
       "dep-c": "https://example.org/mfe1/dep-c.js"
     }
+  },
+  "integrity": {
+    // Only present for URLs whose remoteEntry.json published a hash
+    "https://ecommerce-team.com/cart-button.js": "sha384-…",
+    "https://example.org/mfe1/dep-a.js":         "sha384-…"
   }
 }
 ```
@@ -476,6 +491,7 @@ This structure enables:
 - **Scoped isolation** via the scopes object (dep-b only loads for its specific micro frontend)
 - **Grouped externals** Reusing compatible externals with the same `shareScope` to minimize downloads even more!
 - **Optimal caching** through strategic version selection and reuse
+- **Tamper-evident loads** via the optional `integrity` block — see [Security — Subresource Integrity](./security.md#subresource-integrity)
 
 ## Caching and Performance
 

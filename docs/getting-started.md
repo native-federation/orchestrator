@@ -78,6 +78,20 @@ Each entry maps a logical name (like "@team/component") to the URL of that micro
 
 > 🧠 In production environments it would make more sense to fetch the manifest from some sort of micro frontend discovery service or feed.
 
+Manifest entries can also be supplied as objects to pin a remoteEntry.json against an SRI hash (the orchestrator verifies the bytes before parsing). Both forms can coexist:
+
+```json
+{
+  "team/mfe1": "http://localhost:3000/remoteEntry.json",
+  "team/mfe2": {
+    "url": "http://localhost:4000/remoteEntry.json",
+    "integrity": "sha384-…"
+  }
+}
+```
+
+> See [Security — Subresource Integrity](./security.md#subresource-integrity) for the full picture, including pinning the manifest URL itself and propagating module hashes into the import map.
+
 **Event Handler Setup**<br />
 The micro frontend loading process is asynchronous - the runtime needs time to fetch metadata, resolve dependencies, and set up import maps. The `mfe-loader-available` event signals when this process is complete and the `loadRemoteModule` function is ready to use.
 
@@ -434,6 +448,12 @@ const typedComponent = await as<ButtonComponent>().loadRemoteModule('team/button
 
 // Dynamically add a remote after initialization (see docs/version-resolver.md#dynamic-init)
 await initRemoteEntry('http://localhost:5000/remoteEntry.json', 'team/dashboard');
+
+// initRemoteEntry can also pin the remoteEntry.json against an SRI hash
+await initRemoteEntry('http://localhost:5000/remoteEntry.json', {
+  name: 'team/dashboard',
+  integrity: 'sha384-…',
+});
 
 // Reading the configuration
 console.log(config); // type: ConfigContract

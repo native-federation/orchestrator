@@ -59,13 +59,14 @@ export function createProcessRemoteEntries(
     ports.sharedExternalsRepo.removeFromAllScopes(remoteEntry.name);
   }
 
-  function addRemoteInfoToStorage({ name, url, exposes }: RemoteEntry): void {
+  function addRemoteInfoToStorage({ name, url, exposes, integrity }: RemoteEntry): void {
     ports.remoteInfoRepo.addOrUpdate(name, {
       scopeUrl: _path.getScope(url),
       exposes: Object.values(exposes ?? []).map(m => ({
         moduleName: m.key,
         file: m.outFileName,
       })),
+      ...(integrity ? { integrity } : {}),
     } as RemoteInfo);
   }
 

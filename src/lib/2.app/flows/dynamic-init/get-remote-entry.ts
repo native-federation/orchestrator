@@ -5,22 +5,35 @@ import type { LoggingConfig } from '../../config/log.contract';
 import { NFError } from 'lib/native-federation.error';
 import type { ModeConfig } from '../../config/mode.contract';
 import type { ForGettingRemoteEntry } from '../../driver-ports/dynamic-init/for-getting-remote-entry.port';
+import type { RemoteRef } from '../../driver-ports/dynamic-init/flow.contract';
 import { Optional } from 'lib/utils/optional';
 import type { RemoteEntry } from 'lib/1.domain';
 import * as _path from 'lib/utils/path';
+
+const normalizeRemoteRef = (
+  remote?: RemoteRef
+): { name?: RemoteName; integrity?: string } => {
+  if (!remote) return {};
+  if (typeof remote === 'string') return { name: remote };
+  return remote;
+};
 
 export function createGetRemoteEntry(
   config: LoggingConfig & ModeConfig,
   ports: Pick<DrivingContract, 'remoteEntryProvider' | 'remoteInfoRepo' | 'sse'>
 ): ForGettingRemoteEntry {
-  return async (remoteEntryUrl: RemoteEntryUrl, remoteName?: RemoteName) => {
+  return async (remoteEntryUrl: RemoteEntryUrl, remote?: RemoteRef) => {
+    const { name: remoteName, integrity } = normalizeRemoteRef(remote);
+
     if (!!remoteName && shouldSkipCachedRemote(remoteEntryUrl, remoteName)) {
       config.log.debug(7, `Found remote '${remoteName}' in storage, omitting fetch.`);
       return Optional.empty<RemoteEntry>();
     }
 
     try {
-      const remoteEntry = await ports.remoteEntryProvider.provide(remoteEntryUrl);
+      const remoteEntry = integrity
+        ? await ports.remoteEntryProvider.provide(remoteEntryUrl, { integrity })
+        : await ports.remoteEntryProvider.provide(remoteEntryUrl);
 
       config.log.debug(
         7,

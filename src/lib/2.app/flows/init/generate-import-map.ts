@@ -63,6 +63,10 @@ export function createGenerateImportMap(
       });
       addToScope(importMap, remote.scopeUrl, createScopeModules(externals, remote.scopeUrl));
 
+      for (const version of Object.values(externals)) {
+        addIntegrity(importMap, _path.join(remote.scopeUrl, version.file), remoteName, version.file);
+      }
+
       Object.values(externals)
         .filter(e => !!e.bundle)
         .forEach(e => registerBundleChunks(chunkBundles, remoteName, e.bundle));
@@ -114,9 +118,11 @@ export function createGenerateImportMap(
         if (version.action === 'scope') {
           for (const remote of version.remotes) {
             const remoteScope = getScope(shareScope, remote.name, externalName);
+            const url = _path.join(remoteScope, remote.file);
             addToScope(importMap, remoteScope, {
-              [externalName]: _path.join(remoteScope, remote.file),
+              [externalName]: url,
             });
+            addIntegrity(importMap, url, remote.name, remote.file);
             registerBundleChunks(chunkBundles, remote.name, remote.bundle);
             remote.cached = true;
           }
@@ -126,6 +132,10 @@ export function createGenerateImportMap(
         const scope = getScope(shareScope, version.remotes[0]!.name, externalName);
 
         let targetFileUrl: string = _path.join(scope, version.remotes[0]!.file);
+        let targetFileSource: { name: RemoteName; file: string } = {
+          name: version.remotes[0]!.name,
+          file: version.remotes[0]!.file,
+        };
         version.remotes[0]!.cached = true;
 
         if (version.action === 'share') {
@@ -140,6 +150,10 @@ export function createGenerateImportMap(
             if (!overrideScope)
               overrideScope = getScope(shareScope, override.remotes[0]!.name, externalName);
             targetFileUrl = _path.join(overrideScope, override.remotes[0]!.file);
+            targetFileSource = {
+              name: override.remotes[0]!.name,
+              file: override.remotes[0]!.file,
+            };
             override.remotes[0]!.cached = true;
 
             version.remotes[0]!.cached = false;
@@ -149,6 +163,7 @@ export function createGenerateImportMap(
           const scope = getScope(shareScope, r.name, externalName);
           addToScope(importMap, scope, { [externalName]: targetFileUrl });
         });
+        addIntegrity(importMap, targetFileUrl, targetFileSource.name, targetFileSource.file);
       }
       ports.sharedExternalsRepo.addOrUpdate(externalName, external, shareScope);
     }
@@ -209,9 +224,11 @@ export function createGenerateImportMap(
         if (version.action === 'scope') {
           for (const remote of version.remotes) {
             const remoteScope = getScope(GLOBAL_SCOPE, remote.name, externalName);
+            const url = _path.join(remoteScope, remote.file);
             addToScope(importMap, remoteScope, {
-              [externalName]: _path.join(remoteScope, remote.file),
+              [externalName]: url,
             });
+            addIntegrity(importMap, url, remote.name, remote.file);
             remote.cached = true;
             registerBundleChunks(chunkBundles, remote.name, remote.bundle);
           }
@@ -224,7 +241,9 @@ export function createGenerateImportMap(
         }
 
         const scope = getScope(GLOBAL_SCOPE, version.remotes[0]!.name, externalName);
-        addToGlobal(importMap, { [externalName]: _path.join(scope, version.remotes[0]!.file) });
+        const url = _path.join(scope, version.remotes[0]!.file);
+        addToGlobal(importMap, { [externalName]: url });
+        addIntegrity(importMap, url, version.remotes[0]!.name, version.remotes[0]!.file);
         registerBundleChunks(chunkBundles, version.remotes[0]!.name, version.remotes[0]!.bundle);
 
         version.remotes[0]!.cached = true;
@@ -276,6 +295,7 @@ export function createGenerateImportMap(
       const moduleName = _path.join(remoteName, exposed.moduleName);
       const moduleUrl = _path.join(remote.scopeUrl, exposed.file);
       importMap.imports[moduleName] = moduleUrl;
+      addIntegrity(importMap, moduleUrl, remoteName, exposed.file);
     }
   }
 
@@ -297,7 +317,9 @@ export function createGenerateImportMap(
       const imports = Array.from(bundles).reduce((_imports, bundleName) => {
         ports.sharedChunksRepo.tryGet(remoteName, bundleName).ifPresent(files => {
           files.forEach(file => {
-            _imports[toChunkImport(file)] = _path.join(baseUrl, file);
+            const url = _path.join(baseUrl, file);
+            _imports[toChunkImport(file)] = url;
+            addIntegrity(importMap, url, remoteName, file);
           });
         });
         return _imports;
@@ -307,6 +329,18 @@ export function createGenerateImportMap(
     });
 
     return importMap;
+  }
+
+  function addIntegrity(
+    importMap: ImportMap,
+    url: string,
+    remoteName: RemoteName,
+    file: string
+  ): void {
+    const hash = ports.remoteInfoRepo.tryGet(remoteName).get()?.integrity?.[file];
+    if (!hash) return;
+    if (!importMap.integrity) importMap.integrity = {};
+    importMap.integrity[url] = hash;
   }
 
   function getScope(ctx: string, remoteName: RemoteName, externalName?: string) {

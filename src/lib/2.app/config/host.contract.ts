@@ -5,7 +5,9 @@ export type HostConfig = {
         name: string;
         url: string;
         cacheTag?: string;
+        integrity?: string;
       };
+  manifestIntegrity?: string;
 };
 
 export type HostOptions = {
@@ -16,5 +18,7 @@ export type HostOptions = {
         name?: string;
         url: string;
         cacheTag?: string;
+        integrity?: string;
       };
+  manifestIntegrity?: string;
 };

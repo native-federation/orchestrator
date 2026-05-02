@@ -7,6 +7,7 @@ import { mockAdapters } from 'lib/6.mocks/adapters.mock';
 import { NFError } from 'lib/native-federation.error';
 import { mockRemoteEntry_MFE1 } from 'lib/6.mocks/domain/remote-entry/remote-entry.mock';
 import { mockScopeUrl_MFE1 } from 'lib/6.mocks/domain/scope-url.mock';
+import { RemoteInfo } from 'lib/1.domain';
 
 describe('createGetRemoteEntry', () => {
   let getRemoteEntry: ForGettingRemoteEntry;
@@ -51,8 +52,7 @@ describe('createGetRemoteEntry', () => {
     it('should skip fetching remote if it exists in repository and overrideCachedRemotes is never', async () => {
       config.profile.overrideCachedRemotes = 'never';
       adapters.remoteInfoRepo.tryGet = jest.fn(() =>
-        Optional.of({
-          name: 'team/mfe1',
+        Optional.of<RemoteInfo>({
           scopeUrl: mockScopeUrl_MFE1(),
           exposes: [],
         })
@@ -107,8 +107,7 @@ describe('createGetRemoteEntry', () => {
     it('should override fetching remote if it exists in repository and overrideCachedRemotes is always', async () => {
       config.profile.overrideCachedRemotes = 'always';
       adapters.remoteInfoRepo.tryGet = jest.fn(() =>
-        Optional.of({
-          name: 'team/mfe1',
+        Optional.of<RemoteInfo>({
           scopeUrl: mockScopeUrl_MFE1({ folder: 'v1' }),
           exposes: [],
         })
@@ -130,8 +129,7 @@ describe('createGetRemoteEntry', () => {
     it('should not override fetching remote if it exists in repository and overrideCachedRemotes is init-only', async () => {
       config.profile.overrideCachedRemotes = 'init-only';
       adapters.remoteInfoRepo.tryGet = jest.fn(() =>
-        Optional.of({
-          name: 'team/mfe1',
+        Optional.of<RemoteInfo>({
           scopeUrl: mockScopeUrl_MFE1({ folder: 'v1' }),
           exposes: [],
         })
@@ -151,8 +149,7 @@ describe('createGetRemoteEntry', () => {
     it('should not override fetching remote if it exists in repository and overrideCachedRemotes is never', async () => {
       config.profile.overrideCachedRemotes = 'never';
       adapters.remoteInfoRepo.tryGet = jest.fn(() =>
-        Optional.of({
-          name: 'team/mfe1',
+        Optional.of<RemoteInfo>({
           scopeUrl: mockScopeUrl_MFE1({ folder: 'v1' }),
           exposes: [],
         })
@@ -174,8 +171,7 @@ describe('createGetRemoteEntry', () => {
       config.profile.overrideCachedRemotesIfURLMatches = false;
 
       adapters.remoteInfoRepo.tryGet = jest.fn(() =>
-        Optional.of({
-          name: 'team/mfe1',
+        Optional.of<RemoteInfo>({
           scopeUrl: mockScopeUrl_MFE1({ folder: 'v1' }),
           exposes: [],
         })
@@ -198,8 +194,7 @@ describe('createGetRemoteEntry', () => {
       adapters.remoteInfoRepo.contains = jest.fn(() => true);
 
       adapters.remoteInfoRepo.tryGet = jest.fn(() =>
-        Optional.of({
-          name: 'team/mfe1',
+        Optional.of<RemoteInfo>({
           scopeUrl: mockScopeUrl_MFE1({ folder: 'v1' }),
           exposes: [],
         })
@@ -221,6 +216,39 @@ describe('createGetRemoteEntry', () => {
         url: mockScopeUrl_MFE1({ folder: 'v1', file: 'remoteEntry.json' }),
         override: true,
       });
+    });
+  });
+
+  describe('integrity', () => {
+    it('should pass integrity to provider when remote is given as object with integrity', async () => {
+      await getRemoteEntry(`${mockScopeUrl_MFE1()}remoteEntry.json`, {
+        name: 'team/mfe1',
+        integrity: 'sha384-AAA',
+      });
+
+      expect(adapters.remoteEntryProvider.provide).toHaveBeenCalledWith(
+        `${mockScopeUrl_MFE1()}remoteEntry.json`,
+        { integrity: 'sha384-AAA' }
+      );
+    });
+
+    it('should not pass an opts arg when remote has no integrity', async () => {
+      await getRemoteEntry(`${mockScopeUrl_MFE1()}remoteEntry.json`, 'team/mfe1');
+
+      expect(adapters.remoteEntryProvider.provide).toHaveBeenCalledWith(
+        `${mockScopeUrl_MFE1()}remoteEntry.json`
+      );
+    });
+
+    it('should accept an integrity-only ref (no name)', async () => {
+      await getRemoteEntry(`${mockScopeUrl_MFE1()}remoteEntry.json`, {
+        integrity: 'sha384-AAA',
+      });
+
+      expect(adapters.remoteEntryProvider.provide).toHaveBeenCalledWith(
+        `${mockScopeUrl_MFE1()}remoteEntry.json`,
+        { integrity: 'sha384-AAA' }
+      );
     });
   });
 });

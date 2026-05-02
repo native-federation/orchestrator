@@ -338,4 +338,62 @@ describe('createGetRemoteEntries', () => {
       );
     });
   });
+
+  describe('integrity', () => {
+    it('should accept manifest entries in object form with integrity', async () => {
+      await getRemoteEntries({
+        'team/mfe1': {
+          url: `${mockScopeUrl_MFE1()}remoteEntry.json`,
+          integrity: 'sha384-AAA',
+        },
+      });
+
+      expect(adapters.remoteEntryProvider.provide).toHaveBeenCalledWith(
+        `${mockScopeUrl_MFE1()}remoteEntry.json`,
+        { integrity: 'sha384-AAA' }
+      );
+    });
+
+    it('should not pass an opts arg when manifest entry has no integrity', async () => {
+      await getRemoteEntries({
+        'team/mfe1': `${mockScopeUrl_MFE1()}remoteEntry.json`,
+      });
+
+      expect(adapters.remoteEntryProvider.provide).toHaveBeenCalledWith(
+        `${mockScopeUrl_MFE1()}remoteEntry.json`
+      );
+    });
+
+    it('should pass manifestIntegrity to the manifest provider when configured', async () => {
+      config.manifestIntegrity = 'sha384-MAN';
+
+      await getRemoteEntries('http://host/manifest.json');
+
+      expect(adapters.manifestProvider.provide).toHaveBeenCalledWith(
+        'http://host/manifest.json',
+        { integrity: 'sha384-MAN' }
+      );
+    });
+
+    it('should propagate hostRemoteEntry integrity to the provider', async () => {
+      config.hostRemoteEntry = {
+        name: 'team/host',
+        url: `${mockScopeUrl_HOST()}remoteEntry.json`,
+        integrity: 'sha384-HOST',
+      };
+      adapters.remoteEntryProvider.provide = jest.fn((url: string) => {
+        if (url.startsWith(`${mockScopeUrl_HOST()}remoteEntry.json`)) {
+          return Promise.resolve(mockRemoteEntry_HOST());
+        }
+        return Promise.reject(new NFError(`Fetch of '${url}' returned 404`));
+      });
+
+      await getRemoteEntries({});
+
+      expect(adapters.remoteEntryProvider.provide).toHaveBeenCalledWith(
+        `${mockScopeUrl_HOST()}remoteEntry.json`,
+        { integrity: 'sha384-HOST' }
+      );
+    });
+  });
 });

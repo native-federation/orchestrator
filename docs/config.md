@@ -21,16 +21,19 @@ export type HostOptions = {
     hostRemoteEntry?: string | false | {
         name?: string,
         url: string,
-        cacheTag?: string
-    }
+        cacheTag?: string,
+        integrity?: string
+    },
+    manifestIntegrity?: string
 }
 ```
 
 ### Options:
 
-| Option          | Default | Description                                               |
-| --------------- | ------- | --------------------------------------------------------- |
-| hostRemoteEntry | `false` | Allows for the inclusion of a host remoteEntry.json file. |
+| Option            | Default     | Description                                                                                                                                                                              |
+| ----------------- | ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| hostRemoteEntry   | `false`     | Allows for the inclusion of a host remoteEntry.json file. The optional `integrity` field pins the host's remoteEntry.json against an SRI hash (see [Security](./security.md#subresource-integrity)). |
+| manifestIntegrity | `undefined` | SRI hash for the manifest URL passed as the first argument to `initFederation`. When set, the orchestrator verifies the manifest bytes before parsing.                                   |
 
 ### Example
 
@@ -41,6 +44,34 @@ initFederation('http://example.org/manifest.json', {
   hostRemoteEntry: { url: './remoteEntry.json' },
 });
 ```
+
+### Pinning resources with integrity
+
+Manifest entries, the manifest URL itself, and the host remoteEntry can each carry an SRI hash. Verification is opt-in per resource — entries without a hash are fetched unverified, matching the semantics of `<script integrity="…">`.
+
+```javascript
+initFederation('http://example.org/manifest.json', {
+  manifestIntegrity: 'sha384-…',
+  hostRemoteEntry: {
+    url: './host-remoteEntry.json',
+    integrity: 'sha384-…',
+  },
+});
+```
+
+Per-remote pinning lives in the manifest itself — entries can be either the existing string form or a `{ url, integrity }` object:
+
+```json
+{
+  "team/mfe1": "https://mfe1.example.org/remoteEntry.json",
+  "team/mfe2": {
+    "url": "https://mfe2.example.org/remoteEntry.json",
+    "integrity": "sha384-…"
+  }
+}
+```
+
+> See [Security & Subresource Integrity](./security.md#subresource-integrity) for the full trust chain (manifest → remoteEntry.json → modules) and the supported hash algorithms.
 
 ## <a id="importMapConfig"></a> 2. ImportMap configuration
 
@@ -87,7 +118,7 @@ initFederation('http://example.org/manifest.json', {
 });
 ```
 
-> See [Security & Trusted Types](./security.md) for the recommended CSP header and how the orchestrator interacts with a host-defined policy.
+> See [Security — Trusted Types](./security.md#trusted-types) for the recommended CSP header and how the orchestrator interacts with a host-defined policy.
 
 ## <a id="loggingConfig"></a> 3. Logging configuration
 
