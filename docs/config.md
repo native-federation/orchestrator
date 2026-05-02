@@ -51,16 +51,18 @@ export type ImportMapOptions = {
     loadModuleFn?: (url: string) => Promise<unknown>
     setImportMapFn?: (importMap: ImportMap, opts?: { override?: boolean }) => Promise<ImportMap>
     reloadBrowserFn?: () => void
+    trustedTypesPolicyName?: string | false
 }
 ```
 
 ### Options:
 
-| Option          | Default                             | Description                                                                                                                        |
-| --------------- | ----------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
-| setImportMapFn  | `replaceInDOM("importmap")`         | The function that adds the importmap to the host, by default this is the DOM.                                                      |
-| loadModuleFn    | `url => import(url)`                | This function can mock or alter the 'import' function, necessary for libraries that shim the import function.                      |
-| reloadBrowserFn | `() => {window.location.reload();}` | This function can mock or alter the "reload browser" behavior that is triggered when SSE is enabled and an user rebuilds a remote. |
+| Option                 | Default                             | Description                                                                                                                                                                                                                                |
+| ---------------------- | ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| setImportMapFn         | `replaceInDOM("importmap")`         | The function that adds the importmap to the host, by default this is the DOM.                                                                                                                                                              |
+| loadModuleFn           | `url => import(url)`                | This function can mock or alter the 'import' function, necessary for libraries that shim the import function.                                                                                                                              |
+| reloadBrowserFn        | `() => {window.location.reload();}` | This function can mock or alter the "reload browser" behavior that is triggered when SSE is enabled and an user rebuilds a remote.                                                                                                         |
+| trustedTypesPolicyName | `"nfo"`                             | Name of the [Trusted Types](./security.md) policy that wraps import-map content and dynamic-import URLs in the default `setImportMapFn` and `loadModuleFn`. Pass `false` to opt out. No effect on browsers that do not support Trusted Types. |
 
 ### Example
 
@@ -79,8 +81,13 @@ initFederation('http://example.org/manifest.json', {
   // Option 3: Custom properties
   loadModuleFn: (url: string) => { return customImport(url); },
   setImportMapFn: replaceInDOM('<importmap-type>'),
+
+  // Option 4: rename the Trusted Types policy to match a stricter CSP allowlist
+  trustedTypesPolicyName: 'my-app-nfo',
 });
 ```
+
+> See [Security & Trusted Types](./security.md) for the recommended CSP header and how the orchestrator interacts with a host-defined policy.
 
 ## <a id="loggingConfig"></a> 3. Logging configuration
 

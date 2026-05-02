@@ -126,6 +126,7 @@ const HeaderComponent = await loadRemoteModule('team/mfe2', './Header');
 | [🏗️ Architecture](https://github.com/native-federation/orchestrator/blob/main/docs/architecture.md)           | Understanding the native federation domain |
 | [⚙️ Configuration](https://github.com/native-federation/orchestrator/blob/main/docs/config.md)                | Complete configuration reference           |
 | [🔄 Version Resolution](https://github.com/native-federation/orchestrator/blob/main/docs/version-resolver.md) | How dependency conflicts are resolved      |
+| [🔒 Security & Trusted Types](https://github.com/native-federation/orchestrator/blob/main/docs/security.md)   | CSP setup and the built-in Trusted Types policy |
 
 ## Example repositories
 

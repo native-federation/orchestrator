@@ -1,5 +1,6 @@
 import { mockImportMap } from 'lib/6.mocks/domain/import-map.mock';
 import { replaceInDOM } from './replace-in-dom';
+import { __resetTrustedTypesPolicyForTests } from './trusted-types';
 import { ImportMap } from 'lib/1.domain';
 
 describe('replaceInBrowser', () => {
@@ -7,9 +8,15 @@ describe('replaceInBrowser', () => {
 
   beforeEach(() => {
     document.head.innerHTML = '';
+    __resetTrustedTypesPolicyForTests();
 
     jest.spyOn(document.head, 'appendChild');
     config = replaceInDOM('custom-importmap');
+  });
+
+  afterEach(() => {
+    delete (globalThis as { trustedTypes?: unknown }).trustedTypes;
+    __resetTrustedTypesPolicyForTests();
   });
 
   it('should create a new script element with correct type', () => {
@@ -84,5 +91,26 @@ describe('replaceInBrowser', () => {
     const scripts = document.head.querySelectorAll('script[type="custom-importmap"]');
     expect(scripts.length).toBe(1);
     expect(scripts[0]!.innerHTML).toBe(JSON.stringify(importMap));
+  });
+
+  it('should route the import map through a Trusted Types policy when available', () => {
+    const createScript = jest.fn((s: string) => s);
+    const createPolicy = jest.fn(() => ({ createScript, createScriptURL: (s: string) => s }));
+    (globalThis as { trustedTypes?: unknown }).trustedTypes = { createPolicy };
+
+    const importMap = mockImportMap();
+    replaceInDOM('custom-importmap', 'my-policy')(importMap);
+
+    expect(createPolicy).toHaveBeenCalledWith('my-policy', expect.any(Object));
+    expect(createScript).toHaveBeenCalledWith(JSON.stringify(importMap));
+  });
+
+  it('should not create a policy when the policy name is false', () => {
+    const createPolicy = jest.fn();
+    (globalThis as { trustedTypes?: unknown }).trustedTypes = { createPolicy };
+
+    replaceInDOM('custom-importmap', false)(mockImportMap());
+
+    expect(createPolicy).not.toHaveBeenCalled();
   });
 });
