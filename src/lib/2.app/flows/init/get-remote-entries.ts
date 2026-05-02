@@ -1,5 +1,9 @@
 import type { RemoteEntry } from 'lib/1.domain/remote-entry/remote-entry.contract';
-import type { Manifest, RemoteEntryUrl } from 'lib/1.domain/remote-entry/manifest.contract';
+import type {
+  Manifest,
+  RemoteEntryDescriptor,
+  RemoteEntryUrl,
+} from 'lib/1.domain/remote-entry/manifest.contract';
 import type { RemoteName } from 'lib/1.domain/remote/remote-info.contract';
 import type { ForGettingRemoteEntries } from '../../driver-ports/init/for-getting-remote-entries.port';
 import type { DrivingContract } from '../../driving-ports/driving.contract';
@@ -27,9 +31,14 @@ export function createGetRemoteEntries(
    * @param adapters
    * @returns A list of the remoteEntry json objects
    */
-  return (remotesOrManifestUrl = {}) =>
-    ports.manifestProvider
-      .provide(remotesOrManifestUrl)
+  return (remotesOrManifestUrl = {}) => {
+    const manifestPromise = config.manifestIntegrity
+      ? ports.manifestProvider.provide(remotesOrManifestUrl, {
+          integrity: config.manifestIntegrity,
+        })
+      : ports.manifestProvider.provide(remotesOrManifestUrl);
+
+    return manifestPromise
       .catch(e => {
         config.log.error(1, 'Could not fetch manifest.', e);
         return Promise.reject(new NFError('Failed to fetch manifest'));
@@ -38,30 +47,39 @@ export function createGetRemoteEntries(
       .then(fetchRemoteEntries)
       .then(removeSkippedRemotes)
       .then(checkForSSE);
+  };
 
   function addHostRemoteEntry(manifest: Manifest): Manifest {
     if (!config.hostRemoteEntry) return manifest;
 
-    const { name, url, cacheTag } = config.hostRemoteEntry;
+    const { name, url, cacheTag, integrity } = config.hostRemoteEntry;
     const urlWithCache = cacheTag ? `${url}?cacheTag=${cacheTag}` : url;
 
     return {
       ...manifest,
-      [name]: urlWithCache,
+      [name]: integrity ? { url: urlWithCache, integrity } : urlWithCache,
     };
   }
 
+  function normalizeEntry(descriptor: RemoteEntryDescriptor): {
+    url: RemoteEntryUrl;
+    integrity?: string;
+  } {
+    return typeof descriptor === 'string' ? { url: descriptor } : descriptor;
+  }
+
   async function fetchRemoteEntries(manifest: Manifest): Promise<(RemoteEntry | false)[]> {
-    const fetchPromises = Object.entries(manifest).map(([remoteName, remoteEntryUrl]) =>
-      fetchRemoteEntry(remoteName, remoteEntryUrl)
+    const fetchPromises = Object.entries(manifest).map(([remoteName, descriptor]) =>
+      fetchRemoteEntry(remoteName, descriptor)
     );
     return Promise.all(fetchPromises);
   }
 
   async function fetchRemoteEntry(
     remoteName: RemoteName,
-    remoteEntryUrl: RemoteEntryUrl
+    descriptor: RemoteEntryDescriptor
   ): Promise<RemoteEntry | false> {
+    const { url: remoteEntryUrl, integrity } = normalizeEntry(descriptor);
     let isOverride = false;
     let skip = false;
 
@@ -82,7 +100,9 @@ export function createGetRemoteEntries(
     if (skip) return false;
 
     try {
-      const remoteEntry = await ports.remoteEntryProvider.provide(remoteEntryUrl);
+      const remoteEntry = integrity
+        ? await ports.remoteEntryProvider.provide(remoteEntryUrl, { integrity })
+        : await ports.remoteEntryProvider.provide(remoteEntryUrl);
 
       config.log.debug(
         1,

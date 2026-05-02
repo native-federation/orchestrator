@@ -21,16 +21,19 @@ export type HostOptions = {
     hostRemoteEntry?: string | false | {
         name?: string,
         url: string,
-        cacheTag?: string
-    }
+        cacheTag?: string,
+        integrity?: string
+    },
+    manifestIntegrity?: string
 }
 ```
 
 ### Options:
 
-| Option          | Default | Description                                               |
-| --------------- | ------- | --------------------------------------------------------- |
-| hostRemoteEntry | `false` | Allows for the inclusion of a host remoteEntry.json file. |
+| Option            | Default     | Description                                                                                                                                                                              |
+| ----------------- | ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| hostRemoteEntry   | `false`     | Allows for the inclusion of a host remoteEntry.json file. The optional `integrity` field pins the host's remoteEntry.json against an SRI hash (see [Security](./security.md#subresource-integrity)). |
+| manifestIntegrity | `undefined` | SRI hash for the manifest URL passed as the first argument to `initFederation`. When set, the orchestrator verifies the manifest bytes before parsing.                                   |
 
 ### Example
 
@@ -42,6 +45,34 @@ initFederation('http://example.org/manifest.json', {
 });
 ```
 
+### Pinning resources with integrity
+
+Manifest entries, the manifest URL itself, and the host remoteEntry can each carry an SRI hash. Verification is opt-in per resource — entries without a hash are fetched unverified, matching the semantics of `<script integrity="…">`.
+
+```javascript
+initFederation('http://example.org/manifest.json', {
+  manifestIntegrity: 'sha384-…',
+  hostRemoteEntry: {
+    url: './host-remoteEntry.json',
+    integrity: 'sha384-…',
+  },
+});
+```
+
+Per-remote pinning lives in the manifest itself — entries can be either the existing string form or a `{ url, integrity }` object:
+
+```json
+{
+  "team/mfe1": "https://mfe1.example.org/remoteEntry.json",
+  "team/mfe2": {
+    "url": "https://mfe2.example.org/remoteEntry.json",
+    "integrity": "sha384-…"
+  }
+}
+```
+
+> See [Security & Subresource Integrity](./security.md#subresource-integrity) for the full trust chain (manifest → remoteEntry.json → modules) and the supported hash algorithms.
+
 ## <a id="importMapConfig"></a> 2. ImportMap configuration
 
 The native-federation library uses importmaps under the hood for module resolving. Since importmaps are a [relatively new feature of browsers](https://caniuse.com/import-maps), it might be a good idea to use a polyfill that is guaranteed to work, also in older browsers. There are 2 options supported: default and [es-module-shims](https://www.npmjs.com/package/es-module-shims/v/1.0.1).
@@ -51,16 +82,18 @@ export type ImportMapOptions = {
     loadModuleFn?: (url: string) => Promise<unknown>
     setImportMapFn?: (importMap: ImportMap, opts?: { override?: boolean }) => Promise<ImportMap>
     reloadBrowserFn?: () => void
+    trustedTypesPolicyName?: string | false
 }
 ```
 
 ### Options:
 
-| Option          | Default                             | Description                                                                                                                        |
-| --------------- | ----------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
-| setImportMapFn  | `replaceInDOM("importmap")`         | The function that adds the importmap to the host, by default this is the DOM.                                                      |
-| loadModuleFn    | `url => import(url)`                | This function can mock or alter the 'import' function, necessary for libraries that shim the import function.                      |
-| reloadBrowserFn | `() => {window.location.reload();}` | This function can mock or alter the "reload browser" behavior that is triggered when SSE is enabled and an user rebuilds a remote. |
+| Option                 | Default                             | Description                                                                                                                                                                                                                                |
+| ---------------------- | ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| setImportMapFn         | `replaceInDOM("importmap")`         | The function that adds the importmap to the host, by default this is the DOM.                                                                                                                                                              |
+| loadModuleFn           | `url => import(url)`                | This function can mock or alter the 'import' function, necessary for libraries that shim the import function.                                                                                                                              |
+| reloadBrowserFn        | `() => {window.location.reload();}` | This function can mock or alter the "reload browser" behavior that is triggered when SSE is enabled and an user rebuilds a remote.                                                                                                         |
+| trustedTypesPolicyName | `"nfo"`                             | Name of the [Trusted Types](./security.md) policy that wraps import-map content and dynamic-import URLs in the default `setImportMapFn` and `loadModuleFn`. Pass `false` to opt out. No effect on browsers that do not support Trusted Types. |
 
 ### Example
 
@@ -79,8 +112,13 @@ initFederation('http://example.org/manifest.json', {
   // Option 3: Custom properties
   loadModuleFn: (url: string) => { return customImport(url); },
   setImportMapFn: replaceInDOM('<importmap-type>'),
+
+  // Option 4: rename the Trusted Types policy to match a stricter CSP allowlist
+  trustedTypesPolicyName: 'my-app-nfo',
 });
 ```
+
+> See [Security — Trusted Types](./security.md#trusted-types) for the recommended CSP header and how the orchestrator interacts with a host-defined policy.
 
 ## <a id="loggingConfig"></a> 3. Logging configuration
 

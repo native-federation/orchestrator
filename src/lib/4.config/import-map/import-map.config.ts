@@ -2,7 +2,7 @@ import type { ImportMapConfig, ImportMapOptions } from 'lib/2.app/config/import-
 import { useDefaultImportMap } from './use-default';
 
 export const createImportMapConfig = (o: Partial<ImportMapOptions>): ImportMapConfig => {
-  const fallback = useDefaultImportMap();
+  const fallback = useDefaultImportMap(o.trustedTypesPolicyName);
   return {
     setImportMapFn: o.setImportMapFn ?? fallback.setImportMapFn,
     loadModuleFn: o.loadModuleFn ?? fallback.loadModuleFn,

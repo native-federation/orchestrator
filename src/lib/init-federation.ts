@@ -1,5 +1,6 @@
 import type { LoadRemoteModuleOf, NativeFederationResult } from './init-federation.contract';
 import type { NFOptions } from './2.app/config/config.contract';
+import type { RemoteRef } from './2.app/driver-ports/dynamic-init/flow.contract';
 import { createInitFlow, INIT_FLOW_FACTORY } from './5.di/flows/init.factory';
 import { createDriving } from './5.di/driving.factory';
 import { createConfigHandlers } from './5.di/config.factory';
@@ -44,9 +45,10 @@ const initFederation = (
 
       const initRemoteEntry = async (
         remoteEntryUrl: string,
-        remoteName?: string
-      ): Promise<NativeFederationResult> =>
-        dynamicInitFlow(remoteEntryUrl, remoteName)
+        remote?: RemoteRef
+      ): Promise<NativeFederationResult> => {
+        const remoteName = typeof remote === 'string' ? remote : remote?.name;
+        return dynamicInitFlow(remoteEntryUrl, remote)
           .catch(e => {
             stateDump(`[dynamic-init][${remoteName ?? remoteEntryUrl}] STATE DUMP`);
             if (config.strict.strictRemoteEntry) return Promise.reject(e);
@@ -57,6 +59,7 @@ const initFederation = (
             ...output,
             initRemoteEntry,
           }));
+      };
 
       return {
         ...output,
