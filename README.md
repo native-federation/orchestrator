@@ -67,7 +67,7 @@ Get up and running in under 2 minutes:
     </script>
 
     <!-- Include the orchestrator runtime -->
-    <script src="https://unpkg.com/@softarc/native-federation-orchestrator@4.0.2/quickstart.mjs"></script>
+    <script src="https://unpkg.com/@softarc/native-federation-orchestrator@4.1.0/quickstart.mjs"></script>
   </head>
   <body>
     <!-- Use your loaded components -->
@@ -85,7 +85,7 @@ Your micro frontends are now loaded and ready to use. The runtime handles the wh
 
 ```html
 <!-- Development and quick testing -->
-<script src="https://unpkg.com/@softarc/native-federation-orchestrator@4.0.2/quickstart.mjs"></script>
+<script src="https://unpkg.com/@softarc/native-federation-orchestrator@4.1.0/quickstart.mjs"></script>
 ```
 
 ## Advanced Usage
@@ -120,12 +120,12 @@ const HeaderComponent = await loadRemoteModule('team/mfe2', './Header');
 
 ## Documentation
 
-| Guide                                                                                                         | Description                                |
-| ------------------------------------------------------------------------------------------------------------- | ------------------------------------------ |
-| [🚀 Getting Started](https://github.com/native-federation/orchestrator/blob/main/docs/getting-started.md)     | Detailed setup instructions and examples   |
-| [🏗️ Architecture](https://github.com/native-federation/orchestrator/blob/main/docs/architecture.md)           | Understanding the native federation domain |
-| [⚙️ Configuration](https://github.com/native-federation/orchestrator/blob/main/docs/config.md)                | Complete configuration reference           |
-| [🔄 Version Resolution](https://github.com/native-federation/orchestrator/blob/main/docs/version-resolver.md) | How dependency conflicts are resolved      |
+| Guide                                                                                                         | Description                                     |
+| ------------------------------------------------------------------------------------------------------------- | ----------------------------------------------- |
+| [🚀 Getting Started](https://github.com/native-federation/orchestrator/blob/main/docs/getting-started.md)     | Detailed setup instructions and examples        |
+| [🏗️ Architecture](https://github.com/native-federation/orchestrator/blob/main/docs/architecture.md)           | Understanding the native federation domain      |
+| [⚙️ Configuration](https://github.com/native-federation/orchestrator/blob/main/docs/config.md)                | Complete configuration reference                |
+| [🔄 Version Resolution](https://github.com/native-federation/orchestrator/blob/main/docs/version-resolver.md) | How dependency conflicts are resolved           |
 | [🔒 Security & Trusted Types](https://github.com/native-federation/orchestrator/blob/main/docs/security.md)   | CSP setup and the built-in Trusted Types policy |
 
 ## Example repositories
