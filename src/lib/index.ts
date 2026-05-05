@@ -7,6 +7,8 @@ export {
   NativeFederationResult,
 } from './init-federation.contract';
 
+export { FederationManifest } from './1.domain/remote-entry/manifest.contract';
+
 export { createConfigHandlers } from './5.di/config.factory';
 export { createDriving } from './5.di/driving.factory';
 export {
