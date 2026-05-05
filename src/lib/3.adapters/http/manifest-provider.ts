@@ -1,4 +1,4 @@
-import type { Manifest } from 'lib/1.domain';
+import type { FederationManifest } from 'lib/1.domain';
 import type { ForProvidingManifest } from 'lib/2.app/driving-ports/for-providing-manifest.port';
 import { NFError } from 'lib/native-federation.error';
 import { verifyIntegrity } from 'lib/utils/integrity';
@@ -17,16 +17,16 @@ const createManifestProvider = (): ForProvidingManifest => {
 
   return {
     provide: async function (
-      remotesOrManifestUrl: string | Manifest,
+      remotesOrManifestUrl: string | FederationManifest,
       opts: { integrity?: string } = {}
     ) {
       if (typeof remotesOrManifestUrl !== 'string') return Promise.resolve(remotesOrManifestUrl);
 
-      const parse = async (response: Response): Promise<Manifest> => {
-        if (!opts.integrity) return response.json() as Promise<Manifest>;
+      const parse = async (response: Response): Promise<FederationManifest> => {
+        if (!opts.integrity) return response.json() as Promise<FederationManifest>;
         const bytes = await response.arrayBuffer();
         await verifyIntegrity(bytes, opts.integrity);
-        return JSON.parse(new TextDecoder().decode(bytes)) as Manifest;
+        return JSON.parse(new TextDecoder().decode(bytes)) as FederationManifest;
       };
 
       return fetch(remotesOrManifestUrl)

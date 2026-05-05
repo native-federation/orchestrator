@@ -1,6 +1,7 @@
 import type { LoadRemoteModuleOf, NativeFederationResult } from './init-federation.contract';
 import type { NFOptions } from './2.app/config/config.contract';
 import type { RemoteRef } from './2.app/driver-ports/dynamic-init/flow.contract';
+import type { FederationManifest } from './1.domain';
 import { createInitFlow, INIT_FLOW_FACTORY } from './5.di/flows/init.factory';
 import { createDriving } from './5.di/driving.factory';
 import { createConfigHandlers } from './5.di/config.factory';
@@ -10,7 +11,7 @@ import {
 } from './5.di/flows/dynamic-init.factory';
 
 const initFederation = (
-  remotesOrManifestUrl: string | Record<string, string>,
+  remotesOrManifestUrl: string | FederationManifest,
   options: NFOptions = {}
 ): Promise<NativeFederationResult> => {
   const { adapters, config } = createDriving(createConfigHandlers(options));
