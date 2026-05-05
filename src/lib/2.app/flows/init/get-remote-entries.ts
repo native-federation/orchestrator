@@ -1,6 +1,6 @@
 import type { RemoteEntry } from 'lib/1.domain/remote-entry/remote-entry.contract';
 import type {
-  Manifest,
+  FederationManifest,
   RemoteEntryDescriptor,
   RemoteEntryUrl,
 } from 'lib/1.domain/remote-entry/manifest.contract';
@@ -49,7 +49,7 @@ export function createGetRemoteEntries(
       .then(checkForSSE);
   };
 
-  function addHostRemoteEntry(manifest: Manifest): Manifest {
+  function addHostRemoteEntry(manifest: FederationManifest): FederationManifest {
     if (!config.hostRemoteEntry) return manifest;
 
     const { name, url, cacheTag, integrity } = config.hostRemoteEntry;
@@ -68,7 +68,7 @@ export function createGetRemoteEntries(
     return typeof descriptor === 'string' ? { url: descriptor } : descriptor;
   }
 
-  async function fetchRemoteEntries(manifest: Manifest): Promise<(RemoteEntry | false)[]> {
+  async function fetchRemoteEntries(manifest: FederationManifest): Promise<(RemoteEntry | false)[]> {
     const fetchPromises = Object.entries(manifest).map(([remoteName, descriptor]) =>
       fetchRemoteEntry(remoteName, descriptor)
     );

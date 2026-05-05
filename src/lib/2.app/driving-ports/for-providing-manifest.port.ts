@@ -1,8 +1,8 @@
-import type { Manifest } from 'lib/1.domain/remote-entry/manifest.contract';
+import type { FederationManifest } from 'lib/1.domain/remote-entry/manifest.contract';
 
 export type ForProvidingManifest = {
   provide: (
-    remotesOrManifestUrl: Manifest | string,
+    remotesOrManifestUrl: FederationManifest | string,
     opts?: { integrity?: string }
-  ) => Promise<Manifest>;
+  ) => Promise<FederationManifest>;
 };

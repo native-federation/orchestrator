@@ -1,12 +1,12 @@
 import { createManifestProvider } from './manifest-provider';
-import { Manifest } from 'lib/1.domain/remote-entry/manifest.contract';
+import { FederationManifest } from 'lib/1.domain/remote-entry/manifest.contract';
 import { ForProvidingManifest } from 'lib/2.app/driving-ports/for-providing-manifest.port';
 import { NFError } from 'lib/native-federation.error';
 
 describe('createManifestProvider', () => {
   let manifestProvider: ForProvidingManifest;
 
-  const mockFetchAPI = (response: Manifest) => {
+  const mockFetchAPI = (response: FederationManifest) => {
     global.fetch = jest.fn(url => {
       if (url === 'http://my.service/manifest.json')
         return Promise.resolve({
