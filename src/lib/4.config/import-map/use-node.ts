@@ -1,15 +1,18 @@
 import type { ImportMap } from 'lib/1.domain';
 import type { ImportMapConfig } from 'lib/2.app/config/import-map.contract';
-import { getLoaderBridge, type LoaderBridge } from 'lib/3.adapters/node/loader-bridge';
+import {
+  getNodeLoaderClient,
+  type NodeLoaderClient,
+} from 'lib/3.adapters/node/node-loader.client';
 
-const useNodeImportMap = (): ImportMapConfig & { bridge: LoaderBridge } => {
-  const bridge = getLoaderBridge();
+const useNodeImportMap = (): ImportMapConfig & { nodeLoader: NodeLoaderClient } => {
+  const nodeLoader = getNodeLoaderClient();
   return {
-    bridge,
+    nodeLoader,
     loadModuleFn: (url: string) => import(/* @vite-ignore */ url),
-    setImportMapFn: (importMap: ImportMap) => bridge.setMap(importMap).then(() => importMap),
+    setImportMapFn: (importMap: ImportMap) => nodeLoader.setMap(importMap).then(() => importMap),
     reloadBrowserFn: () => {
-      /* no-op on the server: page reload is a browser concern. */
+      /* no-op */
     },
   };
 };

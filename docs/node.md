@@ -143,13 +143,13 @@ its own worker thread. The main thread and the loader thread share a
 `MessageChannel`:
 
 ```
-┌──────────────────────────┐                ┌──────────────────────────┐
-│  main thread             │   set-map      │  loader thread           │
-│                          │ ─────────────▶ │                          │
-│  initNodeFederation()    │                │  resolve / load hooks    │
-│  builds the import map   │ ◀───────────── │  rewrite specifiers      │
-│                          │   applied-ack  │                          │
-└──────────────────────────┘                └──────────────────────────┘
+┌──────────────────────────┐                     ┌──────────────────────────┐
+│  main thread             │   set-import-map    │  loader thread           │
+│                          │ ──────────────────▶ │                          │
+│  initNodeFederation()    │                     │  resolve / load hooks    │
+│  builds the import map   │ ◀────────────────── │  rewrite specifiers      │
+│                          │  import-map-applied │                          │
+└──────────────────────────┘                     └──────────────────────────┘
 ```
 
 The loader hosts a W3C-compatible import-map resolve algorithm. For every
@@ -182,7 +182,7 @@ These are deliberately omitted because they make no sense server-side:
   resolve everything.
 
 If you pass a custom `setImportMapFn` or `loadModuleFn` you take over from the
-defaults and the loader bridge will not be exercised.
+defaults and the Node loader client will not be exercised.
 
 ## Migrating from `@softarc/native-federation-node`
 

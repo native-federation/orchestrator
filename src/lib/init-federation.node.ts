@@ -69,7 +69,7 @@ const initNodeFederation = (
   const dynamicInitFlow = createDynamicInitFlow(DYNAMIC_INIT_FLOW_FACTORY({ config, adapters }));
 
   return initFlow(remotesOrManifestUrl)
-    .then(({ loadRemoteModule }) => nodeConfig.bridge.ready().then(() => loadRemoteModule))
+    .then(({ loadRemoteModule }) => nodeConfig.nodeLoader.ready().then(() => loadRemoteModule))
     .then(loadRemoteModule => {
       const output = {
         config,
@@ -94,7 +94,7 @@ const initNodeFederation = (
             else console.warn('Failed to initialize remote entry, continuing anyway.');
             return Promise.resolve();
           })
-          .then(() => nodeConfig.bridge.ready())
+          .then(() => nodeConfig.nodeLoader.ready())
           .then(() => ({
             ...output,
             initRemoteEntry,

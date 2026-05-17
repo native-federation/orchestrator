@@ -7,14 +7,14 @@ import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import type { ImportMap } from 'lib/1.domain';
 
-// Stub the loader bridge so initNodeFederation never touches module.register.
-const mockBridge = {
+// Stub the Node loader client so initNodeFederation never touches module.register.
+const mockNodeLoader = {
   setMap: jest.fn<Promise<void>, [ImportMap]>(),
   ready: jest.fn<Promise<void>, []>(),
 };
 
-jest.mock('lib/3.adapters/node/loader-bridge', () => ({
-  getLoaderBridge: () => mockBridge,
+jest.mock('lib/3.adapters/node/node-loader.client', () => ({
+  getNodeLoaderClient: () => mockNodeLoader,
 }));
 
 import { initNodeFederation } from './init-federation.node';
@@ -30,8 +30,8 @@ describe('initNodeFederation', () => {
   let remoteEntryPath: string;
 
   beforeEach(async () => {
-    mockBridge.setMap.mockResolvedValue(undefined);
-    mockBridge.ready.mockResolvedValue(undefined);
+    mockNodeLoader.setMap.mockResolvedValue(undefined);
+    mockNodeLoader.ready.mockResolvedValue(undefined);
 
     dir = await mkdtemp(join(tmpdir(), 'nf-init-'));
     await mkdir(join(dir, 'remote-a'));
@@ -74,14 +74,14 @@ describe('initNodeFederation', () => {
     expect(typeof result.initRemoteEntry).toBe('function');
   });
 
-  it('posts the generated import map to the loader bridge', async () => {
+  it('posts the generated import map to the Node loader client', async () => {
     await initNodeFederation(pathToFileURL(manifestPath).href, {
       hostRemoteEntry: pathToFileURL(hostEntryPath).href,
       loadModuleFn: jest.fn(),
     });
 
-    expect(mockBridge.setMap).toHaveBeenCalledTimes(1);
-    const sentMap = mockBridge.setMap.mock.calls[0]![0];
+    expect(mockNodeLoader.setMap).toHaveBeenCalledTimes(1);
+    const sentMap = mockNodeLoader.setMap.mock.calls[0]![0];
     expect(sentMap.imports).toEqual(
       expect.objectContaining({
         'team/remote-a/./Hello': expect.stringMatching(/remote-a\/hello\.mjs$/),
@@ -89,9 +89,9 @@ describe('initNodeFederation', () => {
     );
   });
 
-  it('awaits bridge.ready() before returning', async () => {
+  it('awaits nodeLoader.ready() before returning', async () => {
     let resolveReady: () => void = () => undefined;
-    mockBridge.ready.mockReturnValue(new Promise<void>(r => (resolveReady = r)));
+    mockNodeLoader.ready.mockReturnValue(new Promise<void>(r => (resolveReady = r)));
 
     let resolved = false;
     const pending = initNodeFederation(pathToFileURL(manifestPath).href, {
@@ -102,7 +102,7 @@ describe('initNodeFederation', () => {
       return r;
     });
 
-    // Let microtasks flush — bridge.ready is pending, init must not resolve.
+    // Let microtasks flush — nodeLoader.ready is pending, init must not resolve.
     await new Promise(r => setTimeout(r, 10));
     expect(resolved).toBe(false);
 
@@ -145,6 +145,6 @@ describe('initNodeFederation', () => {
       }
     );
 
-    expect(mockBridge.setMap).toHaveBeenCalled();
+    expect(mockNodeLoader.setMap).toHaveBeenCalled();
   });
 });

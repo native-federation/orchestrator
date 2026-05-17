@@ -3,44 +3,44 @@
  */
 import type { ImportMap } from 'lib/1.domain';
 
-const mockBridge = {
+const mockNodeLoader = {
   setMap: jest.fn<Promise<void>, [ImportMap]>(),
   ready: jest.fn<Promise<void>, []>(),
 };
 
-jest.mock('lib/3.adapters/node/loader-bridge', () => ({
-  getLoaderBridge: () => mockBridge,
+jest.mock('lib/3.adapters/node/node-loader.client', () => ({
+  getNodeLoaderClient: () => mockNodeLoader,
 }));
 
 import { useNodeImportMap } from './use-node';
 
 describe('useNodeImportMap', () => {
   beforeEach(() => {
-    mockBridge.setMap.mockReset();
-    mockBridge.ready.mockReset();
+    mockNodeLoader.setMap.mockReset();
+    mockNodeLoader.ready.mockReset();
   });
 
-  it('returns an ImportMapConfig plus a bridge reference', () => {
+  it('returns an ImportMapConfig plus a nodeLoader reference', () => {
     const cfg = useNodeImportMap();
     expect(typeof cfg.setImportMapFn).toBe('function');
     expect(typeof cfg.loadModuleFn).toBe('function');
     expect(typeof cfg.reloadBrowserFn).toBe('function');
-    expect(cfg.bridge).toBe(mockBridge);
+    expect(cfg.nodeLoader).toBe(mockNodeLoader);
   });
 
-  it('setImportMapFn forwards to bridge.setMap and resolves with the map', async () => {
-    mockBridge.setMap.mockResolvedValue(undefined);
+  it('setImportMapFn forwards to nodeLoader.setMap and resolves with the map', async () => {
+    mockNodeLoader.setMap.mockResolvedValue(undefined);
     const map: ImportMap = { imports: { foo: '/foo.mjs' } };
 
     const result = await useNodeImportMap().setImportMapFn(map);
 
-    expect(mockBridge.setMap).toHaveBeenCalledWith(map);
+    expect(mockNodeLoader.setMap).toHaveBeenCalledWith(map);
     expect(result).toBe(map);
   });
 
-  it('propagates bridge.setMap rejections', async () => {
+  it('propagates nodeLoader.setMap rejections', async () => {
     const boom = new Error('clone failed');
-    mockBridge.setMap.mockRejectedValue(boom);
+    mockNodeLoader.setMap.mockRejectedValue(boom);
 
     await expect(
       useNodeImportMap().setImportMapFn({ imports: {} })
