@@ -2,7 +2,7 @@ import type { FederationManifest } from 'lib/1.domain';
 import type { ForProvidingManifest } from 'lib/2.app/driving-ports/for-providing-manifest.port';
 import { NFError } from 'lib/native-federation.error';
 import { verifyIntegrity } from 'lib/utils/integrity';
-import { readSourceBytes } from './read-source';
+import { readSourceBytes } from 'lib/utils/node/read-source';
 
 const createFsManifestProvider = (): ForProvidingManifest => {
   const formatError = (manifestUrl: string) => (err: unknown) => {

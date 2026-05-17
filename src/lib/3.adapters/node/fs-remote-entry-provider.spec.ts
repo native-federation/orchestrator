@@ -3,9 +3,9 @@
  */
 import { createFsRemoteEntryProvider } from './fs-remote-entry-provider';
 import { NFError } from 'lib/native-federation.error';
-import { readSourceBytes } from './read-source';
+import { readSourceBytes } from 'lib/utils/node/read-source';
 
-jest.mock('./read-source', () => ({
+jest.mock('lib/utils/node/read-source', () => ({
   readSourceBytes: jest.fn(),
 }));
 

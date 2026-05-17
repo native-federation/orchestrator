@@ -2,7 +2,7 @@ import type { RemoteEntry } from 'lib/1.domain/remote-entry/remote-entry.contrac
 import type { ForProvidingRemoteEntries } from 'lib/2.app/driving-ports/for-providing-remote-entries.port';
 import { NFError } from 'lib/native-federation.error';
 import { verifyIntegrity } from 'lib/utils/integrity';
-import { readSourceBytes } from './read-source';
+import { readSourceBytes } from 'lib/utils/node/read-source';
 
 const createFsRemoteEntryProvider = (): ForProvidingRemoteEntries => {
   const fillEmptyFields = (remoteEntryUrl: string) => (remoteEntry: RemoteEntry) => {

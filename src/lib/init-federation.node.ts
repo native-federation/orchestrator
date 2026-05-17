@@ -21,6 +21,7 @@ import {
   DYNAMIC_INIT_FLOW_FACTORY,
 } from './5.di/flows/dynamic-init.factory';
 import { useNodeImportMap } from './4.config/import-map/use-node';
+import { normalizeHostRemoteEntry } from './utils/node/to-url';
 
 export type InitNodeFederationOptions = NFOptions;
 
@@ -43,12 +44,10 @@ const initNodeFederation = (
   const nodeConfig = useNodeImportMap();
   const config = createConfigHandlers({
     ...options,
-    // Force Node-side defaults; explicit user overrides still win because
-    // createImportMapConfig respects them when present.
+    hostRemoteEntry: normalizeHostRemoteEntry(options.hostRemoteEntry),
     loadModuleFn: options.loadModuleFn ?? nodeConfig.loadModuleFn,
     setImportMapFn: options.setImportMapFn ?? nodeConfig.setImportMapFn,
     reloadBrowserFn: options.reloadBrowserFn ?? nodeConfig.reloadBrowserFn,
-    // SSE is meaningless server-side; ignore any value the caller passed.
     sse: false,
   });
 

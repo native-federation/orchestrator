@@ -4,9 +4,9 @@
 import { createFsManifestProvider } from './fs-manifest-provider';
 import { NFError } from 'lib/native-federation.error';
 import type { FederationManifest } from 'lib/1.domain';
-import { readSourceBytes } from './read-source';
+import { readSourceBytes } from 'lib/utils/node/read-source';
 
-jest.mock('./read-source', () => ({
+jest.mock('lib/utils/node/read-source', () => ({
   readSourceBytes: jest.fn(),
 }));
 
