@@ -196,6 +196,10 @@ function generatePackageExports() {
       "./node": {
         "types": "./types/lib/node.index.d.ts",
         "default": "./fesm2022/node.mjs"
+      },
+
+      "./node-loader/loader.mjs": {
+        "default": "./node-loader/loader.mjs"
       }
     },
     
