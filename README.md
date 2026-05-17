@@ -16,12 +16,15 @@ A lightweight **runtime micro frontend orchestrator** that loads micro frontends
 - 💾 **Advanced Caching** - Optimized for page-reload scenarios with flexible storage options like localStorage and sessionStorage
 - 🔄 **Smart Dependency Resolution** - Automatic version conflict resolution and sharing based on the module federation mental model.
 - 🌐 **Full native-federation compatibility** - Works with standard remoteEntry.json format.
+- 🖥️ **Server-side rendering ready** - First-class Node.js entry point (`/node`) that runs the same pipeline through a `module.register()` loader hook.
 - ⚡ **Lightweight & Fast** - Minimal bundle size (~80kb) with tree-shaking support.
 - 🛠️ **Highly Configurable** - Extensive options and SDK for fine-tuning behavior.
 
 ### How it works
 
 The library runs in the browser to orchestrate the integration of micro frontends into plain HTML pages. While the host application can be SSR, the micro frontends are loaded as ES modules at runtime, providing the benefits of micro frontend architecture without requiring a full SPA framework.
+
+The same pipeline is also available on the server via the `/node` subpath export, which installs a Node `module.register()` loader hook so federated `import(...)` calls resolve through the orchestrator-built import map. See the [Node.js usage guide](./docs/node.md).
 
 ### Extends the Native Federation Ecosystem
 
@@ -123,6 +126,7 @@ const HeaderComponent = await loadRemoteModule('team/mfe2', './Header');
 | Guide                                                                                                         | Description                                     |
 | ------------------------------------------------------------------------------------------------------------- | ----------------------------------------------- |
 | [🚀 Getting Started](https://github.com/native-federation/orchestrator/blob/main/docs/getting-started.md)     | Detailed setup instructions and examples        |
+| [🖥️ Node.js (server-side) usage](https://github.com/native-federation/orchestrator/blob/main/docs/node.md)    | SSR / Node entry, loader hook, migration guide  |
 | [🏗️ Architecture](https://github.com/native-federation/orchestrator/blob/main/docs/architecture.md)           | Understanding the native federation domain      |
 | [⚙️ Configuration](https://github.com/native-federation/orchestrator/blob/main/docs/config.md)                | Complete configuration reference                |
 | [🔄 Version Resolution](https://github.com/native-federation/orchestrator/blob/main/docs/version-resolver.md) | How dependency conflicts are resolved           |
