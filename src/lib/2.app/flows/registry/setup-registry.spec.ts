@@ -1,6 +1,9 @@
 import type { NFEventRegistryConfig } from 'lib/2.app/config/registry.contract';
 import type { NFEventRegistry } from 'lib/1.domain/registry/event-registry.contract';
-import type { NFEventProvider, NFEventUnsubscribe } from 'lib/1.domain/registry/event.contract';
+import type {
+  NFEventProvider,
+  NFEventUnsubscribe,
+} from 'lib/7.extensions/registry/domain/event.contract';
 import { createRegistry } from './setup-registry';
 
 describe('createRegistry', () => {

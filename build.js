@@ -13,7 +13,8 @@ const PATHS = {
 
 const OUTPUT_PATHS = {
   fesm2022: path.join('dist', 'fesm2022'),
-  quickstart: path.join('dist')
+  quickstart: path.join('dist'),
+  nodeLoader: path.join('dist', 'node-loader'),
 };
 
 const FILES_TO_COPY = ['README.md', 'LICENSE.md'];
@@ -130,6 +131,26 @@ async function generateBundles() {
       sourcemap: false,
       minify: true
     },
+
+    '@softarc/native-federation-orchestrator/node': {
+      ...baseConfig,
+      platform: 'node',
+      target: 'node20.6',
+      entryPoints: ['src/lib/node.index.ts'],
+      outfile: path.join(OUTPUT_PATHS.fesm2022, 'node.mjs'),
+      bundle: true,
+      sourcemap: true
+    },
+
+    '@softarc/native-federation-orchestrator/node-loader': {
+      ...baseConfig,
+      platform: 'node',
+      target: 'node20.6',
+      entryPoints: ['src/node-loader.ts'],
+      outfile: path.join(OUTPUT_PATHS.nodeLoader, 'loader.mjs'),
+      bundle: true,
+      sourcemap: true
+    },
   };
 
   return builds;
@@ -170,6 +191,15 @@ function generatePackageExports() {
       "./audit": {
         "types": "./types/lib/audit.index.d.ts",
         "default": "./fesm2022/audit.mjs"
+      },
+
+      "./node": {
+        "types": "./types/lib/node.index.d.ts",
+        "default": "./fesm2022/node.mjs"
+      },
+
+      "./node-loader/loader.mjs": {
+        "default": "./node-loader/loader.mjs"
       }
     },
     
@@ -291,9 +321,10 @@ async function setupDistDirectory() {
   await fsUtils.removeDir(PATHS.dist);
   
   const dirs = [
-    PATHS.dist, 
+    PATHS.dist,
     OUTPUT_PATHS.fesm2022,
-    OUTPUT_PATHS.quickstart
+    OUTPUT_PATHS.quickstart,
+    OUTPUT_PATHS.nodeLoader
   ];
   
   const dirResults = await Promise.all(dirs.map(dir => fsUtils.ensureDir(dir)));
