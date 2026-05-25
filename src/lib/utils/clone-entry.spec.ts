@@ -107,7 +107,7 @@ describe('cloneEntry', () => {
 
       const actual = () => cloneEntry('test', original);
 
-      expect(actual).toThrow(`Could not parse storage entry 'test'`);
+      expect(actual).toThrow(`Could not clone entry 'test'`);
     });
   });
 });

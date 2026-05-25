@@ -185,7 +185,7 @@ Custom browser events are unfortunately vulnerable to unwanted race conditions, 
 </html>
 ```
 
-> **Note:** the event-registry can also be used for robust communication between micro frontends even after initialization.
+> **Note:** the event-registry can also be used for robust communication between micro frontends even after initialization. See the [Event Registry](./event-registry.md) reference for the full API.
 
 ## Custom implementation
 

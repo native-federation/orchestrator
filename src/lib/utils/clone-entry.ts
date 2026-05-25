@@ -16,7 +16,7 @@ const cloneEntry: CloneEntry = <T>(name: StorageEntryKey, raw: T) => {
   } catch {
     /* object is not stringifyable */
   }
-  throw new NFError(`Could not parse storage entry '${String(name)}'`);
+  throw new NFError(`Could not clone entry '${String(name)}'`);
 };
 
 export { CloneEntry, cloneEntry };
