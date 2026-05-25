@@ -1,7 +1,7 @@
 export type NFEventRegistryConfig = {
-  maxStreams: number;
+  maxStreams?: number;
   maxEvents: number;
-  removePercentage: number;
+  removePercentage?: number;
 };
 
 export type NFEventRegistryOptions = Partial<NFEventRegistryConfig>;

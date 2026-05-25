@@ -3,7 +3,7 @@ import type { NFEventRegistry } from 'lib/1.domain/registry/event-registry.contr
 import type {
   NFEventProvider,
   NFEventUnsubscribe,
-} from 'lib/7.extensions/registry/domain/event.contract';
+} from 'lib/1.domain/registry/event.contract';
 import { createRegistry } from './setup-registry';
 
 describe('createRegistry', () => {
@@ -205,7 +205,7 @@ describe('createRegistry', () => {
       callback.mockClear();
 
       const historyCallback = jest.fn();
-      smallRegistry.on('test-event', historyCallback);
+      smallRegistry.on('test-event', historyCallback, { replay: 10 });
 
       return new Promise<void>(resolve => {
         setTimeout(() => {
@@ -271,7 +271,7 @@ describe('createRegistry', () => {
       expect(callback).toHaveBeenCalledWith(expect.objectContaining({ data: testData }));
     });
 
-    it('should receive historical events when subscribing', () => {
+    it('should replay only the most recent historical event by default when subscribing', () => {
       const testData1 = { message: 'first' };
       const testData2 = { message: 'second' };
 
@@ -280,6 +280,25 @@ describe('createRegistry', () => {
 
       const callback = jest.fn();
       registry.on('test-event', callback);
+
+      return new Promise<void>(resolve => {
+        setTimeout(() => {
+          expect(callback).toHaveBeenCalledTimes(1);
+          expect(callback).toHaveBeenCalledWith(expect.objectContaining({ data: testData2 }));
+          resolve();
+        }, 0);
+      });
+    });
+
+    it('should replay multiple historical events when an explicit replay count is provided', () => {
+      const testData1 = { message: 'first' };
+      const testData2 = { message: 'second' };
+
+      registry.emit('test-event', testData1);
+      registry.emit('test-event', testData2);
+
+      const callback = jest.fn();
+      registry.on('test-event', callback, { replay: 10 });
 
       return new Promise<void>(resolve => {
         setTimeout(() => {
