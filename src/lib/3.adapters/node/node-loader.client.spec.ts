@@ -104,6 +104,68 @@ describe('node-loader.client', () => {
     await expect(pending).resolves.toBeUndefined();
   });
 
+  it('posts the share scope on setShareScope and resolves when the loader acks', async () => {
+    const client = getNodeLoaderClient();
+    const keys = { '@angular/core': ['Component'] };
+
+    const pending = client.setShareScope(keys);
+    await flushMicrotasks();
+
+    expect(mockPorts[0]!.port1.postMessage).toHaveBeenCalledWith({
+      type: 'set-share-scope',
+      keys,
+    });
+
+    let resolved = false;
+    pending.then(() => {
+      resolved = true;
+    });
+    await flushMicrotasks();
+    expect(resolved).toBe(false);
+
+    mockPorts[0]!.port1.mockEmit({ type: 'share-scope-applied' });
+    await expect(pending).resolves.toBeUndefined();
+  });
+
+  it('serializes setShareScope behind a pending setMap and matches acks by type', async () => {
+    const client = getNodeLoaderClient();
+    const port1 = mockPorts[0]!.port1;
+
+    const pMap = client.setMap({ imports: { a: '/a.mjs' } });
+    const pScope = client.setShareScope({ pkg: ['x'] });
+    await flushMicrotasks();
+
+    // Only set-import-map posted so far; set-share-scope waits its turn.
+    expect(port1.postMessage).toHaveBeenCalledTimes(1);
+    expect(port1.postMessage).toHaveBeenNthCalledWith(1, {
+      type: 'set-import-map',
+      map: { imports: { a: '/a.mjs' } },
+    });
+
+    let scopeResolved = false;
+    pScope.then(() => {
+      scopeResolved = true;
+    });
+
+    // A share-scope ack must NOT resolve the still-pending setMap.
+    port1.mockEmit({ type: 'share-scope-applied' });
+    await flushMicrotasks();
+    expect(scopeResolved).toBe(false);
+
+    // The correct ack releases setMap and lets set-share-scope post.
+    port1.mockEmit({ type: 'import-map-applied' });
+    await pMap;
+    await flushMicrotasks();
+    expect(scopeResolved).toBe(false);
+    expect(port1.postMessage).toHaveBeenNthCalledWith(2, {
+      type: 'set-share-scope',
+      keys: { pkg: ['x'] },
+    });
+
+    port1.mockEmit({ type: 'share-scope-applied' });
+    await expect(pScope).resolves.toBeUndefined();
+  });
+
   it('ignores messages of other types until the right ack arrives', async () => {
     const client = getNodeLoaderClient();
     const pending = client.setMap({ imports: {} });

@@ -13,12 +13,24 @@ type Imports = Record<string, string>;
 type Scopes = Record<string, Imports>;
 type ImportMap = { imports: Imports; scopes?: Scopes };
 
+/** Per-specifier list of export names to re-export from the published share scope. */
+type ShareScopeKeys = Record<string, string[]>;
+
 type InitData = {
   port?: MessagePort;
   initialImportMap?: ImportMap;
 };
 
+type IncomingMessage =
+  | { type: 'set-import-map'; map: ImportMap }
+  | { type: 'set-share-scope'; keys?: ShareScopeKeys };
+
 const EMPTY_MAP: ImportMap = Object.freeze({ imports: {}, scopes: {} });
+
+/** Synthetic URL scheme for specifiers bridged to the host's share scope. */
+const SHARE_PREFIX = 'nf-share:';
+/** Global key on the main thread holding `{ [specifier]: namespaceObject }`. */
+const SHARE_SCOPE_GLOBAL = '__NF_SHARE_SCOPE__';
 
 const baseURL = (() => {
   const cwd = process.cwd();
@@ -28,16 +40,20 @@ const baseURL = (() => {
 })();
 
 let activeMap: ImportMap = EMPTY_MAP;
+let shareScopeKeys: ShareScopeKeys = Object.create(null);
 
 export function initialize(data: InitData = {}): void {
   if (data.initialImportMap) {
     activeMap = normalize(data.initialImportMap);
   }
   if (data.port) {
-    data.port.on('message', (msg: { type: 'set-import-map'; map: ImportMap }) => {
+    data.port.on('message', (msg: IncomingMessage) => {
       if (msg && msg.type === 'set-import-map') {
         activeMap = normalize(msg.map);
         data.port!.postMessage({ type: 'import-map-applied' });
+      } else if (msg && msg.type === 'set-share-scope') {
+        shareScopeKeys = msg.keys ?? Object.create(null);
+        data.port!.postMessage({ type: 'share-scope-applied' });
       }
     });
     data.port.unref?.();
@@ -53,6 +69,11 @@ export async function resolve(
   context: ResolveContext,
   nextResolve: NextResolve
 ): Promise<ResolveResult> {
+  // Bridged specifiers win over the import map: route them to a synthetic
+  // module that re-exports from the host's published share scope.
+  if (Object.prototype.hasOwnProperty.call(shareScopeKeys, specifier)) {
+    return { url: SHARE_PREFIX + encodeURIComponent(specifier), shortCircuit: true };
+  }
   const mapped = resolveSpecifier(activeMap, specifier, context.parentURL);
   return nextResolve(mapped ?? specifier, context);
 }
@@ -70,6 +91,14 @@ export async function load(
   context: LoadContext,
   nextLoad: NextLoad
 ): Promise<LoadResult> {
+  if (url.startsWith(SHARE_PREFIX)) {
+    const specifier = decodeURIComponent(url.slice(SHARE_PREFIX.length));
+    return {
+      shortCircuit: true,
+      format: 'module',
+      source: synthShareModule(specifier, shareScopeKeys[specifier]),
+    };
+  }
   if (url.startsWith('http://') || url.startsWith('https://')) {
     const res = await fetch(url);
     if (!res.ok) {
@@ -82,6 +111,37 @@ export async function load(
     context.format = 'module';
   }
   return nextLoad(url, context);
+}
+
+// --- share-scope bridge ----------------------------------------------------
+// Synthesizes an in-memory ESM module whose exports forward to the namespace
+// the host published on `globalThis[SHARE_SCOPE_GLOBAL]`. The export-key list
+// is computed on the main thread (where the namespace lives) and shipped over
+// the port, so the loader realm never has to enumerate a namespace it can't
+// see. The `globalThis[...]` reads below run at module-eval time on the main
+// thread, where the instances actually exist.
+
+function synthShareModule(specifier: string, keys: string[] | undefined): string {
+  const ID = /^[\p{ID_Start}$_][\p{ID_Continue}$]*$/u;
+  const ref = `globalThis[${JSON.stringify(SHARE_SCOPE_GLOBAL)}][${JSON.stringify(specifier)}]`;
+  const lines = [
+    `const __ns = ${ref};`,
+    `if (!__ns) throw new Error(${JSON.stringify(
+      `[native-federation] share scope '${specifier}' not published`
+    )});`,
+  ];
+  let hasDefault = false;
+  for (const k of keys ?? []) {
+    if (k === 'default') {
+      hasDefault = true;
+      continue;
+    }
+    // Defensive: only emit syntactically valid export identifiers. Angular's
+    // ɵ… names pass \p{ID_Start}; anything else is skipped.
+    if (ID.test(k)) lines.push(`export const ${k} = __ns[${JSON.stringify(k)}];`);
+  }
+  if (hasDefault) lines.push(`export default __ns["default"];`);
+  return lines.join('\n') + '\n';
 }
 
 // --- WICG import-map resolve algorithm ------------------------------------

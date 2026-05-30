@@ -23,7 +23,28 @@ import {
 import { useNodeImportMap } from './4.config/import-map/use-node';
 import { normalizeHostRemoteEntry } from './utils/node/to-url';
 
-export type InitNodeFederationOptions = NFOptions;
+export type InitNodeFederationOptions = NFOptions & {
+  /**
+   * Bridge specifiers to instances already loaded in the host process (dev).
+   *
+   * Maps each specifier to its module namespace object — e.g.
+   * `{ '@angular/core': await import('@angular/core') }`. The host's instances
+   * are published on `globalThis.__NF_SHARE_SCOPE__` and the node loader
+   * synthesizes a re-export module for each specifier instead of resolving it
+   * through the import map, so remotes share the host's singletons.
+   *
+   * Exports are value snapshots, not live bindings — fine for packages whose
+   * exports are stable refs (Angular's classes/functions), not for packages
+   * that reassign their exports after init.
+   *
+   * Omit in production: with no `shareScope`, nothing is published and the
+   * loader never routes to the bridge — resolution is import-map only.
+   */
+  shareScope?: Record<string, object>;
+};
+
+/** Global key the node loader reads at module-eval time on the main thread. */
+const SHARE_SCOPE_GLOBAL = '__NF_SHARE_SCOPE__';
 
 const buildNodeAdapters = (config: ConfigContract): DrivingContract => ({
   versionCheck: createVersionCheck(),
@@ -42,6 +63,24 @@ const initNodeFederation = (
   options: InitNodeFederationOptions = {}
 ): Promise<NativeFederationResult> => {
   const nodeConfig = useNodeImportMap();
+
+  // Share-scope bridge (dev): publish the host's instances on the global the
+  // loader reads, then ship the export-key lists to the loader thread and wait
+  // for its ack before the init flow resolves any remote import. With no
+  // shareScope this is a no-op and resolution stays import-map only.
+  let shareScopeReady: Promise<unknown> = Promise.resolve();
+  if (options.shareScope) {
+    const globals = globalThis as Record<string, unknown>;
+    globals[SHARE_SCOPE_GLOBAL] = {
+      ...((globals[SHARE_SCOPE_GLOBAL] as Record<string, object> | undefined) ?? {}),
+      ...options.shareScope,
+    };
+    const keys = Object.fromEntries(
+      Object.entries(options.shareScope).map(([specifier, ns]) => [specifier, Object.keys(ns)])
+    );
+    shareScopeReady = nodeConfig.setShareScopeFn(keys);
+  }
+
   const config = createConfigHandlers({
     ...options,
     hostRemoteEntry: normalizeHostRemoteEntry(options.hostRemoteEntry),
@@ -68,7 +107,8 @@ const initNodeFederation = (
   const initFlow = createInitFlow(INIT_FLOW_FACTORY({ adapters, config }));
   const dynamicInitFlow = createDynamicInitFlow(DYNAMIC_INIT_FLOW_FACTORY({ config, adapters }));
 
-  return initFlow(remotesOrManifestUrl)
+  return shareScopeReady
+    .then(() => initFlow(remotesOrManifestUrl))
     .then(({ loadRemoteModule }) => nodeConfig.nodeLoader.ready().then(() => loadRemoteModule))
     .then(loadRemoteModule => {
       const output = {

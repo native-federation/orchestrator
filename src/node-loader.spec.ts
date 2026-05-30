@@ -67,6 +67,16 @@ describe('node-loader hooks', () => {
       expect(next).toHaveBeenCalledWith('file:///live.mjs', {});
     });
 
+    it('acks set-share-scope with share-scope-applied', () => {
+      const loader = freshLoader();
+      const port = new FakePort();
+      loader.initialize({ port: port as unknown as EventEmitter & { postMessage(m: unknown): void } });
+
+      port.emit({ type: 'set-share-scope', keys: { '@angular/core': ['Component'] } });
+
+      expect(port.postMessage).toHaveBeenCalledWith({ type: 'share-scope-applied' });
+    });
+
     it('ignores port messages of other types', async () => {
       const loader = freshLoader();
       const port = new FakePort();
@@ -156,6 +166,77 @@ describe('node-loader hooks', () => {
       expect(next).toHaveBeenCalledWith('file:///globals/lib.mjs', {
         parentURL: 'file:///apps/b/entry.mjs',
       });
+    });
+  });
+
+  describe('share scope', () => {
+    const withScope = (keys: Record<string, string[]>): LoaderModule => {
+      const loader = freshLoader();
+      const port = new FakePort();
+      loader.initialize({ port: port as unknown as EventEmitter & { postMessage(m: unknown): void } });
+      port.emit({ type: 'set-share-scope', keys });
+      return loader;
+    };
+
+    it('routes a bridged specifier to a synthetic nf-share: URL, bypassing nextResolve', async () => {
+      const loader = withScope({ '@angular/core': ['Component'] });
+      const next = jest.fn();
+
+      const result = await loader.resolve('@angular/core', {}, next);
+
+      expect(result).toEqual({ url: 'nf-share:%40angular%2Fcore', shortCircuit: true });
+      expect(next).not.toHaveBeenCalled();
+    });
+
+    it('bridged specifiers win over the import map', async () => {
+      const loader = freshLoader();
+      const port = new FakePort();
+      loader.initialize({ port: port as unknown as EventEmitter & { postMessage(m: unknown): void } });
+      port.emit({ type: 'set-import-map', map: { imports: { '@angular/core': 'file:///ng.mjs' } } });
+      port.emit({ type: 'set-share-scope', keys: { '@angular/core': ['Component'] } });
+      const next = jest.fn();
+
+      const result = await loader.resolve('@angular/core', {}, next);
+
+      expect(result.url).toBe('nf-share:%40angular%2Fcore');
+      expect(next).not.toHaveBeenCalled();
+    });
+
+    it('synthesizes a module that re-exports named keys and default from the global scope', async () => {
+      const loader = withScope({ '@angular/core': ['Component', 'default', 'ɵsetClassMetadata'] });
+
+      const result = await loader.load('nf-share:%40angular%2Fcore', {}, jest.fn());
+
+      expect(result.shortCircuit).toBe(true);
+      expect(result.format).toBe('module');
+      const source = result.source as string;
+      expect(source).toContain('globalThis["__NF_SHARE_SCOPE__"]["@angular/core"]');
+      expect(source).toContain('export const Component = __ns["Component"];');
+      expect(source).toContain('export const ɵsetClassMetadata = __ns["ɵsetClassMetadata"];');
+      expect(source).toContain('export default __ns["default"];');
+      // `default` must not also be emitted as a named const.
+      expect(source).not.toContain('export const default');
+    });
+
+    it('throws a clear error at eval time when the namespace is not published', async () => {
+      const loader = withScope({ '@angular/core': ['Component'] });
+      const result = await loader.load('nf-share:%40angular%2Fcore', {}, jest.fn());
+      const source = result.source as string;
+
+      expect(source).toContain(
+        `throw new Error("[native-federation] share scope '@angular/core' not published")`
+      );
+    });
+
+    it('skips export names that are not valid identifiers', async () => {
+      const loader = withScope({ pkg: ['ok', 'has-dash', '1bad'] });
+
+      const result = await loader.load('nf-share:pkg', {}, jest.fn());
+      const source = result.source as string;
+
+      expect(source).toContain('export const ok = __ns["ok"];');
+      expect(source).not.toContain('has-dash');
+      expect(source).not.toContain('1bad');
     });
   });
 
