@@ -3,12 +3,12 @@ import type { ImportMapConfig } from 'lib/2.app/config/import-map.contract';
 import {
   getNodeLoaderClient,
   type NodeLoaderClient,
-  type ShareScopeKeys,
+  type HostInstanceKeys,
 } from 'lib/3.adapters/node/node-loader.client';
 
 type NodeImportMapConfig = ImportMapConfig & {
   nodeLoader: NodeLoaderClient;
-  setShareScopeFn: (keys: ShareScopeKeys) => Promise<ShareScopeKeys>;
+  setHostInstancesFn: (keys: HostInstanceKeys) => Promise<HostInstanceKeys>;
 };
 
 const useNodeImportMap = (): NodeImportMapConfig => {
@@ -17,7 +17,7 @@ const useNodeImportMap = (): NodeImportMapConfig => {
     nodeLoader,
     loadModuleFn: (url: string) => import(/* @vite-ignore */ url),
     setImportMapFn: (importMap: ImportMap) => nodeLoader.setMap(importMap).then(() => importMap),
-    setShareScopeFn: (keys: ShareScopeKeys) => nodeLoader.setShareScope(keys).then(() => keys),
+    setHostInstancesFn: (keys: HostInstanceKeys) => nodeLoader.setHostInstances(keys).then(() => keys),
     reloadBrowserFn: () => {
       /* no-op */
     },

@@ -168,6 +168,64 @@ The import map can be updated at any time after the initial install — e.g. whe
 you add a new remote via `initRemoteEntry(...)` — and the loader picks up the
 new map on the next resolution.
 
+## Sharing the host's loaded instances (dev)
+
+In development the host process often runs from its own `node_modules` — its
+`@angular/core` is already loaded as a `file://…` module, outside the federation
+import map. Remotes, meanwhile, resolve `@angular/core` through the import map to
+whatever their `remoteEntry.json` declares. That's **two copies of the framework
+in one process**, which breaks singletons (Angular DI, reflection metadata, …).
+
+The `hostInstances` option bridges that gap — it takes three forms:
+
+**Auto-derive from the host remoteEntry (recommended).** Pass `'all'` and the
+orchestrator reads the host's shared singletons straight out of its
+`remoteEntry.json`, imports each in the host realm, and bridges them. Nothing to
+list by hand, and nothing to forget:
+
+```js
+await initNodeFederation('./dist/browser/federation.manifest.json', {
+  hostRemoteEntry: './dist/browser/remoteEntry.json',
+  hostInstances: 'all',
+});
+```
+
+**Auto-derive, filtered.** Restrict it to the specifiers you actually want to
+bridge with `include` / `exclude` (exact or prefix match):
+
+```js
+hostInstances: { include: ['@angular/', 'rxjs', 'zone.js', 'tslib'] },
+// or
+hostInstances: { exclude: ['some-dep-you-want-scoped'] },
+```
+
+**Explicit map.** Hand over the namespace objects yourself — useful when an
+instance comes from somewhere other than a plain `import`:
+
+```js
+hostInstances: {
+  '@angular/core': await import('@angular/core'),
+  '@angular/common': await import('@angular/common'),
+},
+```
+
+How it works: each namespace is published on `globalThis.__NF_HOST_INSTANCES__`,
+and the loader synthesizes a tiny re-export module (`nf-host:<specifier>`) for
+each bridged specifier. A bridged specifier **wins over the import map** —
+`initNodeFederation` waits for the loader to acknowledge the bridge before it
+resolves any remote import. A specifier that can't be loaded in auto mode is
+skipped with a warning rather than aborting init.
+
+> **This is an escape hatch, not part of the sharing model.** `hostInstances`
+> bypasses the version resolver, the import map, and integrity checks entirely,
+> and hands over **value snapshots** (not live bindings). That's fine for
+> packages whose exports are stable references (Angular's classes/functions),
+> not for packages that reassign their exports after init.
+
+Omit it in production: with no `hostInstances`, nothing is published and the
+loader never routes to the bridge — resolution stays import-map only, with full
+version resolution and integrity verification.
+
 ## What is _not_ on the Node entry
 
 These are deliberately omitted because they make no sense server-side:

@@ -21,30 +21,42 @@ import {
   DYNAMIC_INIT_FLOW_FACTORY,
 } from './5.di/flows/dynamic-init.factory';
 import { useNodeImportMap } from './4.config/import-map/use-node';
+import {
+  resolveHostInstances,
+  type HostInstancesOption,
+} from './4.config/import-map/resolve-host-instances';
 import { normalizeHostRemoteEntry } from './utils/node/to-url';
+
+export type { HostInstancesOption, HostInstancesAuto } from './4.config/import-map/resolve-host-instances';
 
 export type InitNodeFederationOptions = NFOptions & {
   /**
    * Bridge specifiers to instances already loaded in the host process (dev).
    *
-   * Maps each specifier to its module namespace object — e.g.
-   * `{ '@angular/core': await import('@angular/core') }`. The host's instances
-   * are published on `globalThis.__NF_SHARE_SCOPE__` and the node loader
-   * synthesizes a re-export module for each specifier instead of resolving it
-   * through the import map, so remotes share the host's singletons.
+   * The host's instances are published on `globalThis.__NF_HOST_INSTANCES__`
+   * and the node loader synthesizes a re-export module for each specifier
+   * instead of resolving it through the import map, so remotes share the host's
+   * singletons. Three forms:
    *
-   * Exports are value snapshots, not live bindings — fine for packages whose
-   * exports are stable refs (Angular's classes/functions), not for packages
-   * that reassign their exports after init.
+   * - **Explicit map** — `{ '@angular/core': await import('@angular/core') }`.
+   * - **`'all'`** — auto-derive every shared singleton from the host remoteEntry
+   *   and import each in the host realm. Needs `hostRemoteEntry`.
+   * - **`{ include, exclude }`** — auto-derive, filtered by exact/prefix match,
+   *   e.g. `{ include: ['@angular/', 'rxjs', 'zone.js'] }`.
    *
-   * Omit in production: with no `shareScope`, nothing is published and the
+   * This is an escape hatch that bypasses the version resolver, the import map,
+   * and integrity checks entirely. Exports are value snapshots, not live
+   * bindings — fine for packages whose exports are stable refs (Angular's
+   * classes/functions), not for packages that reassign their exports after init.
+   *
+   * Omit in production: with no `hostInstances`, nothing is published and the
    * loader never routes to the bridge — resolution is import-map only.
    */
-  shareScope?: Record<string, object>;
+  hostInstances?: HostInstancesOption;
 };
 
 /** Global key the node loader reads at module-eval time on the main thread. */
-const SHARE_SCOPE_GLOBAL = '__NF_SHARE_SCOPE__';
+const HOST_INSTANCES_GLOBAL = '__NF_HOST_INSTANCES__';
 
 const buildNodeAdapters = (config: ConfigContract): DrivingContract => ({
   versionCheck: createVersionCheck(),
@@ -64,26 +76,11 @@ const initNodeFederation = (
 ): Promise<NativeFederationResult> => {
   const nodeConfig = useNodeImportMap();
 
-  // Share-scope bridge (dev): publish the host's instances on the global the
-  // loader reads, then ship the export-key lists to the loader thread and wait
-  // for its ack before the init flow resolves any remote import. With no
-  // shareScope this is a no-op and resolution stays import-map only.
-  let shareScopeReady: Promise<unknown> = Promise.resolve();
-  if (options.shareScope) {
-    const globals = globalThis as Record<string, unknown>;
-    globals[SHARE_SCOPE_GLOBAL] = {
-      ...((globals[SHARE_SCOPE_GLOBAL] as Record<string, object> | undefined) ?? {}),
-      ...options.shareScope,
-    };
-    const keys = Object.fromEntries(
-      Object.entries(options.shareScope).map(([specifier, ns]) => [specifier, Object.keys(ns)])
-    );
-    shareScopeReady = nodeConfig.setShareScopeFn(keys);
-  }
+  const hostRemoteEntry = normalizeHostRemoteEntry(options.hostRemoteEntry);
 
   const config = createConfigHandlers({
     ...options,
-    hostRemoteEntry: normalizeHostRemoteEntry(options.hostRemoteEntry),
+    hostRemoteEntry,
     loadModuleFn: options.loadModuleFn ?? nodeConfig.loadModuleFn,
     setImportMapFn: options.setImportMapFn ?? nodeConfig.setImportMapFn,
     reloadBrowserFn: options.reloadBrowserFn ?? nodeConfig.reloadBrowserFn,
@@ -91,6 +88,30 @@ const initNodeFederation = (
   });
 
   const adapters = buildNodeAdapters(config);
+
+  // Host-instance bridge (dev): resolve the instance map (explicit, or
+  // auto-derived from the host remoteEntry's shared singletons), publish it on
+  // the global the loader reads, ship the export-key lists to the loader thread,
+  // and wait for its ack before the init flow resolves any remote import. With
+  // no hostInstances this is a no-op and resolution stays import-map only.
+  const hostInstancesReady = (async () => {
+    const instances = await resolveHostInstances(options.hostInstances, {
+      remoteEntryProvider: adapters.remoteEntryProvider,
+      hostRemoteEntry,
+      log: config.log,
+    });
+    if (!instances || Object.keys(instances).length === 0) return;
+
+    const globals = globalThis as Record<string, unknown>;
+    globals[HOST_INSTANCES_GLOBAL] = {
+      ...((globals[HOST_INSTANCES_GLOBAL] as Record<string, object> | undefined) ?? {}),
+      ...instances,
+    };
+    const keys = Object.fromEntries(
+      Object.entries(instances).map(([specifier, ns]) => [specifier, Object.keys(ns)])
+    );
+    await nodeConfig.setHostInstancesFn(keys);
+  })();
 
   const stateDump = (msg: string) =>
     config.log.debug(0, msg, {
@@ -107,7 +128,7 @@ const initNodeFederation = (
   const initFlow = createInitFlow(INIT_FLOW_FACTORY({ adapters, config }));
   const dynamicInitFlow = createDynamicInitFlow(DYNAMIC_INIT_FLOW_FACTORY({ config, adapters }));
 
-  return shareScopeReady
+  return hostInstancesReady
     .then(() => initFlow(remotesOrManifestUrl))
     .then(({ loadRemoteModule }) => nodeConfig.nodeLoader.ready().then(() => loadRemoteModule))
     .then(loadRemoteModule => {

@@ -13,8 +13,8 @@ type Imports = Record<string, string>;
 type Scopes = Record<string, Imports>;
 type ImportMap = { imports: Imports; scopes?: Scopes };
 
-/** Per-specifier list of export names to re-export from the published share scope. */
-type ShareScopeKeys = Record<string, string[]>;
+/** Per-specifier list of export names to re-export from the host's published instances. */
+type HostInstanceKeys = Record<string, string[]>;
 
 type InitData = {
   port?: MessagePort;
@@ -23,14 +23,14 @@ type InitData = {
 
 type IncomingMessage =
   | { type: 'set-import-map'; map: ImportMap }
-  | { type: 'set-share-scope'; keys?: ShareScopeKeys };
+  | { type: 'set-host-instances'; keys?: HostInstanceKeys };
 
 const EMPTY_MAP: ImportMap = Object.freeze({ imports: {}, scopes: {} });
 
-/** Synthetic URL scheme for specifiers bridged to the host's share scope. */
-const SHARE_PREFIX = 'nf-share:';
+/** Synthetic URL scheme for specifiers bridged to the host's instances. */
+const HOST_PREFIX = 'nf-host:';
 /** Global key on the main thread holding `{ [specifier]: namespaceObject }`. */
-const SHARE_SCOPE_GLOBAL = '__NF_SHARE_SCOPE__';
+const HOST_INSTANCES_GLOBAL = '__NF_HOST_INSTANCES__';
 
 const baseURL = (() => {
   const cwd = process.cwd();
@@ -40,7 +40,7 @@ const baseURL = (() => {
 })();
 
 let activeMap: ImportMap = EMPTY_MAP;
-let shareScopeKeys: ShareScopeKeys = Object.create(null);
+let hostInstanceKeys: HostInstanceKeys = Object.create(null);
 
 export function initialize(data: InitData = {}): void {
   if (data.initialImportMap) {
@@ -51,9 +51,9 @@ export function initialize(data: InitData = {}): void {
       if (msg && msg.type === 'set-import-map') {
         activeMap = normalize(msg.map);
         data.port!.postMessage({ type: 'import-map-applied' });
-      } else if (msg && msg.type === 'set-share-scope') {
-        shareScopeKeys = msg.keys ?? Object.create(null);
-        data.port!.postMessage({ type: 'share-scope-applied' });
+      } else if (msg && msg.type === 'set-host-instances') {
+        hostInstanceKeys = msg.keys ?? Object.create(null);
+        data.port!.postMessage({ type: 'host-instances-applied' });
       }
     });
     data.port.unref?.();
@@ -70,9 +70,9 @@ export async function resolve(
   nextResolve: NextResolve
 ): Promise<ResolveResult> {
   // Bridged specifiers win over the import map: route them to a synthetic
-  // module that re-exports from the host's published share scope.
-  if (Object.prototype.hasOwnProperty.call(shareScopeKeys, specifier)) {
-    return { url: SHARE_PREFIX + encodeURIComponent(specifier), shortCircuit: true };
+  // module that re-exports from the host's published instances.
+  if (Object.prototype.hasOwnProperty.call(hostInstanceKeys, specifier)) {
+    return { url: HOST_PREFIX + encodeURIComponent(specifier), shortCircuit: true };
   }
   const mapped = resolveSpecifier(activeMap, specifier, context.parentURL);
   return nextResolve(mapped ?? specifier, context);
@@ -91,12 +91,12 @@ export async function load(
   context: LoadContext,
   nextLoad: NextLoad
 ): Promise<LoadResult> {
-  if (url.startsWith(SHARE_PREFIX)) {
-    const specifier = decodeURIComponent(url.slice(SHARE_PREFIX.length));
+  if (url.startsWith(HOST_PREFIX)) {
+    const specifier = decodeURIComponent(url.slice(HOST_PREFIX.length));
     return {
       shortCircuit: true,
       format: 'module',
-      source: synthShareModule(specifier, shareScopeKeys[specifier]),
+      source: synthHostModule(specifier, hostInstanceKeys[specifier]),
     };
   }
   if (url.startsWith('http://') || url.startsWith('https://')) {
@@ -113,21 +113,21 @@ export async function load(
   return nextLoad(url, context);
 }
 
-// --- share-scope bridge ----------------------------------------------------
+// --- host-instance bridge --------------------------------------------------
 // Synthesizes an in-memory ESM module whose exports forward to the namespace
-// the host published on `globalThis[SHARE_SCOPE_GLOBAL]`. The export-key list
-// is computed on the main thread (where the namespace lives) and shipped over
-// the port, so the loader realm never has to enumerate a namespace it can't
-// see. The `globalThis[...]` reads below run at module-eval time on the main
-// thread, where the instances actually exist.
+// the host published on `globalThis[HOST_INSTANCES_GLOBAL]`. The export-key
+// list is computed on the main thread (where the namespace lives) and shipped
+// over the port, so the loader realm never has to enumerate a namespace it
+// can't see. The `globalThis[...]` reads below run at module-eval time on the
+// main thread, where the instances actually exist.
 
-function synthShareModule(specifier: string, keys: string[] | undefined): string {
+function synthHostModule(specifier: string, keys: string[] | undefined): string {
   const ID = /^[\p{ID_Start}$_][\p{ID_Continue}$]*$/u;
-  const ref = `globalThis[${JSON.stringify(SHARE_SCOPE_GLOBAL)}][${JSON.stringify(specifier)}]`;
+  const ref = `globalThis[${JSON.stringify(HOST_INSTANCES_GLOBAL)}][${JSON.stringify(specifier)}]`;
   const lines = [
     `const __ns = ${ref};`,
     `if (!__ns) throw new Error(${JSON.stringify(
-      `[native-federation] share scope '${specifier}' not published`
+      `[native-federation] host instance '${specifier}' not published`
     )});`,
   ];
   let hasDefault = false;

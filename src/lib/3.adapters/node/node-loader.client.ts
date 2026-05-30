@@ -3,17 +3,17 @@ import { MessageChannel } from 'node:worker_threads';
 import type { ImportMap } from 'lib/1.domain';
 import { getLoaderUrl } from './loader-url';
 
-/** Per-specifier list of export names to bridge from the host's share scope. */
-export type ShareScopeKeys = Record<string, string[]>;
+/** Per-specifier list of export names to bridge from the host's instances. */
+export type HostInstanceKeys = Record<string, string[]>;
 
-type IncomingMessage = { type: 'import-map-applied' } | { type: 'share-scope-applied' };
+type IncomingMessage = { type: 'import-map-applied' } | { type: 'host-instances-applied' };
 type OutgoingMessage =
   | { type: 'set-import-map'; map: ImportMap }
-  | { type: 'set-share-scope'; keys: ShareScopeKeys };
+  | { type: 'set-host-instances'; keys: HostInstanceKeys };
 
 export type NodeLoaderClient = {
   setMap: (map: ImportMap) => Promise<void>;
-  setShareScope: (keys: ShareScopeKeys) => Promise<void>;
+  setHostInstances: (keys: HostInstanceKeys) => Promise<void>;
   ready: () => Promise<void>;
 };
 
@@ -32,6 +32,19 @@ const createClient = (): NodeLoaderClient => {
   port1.unref();
 
   let pending: Promise<void> = Promise.resolve();
+
+  // Specifiers bridged to host instances. The loader resolves these ahead of
+  // the import map, so we strip them from the map we post — no dead entries.
+  const bridged = new Set<string>();
+  const omitBridged = (map: ImportMap): ImportMap => {
+    if (bridged.size === 0) return map;
+    const drop = (imports: ImportMap['imports']): ImportMap['imports'] =>
+      Object.fromEntries(Object.entries(imports).filter(([specifier]) => !bridged.has(specifier)));
+    const scopes = map.scopes
+      ? Object.fromEntries(Object.entries(map.scopes).map(([scope, imports]) => [scope, drop(imports)]))
+      : map.scopes;
+    return { ...map, imports: drop(map.imports), ...(scopes ? { scopes } : {}) };
+  };
 
   const postAndAwaitAck = (
     message: OutgoingMessage,
@@ -68,7 +81,7 @@ const createClient = (): NodeLoaderClient => {
     });
 
   // Serialize every post on a single chain so set-import-map and
-  // set-share-scope can never race each other on the loader thread.
+  // set-host-instances can never race each other on the loader thread.
   const enqueue = (message: OutgoingMessage, ackType: IncomingMessage['type']): Promise<void> => {
     const next = pending.catch(() => undefined).then(() => postAndAwaitAck(message, ackType));
     pending = next;
@@ -76,14 +89,16 @@ const createClient = (): NodeLoaderClient => {
   };
 
   const setMap = (map: ImportMap): Promise<void> =>
-    enqueue({ type: 'set-import-map', map }, 'import-map-applied');
+    enqueue({ type: 'set-import-map', map: omitBridged(map) }, 'import-map-applied');
 
-  const setShareScope = (keys: ShareScopeKeys): Promise<void> =>
-    enqueue({ type: 'set-share-scope', keys }, 'share-scope-applied');
+  const setHostInstances = (keys: HostInstanceKeys): Promise<void> => {
+    Object.keys(keys).forEach(specifier => bridged.add(specifier));
+    return enqueue({ type: 'set-host-instances', keys }, 'host-instances-applied');
+  };
 
   return {
     setMap,
-    setShareScope,
+    setHostInstances,
     ready: () => pending,
   };
 };
