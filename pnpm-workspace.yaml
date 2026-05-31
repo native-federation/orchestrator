@@ -1,3 +1,7 @@
 allowBuilds:
   esbuild: true
   unrs-resolver: false
+lockfileIncludeTarballUrl: true
+minimumReleaseAge: 4320
+minimumReleaseAgeExclude:
+  - "@softarc/*"

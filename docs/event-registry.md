@@ -18,7 +18,7 @@ Include `init-registry.mjs` **before** the rest of your scripts. Optionally tune
 
 ```html
 <script
-  src="https://unpkg.com/@softarc/native-federation-orchestrator@4.1.0/init-registry.mjs"
+  src="https://unpkg.com/@softarc/native-federation-orchestrator@4.2.2/init-registry.mjs"
   data-max-streams="50"
   data-max-events="50"
   data-remove-percentage="50"
@@ -29,11 +29,11 @@ After this script runs, `window.__NF_REGISTRY__` is a frozen `NFEventRegistry` i
 
 ## Configuration
 
-| Attribute             | Default | Effect                                                                                                                                            |
-| --------------------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Attribute             | Default | Effect                                                                                                                                           |
+| --------------------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `data-max-streams`    | `50`    | Maximum number of distinct stream types the registry will retain. When exceeded, the least-recently-emitted stream (and its history) is evicted. |
-| `data-max-events`     | `50`    | Per-stream history depth. When exceeded, the oldest events are dropped — see [Trimming](#trimming) below.                                         |
-| `data-remove-percent` | `50`    | When trimming kicks in, this percentage of the buffer is evicted in one batch (so subsequent emits don't slice on every call). Expressed in %.    |
+| `data-max-events`     | `50`    | Per-stream history depth. When exceeded, the oldest events are dropped — see [Trimming](#trimming) below.                                        |
+| `data-remove-percent` | `50`    | When trimming kicks in, this percentage of the buffer is evicted in one batch (so subsequent emits don't slice on every call). Expressed in %.   |
 
 If you instantiate the registry yourself via `createRegistry({ ... })` rather than the script, the equivalent options are `maxStreams`, `maxEvents`, and `removePercentage` (as a fraction, e.g. `0.5`).
 
@@ -115,11 +115,11 @@ __NF_REGISTRY__.update('cart.itemCount', current => (current ?? 0) + 1);
 
 Subscribes `callback` to `type` for every future event. On subscribe, the most recent `opts.replay` events from history are delivered via a microtask (so the unsubscribe handle is returned synchronously, and the replay fires after the current task completes).
 
-| `opts.replay` | Behavior                                                                                                                                                                                                               |
-| ------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `1` (default) | Deliver only the most recent event — matches the "BehaviorSubject" pattern, where a fresh subscriber always sees the current state. Right default for state-channels.                                                  |
-| `0`           | Suppress replay entirely. The subscriber only sees events emitted after it subscribes — right for one-shot signals where past history is irrelevant.                                                                   |
-| `N`           | Deliver up to the last `N` events in chronological order. Capped implicitly by `maxEvents`. Right for late-joining consumers that need recent context (e.g. a debug panel that wants the last 10 navigation events).   |
+| `opts.replay` | Behavior                                                                                                                                                                                                             |
+| ------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `1` (default) | Deliver only the most recent event — matches the "BehaviorSubject" pattern, where a fresh subscriber always sees the current state. Right default for state-channels.                                                |
+| `0`           | Suppress replay entirely. The subscriber only sees events emitted after it subscribes — right for one-shot signals where past history is irrelevant.                                                                 |
+| `N`           | Deliver up to the last `N` events in chronological order. Capped implicitly by `maxEvents`. Right for late-joining consumers that need recent context (e.g. a debug panel that wants the last 10 navigation events). |
 
 ```js
 // Default: get the latest cart state immediately, then every future change.
