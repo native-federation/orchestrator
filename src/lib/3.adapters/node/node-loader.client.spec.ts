@@ -104,6 +104,93 @@ describe('node-loader.client', () => {
     await expect(pending).resolves.toBeUndefined();
   });
 
+  it('posts the host instances on setHostInstances and resolves when the loader acks', async () => {
+    const client = getNodeLoaderClient();
+    const keys = { '@angular/core': ['Component'] };
+
+    const pending = client.setHostInstances(keys);
+    await flushMicrotasks();
+
+    expect(mockPorts[0]!.port1.postMessage).toHaveBeenCalledWith({
+      type: 'set-host-instances',
+      keys,
+    });
+
+    let resolved = false;
+    pending.then(() => {
+      resolved = true;
+    });
+    await flushMicrotasks();
+    expect(resolved).toBe(false);
+
+    mockPorts[0]!.port1.mockEmit({ type: 'host-instances-applied' });
+    await expect(pending).resolves.toBeUndefined();
+  });
+
+  it('serializes setHostInstances behind a pending setMap and matches acks by type', async () => {
+    const client = getNodeLoaderClient();
+    const port1 = mockPorts[0]!.port1;
+
+    const pMap = client.setMap({ imports: { a: '/a.mjs' } });
+    const pHost = client.setHostInstances({ pkg: ['x'] });
+    await flushMicrotasks();
+
+    // Only set-import-map posted so far; set-host-instances waits its turn.
+    expect(port1.postMessage).toHaveBeenCalledTimes(1);
+    expect(port1.postMessage).toHaveBeenNthCalledWith(1, {
+      type: 'set-import-map',
+      map: { imports: { a: '/a.mjs' } },
+    });
+
+    let hostResolved = false;
+    pHost.then(() => {
+      hostResolved = true;
+    });
+
+    // A host-instances ack must NOT resolve the still-pending setMap.
+    port1.mockEmit({ type: 'host-instances-applied' });
+    await flushMicrotasks();
+    expect(hostResolved).toBe(false);
+
+    // The correct ack releases setMap and lets set-host-instances post.
+    port1.mockEmit({ type: 'import-map-applied' });
+    await pMap;
+    await flushMicrotasks();
+    expect(hostResolved).toBe(false);
+    expect(port1.postMessage).toHaveBeenNthCalledWith(2, {
+      type: 'set-host-instances',
+      keys: { pkg: ['x'] },
+    });
+
+    port1.mockEmit({ type: 'host-instances-applied' });
+    await expect(pHost).resolves.toBeUndefined();
+  });
+
+  it('strips bridged specifiers from the import map it posts', async () => {
+    const client = getNodeLoaderClient();
+    const port1 = mockPorts[0]!.port1;
+
+    client.setHostInstances({ '@angular/core': ['Component'] });
+    await flushMicrotasks();
+    port1.mockEmit({ type: 'host-instances-applied' });
+    await flushMicrotasks();
+
+    client.setMap({
+      imports: { '@angular/core': '/ng.mjs', '@angular/core/': '/ng/', foo: '/foo.mjs' },
+      scopes: { '/a/': { '@angular/core': '/scoped-ng.mjs', bar: '/bar.mjs' } },
+    });
+    await flushMicrotasks();
+
+    expect(port1.postMessage).toHaveBeenNthCalledWith(2, {
+      type: 'set-import-map',
+      map: {
+        // Exact bridged specifier dropped; trailing-slash + others kept.
+        imports: { '@angular/core/': '/ng/', foo: '/foo.mjs' },
+        scopes: { '/a/': { bar: '/bar.mjs' } },
+      },
+    });
+  });
+
   it('ignores messages of other types until the right ack arrives', async () => {
     const client = getNodeLoaderClient();
     const pending = client.setMap({ imports: {} });
