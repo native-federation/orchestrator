@@ -588,13 +588,14 @@ The repository is organized **flow-first**: every published subpath of the packa
 core/
   1.domain/            Pure domain contracts (remote entries, externals, import maps)
   2.app/               Application logic
-    flows/init/          The pipeline steps (1-6 run during init, 7-9 back initRemoteEntry)
-    driver-ports/        Contracts the flows fulfil (driven by the entry points)
-    driving-ports/       Contracts the flows consume (fulfilled by adapters)
+    flows/               The pipelines: which steps run in which order (init, initRemoteEntry)
+    steps/               The pipeline steps (1-6 run during init, 7-9 back initRemoteEntry)
+    driver-ports/        Contracts the steps fulfil (composed by the flows, driven by the entry points)
+    driving-ports/       Contracts the steps consume (fulfilled by adapters)
     config/              Configuration contracts
   3.adapters/          Browser, http and storage implementations of the driving ports
   4.config/            Default config handlers (logging, storage, import-map, mode)
-  5.di/                Wiring: flow factories and the federation result builder
+  5.di/                Wiring: driver/adapter/config factories and the federation result builder
   init-federation.ts   The public initFederation() entry point
 ```
 

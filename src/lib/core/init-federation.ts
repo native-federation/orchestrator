@@ -1,11 +1,9 @@
 import type { NativeFederationResult } from './init-federation.contract';
 import type { NFOptions } from './2.app/config/config.contract';
 import type { FederationManifest } from './1.domain';
-import {
-  createInitFlow,
-  createInitRemoteEntryFlow,
-  INIT_FLOW_FACTORY,
-} from './5.di/flows/init.factory';
+import { createInitFlow } from './2.app/flows/init.flow';
+import { createInitRemoteEntryFlow } from './2.app/flows/init-remote-entry.flow';
+import { INIT_FLOW_FACTORY } from './5.di/init.factory';
 import { createDriving } from './5.di/driving.factory';
 import { createConfigHandlers } from './5.di/config.factory';
 import { createFederationResult, createStateDump } from './5.di/federation-result.factory';
