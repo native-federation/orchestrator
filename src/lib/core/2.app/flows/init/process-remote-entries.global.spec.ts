@@ -1,0 +1,477 @@
+import { createProcessRemoteEntries } from './process-remote-entries';
+import { ForProcessingRemoteEntries } from '../../driver-ports/init/for-processing-remote-entries.port';
+import { DrivingContract } from '../../driving-ports/driving.contract';
+import { LoggingConfig } from '../../config/log.contract';
+import { Optional } from 'lib/utils/optional';
+import { ModeConfig } from 'lib/core/2.app/config/mode.contract';
+import { SharedExternal } from 'lib/core/1.domain';
+import { mockConfig } from 'lib/testing/config.mock';
+import { mockAdapters } from 'lib/testing/adapters.mock';
+import {
+  mockRemoteEntry_HOST,
+  mockRemoteEntry_MFE1,
+  mockRemoteEntry_MFE2,
+} from 'lib/testing/domain/remote-entry/remote-entry.mock';
+import { mockSharedInfo, mockSharedInfoA } from 'lib/testing/domain/remote-entry/shared-info.mock';
+import { mockExternal } from 'lib/testing/domain/externals/external.mock';
+import { mockVersion, mockVersion_A } from 'lib/testing/domain/externals/version.mock';
+
+describe('createProcessRemoteEntries - global', () => {
+  let processRemoteEntries: ForProcessingRemoteEntries;
+  let config: LoggingConfig & ModeConfig;
+  let adapters: DrivingContract;
+
+  beforeEach(() => {
+    config = mockConfig();
+    adapters = mockAdapters();
+
+    processRemoteEntries = createProcessRemoteEntries(config, adapters);
+
+    adapters.sharedExternalsRepo.tryGet = jest.fn(() => Optional.empty<SharedExternal>());
+    adapters.versionCheck.isValidSemver = jest.fn(() => true);
+    adapters.versionCheck.compare = jest.fn(() => 0);
+  });
+
+  describe('process shared externals - default cases', () => {
+    it('should add a shared external to an empty list', async () => {
+      adapters.sharedExternalsRepo.tryGet = jest.fn(
+        (): Optional<SharedExternal> => Optional.empty()
+      );
+      const remoteEntries = [mockRemoteEntry_MFE1({ shared: [mockSharedInfoA.v2_1_2()] })];
+
+      await processRemoteEntries(remoteEntries);
+
+      expect(adapters.sharedExternalsRepo.addOrUpdate).toHaveBeenCalledTimes(1);
+      expect(adapters.sharedExternalsRepo.addOrUpdate).toHaveBeenCalledWith(
+        'dep-a',
+        mockExternal.shared([mockVersion_A.v2_1_2({ remotes: ['team/mfe1'] })], { dirty: true }),
+        undefined
+      );
+    });
+
+    it('should add a shared external version to an external', async () => {
+      adapters.sharedExternalsRepo.tryGet = jest.fn(
+        (): Optional<SharedExternal> =>
+          Optional.of(
+            mockExternal.shared(
+              [mockVersion_A.v2_1_2({ remotes: ['team/mfe1'], action: 'skip' })],
+              { dirty: false }
+            )
+          )
+      );
+
+      const remoteEntries = [
+        mockRemoteEntry_MFE2({ exposes: [], shared: [mockSharedInfoA.v2_1_1()] }),
+      ];
+
+      await processRemoteEntries(remoteEntries);
+
+      expect(adapters.sharedExternalsRepo.addOrUpdate).toHaveBeenCalledTimes(1);
+      expect(adapters.sharedExternalsRepo.addOrUpdate).toHaveBeenCalledWith(
+        'dep-a',
+        mockExternal.shared(
+          [
+            mockVersion_A.v2_1_2({ remotes: ['team/mfe1'], action: 'skip' }),
+            mockVersion_A.v2_1_1({ remotes: ['team/mfe2'], action: 'skip' }),
+          ],
+          { dirty: true }
+        ),
+        undefined
+      );
+    });
+  });
+
+  describe('process shared externals - Handle duplicate versions', () => {
+    it('should add remote if exact version already exists in cache', async () => {
+      adapters.sharedExternalsRepo.tryGet = jest.fn(
+        (): Optional<SharedExternal> =>
+          Optional.of(
+            mockExternal.shared(
+              [mockVersion_A.v2_1_2({ remotes: ['team/mfe1'], action: 'skip' })],
+              { dirty: false }
+            )
+          )
+      );
+
+      const remoteEntries = [
+        mockRemoteEntry_MFE2({ exposes: [], shared: [mockSharedInfoA.v2_1_2()] }),
+      ];
+
+      await processRemoteEntries(remoteEntries);
+
+      expect(adapters.sharedExternalsRepo.addOrUpdate).toHaveBeenCalledTimes(1);
+      expect(adapters.sharedExternalsRepo.addOrUpdate).toHaveBeenCalledWith(
+        'dep-a',
+        mockExternal.shared(
+          [
+            mockVersion_A.v2_1_2({
+              remotes: ['team/mfe1', 'team/mfe2'],
+              action: 'skip',
+            }),
+          ],
+          { dirty: false }
+        ),
+        undefined
+      );
+    });
+
+    it('should not skip shared external if in cache, but new version is from host remoteEntry', async () => {
+      adapters.sharedExternalsRepo.tryGet = jest.fn(
+        (): Optional<SharedExternal> =>
+          Optional.of(
+            mockExternal.shared(
+              [mockVersion_A.v2_1_2({ remotes: ['team/mfe1'], action: 'skip' })],
+              { dirty: false }
+            )
+          )
+      );
+
+      const remoteEntries = [
+        mockRemoteEntry_HOST({ exposes: [], shared: [mockSharedInfoA.v2_1_2()], host: true }),
+      ];
+
+      await processRemoteEntries(remoteEntries);
+
+      expect(adapters.sharedExternalsRepo.addOrUpdate).toHaveBeenCalledTimes(1);
+      expect(adapters.sharedExternalsRepo.addOrUpdate).toHaveBeenCalledWith(
+        'dep-a',
+        mockExternal.shared(
+          [
+            mockVersion_A.v2_1_2({
+              remotes: ['team/host', 'team/mfe1'],
+              action: 'skip',
+              host: true,
+            }),
+          ],
+          { dirty: false }
+        ),
+        undefined
+      );
+    });
+
+    it('should mark shared external if in cache and both are host version', async () => {
+      adapters.sharedExternalsRepo.tryGet = jest.fn(
+        (): Optional<SharedExternal> =>
+          Optional.of(
+            mockExternal.shared(
+              [mockVersion_A.v2_1_2({ remotes: ['team/mfe1'], action: 'skip', host: true })],
+              { dirty: false }
+            )
+          )
+      );
+
+      const remoteEntries = [
+        mockRemoteEntry_MFE2({ exposes: [], shared: [mockSharedInfoA.v2_1_2()], host: true }),
+      ];
+
+      await processRemoteEntries(remoteEntries);
+
+      expect(adapters.sharedExternalsRepo.addOrUpdate).toHaveBeenCalledTimes(1);
+      expect(adapters.sharedExternalsRepo.addOrUpdate).toHaveBeenCalledWith(
+        'dep-a',
+        mockExternal.shared(
+          [
+            mockVersion_A.v2_1_2({
+              remotes: ['team/mfe1', 'team/mfe2'],
+              action: 'skip',
+              host: true,
+            }),
+          ],
+          { dirty: false }
+        ),
+        undefined
+      );
+    });
+
+    it('should warn users if the requiredVersions differ and strictVersion', async () => {
+      adapters.sharedExternalsRepo.tryGet = jest.fn(
+        (): Optional<SharedExternal> =>
+          Optional.of(
+            mockExternal.shared(
+              [
+                mockVersion_A.v2_1_2({
+                  remotes: { 'team/mfe1': { requiredVersion: '~1.2.1' } },
+                  action: 'skip',
+                }),
+              ],
+              { dirty: false }
+            )
+          )
+      );
+
+      const remoteEntries = [
+        mockRemoteEntry_MFE2({
+          exposes: [],
+          shared: [mockSharedInfoA.v2_1_2({ requiredVersion: '~1.2.2' })],
+        }),
+      ];
+
+      await processRemoteEntries(remoteEntries);
+
+      expect(adapters.sharedExternalsRepo.addOrUpdate).toHaveBeenCalledTimes(1);
+      expect(adapters.sharedExternalsRepo.addOrUpdate).toHaveBeenCalledWith(
+        'dep-a',
+        mockExternal.shared(
+          [
+            mockVersion_A.v2_1_2({
+              remotes: {
+                'team/mfe1': { requiredVersion: '~1.2.1' },
+                'team/mfe2': { requiredVersion: '~1.2.2' },
+              },
+              action: 'skip',
+            }),
+          ],
+          { dirty: false }
+        ),
+        undefined
+      );
+
+      expect(config.log.warn).toHaveBeenCalledWith(
+        2,
+        "[team/mfe2][dep-a@2.1.2] Required version-range '~1.2.2' does not match cached version-range '~1.2.1'"
+      );
+    });
+    it('should throw an error if the requiredVersions differs if strictVersion and in strict mode', async () => {
+      config.strict.strictExternalSameVersionCompatibility = true;
+      adapters.sharedExternalsRepo.tryGet = jest.fn(
+        (): Optional<SharedExternal> =>
+          Optional.of(
+            mockExternal.shared(
+              [
+                mockVersion_A.v2_1_2({
+                  remotes: { 'team/mfe1': { requiredVersion: '~1.2.1' } },
+                  action: 'skip',
+                }),
+              ],
+              { dirty: false }
+            )
+          )
+      );
+
+      const remoteEntries = [
+        mockRemoteEntry_MFE2({
+          exposes: [],
+          shared: [mockSharedInfoA.v2_1_2({ requiredVersion: '~1.2.2' })],
+        }),
+      ];
+
+      await expect(processRemoteEntries(remoteEntries)).rejects.toThrow(
+        `Could not process remote 'team/mfe2'`
+      );
+
+      expect(config.log.error).toHaveBeenCalledWith(
+        2,
+        "[team/mfe2][dep-a@2.1.2] Required version-range '~1.2.2' does not match cached version-range '~1.2.1'"
+      );
+    });
+  });
+
+  describe('process shared externals - Handle version ordering', () => {
+    beforeEach(() => {
+      adapters.versionCheck.compare = jest.fn((a, b) => {
+        const order = ['2.1.3', '2.1.2', '2.1.1'];
+        return order.indexOf(b) - order.indexOf(a);
+      });
+    });
+
+    it('should correctly order the the versions descending', async () => {
+      adapters.versionCheck.isCompatible = jest.fn(() => true);
+
+      adapters.sharedExternalsRepo.tryGet = jest.fn(
+        (): Optional<SharedExternal> =>
+          Optional.of(
+            mockExternal.shared(
+              [
+                mockVersion_A.v2_1_1({
+                  remotes: { 'team/mfe1': { cached: false } },
+                  action: 'skip',
+                }),
+                mockVersion_A.v2_1_3({
+                  remotes: { 'team/mfe3': { cached: true } },
+                  action: 'share',
+                }),
+              ],
+              {
+                dirty: false,
+              }
+            )
+          )
+      );
+
+      const remoteEntries = [
+        mockRemoteEntry_MFE2({
+          exposes: [],
+          shared: [mockSharedInfoA.v2_1_2()],
+        }),
+      ];
+
+      await processRemoteEntries(remoteEntries);
+
+      expect(adapters.sharedExternalsRepo.addOrUpdate).toHaveBeenCalledTimes(1);
+      expect(adapters.sharedExternalsRepo.addOrUpdate).toHaveBeenCalledWith(
+        'dep-a',
+        mockExternal.shared(
+          [
+            mockVersion_A.v2_1_3({ remotes: { 'team/mfe3': { cached: true } }, action: 'share' }),
+            mockVersion_A.v2_1_2({ remotes: { 'team/mfe2': { cached: false } }, action: 'skip' }),
+            mockVersion_A.v2_1_1({ remotes: { 'team/mfe1': { cached: false } }, action: 'skip' }),
+          ],
+          { dirty: true }
+        ),
+        undefined
+      );
+    });
+  });
+
+  describe('handling a missing version property', () => {
+    it('should add the correct tag if missing', async () => {
+      adapters.versionCheck.smallestVersion = jest.fn((): string => '2.1.1');
+      adapters.sharedExternalsRepo.tryGet = jest.fn(
+        (): Optional<SharedExternal> => Optional.empty()
+      );
+      const remoteEntries = [
+        mockRemoteEntry_MFE1({
+          shared: [mockSharedInfo('dep-a', { requiredVersion: '~2.1.1', singleton: true })],
+        }),
+      ];
+
+      await processRemoteEntries(remoteEntries);
+
+      expect(adapters.sharedExternalsRepo.addOrUpdate).toHaveBeenCalledTimes(1);
+      expect(adapters.sharedExternalsRepo.addOrUpdate).toHaveBeenCalledWith(
+        'dep-a',
+        mockExternal.shared(
+          [
+            mockVersion.shared('2.1.1', 'dep-a', {
+              remotes: { 'team/mfe1': { requiredVersion: '~2.1.1' } },
+              action: 'skip',
+            }),
+          ],
+          { dirty: true }
+        ),
+        undefined
+      );
+      expect(config.log.warn).toHaveBeenCalledWith(
+        2,
+        "[team/mfe1][dep-a] Version 'undefined' is not a valid version."
+      );
+    });
+
+    it('should add the correct requiredVersion from tag if empty', async () => {
+      adapters.versionCheck.smallestVersion = jest.fn((): string => '2.1.1');
+      adapters.sharedExternalsRepo.tryGet = jest.fn(
+        (): Optional<SharedExternal> => Optional.empty()
+      );
+      const remoteEntries = [
+        mockRemoteEntry_MFE1({
+          shared: [mockSharedInfo('dep-a', { requiredVersion: '', singleton: true })],
+        }),
+      ];
+
+      await processRemoteEntries(remoteEntries);
+
+      expect(adapters.sharedExternalsRepo.addOrUpdate).toHaveBeenCalledTimes(1);
+      expect(adapters.sharedExternalsRepo.addOrUpdate).toHaveBeenCalledWith(
+        'dep-a',
+        mockExternal.shared(
+          [
+            mockVersion.shared('2.1.1', 'dep-a', {
+              remotes: { 'team/mfe1': { requiredVersion: '2.1.1' } },
+              action: 'skip',
+            }),
+          ],
+          { dirty: true }
+        ),
+        undefined
+      );
+      expect(config.log.warn).toHaveBeenCalledWith(
+        2,
+        "[team/mfe1][dep-a] Version 'undefined' is not a valid version."
+      );
+    });
+  });
+
+  describe('Storing build chunks', () => {
+    it('should not call sharedChunksRepo when remoteEntry has no chunks', async () => {
+      const remoteEntries = [
+        mockRemoteEntry_MFE1({
+          shared: [mockSharedInfo('dep-a', { version: undefined, requiredVersion: '~1.2.1' })],
+        }),
+      ];
+
+      await processRemoteEntries(remoteEntries);
+
+      expect(adapters.sharedChunksRepo.addOrReplace).not.toHaveBeenCalled();
+    });
+
+    it('should store chunks for multiple builds', async () => {
+      const remoteEntries = [
+        mockRemoteEntry_MFE1({
+          shared: [mockSharedInfo('dep-a', { version: undefined, requiredVersion: '~1.2.1' })],
+          chunks: {
+            shared: ['chunk-ABC.js'],
+            vendor: ['chunk-DEF.js', 'chunk-GHI.js'],
+          },
+        }),
+      ];
+
+      await processRemoteEntries(remoteEntries);
+
+      expect(adapters.sharedChunksRepo.addOrReplace).toHaveBeenCalledTimes(2);
+      expect(adapters.sharedChunksRepo.addOrReplace).toHaveBeenCalledWith('team/mfe1', 'shared', [
+        'chunk-ABC.js',
+      ]);
+      expect(adapters.sharedChunksRepo.addOrReplace).toHaveBeenCalledWith('team/mfe1', 'vendor', [
+        'chunk-DEF.js',
+        'chunk-GHI.js',
+      ]);
+    });
+
+    it('should log debug message with bundle names when chunks exist', async () => {
+      const remoteEntries = [
+        mockRemoteEntry_MFE1({
+          shared: [mockSharedInfo('dep-a', { version: undefined, requiredVersion: '~1.2.1' })],
+          chunks: {
+            shared: ['chunk-ABC.js'],
+            vendor: ['chunk-DEF.js', 'chunk-GHI.js'],
+          },
+        }),
+      ];
+
+      await processRemoteEntries(remoteEntries);
+
+      expect(config.log.debug).toHaveBeenCalledWith(
+        2,
+        'Adding chunks for remote "team/mfe1", bundles: [shared, vendor]'
+      );
+    });
+
+    it('should add a shared external with bundle ref', async () => {
+      adapters.sharedExternalsRepo.tryGet = jest.fn(
+        (): Optional<SharedExternal> => Optional.empty()
+      );
+      const remoteEntries = [
+        mockRemoteEntry_MFE1({
+          shared: [mockSharedInfoA.v2_1_2({ bundle: 'shared' })],
+          chunks: {
+            shared: ['chunk-ABC.js'],
+          },
+        }),
+      ];
+
+      await processRemoteEntries(remoteEntries);
+
+      expect(adapters.sharedExternalsRepo.addOrUpdate).toHaveBeenCalledTimes(1);
+
+      expect(adapters.sharedChunksRepo.addOrReplace).toHaveBeenCalledWith('team/mfe1', 'shared', [
+        'chunk-ABC.js',
+      ]);
+
+      const x = mockExternal.shared(
+        [mockVersion_A.v2_1_2({ remotes: { 'team/mfe1': { bundle: 'shared' } } })],
+        { dirty: true }
+      );
+      expect(adapters.sharedExternalsRepo.addOrUpdate).toHaveBeenCalledWith('dep-a', x, undefined);
+    });
+  });
+});

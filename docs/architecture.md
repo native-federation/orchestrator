@@ -565,3 +565,56 @@ Different configuration options change how the system behaves:
 ```
 
 > Read more about configuration options [here](./config.md)
+
+## Source Code Organization
+
+The repository is organized **flow-first**: every published subpath of the package maps to one folder under `src/lib/`, and the `*.index.ts` barrels at the root of `src/lib/` define the public API of each subpath. To find the code behind a subpath, open its folder; to see what a subpath exposes, read its barrel.
+
+| Subpath (import)                            | Source folder                    | Entry barrel                |
+| ------------------------------------------- | -------------------------------- | --------------------------- |
+| `@softarc/native-federation-orchestrator`   | `src/lib/core/`                  | `src/lib/index.ts`          |
+| `…/sdk`                                     | `src/lib/core/` (re-export view) | `src/lib/sdk.index.ts`      |
+| `…/options`                                 | `src/lib/core/` (config surface) | `src/lib/options.index.ts`  |
+| `…/registry`                                | `src/lib/registry/`              | `src/lib/registry.index.ts` |
+| `…/audit`                                   | `src/lib/audit/`                 | `src/lib/audit.index.ts`    |
+| `…/node`                                    | `src/lib/node/`                  | `src/lib/node.index.ts`     |
+| `…/quickstart.mjs`, `…/init-registry.mjs`, `…/node-loader/loader.mjs` | `src/scripts/` | (standalone script bundles) |
+
+### Core
+
+`src/lib/core/` contains the init flow — everything `initFederation()` needs — and keeps the hexagonal (ports & adapters) layering. The folder numbers encode the dependency direction: higher numbers may import lower ones, never the reverse.
+
+```
+core/
+  1.domain/            Pure domain contracts (remote entries, externals, import maps)
+  2.app/               Application logic
+    flows/init/          The pipeline steps (1-6 run during init, 7-9 back initRemoteEntry)
+    driver-ports/        Contracts the flows fulfil (driven by the entry points)
+    driving-ports/       Contracts the flows consume (fulfilled by adapters)
+    config/              Configuration contracts
+  3.adapters/          Browser, http and storage implementations of the driving ports
+  4.config/            Default config handlers (logging, storage, import-map, mode)
+  5.di/                Wiring: flow factories and the federation result builder
+  init-federation.ts   The public initFederation() entry point
+```
+
+The dynamic flow is part of core: `initFederation()` always returns an `initRemoteEntry` function, built from the same flow factory as the initial pipeline.
+
+### Flows and platforms
+
+- `registry/` — the standalone event registry (`/registry`). Depends on nothing but `lib/utils`.
+- `audit/` — the externals audit (`/audit`). Depends on core's contracts.
+- `node/` — the Node platform (`/node`): fs-based adapters, the node-loader client, and `initNodeFederation()`. Runs core's flows with its own adapters injected.
+- `utils/` — small shared helpers (`Optional`, path utils, `cloneEntry`).
+- `testing/` — shared jest mocks (not published).
+
+### Dependency rules
+
+> A visual map of these rules lives in [CONTRIBUTING.md](./../CONTRIBUTING.md#getting-started).
+
+Enforced by ESLint (`no-restricted-imports` in `eslint.config.js`):
+
+1. Internal code never imports a `*.index.ts` barrel — those are for package consumers only. Import the concrete module instead.
+2. `registry`, `audit` and `node` may depend on `core` and `utils`, never on each other. `core` depends on no flow folder.
+
+Adding a new flow means adding a new folder under `src/lib/`, a `<name>.index.ts` barrel next to the existing ones, and one bundle entry in `build.js`.

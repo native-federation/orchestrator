@@ -1,19 +1,20 @@
-export { initFederation } from './init-federation';
-export { NFError } from './native-federation.error';
+export { initFederation } from './core/init-federation';
+export { NFError } from './core/native-federation.error';
 
 export {
   LoadRemoteModule,
   LoadRemoteModuleOf,
   NativeFederationResult,
-} from './init-federation.contract';
+} from './core/init-federation.contract';
 
-export { FederationManifest } from './1.domain/remote-entry/manifest.contract';
+export { FederationManifest } from './core/1.domain/remote-entry/manifest.contract';
 
-export { createConfigHandlers } from './5.di/config.factory';
-export { createDriving } from './5.di/driving.factory';
+export { createConfigHandlers } from './core/5.di/config.factory';
+export { createDriving } from './core/5.di/driving.factory';
 export {
-  createDynamicInitDrivers,
-  DYNAMIC_INIT_FLOW_FACTORY,
-  createDynamicInitFlow,
-} from './5.di/flows/dynamic-init.factory';
-export { createInitDrivers, INIT_FLOW_FACTORY, createInitFlow } from './5.di/flows/init.factory';
+  createInitDrivers,
+  INIT_FLOW_FACTORY,
+  createInitFlow,
+  createInitRemoteEntryFlow,
+} from './core/5.di/flows/init.factory';
+export { createFederationResult, createStateDump } from './core/5.di/federation-result.factory';

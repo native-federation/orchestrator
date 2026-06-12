@@ -8,6 +8,46 @@ We love seeing fresh ideas and improvements! Before diving into major architectu
 
 For the smoothest experience, we find that contributions focusing on functionality, bug fixes, and meaningful improvements tend to have the quickest path to merge. Style tweaks are great, but if that's the main focus, consider bundling them with a feature or fix to maximize impact.
 
+To find your way around the codebase, see [Source Code Organization](./docs/architecture.md#source-code-organization) - in short: one folder per published subpath under `src/lib/` (`core/`, `registry/`, `audit/`, `node/`), with the `*.index.ts` barrels at the root of `src/lib/` defining each subpath's public API.
+
+Every arrow below means "may import" - this direction is enforced by ESLint, so a PR that crosses a flow boundary (or imports a `*.index.ts` barrel from internal code) will fail the lint step:
+
+```mermaid
+graph LR
+    E["src/scripts/<br/>quickstart · init-registry · node-loader<br/>(standalone script bundles)"]
+
+    subgraph lib ["src/lib"]
+        BARRELS["*.index.ts barrels<br/>published API, one per subpath"]
+
+        CORE["core/<br/>initFederation + initRemoteEntry<br/>hexagonal layers 1.domain → 5.di<br/>(serves '.', /sdk, /options)"]
+        REGISTRY["registry/<br/>event registry<br/>(/registry)"]
+        AUDIT["audit/<br/>externals audit<br/>(/audit)"]
+        NODE["node/<br/>fs adapters · loader client<br/>initNodeFederation (/node)"]
+
+        UTILS["utils/<br/>Optional · path · cloneEntry"]
+        TESTING["testing/<br/>jest mocks, used by *.spec.ts only<br/>(not published)"]
+    end
+
+    E --> BARRELS
+    BARRELS --> CORE
+    BARRELS --> REGISTRY
+    BARRELS --> AUDIT
+    BARRELS --> NODE
+
+    AUDIT -->|contracts| CORE
+    NODE -->|flows, own adapters injected| CORE
+
+    CORE --> UTILS
+    REGISTRY --> UTILS
+    NODE --> UTILS
+    TESTING -.-> CORE
+
+    style CORE fill:#e8f0fe,stroke:#4285f4
+    style BARRELS fill:#fef7e0,stroke:#f9ab00
+```
+
+Notably absent arrows: `core` never imports a flow folder, and `registry`, `audit` and `node` never import each other.
+
 ## Quick Start
 
 1. Fork and clone the repo

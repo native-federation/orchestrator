@@ -1,0 +1,11 @@
+import { ForRemoteInfoStorage } from 'lib/core/2.app/driving-ports/for-remote-info-storage.port';
+
+export const mockRemoteInfoRepository = (): jest.Mocked<ForRemoteInfoStorage> => ({
+  contains: jest.fn(),
+  addOrUpdate: jest.fn(),
+  tryGetModule: jest.fn(),
+  remove: jest.fn(),
+  tryGet: jest.fn(),
+  getAll: jest.fn(),
+  commit: jest.fn(),
+});
