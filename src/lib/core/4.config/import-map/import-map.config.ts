@@ -1,4 +1,7 @@
-import type { ImportMapConfig, ImportMapOptions } from 'lib/core/2.app/config/import-map.contract';
+import type {
+  ImportMapConfig,
+  ImportMapOptions,
+} from 'lib/core/2.app/config/import-map.contract';
 import { useDefaultImportMap } from './use-default';
 
 export const createImportMapConfig = (o: Partial<ImportMapOptions>): ImportMapConfig => {

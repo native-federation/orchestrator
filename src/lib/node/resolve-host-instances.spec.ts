@@ -1,5 +1,5 @@
 /**
- * @jest-environment node
+ * @vitest-environment node
  */
 import type { RemoteEntry, SharedInfo } from 'lib/core/1.domain';
 import type { LogHandler } from 'lib/core/2.app/config/log.contract';
@@ -7,19 +7,26 @@ import type { ForProvidingRemoteEntries } from 'lib/core/2.app/driving-ports/for
 import { resolveHostInstances } from './resolve-host-instances';
 
 const shared = (packageName: string, singleton: boolean): SharedInfo =>
-  ({ packageName, singleton, outFileName: `${packageName}.js`, requiredVersion: '*' }) as SharedInfo;
+  ({
+    packageName,
+    singleton,
+    outFileName: `${packageName}.js`,
+    requiredVersion: '*',
+  }) as SharedInfo;
 
 const makeDeps = (
   sharedInfos: SharedInfo[],
-  hostRemoteEntry: Parameters<typeof resolveHostInstances>[1]['hostRemoteEntry'] = './remoteEntry.json'
+  hostRemoteEntry: Parameters<
+    typeof resolveHostInstances
+  >[1]['hostRemoteEntry'] = './remoteEntry.json'
 ) => {
-  const provide = jest.fn(
+  const provide = vi.fn(
     async (url: string): Promise<RemoteEntry> => ({ url, shared: sharedInfos }) as RemoteEntry
   );
   const log = {
-    debug: jest.fn(),
-    warn: jest.fn(),
-    error: jest.fn(),
+    debug: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
     level: 'debug',
   } as unknown as LogHandler;
   return {
@@ -57,7 +64,9 @@ describe('resolveHostInstances', () => {
       shared('@angular/common', true),
       shared('only-scoped', false),
     ]);
-    const load = jest.fn(async (s: string) => ({ '@angular/core': core, '@angular/common': common })[s]!);
+    const load = vi.fn(
+      async (s: string) => ({ '@angular/core': core, '@angular/common': common })[s]!
+    );
 
     const result = await resolveHostInstances({ load }, deps);
 
@@ -72,7 +81,7 @@ describe('resolveHostInstances', () => {
       shared('rxjs', true),
       shared('lodash', true),
     ]);
-    const load = jest.fn(async (s: string) => ({ name: s }));
+    const load = vi.fn(async (s: string) => ({ name: s }));
 
     const result = await resolveHostInstances({ include: ['@angular/', 'rxjs'], load }, deps);
 
@@ -82,7 +91,7 @@ describe('resolveHostInstances', () => {
 
   it('exclude drops matches', async () => {
     const { deps } = makeDeps([shared('@angular/core', true), shared('zone.js', true)]);
-    const load = jest.fn(async (s: string) => ({ name: s }));
+    const load = vi.fn(async (s: string) => ({ name: s }));
 
     const result = await resolveHostInstances({ exclude: ['zone.js'], load }, deps);
 
@@ -91,7 +100,7 @@ describe('resolveHostInstances', () => {
 
   it('deduplicates repeated package names', async () => {
     const { deps } = makeDeps([shared('@angular/core', true), shared('@angular/core', true)]);
-    const load = jest.fn(async (s: string) => ({ name: s }));
+    const load = vi.fn(async (s: string) => ({ name: s }));
 
     const result = await resolveHostInstances({ load }, deps);
 
@@ -101,7 +110,7 @@ describe('resolveHostInstances', () => {
 
   it('skips a specifier that fails to load and warns, keeping the rest', async () => {
     const { deps, log } = makeDeps([shared('@angular/core', true), shared('broken', true)]);
-    const load = jest.fn(async (s: string) => {
+    const load = vi.fn(async (s: string) => {
       if (s === 'broken') throw new Error('cannot resolve');
       return { name: s };
     });
@@ -109,10 +118,7 @@ describe('resolveHostInstances', () => {
     const result = await resolveHostInstances({ load }, deps);
 
     expect(Object.keys(result!)).toEqual(['@angular/core']);
-    expect(log.warn).toHaveBeenCalledWith(
-      0,
-      expect.stringContaining("could not load 'broken'")
-    );
+    expect(log.warn).toHaveBeenCalledWith(0, expect.stringContaining("could not load 'broken'"));
   });
 
   it('warns and returns undefined when auto mode has no hostRemoteEntry', async () => {
@@ -130,7 +136,7 @@ describe('resolveHostInstances', () => {
       url: 'file:///remoteEntry.json',
       integrity: 'sha384-abc',
     });
-    const load = jest.fn(async (s: string) => ({ name: s }));
+    const load = vi.fn(async (s: string) => ({ name: s }));
 
     await resolveHostInstances({ load }, deps);
 

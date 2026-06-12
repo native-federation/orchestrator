@@ -8,7 +8,10 @@ import { SharedExternal } from 'lib/core/1.domain';
 import { mockConfig } from 'lib/testing/config.mock';
 import { mockAdapters } from 'lib/testing/adapters.mock';
 import { mockRemoteEntry_MFE1 } from 'lib/testing/domain/remote-entry/remote-entry.mock';
-import { mockSharedInfo, mockSharedInfoE } from 'lib/testing/domain/remote-entry/shared-info.mock';
+import {
+  mockSharedInfo,
+  mockSharedInfoE,
+} from 'lib/testing/domain/remote-entry/shared-info.mock';
 import { mockScopedVersion, mockVersion_E } from 'lib/testing/domain/externals/version.mock';
 
 describe('createProcessRemoteEntries - scoped', () => {
@@ -22,10 +25,10 @@ describe('createProcessRemoteEntries - scoped', () => {
 
     processRemoteEntries = createProcessRemoteEntries(config, adapters);
 
-    adapters.sharedExternalsRepo.tryGet = jest.fn(_e => Optional.empty<SharedExternal>());
+    adapters.sharedExternalsRepo.tryGet = vi.fn(_e => Optional.empty<SharedExternal>());
 
-    adapters.versionCheck.isValidSemver = jest.fn(() => true);
-    adapters.versionCheck.compare = jest.fn(() => 0);
+    adapters.versionCheck.isValidSemver = vi.fn(() => true);
+    adapters.versionCheck.compare = vi.fn(() => 0);
   });
 
   describe('default cases', () => {
@@ -45,7 +48,7 @@ describe('createProcessRemoteEntries - scoped', () => {
 
   describe('handling a missing version property', () => {
     it('should add the correct tag if missing', async () => {
-      adapters.versionCheck.smallestVersion = jest.fn((): string => '1.2.1');
+      adapters.versionCheck.smallestVersion = vi.fn((): string => '1.2.1');
       const remoteEntries = [
         mockRemoteEntry_MFE1({ shared: [mockSharedInfo('dep-e', { requiredVersion: '~1.2.1' })] }),
       ];

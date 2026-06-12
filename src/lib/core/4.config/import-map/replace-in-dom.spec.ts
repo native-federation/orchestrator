@@ -10,7 +10,7 @@ describe('replaceInBrowser', () => {
     document.head.innerHTML = '';
     __resetTrustedTypesPolicyForTests();
 
-    jest.spyOn(document.head, 'appendChild');
+    vi.spyOn(document.head, 'appendChild');
     config = replaceInDOM('custom-importmap');
   });
 
@@ -94,8 +94,8 @@ describe('replaceInBrowser', () => {
   });
 
   it('should route the import map through a Trusted Types policy when available', () => {
-    const createScript = jest.fn((s: string) => s);
-    const createPolicy = jest.fn(() => ({ createScript, createScriptURL: (s: string) => s }));
+    const createScript = vi.fn((s: string) => s);
+    const createPolicy = vi.fn(() => ({ createScript, createScriptURL: (s: string) => s }));
     (globalThis as { trustedTypes?: unknown }).trustedTypes = { createPolicy };
 
     const importMap = mockImportMap();
@@ -106,7 +106,7 @@ describe('replaceInBrowser', () => {
   });
 
   it('should not create a policy when the policy name is false', () => {
-    const createPolicy = jest.fn();
+    const createPolicy = vi.fn();
     (globalThis as { trustedTypes?: unknown }).trustedTypes = { createPolicy };
 
     replaceInDOM('custom-importmap', false)(mockImportMap());

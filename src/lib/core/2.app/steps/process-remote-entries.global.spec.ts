@@ -1,3 +1,4 @@
+import type { Mock } from 'vitest';
 import { createProcessRemoteEntries } from './process-remote-entries';
 import { ForProcessingRemoteEntries } from '../driver-ports/init/for-processing-remote-entries.port';
 import { DrivingContract } from '../driving-ports/driving.contract';
@@ -12,7 +13,10 @@ import {
   mockRemoteEntry_MFE1,
   mockRemoteEntry_MFE2,
 } from 'lib/testing/domain/remote-entry/remote-entry.mock';
-import { mockSharedInfo, mockSharedInfoA } from 'lib/testing/domain/remote-entry/shared-info.mock';
+import {
+  mockSharedInfo,
+  mockSharedInfoA,
+} from 'lib/testing/domain/remote-entry/shared-info.mock';
 import { mockExternal } from 'lib/testing/domain/externals/external.mock';
 import { mockVersion, mockVersion_A } from 'lib/testing/domain/externals/version.mock';
 
@@ -27,16 +31,14 @@ describe('createProcessRemoteEntries - global', () => {
 
     processRemoteEntries = createProcessRemoteEntries(config, adapters);
 
-    adapters.sharedExternalsRepo.tryGet = jest.fn(() => Optional.empty<SharedExternal>());
-    adapters.versionCheck.isValidSemver = jest.fn(() => true);
-    adapters.versionCheck.compare = jest.fn(() => 0);
+    adapters.sharedExternalsRepo.tryGet = vi.fn(() => Optional.empty<SharedExternal>());
+    adapters.versionCheck.isValidSemver = vi.fn(() => true);
+    adapters.versionCheck.compare = vi.fn(() => 0);
   });
 
   describe('process shared externals - default cases', () => {
     it('should add a shared external to an empty list', async () => {
-      adapters.sharedExternalsRepo.tryGet = jest.fn(
-        (): Optional<SharedExternal> => Optional.empty()
-      );
+      adapters.sharedExternalsRepo.tryGet = vi.fn((): Optional<SharedExternal> => Optional.empty());
       const remoteEntries = [mockRemoteEntry_MFE1({ shared: [mockSharedInfoA.v2_1_2()] })];
 
       await processRemoteEntries(remoteEntries);
@@ -50,7 +52,7 @@ describe('createProcessRemoteEntries - global', () => {
     });
 
     it('should add a shared external version to an external', async () => {
-      adapters.sharedExternalsRepo.tryGet = jest.fn(
+      adapters.sharedExternalsRepo.tryGet = vi.fn(
         (): Optional<SharedExternal> =>
           Optional.of(
             mockExternal.shared(
@@ -83,7 +85,7 @@ describe('createProcessRemoteEntries - global', () => {
 
   describe('process shared externals - Handle duplicate versions', () => {
     it('should add remote if exact version already exists in cache', async () => {
-      adapters.sharedExternalsRepo.tryGet = jest.fn(
+      adapters.sharedExternalsRepo.tryGet = vi.fn(
         (): Optional<SharedExternal> =>
           Optional.of(
             mockExternal.shared(
@@ -116,7 +118,7 @@ describe('createProcessRemoteEntries - global', () => {
     });
 
     it('should not skip shared external if in cache, but new version is from host remoteEntry', async () => {
-      adapters.sharedExternalsRepo.tryGet = jest.fn(
+      adapters.sharedExternalsRepo.tryGet = vi.fn(
         (): Optional<SharedExternal> =>
           Optional.of(
             mockExternal.shared(
@@ -150,7 +152,7 @@ describe('createProcessRemoteEntries - global', () => {
     });
 
     it('should mark shared external if in cache and both are host version', async () => {
-      adapters.sharedExternalsRepo.tryGet = jest.fn(
+      adapters.sharedExternalsRepo.tryGet = vi.fn(
         (): Optional<SharedExternal> =>
           Optional.of(
             mockExternal.shared(
@@ -184,7 +186,7 @@ describe('createProcessRemoteEntries - global', () => {
     });
 
     it('should warn users if the requiredVersions differ and strictVersion', async () => {
-      adapters.sharedExternalsRepo.tryGet = jest.fn(
+      adapters.sharedExternalsRepo.tryGet = vi.fn(
         (): Optional<SharedExternal> =>
           Optional.of(
             mockExternal.shared(
@@ -233,7 +235,7 @@ describe('createProcessRemoteEntries - global', () => {
     });
     it('should throw an error if the requiredVersions differs if strictVersion and in strict mode', async () => {
       config.strict.strictExternalSameVersionCompatibility = true;
-      adapters.sharedExternalsRepo.tryGet = jest.fn(
+      adapters.sharedExternalsRepo.tryGet = vi.fn(
         (): Optional<SharedExternal> =>
           Optional.of(
             mockExternal.shared(
@@ -268,16 +270,16 @@ describe('createProcessRemoteEntries - global', () => {
 
   describe('process shared externals - Handle version ordering', () => {
     beforeEach(() => {
-      adapters.versionCheck.compare = jest.fn((a, b) => {
+      adapters.versionCheck.compare = vi.fn((a, b) => {
         const order = ['2.1.3', '2.1.2', '2.1.1'];
         return order.indexOf(b) - order.indexOf(a);
       });
     });
 
     it('should correctly order the the versions descending', async () => {
-      adapters.versionCheck.isCompatible = jest.fn(() => true);
+      adapters.versionCheck.isCompatible = vi.fn(() => true);
 
-      adapters.sharedExternalsRepo.tryGet = jest.fn(
+      adapters.sharedExternalsRepo.tryGet = vi.fn(
         (): Optional<SharedExternal> =>
           Optional.of(
             mockExternal.shared(
@@ -325,10 +327,8 @@ describe('createProcessRemoteEntries - global', () => {
 
   describe('handling a missing version property', () => {
     it('should add the correct tag if missing', async () => {
-      adapters.versionCheck.smallestVersion = jest.fn((): string => '2.1.1');
-      adapters.sharedExternalsRepo.tryGet = jest.fn(
-        (): Optional<SharedExternal> => Optional.empty()
-      );
+      adapters.versionCheck.smallestVersion = vi.fn((): string => '2.1.1');
+      adapters.sharedExternalsRepo.tryGet = vi.fn((): Optional<SharedExternal> => Optional.empty());
       const remoteEntries = [
         mockRemoteEntry_MFE1({
           shared: [mockSharedInfo('dep-a', { requiredVersion: '~2.1.1', singleton: true })],
@@ -358,8 +358,8 @@ describe('createProcessRemoteEntries - global', () => {
     });
 
     it('should merge into the cached version when version is missing but the fallback tag matches', async () => {
-      adapters.versionCheck.smallestVersion = jest.fn((): string => '2.1.2');
-      adapters.sharedExternalsRepo.tryGet = jest.fn(
+      adapters.versionCheck.smallestVersion = vi.fn((): string => '2.1.2');
+      adapters.sharedExternalsRepo.tryGet = vi.fn(
         (): Optional<SharedExternal> =>
           Optional.of(
             mockExternal.shared(
@@ -378,7 +378,7 @@ describe('createProcessRemoteEntries - global', () => {
       await processRemoteEntries(remoteEntries);
 
       expect(adapters.sharedExternalsRepo.addOrUpdate).toHaveBeenCalledTimes(1);
-      const stored = (adapters.sharedExternalsRepo.addOrUpdate as jest.Mock).mock
+      const stored = (adapters.sharedExternalsRepo.addOrUpdate as Mock).mock
         .calls[0][1] as SharedExternal;
       expect(stored.versions).toHaveLength(1);
       expect(stored.versions[0]!.tag).toBe('2.1.2');
@@ -387,10 +387,8 @@ describe('createProcessRemoteEntries - global', () => {
     });
 
     it('should add the correct requiredVersion from tag if empty', async () => {
-      adapters.versionCheck.smallestVersion = jest.fn((): string => '2.1.1');
-      adapters.sharedExternalsRepo.tryGet = jest.fn(
-        (): Optional<SharedExternal> => Optional.empty()
-      );
+      adapters.versionCheck.smallestVersion = vi.fn((): string => '2.1.1');
+      adapters.sharedExternalsRepo.tryGet = vi.fn((): Optional<SharedExternal> => Optional.empty());
       const remoteEntries = [
         mockRemoteEntry_MFE1({
           shared: [mockSharedInfo('dep-a', { requiredVersion: '', singleton: true })],
@@ -476,9 +474,7 @@ describe('createProcessRemoteEntries - global', () => {
     });
 
     it('should add a shared external with bundle ref', async () => {
-      adapters.sharedExternalsRepo.tryGet = jest.fn(
-        (): Optional<SharedExternal> => Optional.empty()
-      );
+      adapters.sharedExternalsRepo.tryGet = vi.fn((): Optional<SharedExternal> => Optional.empty());
       const remoteEntries = [
         mockRemoteEntry_MFE1({
           shared: [mockSharedInfoA.v2_1_2({ bundle: 'shared' })],

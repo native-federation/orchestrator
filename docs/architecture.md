@@ -607,7 +607,7 @@ The dynamic flow is part of core: `initFederation()` always returns an `initRemo
 - `audit/` — the externals audit (`/audit`). Depends on core's contracts.
 - `node/` — the Node platform (`/node`): fs-based adapters, the node-loader client, and `initNodeFederation()`. Runs core's flows with its own adapters injected.
 - `utils/` — small shared helpers (`Optional`, path utils, `cloneEntry`).
-- `testing/` — shared jest mocks (not published).
+- `testing/` — shared vitest mocks (not published).
 
 ### Dependency rules
 

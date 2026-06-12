@@ -1,16 +1,17 @@
 /**
- * @jest-environment node
+ * @vitest-environment node
  */
+import type { Mock } from 'vitest';
 import { createFsRemoteEntryProvider } from './fs-remote-entry-provider';
 import { NFError } from 'lib/core/native-federation.error';
 import { readSourceBytes } from 'lib/node/utils/read-source';
 
-jest.mock('lib/node/utils/read-source', () => ({
-  readSourceBytes: jest.fn(),
+vi.mock('lib/node/utils/read-source', () => ({
+  readSourceBytes: vi.fn(),
 }));
 
 describe('createFsRemoteEntryProvider', () => {
-  const readBytes = readSourceBytes as jest.Mock;
+  const readBytes = readSourceBytes as Mock;
 
   beforeEach(() => {
     readBytes.mockReset();
@@ -41,7 +42,9 @@ describe('createFsRemoteEntryProvider', () => {
 
   it('keeps a url present in the payload over the source URL', async () => {
     readBytes.mockResolvedValue(
-      new TextEncoder().encode(JSON.stringify({ name: 'r', url: 'http://canonical/remoteEntry.json' })).buffer
+      new TextEncoder().encode(
+        JSON.stringify({ name: 'r', url: 'http://canonical/remoteEntry.json' })
+      ).buffer
     );
 
     const result = await createFsRemoteEntryProvider().provide('/local/remoteEntry.json');

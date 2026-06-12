@@ -1,3 +1,4 @@
+import type { Mock } from 'vitest';
 import { DrivingContract } from '../driving-ports/driving.contract';
 import { LoggingConfig } from '../config/log.contract';
 import { Optional } from 'lib/utils/optional';
@@ -29,16 +30,16 @@ describe('createProcessDynamicRemoteEntry', () => {
     config = mockConfig();
     adapters = mockAdapters();
 
-    adapters.versionCheck.isValidSemver = jest.fn(() => true);
-    adapters.versionCheck.compare = jest.fn(() => 0);
+    adapters.versionCheck.isValidSemver = vi.fn(() => true);
+    adapters.versionCheck.compare = vi.fn(() => 0);
 
-    adapters.remoteInfoRepo.tryGet = jest.fn(remote => {
+    adapters.remoteInfoRepo.tryGet = vi.fn(remote => {
       if (remote === 'team/mfe2') return Optional.of(mockRemoteInfo_MFE2({ exposes: [] }));
       if (remote === 'team/mfe1') return Optional.of(mockRemoteInfo_MFE1({ exposes: [] }));
 
       return Optional.empty<RemoteInfo>();
     });
-    adapters.sharedExternalsRepo.tryGet = jest.fn(_e => Optional.empty<SharedExternal>());
+    adapters.sharedExternalsRepo.tryGet = vi.fn(_e => Optional.empty<SharedExternal>());
 
     updateCache = createUpdateCache(config, adapters);
   });
@@ -130,7 +131,7 @@ describe('createProcessDynamicRemoteEntry', () => {
 
       await updateCache(remoteEntry);
 
-      const stored = (adapters.remoteInfoRepo.addOrUpdate as jest.Mock).mock.calls[0][1];
+      const stored = (adapters.remoteInfoRepo.addOrUpdate as Mock).mock.calls[0][1];
       expect(stored).not.toHaveProperty('integrity');
     });
   });
@@ -138,7 +139,7 @@ describe('createProcessDynamicRemoteEntry', () => {
   describe('handling a missing version property', () => {
     it('should handle invalid versions in strict mode', async () => {
       config.strict.strictExternalVersion = true;
-      adapters.versionCheck.isValidSemver = jest.fn(() => false);
+      adapters.versionCheck.isValidSemver = vi.fn(() => false);
 
       const remoteEntry = mockRemoteEntry_MFE1({
         shared: [
@@ -157,7 +158,7 @@ describe('createProcessDynamicRemoteEntry', () => {
 
     it('should handle undefined versions in strict mode', async () => {
       config.strict.strictExternalVersion = true;
-      adapters.versionCheck.isValidSemver = jest.fn(() => false);
+      adapters.versionCheck.isValidSemver = vi.fn(() => false);
 
       const remoteEntry = mockRemoteEntry_MFE1({
         shared: [mockSharedInfo('dep-a', { version: undefined, requiredVersion: '~1.2.1' })],

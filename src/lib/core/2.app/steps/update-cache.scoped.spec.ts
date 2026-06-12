@@ -12,7 +12,10 @@ import {
   mockRemoteInfo_MFE2,
 } from 'lib/testing/domain/remote-info/remote-info.mock';
 import { mockRemoteEntry_MFE1 } from 'lib/testing/domain/remote-entry/remote-entry.mock';
-import { mockSharedInfo, mockSharedInfoE } from 'lib/testing/domain/remote-entry/shared-info.mock';
+import {
+  mockSharedInfo,
+  mockSharedInfoE,
+} from 'lib/testing/domain/remote-entry/shared-info.mock';
 import { mockVersion, mockVersion_E } from 'lib/testing/domain/externals/version.mock';
 
 describe('createProcessDynamicRemoteEntry - scoped', () => {
@@ -24,15 +27,15 @@ describe('createProcessDynamicRemoteEntry - scoped', () => {
     config = mockConfig();
     adapters = mockAdapters();
 
-    adapters.versionCheck.isValidSemver = jest.fn(() => true);
-    adapters.versionCheck.compare = jest.fn(() => 0);
+    adapters.versionCheck.isValidSemver = vi.fn(() => true);
+    adapters.versionCheck.compare = vi.fn(() => 0);
 
-    adapters.remoteInfoRepo.tryGet = jest.fn(remote => {
+    adapters.remoteInfoRepo.tryGet = vi.fn(remote => {
       if (remote === 'team/mfe2') return Optional.of(mockRemoteInfo_MFE2({ exposes: [] }));
       if (remote === 'team/mfe1') return Optional.of(mockRemoteInfo_MFE1({ exposes: [] }));
       return Optional.empty<RemoteInfo>();
     });
-    adapters.sharedExternalsRepo.tryGet = jest.fn(_e => Optional.empty<SharedExternal>());
+    adapters.sharedExternalsRepo.tryGet = vi.fn(_e => Optional.empty<SharedExternal>());
 
     updateCache = createUpdateCache(config, adapters);
   });
@@ -55,7 +58,7 @@ describe('createProcessDynamicRemoteEntry - scoped', () => {
   });
 
   it('should add the correct tag if missing', async () => {
-    adapters.versionCheck.smallestVersion = jest.fn((): string => '1.2.1');
+    adapters.versionCheck.smallestVersion = vi.fn((): string => '1.2.1');
 
     const remoteEntry = mockRemoteEntry_MFE1({
       shared: [mockSharedInfo('dep-e', { version: undefined, requiredVersion: '~1.2.1' })],

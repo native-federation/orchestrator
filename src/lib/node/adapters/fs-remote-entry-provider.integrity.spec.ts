@@ -1,22 +1,23 @@
 /**
- * @jest-environment node
+ * @vitest-environment node
  */
+import type { Mock } from 'vitest';
 import { createFsRemoteEntryProvider } from './fs-remote-entry-provider';
 import { NFError } from 'lib/core/native-federation.error';
 import { readSourceBytes } from 'lib/node/utils/read-source';
 import { verifyIntegrity } from 'lib/utils/integrity';
 
-jest.mock('lib/node/utils/read-source', () => ({
-  readSourceBytes: jest.fn(),
+vi.mock('lib/node/utils/read-source', () => ({
+  readSourceBytes: vi.fn(),
 }));
 
-jest.mock('lib/utils/integrity', () => ({
-  verifyIntegrity: jest.fn(),
+vi.mock('lib/utils/integrity', () => ({
+  verifyIntegrity: vi.fn(),
 }));
 
 describe('createFsRemoteEntryProvider (integrity)', () => {
-  const readBytes = readSourceBytes as jest.Mock;
-  const verify = verifyIntegrity as jest.Mock;
+  const readBytes = readSourceBytes as Mock;
+  const verify = verifyIntegrity as Mock;
 
   beforeEach(() => {
     readBytes.mockReset();

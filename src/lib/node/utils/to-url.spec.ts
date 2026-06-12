@@ -1,5 +1,5 @@
 /**
- * @jest-environment node
+ * @vitest-environment node
  */
 import { pathToFileURL } from 'node:url';
 import { toUrl, normalizeHostRemoteEntry } from './to-url';

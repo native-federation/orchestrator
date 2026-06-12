@@ -2,7 +2,7 @@ import { cloneEntry } from './clone-entry';
 
 describe('cloneEntry', () => {
   afterEach(() => {
-    jest.clearAllMocks();
+    vi.clearAllMocks();
   });
 
   it('should clone primitive values', () => {
@@ -49,7 +49,7 @@ describe('cloneEntry', () => {
 
   it('should use structuredClone if available', () => {
     const currentStructuredClone = (window as any).structuredClone;
-    const mockStructuredClone = jest.fn();
+    const mockStructuredClone = vi.fn();
     (window as any).structuredClone = mockStructuredClone;
     const original = { a: 1, b: { c: 2 } };
 

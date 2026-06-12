@@ -35,7 +35,14 @@ export function createProcessRemoteEntries(
   function addSharedExternal(
     remoteEntry: RemoteEntry,
     _sharedInfo: SharedInfo,
-    { tag, remote, cached, scopeType, assertSameVersionCompatibility, commit }: SharedExternalContext
+    {
+      tag,
+      remote,
+      cached,
+      scopeType,
+      assertSameVersionCompatibility,
+      commit,
+    }: SharedExternalContext
   ): void {
     const matchingVersion = cached.versions.find(version => version.tag === tag);
 

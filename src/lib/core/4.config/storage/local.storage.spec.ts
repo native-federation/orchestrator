@@ -13,8 +13,8 @@ describe('localStorageEntry', () => {
     mockStorage = {};
     Object.defineProperty(window, 'localStorage', {
       value: {
-        getItem: jest.fn((key: string) => mockStorage[key] || null),
-        setItem: jest.fn((key: string, value: string) => {
+        getItem: vi.fn((key: string) => mockStorage[key] || null),
+        setItem: vi.fn((key: string, value: string) => {
           mockStorage[key] = value;
         }),
       },
@@ -23,7 +23,7 @@ describe('localStorageEntry', () => {
   });
 
   afterEach(() => {
-    jest.clearAllMocks();
+    vi.clearAllMocks();
   });
 
   it('Create entry with default value on init', () => {

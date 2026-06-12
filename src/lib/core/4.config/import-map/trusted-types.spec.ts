@@ -1,3 +1,4 @@
+import type { Mock } from 'vitest';
 import {
   __resetTrustedTypesPolicyForTests,
   getTrustedTypesPolicy,
@@ -32,7 +33,7 @@ describe('getTrustedTypesPolicy', () => {
 
   describe('when policy name is false', () => {
     it('returns the pass-through policy even if a native factory exists', () => {
-      const createPolicy = jest.fn();
+      const createPolicy = vi.fn();
       (globalThis as { trustedTypes?: unknown }).trustedTypes = { createPolicy };
 
       const policy = getTrustedTypesPolicy(false);
@@ -42,10 +43,10 @@ describe('getTrustedTypesPolicy', () => {
   });
 
   describe('when globalThis.trustedTypes is available', () => {
-    let createPolicy: jest.Mock;
+    let createPolicy: Mock;
 
     beforeEach(() => {
-      createPolicy = jest.fn((_name: string, rules: Record<string, unknown>) => ({
+      createPolicy = vi.fn((_name: string, rules: Record<string, unknown>) => ({
         createScript: rules['createScript'],
         createScriptURL: rules['createScriptURL'],
       }));
@@ -73,7 +74,7 @@ describe('getTrustedTypesPolicy', () => {
     let validator: (input: string) => string;
 
     beforeEach(() => {
-      const createPolicy = jest.fn((_name: string, rules: Record<string, unknown>) => {
+      const createPolicy = vi.fn((_name: string, rules: Record<string, unknown>) => {
         validator = rules['createScript'] as (input: string) => string;
         return {
           createScript: validator,
@@ -113,7 +114,7 @@ describe('getTrustedTypesPolicy', () => {
     let validator: (input: string) => string;
 
     beforeEach(() => {
-      const createPolicy = jest.fn((_name: string, rules: Record<string, unknown>) => {
+      const createPolicy = vi.fn((_name: string, rules: Record<string, unknown>) => {
         validator = rules['createScriptURL'] as (input: string) => string;
         return {
           createScript: rules['createScript'],

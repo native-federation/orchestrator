@@ -13,4 +13,3 @@ export const mockExposedModule = (moduleName: string, file?: string): ExposesInf
 export const mockExposedModuleA = () => mockExposedModule('./wc-comp-a', 'component-a.js');
 export const mockExposedModuleB = () => mockExposedModule('./wc-comp-b', 'component-b.js');
 export const mockExposedModuleC = () => mockExposedModule('./wc-comp-c', 'component-c.js');
-export const mockExposedModuleD = () => mockExposedModule('./wc-comp-d', 'component-d.js');

@@ -25,7 +25,7 @@ describe('createRegistry', () => {
 
       await registry.register('test-resource', testValue);
 
-      const callback = jest.fn();
+      const callback = vi.fn();
       registry.onReady('test-resource', callback);
 
       expect(callback).toHaveBeenCalledWith(testValue);
@@ -33,13 +33,13 @@ describe('createRegistry', () => {
 
     it('should register a resource by name with a provider function', async () => {
       const testValue = { test: 'data' };
-      const provider: NFEventProvider<typeof testValue> = jest.fn().mockResolvedValue(testValue);
+      const provider: NFEventProvider<typeof testValue> = vi.fn().mockResolvedValue(testValue);
 
       await registry.register('test-resource', provider);
 
       expect(provider).toHaveBeenCalled();
 
-      const callback = jest.fn();
+      const callback = vi.fn();
       registry.onReady('test-resource', callback);
 
       expect(callback).toHaveBeenCalledWith(testValue);
@@ -47,21 +47,21 @@ describe('createRegistry', () => {
 
     it('should register a resource with a synchronous provider function', async () => {
       const testValue = { test: 'data' };
-      const provider: NFEventProvider<typeof testValue> = jest.fn().mockReturnValue(testValue);
+      const provider: NFEventProvider<typeof testValue> = vi.fn().mockReturnValue(testValue);
 
       await registry.register('test-resource', provider);
 
       expect(provider).toHaveBeenCalled();
 
-      const callback = jest.fn();
+      const callback = vi.fn();
       registry.onReady('test-resource', callback);
 
       expect(callback).toHaveBeenCalledWith(testValue);
     });
 
     it('should trigger pending callbacks when resource is registered', async () => {
-      const callback1 = jest.fn();
-      const callback2 = jest.fn();
+      const callback1 = vi.fn();
+      const callback2 = vi.fn();
       const testValue = { test: 'data' };
 
       registry.onReady('test-resource', callback1);
@@ -82,14 +82,14 @@ describe('createRegistry', () => {
       const testValue = { test: 'data' };
       await registry.register('test-resource', testValue);
 
-      const callback = jest.fn();
+      const callback = vi.fn();
       registry.onReady('test-resource', callback);
 
       expect(callback).toHaveBeenCalledWith(testValue);
     });
 
     it('should wait for resource to be registered before calling callback', async () => {
-      const callback = jest.fn();
+      const callback = vi.fn();
       const testValue = { test: 'data' };
 
       registry.onReady('test-resource', callback);
@@ -100,7 +100,7 @@ describe('createRegistry', () => {
     });
 
     it('should return an unsubscribe function that removes the callback', async () => {
-      const callback = jest.fn();
+      const callback = vi.fn();
       const testValue = { test: 'data' };
 
       const unsubscribe = registry.onReady('test-resource', callback);
@@ -114,7 +114,7 @@ describe('createRegistry', () => {
       const testValue = { test: 'data' };
       await registry.register('test-resource', testValue);
 
-      const callback = jest.fn();
+      const callback = vi.fn();
       const unsubscribe = registry.onReady('test-resource', callback);
 
       expect(callback).toHaveBeenCalledWith(testValue);
@@ -124,8 +124,8 @@ describe('createRegistry', () => {
     });
 
     it('should clean up pending map when all callbacks are unsubscribed', async () => {
-      const callback1 = jest.fn();
-      const callback2 = jest.fn();
+      const callback1 = vi.fn();
+      const callback2 = vi.fn();
 
       const unsubscribe1 = registry.onReady('test-resource', callback1);
       const unsubscribe2 = registry.onReady('test-resource', callback2);
@@ -143,7 +143,7 @@ describe('createRegistry', () => {
 
   describe('emit', () => {
     it('should emit an event with data and timestamp', () => {
-      const callback = jest.fn();
+      const callback = vi.fn();
       const testData = { message: 'test' };
       const beforeEmit = Date.now();
 
@@ -163,8 +163,8 @@ describe('createRegistry', () => {
     });
 
     it('should emit events to all registered listeners', () => {
-      const callback1 = jest.fn();
-      const callback2 = jest.fn();
+      const callback1 = vi.fn();
+      const callback2 = vi.fn();
       const testData = { message: 'test' };
 
       registry.on('test-event', callback1);
@@ -180,7 +180,7 @@ describe('createRegistry', () => {
 
       registry.emit('test-event', testData);
 
-      const callback = jest.fn();
+      const callback = vi.fn();
       registry.on('test-event', callback);
 
       return new Promise<void>(resolve => {
@@ -195,7 +195,7 @@ describe('createRegistry', () => {
       const smallConfig = { maxStreams: 10, maxEvents: 3, removePercentage: 0.5 };
       const smallRegistry = createRegistry(smallConfig)();
 
-      const callback = jest.fn();
+      const callback = vi.fn();
       smallRegistry.on('test-event', callback);
 
       for (let i = 1; i <= 5; i++) {
@@ -204,7 +204,7 @@ describe('createRegistry', () => {
 
       callback.mockClear();
 
-      const historyCallback = jest.fn();
+      const historyCallback = vi.fn();
       smallRegistry.on('test-event', historyCallback, { replay: 10 });
 
       return new Promise<void>(resolve => {
@@ -237,9 +237,9 @@ describe('createRegistry', () => {
       smallRegistry.emit('type2', { id: 2 });
       smallRegistry.emit('type3', { id: 3 }); // This should remove type1
 
-      const callback1 = jest.fn();
-      const callback2 = jest.fn();
-      const callback3 = jest.fn();
+      const callback1 = vi.fn();
+      const callback2 = vi.fn();
+      const callback3 = vi.fn();
 
       smallRegistry.on('type1', callback1);
       smallRegistry.on('type2', callback2);
@@ -262,7 +262,7 @@ describe('createRegistry', () => {
 
   describe('on', () => {
     it('should subscribe to events and receive future events', () => {
-      const callback = jest.fn();
+      const callback = vi.fn();
       const testData = { message: 'test' };
 
       registry.on('test-event', callback);
@@ -278,7 +278,7 @@ describe('createRegistry', () => {
       registry.emit('test-event', testData1);
       registry.emit('test-event', testData2);
 
-      const callback = jest.fn();
+      const callback = vi.fn();
       registry.on('test-event', callback);
 
       return new Promise<void>(resolve => {
@@ -297,7 +297,7 @@ describe('createRegistry', () => {
       registry.emit('test-event', testData1);
       registry.emit('test-event', testData2);
 
-      const callback = jest.fn();
+      const callback = vi.fn();
       registry.on('test-event', callback, { replay: 10 });
 
       return new Promise<void>(resolve => {
@@ -311,7 +311,7 @@ describe('createRegistry', () => {
     });
 
     it('should return an unsubscribe function that removes the listener', () => {
-      const callback = jest.fn();
+      const callback = vi.fn();
       const testData = { message: 'test' };
 
       const unsubscribe = registry.on('test-event', callback);
@@ -323,8 +323,8 @@ describe('createRegistry', () => {
     });
 
     it('should clean up listeners map when all listeners are unsubscribed', () => {
-      const callback1 = jest.fn();
-      const callback2 = jest.fn();
+      const callback1 = vi.fn();
+      const callback2 = vi.fn();
 
       const unsubscribe1 = registry.on('test-event', callback1);
       const unsubscribe2 = registry.on('test-event', callback2);
@@ -340,8 +340,8 @@ describe('createRegistry', () => {
     });
 
     it('should handle multiple subscriptions to the same event type', () => {
-      const callback1 = jest.fn();
-      const callback2 = jest.fn();
+      const callback1 = vi.fn();
+      const callback2 = vi.fn();
       const testData = { message: 'test' };
 
       registry.on('test-event', callback1);
@@ -353,7 +353,7 @@ describe('createRegistry', () => {
     });
 
     it('should not receive historical events if there are none', () => {
-      const callback = jest.fn();
+      const callback = vi.fn();
 
       registry.on('test-event', callback);
 
@@ -368,8 +368,8 @@ describe('createRegistry', () => {
 
   describe('integration scenarios', () => {
     it('should handle complex workflow with registration, events, and subscriptions', async () => {
-      const resourceCallback = jest.fn();
-      const eventCallback = jest.fn();
+      const resourceCallback = vi.fn();
+      const eventCallback = vi.fn();
 
       registry.onReady('app-ready', resourceCallback);
       registry.on('app-event', eventCallback);
@@ -398,8 +398,8 @@ describe('createRegistry', () => {
     });
 
     it('should handle unsubscription during event emission', () => {
-      const callback1 = jest.fn();
-      const callback2 = jest.fn();
+      const callback1 = vi.fn();
+      const callback2 = vi.fn();
 
       let unsubscribe1: NFEventUnsubscribe;
 
@@ -427,8 +427,8 @@ describe('createRegistry', () => {
       registry.emit('test-event', { source: 'registry1' });
       registry2.emit('test-event', { source: 'registry2' });
 
-      const callback1 = jest.fn();
-      const callback2 = jest.fn();
+      const callback1 = vi.fn();
+      const callback2 = vi.fn();
 
       registry.on('test-event', callback1);
       registry2.on('test-event', callback2);
@@ -449,8 +449,8 @@ describe('createRegistry', () => {
 
   describe('clear', () => {
     it('should clear all registry state when called without parameters', () => {
-      const callback = jest.fn();
-      const pendingCallback = jest.fn();
+      const callback = vi.fn();
+      const pendingCallback = vi.fn();
 
       // Set up some state
       registry.emit('test-event', { data: 'test' });
@@ -461,7 +461,7 @@ describe('createRegistry', () => {
       registry.clear();
 
       // Verify events are cleared
-      const newCallback = jest.fn();
+      const newCallback = vi.fn();
       registry.on('test-event', newCallback);
 
       setTimeout(() => {
@@ -480,10 +480,10 @@ describe('createRegistry', () => {
     });
 
     it('should clear only specific event type when type parameter is provided', async () => {
-      const callback1 = jest.fn();
-      const callback2 = jest.fn();
-      const pendingCallback1 = jest.fn();
-      const pendingCallback2 = jest.fn();
+      const callback1 = vi.fn();
+      const callback2 = vi.fn();
+      const pendingCallback1 = vi.fn();
+      const pendingCallback2 = vi.fn();
 
       // Set up events
       registry.emit('event-type-1', { data: 'test1' });
@@ -504,7 +504,7 @@ describe('createRegistry', () => {
       registry.clear('event-type-1');
 
       // Verify event-type-1 is cleared (events, listeners, pending)
-      const newCallback1 = jest.fn();
+      const newCallback1 = vi.fn();
       registry.on('event-type-1', newCallback1);
 
       setTimeout(() => {
@@ -516,7 +516,7 @@ describe('createRegistry', () => {
       expect(pendingCallback1).not.toHaveBeenCalled();
 
       // Verify event-type-2 still has history and registered resource
-      const newCallback2 = jest.fn();
+      const newCallback2 = vi.fn();
       registry.on('event-type-2', newCallback2);
 
       return new Promise<void>(resolve => {
@@ -526,7 +526,7 @@ describe('createRegistry', () => {
           );
 
           // Verify the registered resource for event-type-2 is still available
-          const immediateCallback = jest.fn();
+          const immediateCallback = vi.fn();
           registry.onReady('event-type-2', immediateCallback);
           expect(immediateCallback).toHaveBeenCalledWith({ value: 'resource2' });
 

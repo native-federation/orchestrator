@@ -17,14 +17,14 @@ describe('createDetermineSharedExternals', () => {
     config = mockConfig();
     adapters = mockAdapters();
 
-    adapters.sharedExternalsRepo.scopeType = jest.fn(() => 'global');
+    adapters.sharedExternalsRepo.scopeType = vi.fn(() => 'global');
 
     determineSharedExternals = createDetermineSharedExternals(config, adapters);
   });
 
   describe("default scenario's", () => {
     it('should set available version to share', async () => {
-      adapters.sharedExternalsRepo.getFromScope = jest.fn(() => ({
+      adapters.sharedExternalsRepo.getFromScope = vi.fn(() => ({
         'dep-a': mockExternal_A({
           dirty: true,
           versions: [mockVersion_A.v2_1_1({ remotes: ['team/mfe1'], action: 'skip' })],
@@ -44,7 +44,7 @@ describe('createDetermineSharedExternals', () => {
     });
 
     it('should skip if not dirty', async () => {
-      adapters.sharedExternalsRepo.getFromScope = jest.fn(() => ({
+      adapters.sharedExternalsRepo.getFromScope = vi.fn(() => ({
         'dep-a': mockExternal_A({
           dirty: false,
           versions: [mockVersion_A.v2_1_1({ remotes: ['team/mfe1'], action: 'skip' })],
@@ -61,7 +61,7 @@ describe('createDetermineSharedExternals', () => {
     it('should set "skip" if incompatible, strictVersion is false and in non-strict mode', async () => {
       config.strict.strictExternalCompatibility = false;
 
-      adapters.sharedExternalsRepo.getFromScope = jest.fn(() => ({
+      adapters.sharedExternalsRepo.getFromScope = vi.fn(() => ({
         'dep-b': mockExternal_B({
           dirty: true,
           versions: [
@@ -95,7 +95,7 @@ describe('createDetermineSharedExternals', () => {
     it('should set "scoped" if incompatible, strictVersion is true and in non-strict mode', async () => {
       config.strict.strictExternalCompatibility = false;
 
-      adapters.sharedExternalsRepo.getFromScope = jest.fn(() => ({
+      adapters.sharedExternalsRepo.getFromScope = vi.fn(() => ({
         'dep-b': mockExternal_B({
           dirty: true,
           versions: [
@@ -129,7 +129,7 @@ describe('createDetermineSharedExternals', () => {
     it('should throw error if incompatible, strictVersion is true and in strict mode', async () => {
       config.strict.strictExternalCompatibility = true;
 
-      adapters.sharedExternalsRepo.getFromScope = jest.fn(() => ({
+      adapters.sharedExternalsRepo.getFromScope = vi.fn(() => ({
         'dep-b': mockExternal_B({
           dirty: true,
           versions: [
@@ -150,13 +150,13 @@ describe('createDetermineSharedExternals', () => {
 
   describe('Custom scope', () => {
     beforeEach(() => {
-      adapters.sharedExternalsRepo.getScopes = jest.fn(() => ['custom-scope']);
-      adapters.sharedExternalsRepo.scopeType = jest.fn(() => 'shareScope');
+      adapters.sharedExternalsRepo.getScopes = vi.fn(() => ['custom-scope']);
+      adapters.sharedExternalsRepo.scopeType = vi.fn(() => 'shareScope');
     });
 
     it('should set only one version to share when compatible, the rest to skip', async () => {
-      adapters.versionCheck.isCompatible = jest.fn(() => true);
-      adapters.sharedExternalsRepo.getFromScope = jest.fn(() => ({
+      adapters.versionCheck.isCompatible = vi.fn(() => true);
+      adapters.sharedExternalsRepo.getFromScope = vi.fn(() => ({
         'dep-b': mockExternal_B({
           dirty: true,
           versions: [

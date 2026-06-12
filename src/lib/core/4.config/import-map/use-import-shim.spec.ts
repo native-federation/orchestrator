@@ -1,13 +1,14 @@
+import type { Mock } from 'vitest';
 import { useShimImportMap } from './use-import-shim';
 import { __resetTrustedTypesPolicyForTests } from './trusted-types';
 
 declare const global: typeof globalThis;
 
 describe('useShimImportMap', () => {
-  let importShimMock: jest.Mock;
+  let importShimMock: Mock;
 
   beforeEach(() => {
-    importShimMock = jest.fn().mockResolvedValue({});
+    importShimMock = vi.fn().mockResolvedValue({});
     (global as unknown as { importShim: unknown }).importShim = importShimMock;
     __resetTrustedTypesPolicyForTests();
   });
@@ -35,9 +36,9 @@ describe('useShimImportMap', () => {
     const trustedScriptURL = {
       toString: () => 'https://example.test/a.js',
     };
-    const createScriptURL = jest.fn(() => trustedScriptURL);
+    const createScriptURL = vi.fn(() => trustedScriptURL);
     (globalThis as { trustedTypes?: unknown }).trustedTypes = {
-      createPolicy: jest.fn(() => ({
+      createPolicy: vi.fn(() => ({
         createScript: (s: string) => s,
         createScriptURL,
       })),

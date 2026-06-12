@@ -1,4 +1,5 @@
-jest.mock('@softarc/native-federation/domain', () => ({
+import type { Mock, Mocked } from 'vitest';
+vi.mock('@softarc/native-federation/domain', () => ({
   BuildNotificationType: {
     COMPLETED: 'federation-rebuild-complete',
     ERROR: 'federation-rebuild-error',
@@ -14,19 +15,19 @@ import { ConfigContract } from 'lib/core/2.app/config/config.contract';
 
 describe('createSSEHandler', () => {
   let sseHandler: ForSSE;
-  let mockEventSource: jest.Mocked<EventSource>;
+  let mockEventSource: Mocked<EventSource>;
   let config: ConfigContract;
-  let eventSourceConstructorSpy: jest.Mock;
+  let eventSourceConstructorSpy: Mock;
 
   beforeEach(() => {
     // Mock EventSource
     mockEventSource = {
       onmessage: null,
       onerror: null,
-      close: jest.fn(),
-      addEventListener: jest.fn(),
-      removeEventListener: jest.fn(),
-      dispatchEvent: jest.fn(),
+      close: vi.fn(),
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      dispatchEvent: vi.fn(),
       CONNECTING: 0,
       OPEN: 1,
       CLOSED: 2,
@@ -36,8 +37,11 @@ describe('createSSEHandler', () => {
       onopen: null,
     } as any;
 
-    // Mock EventSource constructor on window (not global for jsdom)
-    (window as any).EventSource = jest.fn(() => mockEventSource);
+    // Mock EventSource constructor on window (not global for jsdom).
+    // vitest 4: a mock called with `new` needs a `function` (not arrow) implementation.
+    (window as any).EventSource = vi.fn(function () {
+      return mockEventSource;
+    });
     eventSourceConstructorSpy = (window as any).EventSource;
 
     // Mock console methods
@@ -47,7 +51,7 @@ describe('createSSEHandler', () => {
   });
 
   afterEach(() => {
-    jest.restoreAllMocks();
+    vi.restoreAllMocks();
     delete (window as any).EventSource;
   });
 

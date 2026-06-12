@@ -1,16 +1,17 @@
 /**
- * @jest-environment node
+ * @vitest-environment node
  */
+import type { Mock } from 'vitest';
 import * as fs from 'node:fs/promises';
 import { readSourceBytes } from './read-source';
 import { NFError } from 'lib/core/native-federation.error';
 
-jest.mock('node:fs/promises', () => ({
-  readFile: jest.fn(),
+vi.mock('node:fs/promises', () => ({
+  readFile: vi.fn(),
 }));
 
 describe('readSourceBytes', () => {
-  const readFile = fs.readFile as unknown as jest.Mock;
+  const readFile = fs.readFile as unknown as Mock;
 
   beforeEach(() => {
     readFile.mockReset();
@@ -19,7 +20,7 @@ describe('readSourceBytes', () => {
   describe('http(s) URLs', () => {
     it('fetches over http and returns the response body as ArrayBuffer', async () => {
       const expected = Buffer.from('hello').buffer;
-      global.fetch = jest.fn().mockResolvedValue({
+      global.fetch = vi.fn().mockResolvedValue({
         ok: true,
         arrayBuffer: () => Promise.resolve(expected),
       } as unknown as Response);
@@ -33,7 +34,7 @@ describe('readSourceBytes', () => {
 
     it('fetches over https as well', async () => {
       const expected = new ArrayBuffer(0);
-      global.fetch = jest.fn().mockResolvedValue({
+      global.fetch = vi.fn().mockResolvedValue({
         ok: true,
         arrayBuffer: () => Promise.resolve(expected),
       } as unknown as Response);
@@ -44,7 +45,7 @@ describe('readSourceBytes', () => {
     });
 
     it('throws NFError on non-ok response', async () => {
-      global.fetch = jest.fn().mockResolvedValue({
+      global.fetch = vi.fn().mockResolvedValue({
         ok: false,
         status: 503,
         statusText: 'Service Unavailable',

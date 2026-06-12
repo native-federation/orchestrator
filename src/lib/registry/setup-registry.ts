@@ -5,10 +5,7 @@ import type {
   NFEventUnsubscribe,
 } from './event.contract';
 import type { ForManagingEvents } from './for-managing-events.port';
-import type {
-  NFEventRegistryConfig,
-  NFEventRegistryOptions,
-} from './registry.contract';
+import type { NFEventRegistryConfig, NFEventRegistryOptions } from './registry.contract';
 import { cloneEntry } from 'lib/utils/clone-entry';
 
 export function createRegistry(opts: NFEventRegistryOptions): ForManagingEvents {

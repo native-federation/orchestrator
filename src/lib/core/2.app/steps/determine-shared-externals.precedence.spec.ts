@@ -20,14 +20,14 @@ describe('createDetermineSharedExternals (compatibility precedence)', () => {
 
     adapters = mockAdapters();
 
-    adapters.sharedExternalsRepo.getScopes = jest.fn(() => [GLOBAL_SCOPE]);
-    adapters.sharedExternalsRepo.scopeType = jest.fn(() => 'global');
+    adapters.sharedExternalsRepo.getScopes = vi.fn(() => [GLOBAL_SCOPE]);
+    adapters.sharedExternalsRepo.scopeType = vi.fn(() => 'global');
     determineSharedExternals = createDetermineSharedExternals(config, adapters);
   });
 
   it('should set the host version if available', async () => {
-    adapters.versionCheck.isCompatible = jest.fn(() => true);
-    adapters.sharedExternalsRepo.getFromScope = jest.fn(() => ({
+    adapters.versionCheck.isCompatible = vi.fn(() => true);
+    adapters.sharedExternalsRepo.getFromScope = vi.fn(() => ({
       'dep-a': mockExternal_A({
         dirty: true,
         versions: [
@@ -53,8 +53,8 @@ describe('createDetermineSharedExternals (compatibility precedence)', () => {
   });
 
   it('should share the latest version if all equal', async () => {
-    adapters.versionCheck.isCompatible = jest.fn(() => true);
-    adapters.sharedExternalsRepo.getFromScope = jest.fn(() => ({
+    adapters.versionCheck.isCompatible = vi.fn(() => true);
+    adapters.sharedExternalsRepo.getFromScope = vi.fn(() => ({
       'dep-a': mockExternal_A({
         dirty: true,
         versions: [
@@ -80,8 +80,8 @@ describe('createDetermineSharedExternals (compatibility precedence)', () => {
   });
 
   it('should share the latest version if all equal no matter which one is cached', async () => {
-    adapters.versionCheck.isCompatible = jest.fn(() => true);
-    adapters.sharedExternalsRepo.getFromScope = jest.fn(() => ({
+    adapters.versionCheck.isCompatible = vi.fn(() => true);
+    adapters.sharedExternalsRepo.getFromScope = vi.fn(() => ({
       'dep-b': mockExternal_A({
         dirty: true,
         versions: [
@@ -107,10 +107,10 @@ describe('createDetermineSharedExternals (compatibility precedence)', () => {
   });
 
   it('Should choose latest most compatible version if no host version available', async () => {
-    adapters.versionCheck.isCompatible = jest.fn(
+    adapters.versionCheck.isCompatible = vi.fn(
       (v, range) => v.substring(0, 3) === range.substring(1, 4) // '(x.x).x' === '~(x.x).x'
     );
-    adapters.sharedExternalsRepo.getFromScope = jest.fn(() => ({
+    adapters.sharedExternalsRepo.getFromScope = vi.fn(() => ({
       'dep-b': mockExternal_B({
         dirty: true,
         versions: [
@@ -140,10 +140,10 @@ describe('createDetermineSharedExternals (compatibility precedence)', () => {
   it('Should prioritize latest version if config is enabled', async () => {
     config.profile.latestSharedExternal = true;
 
-    adapters.versionCheck.isCompatible = jest.fn(
+    adapters.versionCheck.isCompatible = vi.fn(
       (v, range) => v.substring(0, 3) === range.substring(1, 4) // '(x.x).x' === '~(x.x).x'
     );
-    adapters.sharedExternalsRepo.getFromScope = jest.fn(() => ({
+    adapters.sharedExternalsRepo.getFromScope = vi.fn(() => ({
       'dep-b': mockExternal_B({
         dirty: true,
         versions: [

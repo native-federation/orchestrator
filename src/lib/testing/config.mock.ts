@@ -3,19 +3,19 @@ import { createMockLogHandler } from './handlers/log.handler';
 
 export const mockConfig = (): ConfigContract => ({
   // StorageConfig
-  storage: jest.fn().mockImplementation((_: string) => ({
-    set: jest.fn().mockReturnThis(),
-    get: jest.fn(),
-    clear: jest.fn().mockReturnThis(),
+  storage: vi.fn().mockImplementation((_: string) => ({
+    set: vi.fn().mockReturnThis(),
+    get: vi.fn(),
+    clear: vi.fn().mockReturnThis(),
   })),
   clearStorage: false,
   // LoggingConfig
   log: createMockLogHandler('debug'),
   sse: false,
   // importMapConfig
-  setImportMapFn: jest.fn(),
-  loadModuleFn: jest.fn(),
-  reloadBrowserFn: jest.fn(),
+  setImportMapFn: vi.fn(),
+  loadModuleFn: vi.fn(),
+  reloadBrowserFn: vi.fn(),
   // hostConfig
   hostRemoteEntry: false,
   // ModeConfig

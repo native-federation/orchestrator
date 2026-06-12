@@ -1,22 +1,23 @@
 /**
- * @jest-environment node
+ * @vitest-environment node
  */
+import type { Mock } from 'vitest';
 import { createFsManifestProvider } from './fs-manifest-provider';
 import { NFError } from 'lib/core/native-federation.error';
 import { readSourceBytes } from 'lib/node/utils/read-source';
 import { verifyIntegrity } from 'lib/utils/integrity';
 
-jest.mock('lib/node/utils/read-source', () => ({
-  readSourceBytes: jest.fn(),
+vi.mock('lib/node/utils/read-source', () => ({
+  readSourceBytes: vi.fn(),
 }));
 
-jest.mock('lib/utils/integrity', () => ({
-  verifyIntegrity: jest.fn(),
+vi.mock('lib/utils/integrity', () => ({
+  verifyIntegrity: vi.fn(),
 }));
 
 describe('createFsManifestProvider (integrity)', () => {
-  const readBytes = readSourceBytes as jest.Mock;
-  const verify = verifyIntegrity as jest.Mock;
+  const readBytes = readSourceBytes as Mock;
+  const verify = verifyIntegrity as Mock;
 
   beforeEach(() => {
     readBytes.mockReset();
@@ -50,6 +51,8 @@ describe('createFsManifestProvider (integrity)', () => {
 
     await expect(
       createFsManifestProvider().provide('/tmp/m.json', { integrity: 'sha256-x' })
-    ).rejects.toEqual(new NFError("Read of '/tmp/m.json' returned Integrity mismatch: expected X, got Y"));
+    ).rejects.toEqual(
+      new NFError("Read of '/tmp/m.json' returned Integrity mismatch: expected X, got Y")
+    );
   });
 });

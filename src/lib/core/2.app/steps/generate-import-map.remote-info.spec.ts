@@ -22,10 +22,10 @@ describe('createGenerateImportMap (remoteInfos)', () => {
     config = mockConfig();
     adapters = mockAdapters();
 
-    adapters.remoteInfoRepo.getAll = jest.fn(() => ({}));
-    adapters.scopedExternalsRepo.getAll = jest.fn(() => ({}));
-    adapters.sharedExternalsRepo.getFromScope = jest.fn(() => ({}));
-    adapters.remoteInfoRepo.tryGet = jest.fn(remoteName => {
+    adapters.remoteInfoRepo.getAll = vi.fn(() => ({}));
+    adapters.scopedExternalsRepo.getAll = vi.fn(() => ({}));
+    adapters.sharedExternalsRepo.getFromScope = vi.fn(() => ({}));
+    adapters.remoteInfoRepo.tryGet = vi.fn(remoteName => {
       if (remoteName === 'team/mfe1') return Optional.of(mockRemoteInfo_MFE1());
       if (remoteName === 'team/mfe2') return Optional.of(mockRemoteInfo_MFE2());
       return Optional.empty<RemoteInfo>();
@@ -35,7 +35,7 @@ describe('createGenerateImportMap (remoteInfos)', () => {
   });
 
   it('should add the remote modules to the global scope.', async () => {
-    adapters.remoteInfoRepo.getAll = jest.fn(() => ({
+    adapters.remoteInfoRepo.getAll = vi.fn(() => ({
       'team/mfe1': mockRemoteInfo_MFE1(),
     }));
 
@@ -49,7 +49,7 @@ describe('createGenerateImportMap (remoteInfos)', () => {
   });
 
   it('should add multiple remotes.', async () => {
-    adapters.remoteInfoRepo.getAll = jest.fn(() => ({
+    adapters.remoteInfoRepo.getAll = vi.fn(() => ({
       'team/mfe1': mockRemoteInfo_MFE1(),
       'team/mfe2': mockRemoteInfo_MFE2(),
     }));
@@ -66,7 +66,7 @@ describe('createGenerateImportMap (remoteInfos)', () => {
   });
 
   it('should handle remotes without modules.', async () => {
-    adapters.remoteInfoRepo.getAll = jest.fn(() => ({
+    adapters.remoteInfoRepo.getAll = vi.fn(() => ({
       'team/mfe1': mockRemoteInfo_MFE1({ exposes: [] }),
       'team/mfe2': mockRemoteInfo_MFE2(),
     }));

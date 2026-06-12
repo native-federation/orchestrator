@@ -1,3 +1,4 @@
+import type { Mock } from 'vitest';
 import { createRemoteEntryProvider } from './remote-entry-provider';
 import { RemoteEntry } from 'lib/core/1.domain/remote-entry/remote-entry.contract';
 import { ForProvidingRemoteEntries } from 'lib/core/2.app/driving-ports/for-providing-remote-entries.port';
@@ -10,7 +11,7 @@ describe('createRemoteEntryProvider', () => {
   let remoteEntryProvider: ForProvidingRemoteEntries;
 
   const mockFetchAPI = (response: Partial<RemoteEntry>, opt: { success: boolean }) => {
-    global.fetch = jest.fn(_ => {
+    global.fetch = vi.fn(_ => {
       if (opt.success) {
         return Promise.resolve({
           ok: true,
@@ -24,7 +25,7 @@ describe('createRemoteEntryProvider', () => {
         status: 404,
         statusText: 'Not Found',
       } as Response);
-    }) as jest.Mock;
+    }) as Mock;
   };
 
   beforeEach(() => {
@@ -65,13 +66,13 @@ describe('createRemoteEntryProvider', () => {
     });
 
     it('should reject with NFError when JSON parsing fails', async () => {
-      global.fetch = jest.fn(() => {
+      global.fetch = vi.fn(() => {
         return Promise.resolve({
           ok: true,
           status: 200,
           json: () => Promise.reject(new Error('Invalid JSON')),
         } as unknown as Response);
-      }) as jest.Mock;
+      }) as Mock;
 
       await expect(
         remoteEntryProvider.provide(`${mockScopeUrl_MFE1()}remoteEntry.json`)

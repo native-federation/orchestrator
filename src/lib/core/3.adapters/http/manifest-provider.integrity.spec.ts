@@ -1,6 +1,7 @@
 /**
- * @jest-environment node
+ * @vitest-environment node
  */
+import type { Mock } from 'vitest';
 import { createManifestProvider } from './manifest-provider';
 import { ForProvidingManifest } from 'lib/core/2.app/driving-ports/for-providing-manifest.port';
 import { NFError } from 'lib/core/native-federation.error';
@@ -15,7 +16,7 @@ const sriOf = async (input: string): Promise<string> => {
 };
 
 const mockBytesFetch = (body: string) => {
-  global.fetch = jest.fn(async () => {
+  global.fetch = vi.fn(async () => {
     const bytes = new TextEncoder().encode(body);
     return {
       ok: true,
@@ -23,7 +24,7 @@ const mockBytesFetch = (body: string) => {
       arrayBuffer: () => Promise.resolve(bytes.buffer),
       json: () => Promise.resolve(JSON.parse(body)),
     } as Response;
-  }) as jest.Mock;
+  }) as Mock;
 };
 
 describe('createManifestProvider (integrity)', () => {

@@ -58,7 +58,14 @@ export function createUpdateCache(
   function resolveSharedExternal(
     remoteEntry: RemoteEntry,
     sharedInfo: SharedInfo,
-    { tag, remote, cached, scopeType, assertSameVersionCompatibility, commit }: SharedExternalContext
+    {
+      tag,
+      remote,
+      cached,
+      scopeType,
+      assertSameVersionCompatibility,
+      commit,
+    }: SharedExternalContext
   ): { action: SharedVersionAction; sharedVersion?: SharedVersion } {
     let action: SharedVersionAction = scopeType === 'strict' ? 'share' : 'skip';
 

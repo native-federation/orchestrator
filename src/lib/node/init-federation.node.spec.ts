@@ -1,5 +1,5 @@
 /**
- * @jest-environment node
+ * @vitest-environment node
  */
 import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -8,12 +8,12 @@ import { pathToFileURL } from 'node:url';
 import type { ImportMap } from 'lib/core/1.domain';
 
 // Stub the Node loader client so initNodeFederation never touches module.register.
-const mockNodeLoader = {
-  setMap: jest.fn<Promise<void>, [ImportMap]>(),
-  ready: jest.fn<Promise<void>, []>(),
-};
+const mockNodeLoader = vi.hoisted(() => ({
+  setMap: vi.fn<(map: ImportMap) => Promise<void>>(),
+  ready: vi.fn<() => Promise<void>>(),
+}));
 
-jest.mock('lib/node/adapters/node-loader.client', () => ({
+vi.mock('lib/node/adapters/node-loader.client', () => ({
   getNodeLoaderClient: () => mockNodeLoader,
 }));
 
@@ -63,7 +63,7 @@ describe('initNodeFederation', () => {
   });
 
   it('returns a result with loadRemoteModule after consuming an on-disk manifest', async () => {
-    const loadModuleFn = jest.fn().mockResolvedValue({ greet: () => 'hi' });
+    const loadModuleFn = vi.fn().mockResolvedValue({ greet: () => 'hi' });
 
     const result = await initNodeFederation(pathToFileURL(manifestPath).href, {
       hostRemoteEntry: pathToFileURL(hostEntryPath).href,
@@ -77,7 +77,7 @@ describe('initNodeFederation', () => {
   it('posts the generated import map to the Node loader client', async () => {
     await initNodeFederation(pathToFileURL(manifestPath).href, {
       hostRemoteEntry: pathToFileURL(hostEntryPath).href,
-      loadModuleFn: jest.fn(),
+      loadModuleFn: vi.fn(),
     });
 
     expect(mockNodeLoader.setMap).toHaveBeenCalledTimes(1);
@@ -96,7 +96,7 @@ describe('initNodeFederation', () => {
     let resolved = false;
     const pending = initNodeFederation(pathToFileURL(manifestPath).href, {
       hostRemoteEntry: pathToFileURL(hostEntryPath).href,
-      loadModuleFn: jest.fn(),
+      loadModuleFn: vi.fn(),
     }).then(r => {
       resolved = true;
       return r;
@@ -112,7 +112,7 @@ describe('initNodeFederation', () => {
   });
 
   it('loadRemoteModule delegates to the configured loadModuleFn with the resolved URL', async () => {
-    const loadModuleFn = jest.fn().mockResolvedValue({ greet: () => 'hi' });
+    const loadModuleFn = vi.fn().mockResolvedValue({ greet: () => 'hi' });
 
     const { loadRemoteModule } = await initNodeFederation(pathToFileURL(manifestPath).href, {
       hostRemoteEntry: pathToFileURL(hostEntryPath).href,
@@ -121,9 +121,7 @@ describe('initNodeFederation', () => {
 
     const module = await loadRemoteModule('team/remote-a', './Hello');
 
-    expect(loadModuleFn).toHaveBeenCalledWith(
-      expect.stringMatching(/remote-a\/hello\.mjs$/)
-    );
+    expect(loadModuleFn).toHaveBeenCalledWith(expect.stringMatching(/remote-a\/hello\.mjs$/));
     expect(module).toEqual({ greet: expect.any(Function) });
   });
 
@@ -131,7 +129,7 @@ describe('initNodeFederation', () => {
     await expect(
       initNodeFederation('file:///definitely/does/not/exist.json', {
         hostRemoteEntry: pathToFileURL(hostEntryPath).href,
-        loadModuleFn: jest.fn(),
+        loadModuleFn: vi.fn(),
       })
     ).rejects.toThrow();
   });
@@ -141,7 +139,7 @@ describe('initNodeFederation', () => {
       { 'team/remote-a': pathToFileURL(remoteEntryPath).href },
       {
         hostRemoteEntry: pathToFileURL(hostEntryPath).href,
-        loadModuleFn: jest.fn(),
+        loadModuleFn: vi.fn(),
       }
     );
 

@@ -72,7 +72,7 @@ describe('Optional', () => {
 
   describe('ifPresent', () => {
     it('should call the callback if value is present', () => {
-      const mockCallback = jest.fn();
+      const mockCallback = vi.fn();
       Optional.of('test').ifPresent(mockCallback);
 
       expect(mockCallback).toHaveBeenCalledTimes(1);
@@ -80,7 +80,7 @@ describe('Optional', () => {
     });
 
     it('should not call the callback if value is not present', () => {
-      const mockCallback = jest.fn();
+      const mockCallback = vi.fn();
       Optional.empty().ifPresent(mockCallback);
       Optional.of(null).ifPresent(mockCallback);
       Optional.of(undefined).ifPresent(mockCallback);

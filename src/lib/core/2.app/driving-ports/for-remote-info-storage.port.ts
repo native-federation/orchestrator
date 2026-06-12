@@ -1,4 +1,8 @@
-import type { RemoteInfo, RemoteName, Remotes } from 'lib/core/1.domain/remote/remote-info.contract';
+import type {
+  RemoteInfo,
+  RemoteName,
+  Remotes,
+} from 'lib/core/1.domain/remote/remote-info.contract';
 import type { Optional } from 'lib/utils/optional';
 
 export type ForRemoteInfoStorage = {

@@ -25,7 +25,7 @@ graph LR
         NODE["node/<br/>fs adapters · loader client<br/>initNodeFederation (/node)"]
 
         UTILS["utils/<br/>Optional · path · cloneEntry"]
-        TESTING["testing/<br/>jest mocks, used by *.spec.ts only<br/>(not published)"]
+        TESTING["testing/<br/>vitest mocks, used by *.spec.ts only<br/>(not published)"]
     end
 
     E --> BARRELS

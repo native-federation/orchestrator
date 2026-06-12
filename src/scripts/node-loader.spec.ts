@@ -1,13 +1,13 @@
 /**
- * @jest-environment node
+ * @vitest-environment node
  */
 import type { EventEmitter } from 'node:events';
 
 type Handler = (msg: unknown) => void;
 
 class FakePort {
-  postMessage = jest.fn<void, [unknown]>();
-  unref = jest.fn<void, []>();
+  postMessage = vi.fn<(msg: unknown) => void>();
+  unref = vi.fn<() => void>();
   private handlers: Handler[] = [];
   on(_event: 'message', fn: Handler): this {
     this.handlers.push(fn);
@@ -20,33 +20,30 @@ class FakePort {
 
 type LoaderModule = typeof import('./node-loader');
 
-const freshLoader = (): LoaderModule => {
-  let mod!: LoaderModule;
-  jest.isolateModules(() => {
-    mod = require('./node-loader');
-  });
-  return mod;
+const freshLoader = async (): Promise<LoaderModule> => {
+  vi.resetModules();
+  return import('./node-loader');
 };
 
 describe('node-loader hooks', () => {
   describe('initialize', () => {
-    it('is a no-op when called with no data', () => {
-      const loader = freshLoader();
+    it('is a no-op when called with no data', async () => {
+      const loader = await freshLoader();
       expect(() => loader.initialize()).not.toThrow();
     });
 
     it('applies the initialImportMap before any messages arrive', async () => {
-      const loader = freshLoader();
+      const loader = await freshLoader();
       loader.initialize({ initialImportMap: { imports: { foo: 'file:///foo.mjs' } } });
-      const next = jest.fn().mockResolvedValue({ url: 'unused' });
+      const next = vi.fn().mockResolvedValue({ url: 'unused' });
 
       await loader.resolve('foo', {}, next);
 
       expect(next).toHaveBeenCalledWith('file:///foo.mjs', {});
     });
 
-    it('subscribes to port messages and acks set-import-map', () => {
-      const loader = freshLoader();
+    it('subscribes to port messages and acks set-import-map', async () => {
+      const loader = await freshLoader();
       const port = new FakePort();
       loader.initialize({ port: port as unknown as EventEmitter & { postMessage(m: unknown): void } });
 
@@ -56,19 +53,19 @@ describe('node-loader hooks', () => {
     });
 
     it('updates the active import map after a set-import-map message', async () => {
-      const loader = freshLoader();
+      const loader = await freshLoader();
       const port = new FakePort();
       loader.initialize({ port: port as unknown as EventEmitter & { postMessage(m: unknown): void } });
 
       port.emit({ type: 'set-import-map', map: { imports: { live: 'file:///live.mjs' } } });
 
-      const next = jest.fn().mockResolvedValue({ url: 'unused' });
+      const next = vi.fn().mockResolvedValue({ url: 'unused' });
       await loader.resolve('live', {}, next);
       expect(next).toHaveBeenCalledWith('file:///live.mjs', {});
     });
 
-    it('acks set-host-instances with host-instances-applied', () => {
-      const loader = freshLoader();
+    it('acks set-host-instances with host-instances-applied', async () => {
+      const loader = await freshLoader();
       const port = new FakePort();
       loader.initialize({ port: port as unknown as EventEmitter & { postMessage(m: unknown): void } });
 
@@ -78,7 +75,7 @@ describe('node-loader hooks', () => {
     });
 
     it('ignores port messages of other types', async () => {
-      const loader = freshLoader();
+      const loader = await freshLoader();
       const port = new FakePort();
       loader.initialize({ port: port as unknown as EventEmitter & { postMessage(m: unknown): void } });
 
@@ -88,8 +85,8 @@ describe('node-loader hooks', () => {
       expect(port.postMessage).not.toHaveBeenCalled();
     });
 
-    it('unrefs the port if it supports it', () => {
-      const loader = freshLoader();
+    it('unrefs the port if it supports it', async () => {
+      const loader = await freshLoader();
       const port = new FakePort();
       loader.initialize({ port: port as unknown as EventEmitter & { postMessage(m: unknown): void } });
       expect(port.unref).toHaveBeenCalled();
@@ -98,8 +95,8 @@ describe('node-loader hooks', () => {
 
   describe('resolve', () => {
     it('passes through unmapped specifiers', async () => {
-      const loader = freshLoader();
-      const next = jest.fn().mockResolvedValue({ url: 'next-out' });
+      const loader = await freshLoader();
+      const next = vi.fn().mockResolvedValue({ url: 'next-out' });
 
       await loader.resolve('node:fs', {}, next);
 
@@ -107,11 +104,11 @@ describe('node-loader hooks', () => {
     });
 
     it('rewrites an exact match from imports', async () => {
-      const loader = freshLoader();
+      const loader = await freshLoader();
       loader.initialize({
         initialImportMap: { imports: { foo: 'file:///pkg/foo.mjs' } },
       });
-      const next = jest.fn().mockResolvedValue({ url: 'next-out' });
+      const next = vi.fn().mockResolvedValue({ url: 'next-out' });
 
       await loader.resolve('foo', {}, next);
 
@@ -119,11 +116,11 @@ describe('node-loader hooks', () => {
     });
 
     it('honours trailing-slash prefix imports', async () => {
-      const loader = freshLoader();
+      const loader = await freshLoader();
       loader.initialize({
         initialImportMap: { imports: { 'pkg/': 'file:///pkg/' } },
       });
-      const next = jest.fn().mockResolvedValue({ url: 'next-out' });
+      const next = vi.fn().mockResolvedValue({ url: 'next-out' });
 
       await loader.resolve('pkg/sub/index.mjs', {}, next);
 
@@ -131,7 +128,7 @@ describe('node-loader hooks', () => {
     });
 
     it('prefers a matching scope over the global imports', async () => {
-      const loader = freshLoader();
+      const loader = await freshLoader();
       loader.initialize({
         initialImportMap: {
           imports: { lib: 'file:///globals/lib.mjs' },
@@ -140,7 +137,7 @@ describe('node-loader hooks', () => {
           },
         },
       });
-      const next = jest.fn().mockResolvedValue({ url: 'next-out' });
+      const next = vi.fn().mockResolvedValue({ url: 'next-out' });
 
       await loader.resolve('lib', { parentURL: 'file:///apps/a/entry.mjs' }, next);
 
@@ -150,7 +147,7 @@ describe('node-loader hooks', () => {
     });
 
     it('falls back to global imports when the scope does not match', async () => {
-      const loader = freshLoader();
+      const loader = await freshLoader();
       loader.initialize({
         initialImportMap: {
           imports: { lib: 'file:///globals/lib.mjs' },
@@ -159,7 +156,7 @@ describe('node-loader hooks', () => {
           },
         },
       });
-      const next = jest.fn().mockResolvedValue({ url: 'next-out' });
+      const next = vi.fn().mockResolvedValue({ url: 'next-out' });
 
       await loader.resolve('lib', { parentURL: 'file:///apps/b/entry.mjs' }, next);
 
@@ -170,8 +167,8 @@ describe('node-loader hooks', () => {
   });
 
   describe('host instances', () => {
-    const withHostInstances = (keys: Record<string, string[]>): LoaderModule => {
-      const loader = freshLoader();
+    const withHostInstances = async (keys: Record<string, string[]>): Promise<LoaderModule> => {
+      const loader = await freshLoader();
       const port = new FakePort();
       loader.initialize({ port: port as unknown as EventEmitter & { postMessage(m: unknown): void } });
       port.emit({ type: 'set-host-instances', keys });
@@ -179,8 +176,8 @@ describe('node-loader hooks', () => {
     };
 
     it('routes a bridged specifier to a synthetic nf-host: URL, bypassing nextResolve', async () => {
-      const loader = withHostInstances({ '@angular/core': ['Component'] });
-      const next = jest.fn();
+      const loader = await withHostInstances({ '@angular/core': ['Component'] });
+      const next = vi.fn();
 
       const result = await loader.resolve('@angular/core', {}, next);
 
@@ -189,12 +186,12 @@ describe('node-loader hooks', () => {
     });
 
     it('bridged specifiers win over the import map', async () => {
-      const loader = freshLoader();
+      const loader = await freshLoader();
       const port = new FakePort();
       loader.initialize({ port: port as unknown as EventEmitter & { postMessage(m: unknown): void } });
       port.emit({ type: 'set-import-map', map: { imports: { '@angular/core': 'file:///ng.mjs' } } });
       port.emit({ type: 'set-host-instances', keys: { '@angular/core': ['Component'] } });
-      const next = jest.fn();
+      const next = vi.fn();
 
       const result = await loader.resolve('@angular/core', {}, next);
 
@@ -203,9 +200,9 @@ describe('node-loader hooks', () => {
     });
 
     it('synthesizes a module that re-exports named keys and default from the host instances', async () => {
-      const loader = withHostInstances({ '@angular/core': ['Component', 'default', 'ɵsetClassMetadata'] });
+      const loader = await withHostInstances({ '@angular/core': ['Component', 'default', 'ɵsetClassMetadata'] });
 
-      const result = await loader.load('nf-host:%40angular%2Fcore', {}, jest.fn());
+      const result = await loader.load('nf-host:%40angular%2Fcore', {}, vi.fn());
 
       expect(result.shortCircuit).toBe(true);
       expect(result.format).toBe('module');
@@ -219,8 +216,8 @@ describe('node-loader hooks', () => {
     });
 
     it('throws a clear error at eval time when the namespace is not published', async () => {
-      const loader = withHostInstances({ '@angular/core': ['Component'] });
-      const result = await loader.load('nf-host:%40angular%2Fcore', {}, jest.fn());
+      const loader = await withHostInstances({ '@angular/core': ['Component'] });
+      const result = await loader.load('nf-host:%40angular%2Fcore', {}, vi.fn());
       const source = result.source as string;
 
       expect(source).toContain(
@@ -229,9 +226,9 @@ describe('node-loader hooks', () => {
     });
 
     it('skips export names that are not valid identifiers', async () => {
-      const loader = withHostInstances({ pkg: ['ok', 'has-dash', '1bad'] });
+      const loader = await withHostInstances({ pkg: ['ok', 'has-dash', '1bad'] });
 
-      const result = await loader.load('nf-host:pkg', {}, jest.fn());
+      const result = await loader.load('nf-host:pkg', {}, vi.fn());
       const source = result.source as string;
 
       expect(source).toContain('export const ok = __ns["ok"];');
@@ -247,12 +244,12 @@ describe('node-loader hooks', () => {
     });
 
     it('short-circuits http URLs with the fetched source as ESM', async () => {
-      const loader = freshLoader();
-      global.fetch = jest.fn().mockResolvedValue({
+      const loader = await freshLoader();
+      global.fetch = vi.fn().mockResolvedValue({
         ok: true,
         text: () => Promise.resolve('export const x = 1;'),
       } as unknown as Response);
-      const next = jest.fn();
+      const next = vi.fn();
 
       const result = await loader.load('http://example.com/m.mjs', {}, next);
 
@@ -266,35 +263,35 @@ describe('node-loader hooks', () => {
     });
 
     it('short-circuits https URLs the same way', async () => {
-      const loader = freshLoader();
-      global.fetch = jest.fn().mockResolvedValue({
+      const loader = await freshLoader();
+      global.fetch = vi.fn().mockResolvedValue({
         ok: true,
         text: () => Promise.resolve('export {};'),
       } as unknown as Response);
 
-      const result = await loader.load('https://example.com/m.mjs', {}, jest.fn());
+      const result = await loader.load('https://example.com/m.mjs', {}, vi.fn());
 
       expect(result.format).toBe('module');
       expect(result.shortCircuit).toBe(true);
     });
 
     it('throws when the http fetch returns non-ok', async () => {
-      const loader = freshLoader();
-      global.fetch = jest.fn().mockResolvedValue({
+      const loader = await freshLoader();
+      global.fetch = vi.fn().mockResolvedValue({
         ok: false,
         status: 500,
         statusText: 'Boom',
       } as unknown as Response);
 
-      await expect(loader.load('http://example.com/m.mjs', {}, jest.fn())).rejects.toThrow(
+      await expect(loader.load('http://example.com/m.mjs', {}, vi.fn())).rejects.toThrow(
         'Failed to fetch module from http://example.com/m.mjs: 500 Boom'
       );
     });
 
     it('sets context.format = "module" for non-node-non-http URLs and falls through', async () => {
-      const loader = freshLoader();
+      const loader = await freshLoader();
       const ctx: { format?: string | null } = {};
-      const next = jest.fn().mockResolvedValue({ url: 'x', format: 'module' });
+      const next = vi.fn().mockResolvedValue({ url: 'x', format: 'module' });
 
       await loader.load('file:///foo.mjs', ctx, next);
 
@@ -303,9 +300,9 @@ describe('node-loader hooks', () => {
     });
 
     it('does not touch context.format for node: URLs', async () => {
-      const loader = freshLoader();
+      const loader = await freshLoader();
       const ctx: { format?: string | null } = {};
-      const next = jest.fn().mockResolvedValue({ url: 'node:fs', format: 'builtin' });
+      const next = vi.fn().mockResolvedValue({ url: 'node:fs', format: 'builtin' });
 
       await loader.load('node:fs', ctx, next);
 

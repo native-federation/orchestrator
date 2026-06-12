@@ -86,7 +86,9 @@ export const resolveHostInstances = async (
 
   const load = auto.load ?? ((specifier: string) => import(specifier));
 
-  const specifiers = [...new Set((entry.shared ?? []).filter(s => s.singleton).map(s => s.packageName))]
+  const specifiers = [
+    ...new Set((entry.shared ?? []).filter(s => s.singleton).map(s => s.packageName)),
+  ]
     .filter(s => (auto.include ? matches(s, auto.include) : true))
     .filter(s => (auto.exclude ? !matches(s, auto.exclude) : true));
 
@@ -103,6 +105,9 @@ export const resolveHostInstances = async (
     }
   }
 
-  deps.log.debug(0, `[native-federation] hostInstances bridged: ${Object.keys(map).join(', ') || '(none)'}`);
+  deps.log.debug(
+    0,
+    `[native-federation] hostInstances bridged: ${Object.keys(map).join(', ') || '(none)'}`
+  );
   return map;
 };
