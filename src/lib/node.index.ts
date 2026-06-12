@@ -1,5 +1,9 @@
 export { initNodeFederation } from './node/init-federation.node';
-export type { InitNodeFederationOptions } from './node/init-federation.node';
+export type {
+  InitNodeFederationOptions,
+  HostInstancesOption,
+  HostInstancesAuto,
+} from './node/init-federation.node';
 export { NFError } from './core/native-federation.error';
 export type {
   LoadRemoteModule,

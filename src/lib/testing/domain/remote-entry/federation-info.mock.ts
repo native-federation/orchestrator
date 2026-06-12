@@ -1,10 +1,5 @@
 import { ExposesInfo, SharedInfo } from 'lib/core/1.domain/remote-entry/remote-entry.contract';
-import {
-  mockExposedModuleA,
-  mockExposedModuleB,
-  mockExposedModuleC,
-  mockExposedModuleD,
-} from './exposes-info.mock';
+import { mockExposedModuleA, mockExposedModuleB, mockExposedModuleC } from './exposes-info.mock';
 import {
   mockSharedInfoA,
   mockSharedInfoB,
@@ -50,14 +45,6 @@ export const mockFederationInfo_MFE2 = (
       mockSharedInfoC.v2_2_1(),
       mockSharedInfoD.v2_2_2(),
     ],
-  });
-
-export const mockFederationInfo_MFE3 = (
-  o: { exposes?: ExposesInfo[]; shared?: SharedInfo[] } = {}
-) =>
-  mockFederationInfo('team/mfe3', {
-    exposes: o.exposes ?? [mockExposedModuleD()],
-    shared: o.shared ?? [mockSharedInfoA.v2_1_1(), mockSharedInfoB.v2_1_1()],
   });
 
 export const mockFederationInfo_HOST = (

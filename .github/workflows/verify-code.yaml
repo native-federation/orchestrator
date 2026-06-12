@@ -13,20 +13,23 @@ jobs:
         with:
           node-version: "24.x"
       - name: Setup PNPM
-        uses: pnpm/action-setup@v2
+        uses: pnpm/action-setup@v4
         with:
           version: 11
 
       - name: Dependencies OK
         run: pnpm install --frozen-lockfile
 
-      - name: Library builds
+      - name: Build OK
         run: pnpm build
 
-      - name: Code quality OK
+      - name: Lint OK
         run: pnpm lint
 
-      - name: Tests OK
+      - name: Knip OK
+        run: pnpm knip
+
+      - name: Test OK
         run: pnpm test
 
       - name: Audit OK

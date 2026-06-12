@@ -87,21 +87,6 @@ export const mockVersion_B = {
     mockVersion.shared('2.1.1', 'dep-b', { remotes: opt.remotes ?? ['team/mfe3'], ...opt }),
 };
 
-export const mockVersion_C = {
-  v2_2_2: (opt: Partial<mockSharedVersionOptions> = {}) =>
-    mockVersion.shared('2.2.2', 'dep-c', { remotes: opt.remotes ?? ['team/mfe1'], ...opt }),
-  v2_2_1: (opt: Partial<mockSharedVersionOptions> = {}) =>
-    mockVersion.shared('2.2.1', 'dep-c', { remotes: opt.remotes ?? ['team/mfe2'], ...opt }),
-};
-
-export const mockVersion_D = {
-  v2_2_2: (opt: Partial<mockSharedVersionOptions> = {}) =>
-    mockVersion.shared('2.2.2', 'dep-d', {
-      ...opt,
-      remotes: opt.remotes ?? ['team/mfe1', 'team/host'],
-    }),
-};
-
 export const mockVersion_E = {
   v1_2_3: () => mockVersion.scoped('1.2.3', 'dep-e'),
   v1_2_4: () => mockVersion.scoped('1.2.4', 'dep-e'),
