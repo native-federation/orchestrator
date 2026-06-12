@@ -1,3 +1,3 @@
-export * from './2.app/driver-ports/dynamic-init';
+export * from './audit/for-auditing-externals.port';
 
-export * from './2.app/flows/audit/externals-audit';
+export * from './audit/externals-audit';

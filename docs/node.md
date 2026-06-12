@@ -12,7 +12,7 @@ prerendering, or any other long-lived Node runtime.
 It is a drop-in replacement for the deprecated
 [`@softarc/native-federation-node`](https://www.npmjs.com/package/@softarc/native-federation-node)
 package and supersedes it: the orchestrator's version resolver, integrity
-verification, shared-scope handling, and dynamic-init flow are all available on
+verification, shared-scope handling, and dynamic remote initialization (`initRemoteEntry`) are all available on
 the server side.
 
 ## Prerequisites

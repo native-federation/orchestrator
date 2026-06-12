@@ -7,7 +7,7 @@ const PATHS = {
   src: 'src',
   dist: 'dist',
   lib: path.join('src', 'lib'),
-  quickstart: path.join('src'),
+  scripts: path.join('src', 'scripts'),
   tsconfigTypes: 'tsconfig.build.json',
 };
 
@@ -116,7 +116,7 @@ async function generateBundles() {
 
     '@softarc/native-federation-orchestrator/quickstart': {
       ...baseConfig,
-      entryPoints: [path.join(PATHS.quickstart, "quickstart.ts")],
+      entryPoints: [path.join(PATHS.scripts, "quickstart.ts")],
       outfile: path.join(OUTPUT_PATHS.quickstart, `quickstart.mjs`),
       bundle: true,
       sourcemap: false,
@@ -125,7 +125,7 @@ async function generateBundles() {
 
     '@softarc/native-federation-orchestrator/init-registry': {
       ...baseConfig,
-      entryPoints: [path.join(PATHS.quickstart, "init-registry.ts")],
+      entryPoints: [path.join(PATHS.scripts, "init-registry.ts")],
       outfile: path.join(OUTPUT_PATHS.quickstart, `init-registry.mjs`),
       bundle: true,
       sourcemap: false,
@@ -146,7 +146,7 @@ async function generateBundles() {
       ...baseConfig,
       platform: 'node',
       target: 'node20.6',
-      entryPoints: ['src/node-loader.ts'],
+      entryPoints: ['src/scripts/node-loader.ts'],
       outfile: path.join(OUTPUT_PATHS.nodeLoader, 'loader.mjs'),
       bundle: true,
       sourcemap: true

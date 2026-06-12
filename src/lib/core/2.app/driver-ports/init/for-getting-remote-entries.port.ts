@@ -1,0 +1,6 @@
+import type { RemoteEntry } from 'lib/core/1.domain/remote-entry/remote-entry.contract';
+import type { FederationManifest } from 'lib/core/1.domain/remote-entry/manifest.contract';
+
+export type ForGettingRemoteEntries = (
+  remotesOrManifestUrl: string | FederationManifest
+) => Promise<RemoteEntry[]>;
