@@ -33,10 +33,10 @@ describe('createGenerateImportMap (shared-externals)', () => {
     config = mockConfig();
     adapters = mockAdapters();
 
-    adapters.remoteInfoRepo.getAll = jest.fn(() => ({}));
-    adapters.scopedExternalsRepo.getAll = jest.fn(() => ({}));
-    adapters.sharedExternalsRepo.getFromScope = jest.fn(() => ({}));
-    adapters.remoteInfoRepo.tryGet = jest.fn(remote => {
+    adapters.remoteInfoRepo.getAll = vi.fn(() => ({}));
+    adapters.scopedExternalsRepo.getAll = vi.fn(() => ({}));
+    adapters.sharedExternalsRepo.getFromScope = vi.fn(() => ({}));
+    adapters.remoteInfoRepo.tryGet = vi.fn(remote => {
       if (remote === 'team/host') return Optional.of(mockRemoteInfo_HOST({ exposes: [] }));
       if (remote === 'team/mfe1') return Optional.of(mockRemoteInfo_MFE1({ exposes: [] }));
       if (remote === 'team/mfe2') return Optional.of(mockRemoteInfo_MFE2({ exposes: [] }));
@@ -48,7 +48,7 @@ describe('createGenerateImportMap (shared-externals)', () => {
   });
 
   it('should add the shared externals to the global scope.', async () => {
-    adapters.sharedExternalsRepo.getFromScope = jest.fn(() => ({
+    adapters.sharedExternalsRepo.getFromScope = vi.fn(() => ({
       'dep-a': mockExternal_A({
         dirty: false,
         versions: [mockVersion_A.v2_1_1({ action: 'share', remotes: ['team/mfe1'] })],
@@ -65,7 +65,7 @@ describe('createGenerateImportMap (shared-externals)', () => {
   });
 
   it('should only add the shared version of the shared external to the global scope.', async () => {
-    adapters.sharedExternalsRepo.getFromScope = jest.fn(() => ({
+    adapters.sharedExternalsRepo.getFromScope = vi.fn(() => ({
       'dep-a': mockExternal_A({
         dirty: false,
         versions: [
@@ -86,7 +86,7 @@ describe('createGenerateImportMap (shared-externals)', () => {
   });
 
   it('should add the scoped version of the shared external to its own scope.', async () => {
-    adapters.sharedExternalsRepo.getFromScope = jest.fn(() => ({
+    adapters.sharedExternalsRepo.getFromScope = vi.fn(() => ({
       'dep-a': mockExternal_A({
         dirty: false,
         versions: [
@@ -112,7 +112,7 @@ describe('createGenerateImportMap (shared-externals)', () => {
   });
 
   it('should should scope all remotes in a scoped version.', async () => {
-    adapters.sharedExternalsRepo.getFromScope = jest.fn(() => ({
+    adapters.sharedExternalsRepo.getFromScope = vi.fn(() => ({
       'dep-a': mockExternal_A({
         dirty: false,
         versions: [
@@ -143,7 +143,7 @@ describe('createGenerateImportMap (shared-externals)', () => {
   });
 
   it('should update the version in storage as "cached".', async () => {
-    adapters.sharedExternalsRepo.getFromScope = jest.fn(() => ({
+    adapters.sharedExternalsRepo.getFromScope = vi.fn(() => ({
       'dep-a': mockExternal_A({
         dirty: false,
         versions: [
@@ -170,7 +170,7 @@ describe('createGenerateImportMap (shared-externals)', () => {
   it('should warn the user about 2 shared versions and choose the most recent one if in non-strict mode.', async () => {
     config.strict.strictImportMap = false;
 
-    adapters.sharedExternalsRepo.getFromScope = jest.fn(() => ({
+    adapters.sharedExternalsRepo.getFromScope = vi.fn(() => ({
       'dep-a': mockExternal_A({
         dirty: false,
         versions: [
@@ -195,7 +195,7 @@ describe('createGenerateImportMap (shared-externals)', () => {
   it('should throw error if 2 shared versions and in strict mode.', async () => {
     config.strict.strictImportMap = true;
 
-    adapters.sharedExternalsRepo.getFromScope = jest.fn(() => ({
+    adapters.sharedExternalsRepo.getFromScope = vi.fn(() => ({
       'dep-a': mockExternal_A({
         dirty: false,
         versions: [
@@ -213,7 +213,7 @@ describe('createGenerateImportMap (shared-externals)', () => {
   });
 
   it('should throw an error if the remote doesnt exist', async () => {
-    adapters.sharedExternalsRepo.getFromScope = jest.fn(() => ({
+    adapters.sharedExternalsRepo.getFromScope = vi.fn(() => ({
       'dep-a': mockExternal_A({
         dirty: false,
         versions: [mockVersion_A.v2_1_3({ action: 'share', remotes: ['team/mfe3'] })],

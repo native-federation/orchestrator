@@ -8,7 +8,7 @@ import { noopLogger } from './logging/noop.logger';
 
 describe('DefaultConfig', () => {
   afterEach(() => {
-    jest.restoreAllMocks();
+    vi.restoreAllMocks();
   });
 
   describe('HostOptions -> HostConfig', () => {
@@ -31,7 +31,7 @@ describe('DefaultConfig', () => {
 
   describe('LoggingOptions -> ImportMapConfig', () => {
     it('Should apply correct fallback config from options', () => {
-      const spy = jest.spyOn(logHandler, 'createLogHandler');
+      const spy = vi.spyOn(logHandler, 'createLogHandler');
 
       createLogConfig({});
 
@@ -62,7 +62,7 @@ describe('DefaultConfig', () => {
 
   describe('StorageOptions -> StorageConfig', () => {
     it('Should apply correct fallback config from options', () => {
-      const spy = jest.spyOn(storageHandler, 'globalThisStorageEntry');
+      const spy = vi.spyOn(storageHandler, 'globalThisStorageEntry');
 
       const actual = createStorageConfig({});
       actual.storage('entry', {});

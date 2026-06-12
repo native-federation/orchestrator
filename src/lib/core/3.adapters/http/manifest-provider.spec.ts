@@ -1,3 +1,4 @@
+import type { Mock } from 'vitest';
 import { createManifestProvider } from './manifest-provider';
 import { FederationManifest } from 'lib/core/1.domain/remote-entry/manifest.contract';
 import { ForProvidingManifest } from 'lib/core/2.app/driving-ports/for-providing-manifest.port';
@@ -7,7 +8,7 @@ describe('createManifestProvider', () => {
   let manifestProvider: ForProvidingManifest;
 
   const mockFetchAPI = (response: FederationManifest) => {
-    global.fetch = jest.fn(url => {
+    global.fetch = vi.fn(url => {
       if (url === 'http://my.service/manifest.json')
         return Promise.resolve({
           ok: true,
@@ -20,7 +21,7 @@ describe('createManifestProvider', () => {
         status: 404,
         statusText: 'Not Found',
       } as Response);
-    }) as jest.Mock;
+    }) as Mock;
   };
 
   beforeEach(() => {
@@ -70,13 +71,13 @@ describe('createManifestProvider', () => {
     });
 
     it('should handle JSON parsing errors for manifest', async () => {
-      global.fetch = jest.fn(() => {
+      global.fetch = vi.fn(() => {
         return Promise.resolve({
           ok: true,
           status: 200,
           json: () => Promise.reject(new Error('Invalid JSON')),
         } as unknown as Response);
-      }) as jest.Mock;
+      }) as Mock;
 
       const manifestUrl = 'http://bad.service/manifest.json';
 

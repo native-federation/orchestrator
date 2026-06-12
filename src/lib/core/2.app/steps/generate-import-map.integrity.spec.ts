@@ -47,22 +47,22 @@ describe('createGenerateImportMap (integrity)', () => {
     config = mockConfig();
     adapters = mockAdapters();
 
-    adapters.remoteInfoRepo.getAll = jest.fn(() => ({}));
-    adapters.scopedExternalsRepo.getAll = jest.fn(() => ({}));
-    adapters.sharedExternalsRepo.getFromScope = jest.fn(() => ({}));
-    adapters.sharedExternalsRepo.getScopes = jest.fn(() => []);
-    adapters.sharedChunksRepo.tryGet = jest.fn(() => Optional.empty());
-    adapters.remoteInfoRepo.tryGet = jest.fn(() => Optional.empty<RemoteInfo>());
+    adapters.remoteInfoRepo.getAll = vi.fn(() => ({}));
+    adapters.scopedExternalsRepo.getAll = vi.fn(() => ({}));
+    adapters.sharedExternalsRepo.getFromScope = vi.fn(() => ({}));
+    adapters.sharedExternalsRepo.getScopes = vi.fn(() => []);
+    adapters.sharedChunksRepo.tryGet = vi.fn(() => Optional.empty());
+    adapters.remoteInfoRepo.tryGet = vi.fn(() => Optional.empty<RemoteInfo>());
 
     generateImportMap = createGenerateImportMap(config, adapters);
   });
 
   it('should omit the integrity block when no remote provides hashes', async () => {
-    adapters.remoteInfoRepo.tryGet = jest.fn(remote => {
+    adapters.remoteInfoRepo.tryGet = vi.fn(remote => {
       if (remote === 'team/mfe1') return Optional.of(remoteInfoFor('team/mfe1'));
       return Optional.empty<RemoteInfo>();
     });
-    adapters.remoteInfoRepo.getAll = jest.fn(() => ({
+    adapters.remoteInfoRepo.getAll = vi.fn(() => ({
       'team/mfe1': remoteInfoFor('team/mfe1'),
     }));
 
@@ -73,11 +73,11 @@ describe('createGenerateImportMap (integrity)', () => {
 
   it('should add integrity for exposed remote modules', async () => {
     const integrity = { 'component-a.js': HASH_COMP_A };
-    adapters.remoteInfoRepo.tryGet = jest.fn(remote => {
+    adapters.remoteInfoRepo.tryGet = vi.fn(remote => {
       if (remote === 'team/mfe1') return Optional.of(remoteInfoFor('team/mfe1', integrity));
       return Optional.empty<RemoteInfo>();
     });
-    adapters.remoteInfoRepo.getAll = jest.fn(() => ({
+    adapters.remoteInfoRepo.getAll = vi.fn(() => ({
       'team/mfe1': remoteInfoFor('team/mfe1', integrity),
     }));
 
@@ -90,12 +90,11 @@ describe('createGenerateImportMap (integrity)', () => {
 
   it('should add integrity for scoped externals', async () => {
     const integrity = { 'dep-e.js': HASH_E, 'dep-f.js': HASH_F };
-    adapters.remoteInfoRepo.tryGet = jest.fn(remote => {
-      if (remote === 'team/mfe1')
-        return Optional.of(remoteInfoFor('team/mfe1', integrity));
+    adapters.remoteInfoRepo.tryGet = vi.fn(remote => {
+      if (remote === 'team/mfe1') return Optional.of(remoteInfoFor('team/mfe1', integrity));
       return Optional.empty<RemoteInfo>();
     });
-    adapters.scopedExternalsRepo.getAll = jest.fn(() => ({
+    adapters.scopedExternalsRepo.getAll = vi.fn(() => ({
       'team/mfe1': { ...mockExternal_E(), ...mockExternal_F() },
     }));
 
@@ -109,12 +108,11 @@ describe('createGenerateImportMap (integrity)', () => {
 
   it('should skip integrity entries when the file has no hash', async () => {
     const integrity = { 'dep-e.js': HASH_E };
-    adapters.remoteInfoRepo.tryGet = jest.fn(remote => {
-      if (remote === 'team/mfe1')
-        return Optional.of(remoteInfoFor('team/mfe1', integrity));
+    adapters.remoteInfoRepo.tryGet = vi.fn(remote => {
+      if (remote === 'team/mfe1') return Optional.of(remoteInfoFor('team/mfe1', integrity));
       return Optional.empty<RemoteInfo>();
     });
-    adapters.scopedExternalsRepo.getAll = jest.fn(() => ({
+    adapters.scopedExternalsRepo.getAll = vi.fn(() => ({
       'team/mfe1': { ...mockExternal_E(), ...mockExternal_F() },
     }));
 
@@ -127,12 +125,11 @@ describe('createGenerateImportMap (integrity)', () => {
 
   it('should add integrity for globally shared externals', async () => {
     const integrity = { 'dep-a.js': HASH_A };
-    adapters.remoteInfoRepo.tryGet = jest.fn(remote => {
-      if (remote === 'team/mfe1')
-        return Optional.of(remoteInfoFor('team/mfe1', integrity));
+    adapters.remoteInfoRepo.tryGet = vi.fn(remote => {
+      if (remote === 'team/mfe1') return Optional.of(remoteInfoFor('team/mfe1', integrity));
       return Optional.empty<RemoteInfo>();
     });
-    adapters.sharedExternalsRepo.getFromScope = jest.fn(() => ({
+    adapters.sharedExternalsRepo.getFromScope = vi.fn(() => ({
       'dep-a': mockExternal_A({
         dirty: false,
         versions: [mockVersion_A.v2_1_1({ action: 'share', remotes: ['team/mfe1'] })],
@@ -149,19 +146,19 @@ describe('createGenerateImportMap (integrity)', () => {
   it('should add integrity for share-scope shared externals', async () => {
     const integrity1 = { 'dep-a.js': HASH_A };
     const integrity2 = { 'dep-b.js': HASH_B };
-    adapters.remoteInfoRepo.tryGet = jest.fn(remote => {
+    adapters.remoteInfoRepo.tryGet = vi.fn(remote => {
       if (remote === 'team/mfe1') return Optional.of(remoteInfoFor('team/mfe1', integrity1));
       if (remote === 'team/mfe2') return Optional.of(remoteInfoFor('team/mfe2', integrity2));
       return Optional.empty<RemoteInfo>();
     });
-    adapters.sharedExternalsRepo.getScopes = jest.fn(() => ['custom-scope']);
+    adapters.sharedExternalsRepo.getScopes = vi.fn(() => ['custom-scope']);
     const sharedForScope = {
       'dep-a': mockExternal_A({
         dirty: false,
         versions: [mockVersion_A.v2_1_1({ action: 'share', remotes: ['team/mfe1'] })],
       }),
     };
-    adapters.sharedExternalsRepo.getFromScope = jest.fn(scope =>
+    adapters.sharedExternalsRepo.getFromScope = vi.fn(scope =>
       scope === 'custom-scope' ? sharedForScope : {}
     );
 
@@ -174,11 +171,11 @@ describe('createGenerateImportMap (integrity)', () => {
 
   it('should add integrity for chunk imports', async () => {
     const integrity = { 'dep-a.js': HASH_A, 'shared-chunk.js': HASH_CHUNK };
-    adapters.remoteInfoRepo.tryGet = jest.fn(remote => {
+    adapters.remoteInfoRepo.tryGet = vi.fn(remote => {
       if (remote === 'team/mfe1') return Optional.of(remoteInfoFor('team/mfe1', integrity));
       return Optional.empty<RemoteInfo>();
     });
-    adapters.sharedExternalsRepo.getFromScope = jest.fn(() => ({
+    adapters.sharedExternalsRepo.getFromScope = vi.fn(() => ({
       'dep-a': mockExternal_A({
         dirty: false,
         versions: [
@@ -189,7 +186,7 @@ describe('createGenerateImportMap (integrity)', () => {
         ],
       }),
     }));
-    adapters.sharedChunksRepo.tryGet = jest.fn((remote, bundle) => {
+    adapters.sharedChunksRepo.tryGet = vi.fn((remote, bundle) => {
       if (remote === 'team/mfe1' && bundle === 'shared') {
         return Optional.of(['shared-chunk.js']);
       }
@@ -207,12 +204,12 @@ describe('createGenerateImportMap (integrity)', () => {
   it('should add integrity across multiple remotes', async () => {
     const integrity1 = { 'component-a.js': HASH_COMP_A };
     const integrity2 = { 'component-b.js': HASH_COMP_B };
-    adapters.remoteInfoRepo.tryGet = jest.fn(remote => {
+    adapters.remoteInfoRepo.tryGet = vi.fn(remote => {
       if (remote === 'team/mfe1') return Optional.of(remoteInfoFor('team/mfe1', integrity1));
       if (remote === 'team/mfe2') return Optional.of(remoteInfoFor('team/mfe2', integrity2));
       return Optional.empty<RemoteInfo>();
     });
-    adapters.remoteInfoRepo.getAll = jest.fn(() => ({
+    adapters.remoteInfoRepo.getAll = vi.fn(() => ({
       'team/mfe1': remoteInfoFor('team/mfe1', integrity1),
       'team/mfe2': remoteInfoFor('team/mfe2', integrity2),
     }));

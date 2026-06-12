@@ -17,12 +17,12 @@ import { createConfigHandlers } from 'lib/core/5.di/config.factory';
 import { createInitFlow } from 'lib/core/2.app/flows/init.flow';
 import { createInitRemoteEntryFlow } from 'lib/core/2.app/flows/init-remote-entry.flow';
 import { INIT_FLOW_FACTORY } from 'lib/core/5.di/init.factory';
-import { createFederationResult, createStateDump } from 'lib/core/5.di/federation-result.factory';
-import { useNodeImportMap } from './use-node';
 import {
-  resolveHostInstances,
-  type HostInstancesOption,
-} from './resolve-host-instances';
+  createFederationResult,
+  createStateDump,
+} from 'lib/core/5.di/federation-result.factory';
+import { useNodeImportMap } from './use-node';
+import { resolveHostInstances, type HostInstancesOption } from './resolve-host-instances';
 import { normalizeHostRemoteEntry } from './utils/to-url';
 
 export type { HostInstancesOption, HostInstancesAuto } from './resolve-host-instances';

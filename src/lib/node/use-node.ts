@@ -17,7 +17,8 @@ const useNodeImportMap = (): NodeImportMapConfig => {
     nodeLoader,
     loadModuleFn: (url: string) => import(/* @vite-ignore */ url),
     setImportMapFn: (importMap: ImportMap) => nodeLoader.setMap(importMap).then(() => importMap),
-    setHostInstancesFn: (keys: HostInstanceKeys) => nodeLoader.setHostInstances(keys).then(() => keys),
+    setHostInstancesFn: (keys: HostInstanceKeys) =>
+      nodeLoader.setHostInstances(keys).then(() => keys),
     reloadBrowserFn: () => {
       /* no-op */
     },

@@ -148,7 +148,7 @@ describe('createConvertToImportMap (integrity)', () => {
       chunks: { 'mapping-or-exposed': ['shared-chunk.js'] },
       integrity: { 'shared-chunk.js': HASH_CHUNK },
     });
-    ports.sharedChunksRepo.tryGet = jest.fn((remote, bundle) => {
+    ports.sharedChunksRepo.tryGet = vi.fn((remote, bundle) => {
       if (remote === 'team/mfe2' && bundle === 'mapping-or-exposed') {
         return Optional.of(['shared-chunk.js']);
       }

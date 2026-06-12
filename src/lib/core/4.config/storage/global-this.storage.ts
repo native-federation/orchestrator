@@ -1,5 +1,8 @@
 import { cloneEntry } from 'lib/utils/clone-entry';
-import { type StorageEntryCreator, type StorageEntry } from 'lib/core/2.app/config/storage.contract';
+import {
+  type StorageEntryCreator,
+  type StorageEntry,
+} from 'lib/core/2.app/config/storage.contract';
 
 const globalThisStorageEntry: StorageEntryCreator =
   (namespace: string) =>

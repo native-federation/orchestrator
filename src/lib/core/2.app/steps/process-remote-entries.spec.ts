@@ -1,3 +1,4 @@
+import type { Mock } from 'vitest';
 import { createProcessRemoteEntries } from './process-remote-entries';
 import { ForProcessingRemoteEntries } from '../driver-ports/init/for-processing-remote-entries.port';
 import { DrivingContract } from '../driving-ports/driving.contract';
@@ -21,12 +22,12 @@ describe('createProcessRemoteEntries', () => {
     config = mockConfig();
     adapters = mockAdapters();
 
-    adapters.sharedExternalsRepo.tryGet = jest.fn(_e => Optional.empty<SharedExternal>());
+    adapters.sharedExternalsRepo.tryGet = vi.fn(_e => Optional.empty<SharedExternal>());
 
     processRemoteEntries = createProcessRemoteEntries(config, adapters);
 
-    adapters.versionCheck.isValidSemver = jest.fn(() => true);
-    adapters.versionCheck.compare = jest.fn(() => 0);
+    adapters.versionCheck.isValidSemver = vi.fn(() => true);
+    adapters.versionCheck.compare = vi.fn(() => 0);
   });
 
   describe('cleaning up before processing', () => {
@@ -92,7 +93,7 @@ describe('createProcessRemoteEntries', () => {
 
       await processRemoteEntries(remoteEntries);
 
-      const stored = (adapters.remoteInfoRepo.addOrUpdate as jest.Mock).mock.calls[0][1];
+      const stored = (adapters.remoteInfoRepo.addOrUpdate as Mock).mock.calls[0][1];
       expect(stored).not.toHaveProperty('integrity');
     });
   });
@@ -100,7 +101,7 @@ describe('createProcessRemoteEntries', () => {
   describe('handling a missing version property', () => {
     it('should handle invalid versions in strict mode', async () => {
       config.strict.strictExternalVersion = true;
-      adapters.versionCheck.isValidSemver = jest.fn(() => false);
+      adapters.versionCheck.isValidSemver = vi.fn(() => false);
 
       const remoteEntries = [
         mockRemoteEntry_MFE1({
@@ -120,7 +121,7 @@ describe('createProcessRemoteEntries', () => {
 
     it('should handle undefined versions in strict mode', async () => {
       config.strict.strictExternalVersion = true;
-      adapters.versionCheck.isValidSemver = jest.fn(() => false);
+      adapters.versionCheck.isValidSemver = vi.fn(() => false);
 
       const remoteEntries = [
         mockRemoteEntry_MFE1({

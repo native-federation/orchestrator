@@ -21,16 +21,16 @@ describe('createProcessRemoteEntries - shareScope', () => {
     config = mockConfig();
     adapters = mockAdapters();
 
-    adapters.sharedExternalsRepo.tryGet = jest.fn(_e => Optional.empty<SharedExternal>());
+    adapters.sharedExternalsRepo.tryGet = vi.fn(_e => Optional.empty<SharedExternal>());
 
     processRemoteEntries = createProcessRemoteEntries(config, adapters);
 
-    adapters.versionCheck.isValidSemver = jest.fn(() => true);
-    adapters.versionCheck.compare = jest.fn(() => 0);
+    adapters.versionCheck.isValidSemver = vi.fn(() => true);
+    adapters.versionCheck.compare = vi.fn(() => 0);
   });
 
   it('should add to shareScope', async () => {
-    adapters.sharedExternalsRepo.tryGet = jest.fn((): Optional<SharedExternal> => Optional.empty());
+    adapters.sharedExternalsRepo.tryGet = vi.fn((): Optional<SharedExternal> => Optional.empty());
 
     const remoteEntries = [
       mockRemoteEntry_MFE1({ shared: [mockSharedInfoA.v2_1_2({ shareScope: 'custom-scope' })] }),
@@ -47,9 +47,9 @@ describe('createProcessRemoteEntries - shareScope', () => {
   });
 
   it('should handle "strict" shareScope', async () => {
-    adapters.sharedExternalsRepo.scopeType = jest.fn(() => 'strict');
+    adapters.sharedExternalsRepo.scopeType = vi.fn(() => 'strict');
 
-    adapters.sharedExternalsRepo.tryGet = jest.fn(
+    adapters.sharedExternalsRepo.tryGet = vi.fn(
       (): Optional<SharedExternal> =>
         Optional.of(
           mockExternal.shared(

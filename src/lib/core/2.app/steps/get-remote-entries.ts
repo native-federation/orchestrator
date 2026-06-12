@@ -68,7 +68,9 @@ export function createGetRemoteEntries(
     return typeof descriptor === 'string' ? { url: descriptor } : descriptor;
   }
 
-  async function fetchRemoteEntries(manifest: FederationManifest): Promise<(RemoteEntry | false)[]> {
+  async function fetchRemoteEntries(
+    manifest: FederationManifest
+  ): Promise<(RemoteEntry | false)[]> {
     const fetchPromises = Object.entries(manifest).map(([remoteName, descriptor]) =>
       fetchRemoteEntry(remoteName, descriptor)
     );

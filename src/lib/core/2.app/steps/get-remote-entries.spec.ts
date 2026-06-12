@@ -30,11 +30,11 @@ describe('createGetRemoteEntries', () => {
     config = mockConfig();
     adapters = mockAdapters();
 
-    adapters.remoteInfoRepo.tryGet = jest.fn(_ => {
+    adapters.remoteInfoRepo.tryGet = vi.fn(_ => {
       return Optional.empty<RemoteInfo>();
     });
 
-    adapters.remoteEntryProvider.provide = jest.fn((url: string) => {
+    adapters.remoteEntryProvider.provide = vi.fn((url: string) => {
       if (url.startsWith(mockScopeUrl_MFE1())) {
         return Promise.resolve(mockRemoteEntry_MFE1());
       }
@@ -96,7 +96,7 @@ describe('createGetRemoteEntries', () => {
 
   describe('inclusion of host remoteEntry', () => {
     beforeEach(() => {
-      adapters.remoteEntryProvider.provide = jest.fn((url: string) => {
+      adapters.remoteEntryProvider.provide = vi.fn((url: string) => {
         if (url.startsWith(`${mockScopeUrl_HOST()}remoteEntry.json`)) {
           return Promise.resolve(mockRemoteEntry_HOST());
         }
@@ -163,7 +163,7 @@ describe('createGetRemoteEntries', () => {
       config.profile.overrideCachedRemotesIfURLMatches = false;
 
       // Setup storage to contain one of the remotes
-      adapters.remoteInfoRepo.tryGet = jest
+      adapters.remoteInfoRepo.tryGet = vi
         .fn()
         .mockImplementation(_ =>
           Optional.of({ scopeUrl: mockScopeUrl_MFE1({ folder: 'v1' }), exposes: [] })
@@ -188,7 +188,7 @@ describe('createGetRemoteEntries', () => {
       config.profile.overrideCachedRemotesIfURLMatches = false;
 
       // Setup storage to contain one of the remotes
-      adapters.remoteInfoRepo.tryGet = jest
+      adapters.remoteInfoRepo.tryGet = vi
         .fn()
         .mockImplementation(_ =>
           Optional.of({ scopeUrl: mockScopeUrl_MFE1({ folder: 'v1' }), exposes: [] })
@@ -211,7 +211,7 @@ describe('createGetRemoteEntries', () => {
       config.profile.overrideCachedRemotesIfURLMatches = true;
 
       // Setup storage to contain one of the remotes
-      adapters.remoteInfoRepo.tryGet = jest
+      adapters.remoteInfoRepo.tryGet = vi
         .fn()
         .mockImplementation(_ =>
           Optional.of({ scopeUrl: mockScopeUrl_MFE1({ folder: 'v1' }), exposes: [] })
@@ -233,7 +233,7 @@ describe('createGetRemoteEntries', () => {
       config.profile.overrideCachedRemotesIfURLMatches = true;
 
       // Setup storage to contain one of the remotes
-      adapters.remoteInfoRepo.tryGet = jest
+      adapters.remoteInfoRepo.tryGet = vi
         .fn()
         .mockImplementation(_ =>
           Optional.of({ scopeUrl: mockScopeUrl_MFE1({ folder: 'v1' }), exposes: [] })
@@ -257,7 +257,7 @@ describe('createGetRemoteEntries', () => {
   describe('error handling', () => {
     it('should handle failed remote fetch in non-strict mode', async () => {
       config.strict.strictRemoteEntry = false;
-      adapters.remoteEntryProvider.provide = jest.fn(url => {
+      adapters.remoteEntryProvider.provide = vi.fn(url => {
         if (url === `${mockScopeUrl_MFE1()}remoteEntry.json`) {
           return Promise.resolve(mockRemoteEntry_MFE1());
         }
@@ -280,7 +280,7 @@ describe('createGetRemoteEntries', () => {
     it('should throw error when remote fetch fails in strict mode', async () => {
       config.strict.strictRemoteEntry = true;
 
-      adapters.remoteEntryProvider.provide = jest.fn(url => {
+      adapters.remoteEntryProvider.provide = vi.fn(url => {
         if (url === `${mockScopeUrl_MFE2()}remoteEntry.json`) {
           return Promise.resolve(mockRemoteEntry_MFE2());
         }
@@ -299,7 +299,7 @@ describe('createGetRemoteEntries', () => {
     });
 
     it('should throw error when manifest provider fails', async () => {
-      adapters.manifestProvider.provide = jest
+      adapters.manifestProvider.provide = vi
         .fn()
         .mockRejectedValue(new NFError('Failed to fetch manifest'));
 
@@ -369,10 +369,9 @@ describe('createGetRemoteEntries', () => {
 
       await getRemoteEntries('http://host/manifest.json');
 
-      expect(adapters.manifestProvider.provide).toHaveBeenCalledWith(
-        'http://host/manifest.json',
-        { integrity: 'sha384-MAN' }
-      );
+      expect(adapters.manifestProvider.provide).toHaveBeenCalledWith('http://host/manifest.json', {
+        integrity: 'sha384-MAN',
+      });
     });
 
     it('should propagate hostRemoteEntry integrity to the provider', async () => {
@@ -381,7 +380,7 @@ describe('createGetRemoteEntries', () => {
         url: `${mockScopeUrl_HOST()}remoteEntry.json`,
         integrity: 'sha384-HOST',
       };
-      adapters.remoteEntryProvider.provide = jest.fn((url: string) => {
+      adapters.remoteEntryProvider.provide = vi.fn((url: string) => {
         if (url.startsWith(`${mockScopeUrl_HOST()}remoteEntry.json`)) {
           return Promise.resolve(mockRemoteEntry_HOST());
         }

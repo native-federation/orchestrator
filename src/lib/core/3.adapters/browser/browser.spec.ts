@@ -1,3 +1,4 @@
+import type { Mock } from 'vitest';
 import { createBrowser } from './browser';
 import { ImportMapConfig } from 'lib/core/2.app/config/import-map.contract';
 import { ForBrowserTasks } from 'lib/core/2.app/driving-ports/for-browser-tasks';
@@ -5,37 +6,37 @@ import { ForBrowserTasks } from 'lib/core/2.app/driving-ports/for-browser-tasks'
 function setupDomEnvironment() {
   document.head.innerHTML = '';
 
-  jest.spyOn(document.head, 'appendChild');
+  vi.spyOn(document.head, 'appendChild');
 }
 
 describe('createBrowser', () => {
   let browser: ForBrowserTasks;
   let mockConfig: ImportMapConfig;
-  let mockLoadModuleFn: jest.Mock;
-  let mockSetImportMap: jest.Mock;
+  let mockLoadModuleFn: Mock;
+  let mockSetImportMap: Mock;
 
   beforeEach(() => {
     setupDomEnvironment();
 
-    mockLoadModuleFn = jest.fn().mockImplementation(_ => {
+    mockLoadModuleFn = vi.fn().mockImplementation(_ => {
       return Promise.resolve({ default: { name: 'mocked-module' } });
     });
 
-    mockSetImportMap = jest.fn((importMap: ImportMap) => {
+    mockSetImportMap = vi.fn((importMap: ImportMap) => {
       return Promise.resolve(importMap);
     });
 
     mockConfig = {
       loadModuleFn: mockLoadModuleFn,
       setImportMapFn: mockSetImportMap,
-      reloadBrowserFn: jest.fn(),
+      reloadBrowserFn: vi.fn(),
     };
 
     browser = createBrowser(mockConfig);
   });
 
   afterEach(() => {
-    jest.restoreAllMocks();
+    vi.restoreAllMocks();
   });
 
   describe('importModule', () => {

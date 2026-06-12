@@ -41,7 +41,9 @@ const createClient = (): NodeLoaderClient => {
     const drop = (imports: ImportMap['imports']): ImportMap['imports'] =>
       Object.fromEntries(Object.entries(imports).filter(([specifier]) => !bridged.has(specifier)));
     const scopes = map.scopes
-      ? Object.fromEntries(Object.entries(map.scopes).map(([scope, imports]) => [scope, drop(imports)]))
+      ? Object.fromEntries(
+          Object.entries(map.scopes).map(([scope, imports]) => [scope, drop(imports)])
+        )
       : map.scopes;
     return { ...map, imports: drop(map.imports), ...(scopes ? { scopes } : {}) };
   };

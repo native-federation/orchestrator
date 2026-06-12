@@ -14,7 +14,10 @@ import {
 import { mockExternal } from 'lib/testing/domain/externals/external.mock';
 import { mockVersion_A, mockVersion_B } from 'lib/testing/domain/externals/version.mock';
 import { mockRemoteEntry_MFE1 } from 'lib/testing/domain/remote-entry/remote-entry.mock';
-import { mockSharedInfoA, mockSharedInfoB } from 'lib/testing/domain/remote-entry/shared-info.mock';
+import {
+  mockSharedInfoA,
+  mockSharedInfoB,
+} from 'lib/testing/domain/remote-entry/shared-info.mock';
 import { mockScopeUrl_MFE2 } from 'lib/testing/domain/scope-url.mock';
 
 describe('createProcessDynamicRemoteEntry - scoped', () => {
@@ -26,25 +29,25 @@ describe('createProcessDynamicRemoteEntry - scoped', () => {
     config = mockConfig();
     adapters = mockAdapters();
 
-    adapters.versionCheck.isValidSemver = jest.fn(() => true);
-    adapters.versionCheck.compare = jest.fn(() => 0);
+    adapters.versionCheck.isValidSemver = vi.fn(() => true);
+    adapters.versionCheck.compare = vi.fn(() => 0);
 
-    adapters.remoteInfoRepo.tryGet = jest.fn(remote => {
+    adapters.remoteInfoRepo.tryGet = vi.fn(remote => {
       if (remote === 'team/mfe2') return Optional.of(mockRemoteInfo_MFE2({ exposes: [] }));
       if (remote === 'team/mfe1') return Optional.of(mockRemoteInfo_MFE1({ exposes: [] }));
       return Optional.empty<RemoteInfo>();
     });
 
-    adapters.sharedExternalsRepo.tryGet = jest.fn(_e => Optional.empty<SharedExternal>());
-    adapters.sharedExternalsRepo.scopeType = jest.fn(() => 'shareScope');
+    adapters.sharedExternalsRepo.tryGet = vi.fn(_e => Optional.empty<SharedExternal>());
+    adapters.sharedExternalsRepo.scopeType = vi.fn(() => 'shareScope');
 
     updateCache = createUpdateCache(config, adapters);
   });
 
   it('should add version as "skip" if shared compatible version exists', async () => {
-    adapters.versionCheck.isCompatible = jest.fn(() => true);
+    adapters.versionCheck.isCompatible = vi.fn(() => true);
 
-    adapters.sharedExternalsRepo.tryGet = jest.fn(
+    adapters.sharedExternalsRepo.tryGet = vi.fn(
       (): Optional<SharedExternal> =>
         Optional.of(
           mockExternal.shared(
@@ -80,9 +83,9 @@ describe('createProcessDynamicRemoteEntry - scoped', () => {
   });
 
   it('should directly share a "shareScope: strict" version', async () => {
-    adapters.sharedExternalsRepo.scopeType = jest.fn(() => 'strict');
+    adapters.sharedExternalsRepo.scopeType = vi.fn(() => 'strict');
 
-    adapters.sharedExternalsRepo.tryGet = jest.fn(
+    adapters.sharedExternalsRepo.tryGet = vi.fn(
       (): Optional<SharedExternal> =>
         Optional.of(
           mockExternal.shared(
@@ -127,9 +130,9 @@ describe('createProcessDynamicRemoteEntry - scoped', () => {
   });
 
   it('should override a shared external to list with same version when shareScope', async () => {
-    adapters.versionCheck.isCompatible = jest.fn(() => true);
+    adapters.versionCheck.isCompatible = vi.fn(() => true);
 
-    adapters.sharedExternalsRepo.tryGet = jest.fn(
+    adapters.sharedExternalsRepo.tryGet = vi.fn(
       (): Optional<SharedExternal> =>
         Optional.of(
           mockExternal.shared(
@@ -166,9 +169,9 @@ describe('createProcessDynamicRemoteEntry - scoped', () => {
   });
 
   it('should add an scoped external if shared incompatible external exists', async () => {
-    adapters.versionCheck.isCompatible = jest.fn(() => false);
+    adapters.versionCheck.isCompatible = vi.fn(() => false);
 
-    adapters.sharedExternalsRepo.tryGet = jest.fn(
+    adapters.sharedExternalsRepo.tryGet = vi.fn(
       (): Optional<SharedExternal> =>
         Optional.of(
           mockExternal.shared(
@@ -204,7 +207,7 @@ describe('createProcessDynamicRemoteEntry - scoped', () => {
   });
 
   it('should add a shared external if no shared version present.', async () => {
-    adapters.sharedExternalsRepo.tryGet = jest.fn((): Optional<SharedExternal> => Optional.empty());
+    adapters.sharedExternalsRepo.tryGet = vi.fn((): Optional<SharedExternal> => Optional.empty());
     const remoteEntry = mockRemoteEntry_MFE1({
       shared: [mockSharedInfoA.v2_1_2({ shareScope: 'custom-scope' })],
       exposes: [],

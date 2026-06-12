@@ -1,3 +1,4 @@
+import type { Mock } from 'vitest';
 import { createExternalsAudit } from './externals-audit';
 import { NFError } from 'lib/core/native-federation.error';
 import { LoggingConfig, ModeConfig } from 'lib/core/2.app/config';
@@ -21,10 +22,10 @@ describe('createExternalsAudit', () => {
 
     externalsAudit = createExternalsAudit(config, ports);
 
-    ports.sharedExternalsRepo.getScopes = jest.fn(() => ['__GLOBAL__']);
-    ports.sharedExternalsRepo.getFromScope = jest.fn(() => ({}));
-    ports.versionCheck.isCompatible = jest.fn(() => false);
-    ports.versionCheck.compare = jest.fn(() => 0);
+    ports.sharedExternalsRepo.getScopes = vi.fn(() => ['__GLOBAL__']);
+    ports.sharedExternalsRepo.getFromScope = vi.fn(() => ({}));
+    ports.versionCheck.isCompatible = vi.fn(() => false);
+    ports.versionCheck.compare = vi.fn(() => 0);
   });
 
   describe('successful audit scenarios', () => {
@@ -61,13 +62,13 @@ describe('createExternalsAudit', () => {
         ],
       });
 
-      (ports.sharedExternalsRepo.getFromScope as jest.Mock).mockReturnValue({
+      (ports.sharedExternalsRepo.getFromScope as Mock).mockReturnValue({
         'dep-a': mockExternal_A({
           dirty: false,
           versions: [mockVersion_A.v2_1_1({ remotes: ['team/other-mfe'], action: 'share' })],
         }),
       });
-      (ports.versionCheck.isCompatible as jest.Mock).mockReturnValue(true);
+      (ports.versionCheck.isCompatible as Mock).mockReturnValue(true);
 
       await expect(externalsAudit(remoteEntry)).resolves.toBeUndefined();
 
@@ -87,13 +88,13 @@ describe('createExternalsAudit', () => {
         ],
       });
 
-      (ports.sharedExternalsRepo.getFromScope as jest.Mock).mockReturnValue({
+      (ports.sharedExternalsRepo.getFromScope as Mock).mockReturnValue({
         'dep-a': mockExternal_A({
           dirty: false,
           versions: [mockVersion_A.v2_1_1({ remotes: ['team/other-mfe'], action: 'share' })],
         }),
       });
-      (ports.versionCheck.isCompatible as jest.Mock).mockReturnValue(false);
+      (ports.versionCheck.isCompatible as Mock).mockReturnValue(false);
 
       await expect(externalsAudit(remoteEntry)).resolves.toBeUndefined();
 
@@ -107,7 +108,7 @@ describe('createExternalsAudit', () => {
         shared: [],
       });
 
-      (ports.sharedExternalsRepo.getFromScope as jest.Mock).mockReturnValue({
+      (ports.sharedExternalsRepo.getFromScope as Mock).mockReturnValue({
         'dep-b': mockExternal_B({
           dirty: false,
           versions: [
@@ -116,7 +117,7 @@ describe('createExternalsAudit', () => {
           ],
         }),
       });
-      (ports.versionCheck.compare as jest.Mock).mockReturnValue(-1);
+      (ports.versionCheck.compare as Mock).mockReturnValue(-1);
 
       await expect(externalsAudit(remoteEntry)).resolves.toBeUndefined();
 
@@ -131,7 +132,7 @@ describe('createExternalsAudit', () => {
         shared: [],
       });
 
-      (ports.sharedExternalsRepo.getFromScope as jest.Mock).mockReturnValue({
+      (ports.sharedExternalsRepo.getFromScope as Mock).mockReturnValue({
         'dep-b': mockExternal_B({
           dirty: false,
           versions: [
@@ -140,7 +141,7 @@ describe('createExternalsAudit', () => {
           ],
         }),
       });
-      (ports.versionCheck.compare as jest.Mock).mockReturnValue(1);
+      (ports.versionCheck.compare as Mock).mockReturnValue(1);
 
       await expect(externalsAudit(remoteEntry)).resolves.toBeUndefined();
 
@@ -163,13 +164,13 @@ describe('createExternalsAudit', () => {
         ],
       });
 
-      (ports.sharedExternalsRepo.getFromScope as jest.Mock).mockReturnValue({
+      (ports.sharedExternalsRepo.getFromScope as Mock).mockReturnValue({
         'dep-a': mockExternal_A({
           dirty: false,
           versions: [mockVersion_A.v2_1_1({ remotes: ['team/other-mfe'], action: 'share' })],
         }),
       });
-      (ports.versionCheck.isCompatible as jest.Mock).mockReturnValue(true);
+      (ports.versionCheck.isCompatible as Mock).mockReturnValue(true);
 
       await expect(externalsAudit(remoteEntry)).rejects.toEqual(
         new NFError('Failed externals audit')
@@ -191,13 +192,13 @@ describe('createExternalsAudit', () => {
         ],
       });
 
-      (ports.sharedExternalsRepo.getFromScope as jest.Mock).mockReturnValue({
+      (ports.sharedExternalsRepo.getFromScope as Mock).mockReturnValue({
         'dep-a': mockExternal_A({
           dirty: false,
           versions: [mockVersion_A.v2_1_1({ remotes: ['team/other-mfe'], action: 'share' })],
         }),
       });
-      (ports.versionCheck.isCompatible as jest.Mock).mockReturnValue(true);
+      (ports.versionCheck.isCompatible as Mock).mockReturnValue(true);
 
       await expect(externalsAudit(remoteEntry)).resolves.toBeUndefined();
 

@@ -8,9 +8,9 @@ describe('consoleLogger', () => {
   };
 
   beforeEach(() => {
-    console.log = jest.fn();
-    console.error = jest.fn();
-    console.warn = jest.fn();
+    console.log = vi.fn();
+    console.error = vi.fn();
+    console.warn = vi.fn();
   });
 
   afterEach(() => {

@@ -1,4 +1,9 @@
-import type { RemoteName, ScopedExternal, ScopedExternals, ScopedVersion } from 'lib/core/1.domain';
+import type {
+  RemoteName,
+  ScopedExternal,
+  ScopedExternals,
+  ScopedVersion,
+} from 'lib/core/1.domain';
 import type { Optional } from 'lib/utils/optional';
 
 export type ForScopedExternalsStorage = {

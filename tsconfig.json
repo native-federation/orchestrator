@@ -5,9 +5,8 @@
     "lib": ["ES2022", "dom"],
     "moduleResolution": "Bundler",    
     "rootDir": "./src",
-    "baseUrl": "./src",
     "paths": {
-      "lib/*": ["./lib/*"]
+      "lib/*": ["./src/lib/*"]
     },
     
     "strict": true,
@@ -20,7 +19,8 @@
     "noUncheckedIndexedAccess": true,
     
     "esModuleInterop": true,
-    
+    "types": ["node", "vitest/globals"],
+
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true
   },

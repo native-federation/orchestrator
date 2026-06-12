@@ -312,7 +312,7 @@ describe('createConvertToImportMap', () => {
       const actions: SharedInfoActions = {
         'dep-a': { action: 'share' },
       };
-      ports.sharedChunksRepo.tryGet = jest.fn((remote, bundle) => {
+      ports.sharedChunksRepo.tryGet = vi.fn((remote, bundle) => {
         if (remote === 'team/mfe2' && bundle === 'shared') {
           return Optional.of(['shared-chunk.js', 'utils-chunk.js']);
         }
@@ -342,7 +342,7 @@ describe('createConvertToImportMap', () => {
         'dep-a': { action: 'share' },
         'dep-b': { action: 'share' },
       };
-      ports.sharedChunksRepo.tryGet = jest.fn((remote, bundle) => {
+      ports.sharedChunksRepo.tryGet = vi.fn((remote, bundle) => {
         if (remote === 'team/mfe2' && bundle === 'shared') {
           return Optional.of(['shared-chunk.js']);
         }
@@ -375,7 +375,7 @@ describe('createConvertToImportMap', () => {
         ],
       });
       const actions: SharedInfoActions = {};
-      ports.sharedChunksRepo.tryGet = jest.fn((remote, bundle) => {
+      ports.sharedChunksRepo.tryGet = vi.fn((remote, bundle) => {
         if (remote === 'team/mfe2' && bundle === 'scoped') {
           return Optional.of(['scoped-chunk.js']);
         }
@@ -398,7 +398,7 @@ describe('createConvertToImportMap', () => {
       const actions: SharedInfoActions = {
         'dep-a': { action: 'share' },
       };
-      ports.sharedChunksRepo.tryGet = jest.fn(() => Optional.of(['shared-chunk.mjs']));
+      ports.sharedChunksRepo.tryGet = vi.fn(() => Optional.of(['shared-chunk.mjs']));
 
       const importMap = await convertToImportMap({ entry: remoteEntry, actions });
 
@@ -415,7 +415,7 @@ describe('createConvertToImportMap', () => {
       const actions: SharedInfoActions = {
         'dep-a': { action: 'share' },
       };
-      ports.sharedChunksRepo.tryGet = jest.fn(() => Optional.of([]));
+      ports.sharedChunksRepo.tryGet = vi.fn(() => Optional.of([]));
 
       const importMap = await convertToImportMap({ entry: remoteEntry, actions });
 
@@ -433,7 +433,7 @@ describe('createConvertToImportMap', () => {
       const actions: SharedInfoActions = {
         'dep-a': { action: 'share' },
       };
-      ports.sharedChunksRepo.tryGet = jest.fn(() => Optional.empty());
+      ports.sharedChunksRepo.tryGet = vi.fn(() => Optional.empty());
 
       const importMap = await convertToImportMap({ entry: remoteEntry, actions });
 
@@ -451,7 +451,7 @@ describe('createConvertToImportMap', () => {
       const actions: SharedInfoActions = {
         'dep-a': { action: 'share' },
       };
-      ports.sharedChunksRepo.tryGet = jest.fn(() => Optional.of(['shared-chunk.js']));
+      ports.sharedChunksRepo.tryGet = vi.fn(() => Optional.of(['shared-chunk.js']));
 
       const importMap = await convertToImportMap({ entry: remoteEntry, actions });
 

@@ -64,7 +64,12 @@ export function createGenerateImportMap(
       addToScope(importMap, remote.scopeUrl, createScopeModules(externals, remote.scopeUrl));
 
       for (const version of Object.values(externals)) {
-        addIntegrity(importMap, _path.join(remote.scopeUrl, version.file), remoteName, version.file);
+        addIntegrity(
+          importMap,
+          _path.join(remote.scopeUrl, version.file),
+          remoteName,
+          version.file
+        );
       }
 
       Object.values(externals)

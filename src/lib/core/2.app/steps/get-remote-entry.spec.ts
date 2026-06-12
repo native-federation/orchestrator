@@ -18,11 +18,11 @@ describe('createGetRemoteEntry', () => {
     config = mockConfig();
     adapters = mockAdapters();
 
-    adapters.remoteInfoRepo.tryGet = jest.fn(() => Optional.empty());
+    adapters.remoteInfoRepo.tryGet = vi.fn(() => Optional.empty());
 
     getRemoteEntry = createGetRemoteEntry(config, adapters);
 
-    adapters.remoteEntryProvider.provide = jest.fn((url: string) => {
+    adapters.remoteEntryProvider.provide = vi.fn((url: string) => {
       if (url.startsWith(mockScopeUrl_MFE1())) {
         return Promise.resolve({ ...mockRemoteEntry_MFE1(), url });
       }
@@ -42,7 +42,7 @@ describe('createGetRemoteEntry', () => {
     });
 
     it('should throw error if remoteEntryProvider fails', async () => {
-      adapters.remoteEntryProvider.provide = jest.fn().mockRejectedValue(new Error('Fetch error'));
+      adapters.remoteEntryProvider.provide = vi.fn().mockRejectedValue(new Error('Fetch error'));
 
       await expect(
         getRemoteEntry(mockScopeUrl_MFE1({ file: 'remoteEntry.json' }), 'team/mfe1')
@@ -51,7 +51,7 @@ describe('createGetRemoteEntry', () => {
 
     it('should skip fetching remote if it exists in repository and overrideCachedRemotes is never', async () => {
       config.profile.overrideCachedRemotes = 'never';
-      adapters.remoteInfoRepo.tryGet = jest.fn(() =>
+      adapters.remoteInfoRepo.tryGet = vi.fn(() =>
         Optional.of<RemoteInfo>({
           scopeUrl: mockScopeUrl_MFE1(),
           exposes: [],
@@ -106,7 +106,7 @@ describe('createGetRemoteEntry', () => {
   describe('overriding cached remotes', () => {
     it('should override fetching remote if it exists in repository and overrideCachedRemotes is always', async () => {
       config.profile.overrideCachedRemotes = 'always';
-      adapters.remoteInfoRepo.tryGet = jest.fn(() =>
+      adapters.remoteInfoRepo.tryGet = vi.fn(() =>
         Optional.of<RemoteInfo>({
           scopeUrl: mockScopeUrl_MFE1({ folder: 'v1' }),
           exposes: [],
@@ -128,7 +128,7 @@ describe('createGetRemoteEntry', () => {
 
     it('should not override fetching remote if it exists in repository and overrideCachedRemotes is init-only', async () => {
       config.profile.overrideCachedRemotes = 'init-only';
-      adapters.remoteInfoRepo.tryGet = jest.fn(() =>
+      adapters.remoteInfoRepo.tryGet = vi.fn(() =>
         Optional.of<RemoteInfo>({
           scopeUrl: mockScopeUrl_MFE1({ folder: 'v1' }),
           exposes: [],
@@ -148,7 +148,7 @@ describe('createGetRemoteEntry', () => {
 
     it('should not override fetching remote if it exists in repository and overrideCachedRemotes is never', async () => {
       config.profile.overrideCachedRemotes = 'never';
-      adapters.remoteInfoRepo.tryGet = jest.fn(() =>
+      adapters.remoteInfoRepo.tryGet = vi.fn(() =>
         Optional.of<RemoteInfo>({
           scopeUrl: mockScopeUrl_MFE1({ folder: 'v1' }),
           exposes: [],
@@ -170,7 +170,7 @@ describe('createGetRemoteEntry', () => {
       config.profile.overrideCachedRemotes = 'always';
       config.profile.overrideCachedRemotesIfURLMatches = false;
 
-      adapters.remoteInfoRepo.tryGet = jest.fn(() =>
+      adapters.remoteInfoRepo.tryGet = vi.fn(() =>
         Optional.of<RemoteInfo>({
           scopeUrl: mockScopeUrl_MFE1({ folder: 'v1' }),
           exposes: [],
@@ -191,9 +191,9 @@ describe('createGetRemoteEntry', () => {
     it('should override remote if URL matches cached remote info and enabled in config', async () => {
       config.profile.overrideCachedRemotes = 'always';
       config.profile.overrideCachedRemotesIfURLMatches = true;
-      adapters.remoteInfoRepo.contains = jest.fn(() => true);
+      adapters.remoteInfoRepo.contains = vi.fn(() => true);
 
-      adapters.remoteInfoRepo.tryGet = jest.fn(() =>
+      adapters.remoteInfoRepo.tryGet = vi.fn(() =>
         Optional.of<RemoteInfo>({
           scopeUrl: mockScopeUrl_MFE1({ folder: 'v1' }),
           exposes: [],

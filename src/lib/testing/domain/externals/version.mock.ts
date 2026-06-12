@@ -1,4 +1,9 @@
-import { ScopedVersion, SharedVersion, SharedVersionAction, SharedVersionMeta } from 'lib/core/1.domain';
+import {
+  ScopedVersion,
+  SharedVersion,
+  SharedVersionAction,
+  SharedVersionMeta,
+} from 'lib/core/1.domain';
 
 export const mockVersionRemote = (
   name: string,

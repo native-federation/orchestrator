@@ -1,17 +1,18 @@
 /**
- * @jest-environment node
+ * @vitest-environment node
  */
+import type { Mock } from 'vitest';
 import { createFsManifestProvider } from './fs-manifest-provider';
 import { NFError } from 'lib/core/native-federation.error';
 import type { FederationManifest } from 'lib/core/1.domain';
 import { readSourceBytes } from 'lib/node/utils/read-source';
 
-jest.mock('lib/node/utils/read-source', () => ({
-  readSourceBytes: jest.fn(),
+vi.mock('lib/node/utils/read-source', () => ({
+  readSourceBytes: vi.fn(),
 }));
 
 describe('createFsManifestProvider', () => {
-  const readBytes = readSourceBytes as jest.Mock;
+  const readBytes = readSourceBytes as Mock;
 
   beforeEach(() => {
     readBytes.mockReset();

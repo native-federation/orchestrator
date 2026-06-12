@@ -2,9 +2,9 @@ import { noopLogger } from './noop.logger';
 
 describe('consoleLogger', () => {
   beforeEach(() => {
-    noopLogger.debug = jest.fn();
-    noopLogger.warn = jest.fn();
-    noopLogger.error = jest.fn();
+    noopLogger.debug = vi.fn();
+    noopLogger.warn = vi.fn();
+    noopLogger.error = vi.fn();
   });
 
   it('should call appropriate console methods for each level', () => {

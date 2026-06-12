@@ -6,9 +6,9 @@ describe('LogHandler', () => {
   let logHandler: LogHandler;
 
   beforeEach(() => {
-    noopLogger.debug = jest.fn();
-    noopLogger.warn = jest.fn();
-    noopLogger.error = jest.fn();
+    noopLogger.debug = vi.fn();
+    noopLogger.warn = vi.fn();
+    noopLogger.error = vi.fn();
   });
 
   describe('ERROR level', () => {

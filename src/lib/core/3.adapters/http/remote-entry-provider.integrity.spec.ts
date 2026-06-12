@@ -1,6 +1,7 @@
 /**
- * @jest-environment node
+ * @vitest-environment node
  */
+import type { Mock } from 'vitest';
 import { createRemoteEntryProvider } from './remote-entry-provider';
 import { ForProvidingRemoteEntries } from 'lib/core/2.app/driving-ports/for-providing-remote-entries.port';
 import { mockFederationInfo_MFE1 } from 'lib/testing/domain/remote-entry/federation-info.mock';
@@ -18,7 +19,7 @@ const sriOf = async (input: string): Promise<string> => {
 };
 
 const mockBytesFetch = (body: string) => {
-  global.fetch = jest.fn(async () => {
+  global.fetch = vi.fn(async () => {
     const bytes = new TextEncoder().encode(body);
     return {
       ok: true,
@@ -26,7 +27,7 @@ const mockBytesFetch = (body: string) => {
       arrayBuffer: () => Promise.resolve(bytes.buffer),
       json: () => Promise.resolve(JSON.parse(body)),
     } as Response;
-  }) as jest.Mock;
+  }) as Mock;
 };
 
 describe('createRemoteEntryProvider (integrity)', () => {

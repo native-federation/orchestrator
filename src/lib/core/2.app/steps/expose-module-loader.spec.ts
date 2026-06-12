@@ -20,8 +20,8 @@ describe('createExposeModuleLoader', () => {
   });
 
   it('should load a remote module if in storage', async () => {
-    adapters.remoteInfoRepo.contains = jest.fn(() => true);
-    adapters.remoteInfoRepo.tryGetModule = jest.fn(
+    adapters.remoteInfoRepo.contains = vi.fn(() => true);
+    adapters.remoteInfoRepo.tryGetModule = vi.fn(
       (): Optional<string> => Optional.of('http://my.service/mfe1/component-a.js')
     );
 
@@ -35,7 +35,7 @@ describe('createExposeModuleLoader', () => {
   });
 
   it('should throw an error if remote-info is not in storage', async () => {
-    adapters.remoteInfoRepo.contains = jest.fn(() => false);
+    adapters.remoteInfoRepo.contains = vi.fn(() => false);
 
     const loadRemoteModule = await exposeModuleLoader();
 
@@ -49,8 +49,8 @@ describe('createExposeModuleLoader', () => {
   });
 
   it('should throw an error if remote-info doesnt contain the module', async () => {
-    adapters.remoteInfoRepo.contains = jest.fn(() => true);
-    adapters.remoteInfoRepo.tryGetModule = jest.fn((): Optional<string> => Optional.empty());
+    adapters.remoteInfoRepo.contains = vi.fn(() => true);
+    adapters.remoteInfoRepo.tryGetModule = vi.fn((): Optional<string> => Optional.empty());
 
     const loadRemoteModule = await exposeModuleLoader();
 

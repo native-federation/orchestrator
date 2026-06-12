@@ -27,12 +27,12 @@ describe('createGenerateImportMap (chunk-imports)', () => {
     config = mockConfig();
     adapters = mockAdapters();
 
-    adapters.remoteInfoRepo.getAll = jest.fn(() => ({}));
-    adapters.scopedExternalsRepo.getAll = jest.fn(() => ({}));
-    adapters.sharedExternalsRepo.getFromScope = jest.fn(() => ({}));
-    adapters.sharedExternalsRepo.getScopes = jest.fn(() => []);
-    adapters.sharedChunksRepo.tryGet = jest.fn(() => Optional.empty());
-    adapters.remoteInfoRepo.tryGet = jest.fn(remote => {
+    adapters.remoteInfoRepo.getAll = vi.fn(() => ({}));
+    adapters.scopedExternalsRepo.getAll = vi.fn(() => ({}));
+    adapters.sharedExternalsRepo.getFromScope = vi.fn(() => ({}));
+    adapters.sharedExternalsRepo.getScopes = vi.fn(() => []);
+    adapters.sharedChunksRepo.tryGet = vi.fn(() => Optional.empty());
+    adapters.remoteInfoRepo.tryGet = vi.fn(remote => {
       if (remote === 'team/mfe1') return Optional.of(mockRemoteInfo_MFE1({ exposes: [] }));
       if (remote === 'team/mfe2') return Optional.of(mockRemoteInfo_MFE2({ exposes: [] }));
       return Optional.empty<RemoteInfo>();
@@ -42,7 +42,7 @@ describe('createGenerateImportMap (chunk-imports)', () => {
   });
 
   it('should not add chunk imports when no bundles are registered', async () => {
-    adapters.sharedExternalsRepo.getFromScope = jest.fn(() => ({
+    adapters.sharedExternalsRepo.getFromScope = vi.fn(() => ({
       'dep-a': mockExternal_A({
         dirty: false,
         versions: [mockVersion_A.v2_1_1({ action: 'share', remotes: ['team/mfe1'] })],
@@ -56,7 +56,7 @@ describe('createGenerateImportMap (chunk-imports)', () => {
   });
 
   it('should add chunk imports for shared externals with bundle', async () => {
-    adapters.sharedExternalsRepo.getFromScope = jest.fn(() => ({
+    adapters.sharedExternalsRepo.getFromScope = vi.fn(() => ({
       'dep-a': mockExternal_A({
         dirty: false,
         versions: [
@@ -67,7 +67,7 @@ describe('createGenerateImportMap (chunk-imports)', () => {
         ],
       }),
     }));
-    adapters.sharedChunksRepo.tryGet = jest.fn((remote, bundle) => {
+    adapters.sharedChunksRepo.tryGet = vi.fn((remote, bundle) => {
       if (remote === 'team/mfe1' && bundle === 'shared') {
         return Optional.of(['shared-chunk.js', 'utils-chunk.js']);
       }
@@ -86,7 +86,7 @@ describe('createGenerateImportMap (chunk-imports)', () => {
   });
 
   it('should add chunk imports for multiple bundles from same remote', async () => {
-    adapters.sharedExternalsRepo.getFromScope = jest.fn(() => ({
+    adapters.sharedExternalsRepo.getFromScope = vi.fn(() => ({
       'dep-a': mockExternal_A({
         dirty: false,
         versions: [
@@ -106,7 +106,7 @@ describe('createGenerateImportMap (chunk-imports)', () => {
         ],
       }),
     }));
-    adapters.sharedChunksRepo.tryGet = jest.fn((remote, bundle) => {
+    adapters.sharedChunksRepo.tryGet = vi.fn((remote, bundle) => {
       if (remote === 'team/mfe1' && bundle === 'shared') {
         return Optional.of(['shared-chunk.js']);
       }
@@ -130,7 +130,7 @@ describe('createGenerateImportMap (chunk-imports)', () => {
   });
 
   it('should add chunk imports for bundles from multiple remotes', async () => {
-    adapters.sharedExternalsRepo.getFromScope = jest.fn(() => ({
+    adapters.sharedExternalsRepo.getFromScope = vi.fn(() => ({
       'dep-a': mockExternal_A({
         dirty: false,
         versions: [
@@ -145,7 +145,7 @@ describe('createGenerateImportMap (chunk-imports)', () => {
         ],
       }),
     }));
-    adapters.sharedChunksRepo.tryGet = jest.fn((remote, bundle) => {
+    adapters.sharedChunksRepo.tryGet = vi.fn((remote, bundle) => {
       if (remote === 'team/mfe1' && bundle === 'shared') {
         return Optional.of(['mfe1-chunk.js']);
       }
@@ -166,7 +166,7 @@ describe('createGenerateImportMap (chunk-imports)', () => {
   });
 
   it('should handle chunk files with .mjs extension', async () => {
-    adapters.sharedExternalsRepo.getFromScope = jest.fn(() => ({
+    adapters.sharedExternalsRepo.getFromScope = vi.fn(() => ({
       'dep-a': mockExternal_A({
         dirty: false,
         versions: [
@@ -177,7 +177,7 @@ describe('createGenerateImportMap (chunk-imports)', () => {
         ],
       }),
     }));
-    adapters.sharedChunksRepo.tryGet = jest.fn(() => Optional.of(['shared-chunk.mjs']));
+    adapters.sharedChunksRepo.tryGet = vi.fn(() => Optional.of(['shared-chunk.mjs']));
 
     const actual = await generateImportMap();
 
@@ -187,7 +187,7 @@ describe('createGenerateImportMap (chunk-imports)', () => {
   });
 
   it('should handle chunk files with .cjs extension', async () => {
-    adapters.sharedExternalsRepo.getFromScope = jest.fn(() => ({
+    adapters.sharedExternalsRepo.getFromScope = vi.fn(() => ({
       'dep-a': mockExternal_A({
         dirty: false,
         versions: [
@@ -198,7 +198,7 @@ describe('createGenerateImportMap (chunk-imports)', () => {
         ],
       }),
     }));
-    adapters.sharedChunksRepo.tryGet = jest.fn(() => Optional.of(['shared-chunk.cjs']));
+    adapters.sharedChunksRepo.tryGet = vi.fn(() => Optional.of(['shared-chunk.cjs']));
 
     const actual = await generateImportMap();
 
@@ -208,12 +208,12 @@ describe('createGenerateImportMap (chunk-imports)', () => {
   });
 
   it('should add chunk imports for scoped externals with bundle', async () => {
-    adapters.scopedExternalsRepo.getAll = jest.fn(() => ({
+    adapters.scopedExternalsRepo.getAll = vi.fn(() => ({
       'team/mfe1': {
         'dep-a': { tag: '1.0.0', file: 'dep-a.js', bundle: 'scoped' },
       },
     }));
-    adapters.sharedChunksRepo.tryGet = jest.fn((remote, bundle) => {
+    adapters.sharedChunksRepo.tryGet = vi.fn((remote, bundle) => {
       if (remote === 'team/mfe1' && bundle === 'scoped') {
         return Optional.of(['scoped-chunk.js']);
       }
@@ -229,7 +229,7 @@ describe('createGenerateImportMap (chunk-imports)', () => {
   });
 
   it('should handle empty chunks array from repository', async () => {
-    adapters.sharedExternalsRepo.getFromScope = jest.fn(() => ({
+    adapters.sharedExternalsRepo.getFromScope = vi.fn(() => ({
       'dep-a': mockExternal_A({
         dirty: false,
         versions: [
@@ -240,7 +240,7 @@ describe('createGenerateImportMap (chunk-imports)', () => {
         ],
       }),
     }));
-    adapters.sharedChunksRepo.tryGet = jest.fn(() => Optional.of([]));
+    adapters.sharedChunksRepo.tryGet = vi.fn(() => Optional.of([]));
 
     const actual = await generateImportMap();
 

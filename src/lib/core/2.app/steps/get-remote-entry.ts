@@ -10,9 +10,7 @@ import { Optional } from 'lib/utils/optional';
 import type { RemoteEntry } from 'lib/core/1.domain';
 import * as _path from 'lib/utils/path';
 
-const normalizeRemoteRef = (
-  remote?: RemoteRef
-): { name?: RemoteName; integrity?: string } => {
+const normalizeRemoteRef = (remote?: RemoteRef): { name?: RemoteName; integrity?: string } => {
   if (!remote) return {};
   if (typeof remote === 'string') return { name: remote };
   return remote;

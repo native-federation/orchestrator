@@ -1,4 +1,9 @@
-import { ScopedExternal, ScopedVersion, SharedExternal, SharedVersion } from 'lib/core/1.domain';
+import {
+  ScopedExternal,
+  ScopedVersion,
+  SharedExternal,
+  SharedVersion,
+} from 'lib/core/1.domain';
 import {
   mockVersion_A,
   mockVersion_B,

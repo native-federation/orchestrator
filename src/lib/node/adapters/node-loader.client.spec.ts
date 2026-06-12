@@ -1,46 +1,52 @@
 /**
- * @jest-environment node
+ * @vitest-environment node
  */
 import type { ImportMap } from 'lib/core/1.domain';
 
-// jest.mock() factories may only reference variables prefixed `mock*`.
+// vi.mock() factories run before module-level declarations, so everything
+// they reference must be created inside vi.hoisted().
 
 type Handler = (msg: unknown) => void;
 
-class MockFakePort {
-  postMessage = jest.fn<void, [unknown]>();
-  unref = jest.fn<void, []>();
-  private handlers: Handler[] = [];
-  on(event: 'message', fn: Handler): this {
-    if (event === 'message') this.handlers.push(fn);
-    return this;
+const { MockFakePort, mockPorts, mockRegister } = vi.hoisted(() => {
+  class MockFakePort {
+    postMessage = vi.fn<(msg: unknown) => void>();
+    unref = vi.fn<() => void>();
+    private handlers: Handler[] = [];
+    on(event: 'message', fn: Handler): this {
+      if (event === 'message') this.handlers.push(fn);
+      return this;
+    }
+    off(event: 'message', fn: Handler): this {
+      if (event === 'message') this.handlers = this.handlers.filter(h => h !== fn);
+      return this;
+    }
+    /** Test helper: deliver a message to all current 'message' listeners. */
+    mockEmit(msg: unknown): void {
+      [...this.handlers].forEach(h => h(msg));
+    }
   }
-  off(event: 'message', fn: Handler): this {
-    if (event === 'message') this.handlers = this.handlers.filter(h => h !== fn);
-    return this;
-  }
-  /** Test helper: deliver a message to all current 'message' listeners. */
-  mockEmit(msg: unknown): void {
-    [...this.handlers].forEach(h => h(msg));
-  }
-}
 
-const mockPorts: { port1: MockFakePort; port2: MockFakePort }[] = [];
-const mockRegister = jest.fn();
+  const mockPorts: { port1: MockFakePort; port2: MockFakePort }[] = [];
+  const mockRegister = vi.fn();
 
-jest.mock('node:worker_threads', () => ({
-  MessageChannel: jest.fn(() => {
+  return { MockFakePort, mockPorts, mockRegister };
+});
+
+vi.mock('node:worker_threads', () => ({
+  // vitest 4: a mock called with `new` needs a `function` (not arrow) implementation.
+  MessageChannel: vi.fn(function () {
     const pair = { port1: new MockFakePort(), port2: new MockFakePort() };
     mockPorts.push(pair);
     return pair;
   }),
 }));
 
-jest.mock('node:module', () => ({
+vi.mock('node:module', () => ({
   register: (...args: unknown[]) => mockRegister(...args),
 }));
 
-jest.mock('./loader-url', () => ({
+vi.mock('./loader-url', () => ({
   getLoaderUrl: () => new URL('file:///fake/dist/node-loader/loader.mjs'),
 }));
 
@@ -293,10 +299,10 @@ describe('node-loader.client', () => {
 
   describe('with fake timers', () => {
     beforeEach(() => {
-      jest.useFakeTimers();
+      vi.useFakeTimers();
     });
     afterEach(() => {
-      jest.useRealTimers();
+      vi.useRealTimers();
     });
 
     it('rejects setMap when the loader does not acknowledge within the timeout', async () => {
@@ -308,7 +314,7 @@ describe('node-loader.client', () => {
       );
 
       await flushMicrotasks();
-      jest.advanceTimersByTime(NODE_LOADER_CLIENT_ACK_TIMEOUT_MS);
+      vi.advanceTimersByTime(NODE_LOADER_CLIENT_ACK_TIMEOUT_MS);
       const outcome = await settled;
       expect(outcome.ok).toBe(false);
       expect((outcome as { err: Error }).err.message).toMatch(/did not acknowledge/);
