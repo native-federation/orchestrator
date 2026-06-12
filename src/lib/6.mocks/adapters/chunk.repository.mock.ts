@@ -1,5 +1,5 @@
 import { ForSharedChunksStorage } from 'lib/2.app/driving-ports/for-shared-chunks-storage.port';
-import { Optional } from 'lib/sdk.index';
+import { Optional } from 'lib/utils/optional';
 
 export const mockChunkRepository = (): jest.Mocked<ForSharedChunksStorage> => ({
   addOrReplace: jest.fn(),

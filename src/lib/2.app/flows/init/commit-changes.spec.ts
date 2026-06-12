@@ -1,4 +1,4 @@
-import { LoggingConfig } from 'lib/options.index';
+import { LoggingConfig } from 'lib/2.app/config/log.contract';
 import { ForCommittingChanges } from '../../driver-ports/init/for-committing-changes.port';
 import { DrivingContract } from '../../driving-ports/driving.contract';
 import { createCommitChanges } from './commit-changes';

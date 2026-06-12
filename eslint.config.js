@@ -44,6 +44,16 @@ module.exports = [
                 prefer: 'type-imports',
             }],
             
+            // Entry-point barrels (lib/*.index.ts) define the published package API.
+            // Internal code must import concrete modules so the dependency graph
+            // between subpackages stays visible and free of accidental cycles.
+            'no-restricted-imports': ['error', {
+                patterns: [{
+                    group: ['**/*.index', '**/*.index.ts'],
+                    message: 'Entry-point barrels (*.index.ts) are for package consumers only. Import the concrete module instead.',
+                }],
+            }],
+
             // General rules
             'no-console': ['warn', { allow: ['warn', 'error'] }],
             'eqeqeq': ['error', 'always'],

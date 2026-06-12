@@ -9,7 +9,7 @@ import type {
   NFEventRegistryConfig,
   NFEventRegistryOptions,
 } from 'lib/2.app/config/registry.contract';
-import { cloneEntry } from 'lib/sdk.index';
+import { cloneEntry } from 'lib/utils/clone-entry';
 
 export function createRegistry(opts: NFEventRegistryOptions): ForManagingEvents {
   const cfg: NFEventRegistryConfig = {

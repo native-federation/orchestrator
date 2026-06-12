@@ -10,7 +10,7 @@ import { createSSEHandler } from './sse-handler';
 import { ForSSE } from 'lib/2.app/driving-ports/for-sse.port';
 import { BuildNotificationType } from '@softarc/native-federation/domain';
 import { mockConfig } from 'lib/6.mocks/config.mock';
-import { ConfigContract } from 'lib/options.index';
+import { ConfigContract } from 'lib/2.app/config/config.contract';
 
 describe('createSSEHandler', () => {
   let sseHandler: ForSSE;

@@ -10,7 +10,7 @@ import { createStorageHandlerMock } from 'lib/6.mocks/handlers/storage.mock';
 import { StorageConfig } from 'lib/2.app/config';
 import { mockVersion } from 'lib/6.mocks/domain/externals/version.mock';
 import { Optional } from 'lib/utils/optional';
-import { ForSharedExternalsStorage } from 'lib/sdk.index';
+import { ForSharedExternalsStorage } from 'lib/2.app/driving-ports/for-shared-externals-storage.port';
 import {
   mockExternal,
   mockExternal_A,

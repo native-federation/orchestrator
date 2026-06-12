@@ -5,7 +5,7 @@ import { createConvertToImportMap } from 'lib/2.app/flows/dynamic-init/convert-t
 import { createGetRemoteEntry } from 'lib/2.app/flows/dynamic-init/get-remote-entry';
 import { createUpdateCache } from 'lib/2.app/flows/dynamic-init/update-cache';
 import { createCommitChanges } from 'lib/2.app/flows/init/commit-changes';
-import type { DynamicInitDriversContract } from 'lib/audit.index';
+import type { DynamicInitDriversContract } from 'lib/2.app/driver-ports/dynamic-init/drivers.contract';
 import type { DrivingContract } from '../../2.app/driving-ports/driving.contract';
 import type { ConfigContract } from '../../2.app/config/config.contract';
 

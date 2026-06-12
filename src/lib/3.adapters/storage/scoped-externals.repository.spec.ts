@@ -3,7 +3,7 @@ import { createStorageHandlerMock } from 'lib/6.mocks/handlers/storage.mock';
 import { StorageConfig } from 'lib/2.app/config';
 import { mockVersion } from 'lib/6.mocks/domain/externals/version.mock';
 import { mockExternal_E, mockExternal_F } from 'lib/6.mocks/domain/externals/external.mock';
-import { ForScopedExternalsStorage } from 'lib/sdk.index';
+import { ForScopedExternalsStorage } from 'lib/2.app/driving-ports/for-scoped-externals-storage.port';
 import { Optional } from 'lib/utils/optional';
 import { ScopedExternal } from 'lib/1.domain';
 

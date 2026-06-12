@@ -1,7 +1,7 @@
 import type { StorageConfig, StorageEntry } from 'lib/2.app/config/storage.contract';
 import type { ForSharedChunksStorage } from 'lib/2.app/driving-ports/for-shared-chunks-storage.port';
 import type { SharedChunks } from 'lib/1.domain/externals/chunks.contract';
-import { Optional } from 'lib/sdk.index';
+import { Optional } from 'lib/utils/optional';
 
 const createChunkRepository = (config: StorageConfig): ForSharedChunksStorage => {
   const STORAGE: StorageEntry<SharedChunks> = config.storage('shared-chunks', {});

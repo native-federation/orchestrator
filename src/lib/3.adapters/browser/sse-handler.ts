@@ -1,7 +1,7 @@
 import { BuildNotificationType } from '@softarc/native-federation/domain';
 import type { ImportMapConfig } from 'lib/2.app/config/import-map.contract';
 import type { ForSSE } from 'lib/2.app/driving-ports/for-sse.port';
-import type { LoggingConfig } from 'lib/options.index';
+import type { LoggingConfig } from 'lib/2.app/config/log.contract';
 
 /**
  * Watches for federation build completion events and automatically reloads the page.

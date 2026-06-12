@@ -10,7 +10,8 @@ import {
   mockRemoteInfo_MFE2,
 } from 'lib/6.mocks/domain/remote-info/remote-info.mock';
 import { mockScopeUrl_MFE1, mockScopeUrl_MFE2 } from 'lib/6.mocks/domain/scope-url.mock';
-import { Optional, RemoteInfo } from 'lib/sdk.index';
+import { Optional } from 'lib/utils/optional';
+import { RemoteInfo } from 'lib/1.domain';
 
 describe('createGenerateImportMap (remoteInfos)', () => {
   let generateImportMap: ForGeneratingImportMap;

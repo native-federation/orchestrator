@@ -1,7 +1,7 @@
 import { createStorageHandlerMock } from 'lib/6.mocks/handlers/storage.mock';
 import { StorageConfig } from 'lib/2.app/config';
 import { createChunkRepository } from './chunk.repository';
-import { Optional } from 'lib/sdk.index';
+import { Optional } from 'lib/utils/optional';
 import { ChunkInfo } from '@softarc/native-federation/domain';
 
 describe('createChunkRepository', () => {

@@ -1,4 +1,4 @@
-import { createRegistry } from 'lib/registry.index';
+import { createRegistry } from 'lib/2.app/flows/registry/setup-registry';
 import type { NFEventRegistry } from './lib/1.domain/registry/event-registry.contract';
 import type { NFEventRegistryOptions } from './lib/2.app/config/registry.contract';
 

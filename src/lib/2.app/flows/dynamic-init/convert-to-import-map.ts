@@ -3,7 +3,7 @@ import type { RemoteEntry, SharedInfoActions } from 'lib/1.domain';
 import type { LoggingConfig } from '../../config/log.contract';
 import * as _path from 'lib/utils/path';
 import type { ForConvertingToImportMap } from 'lib/2.app/driver-ports/dynamic-init/for-converting-to-import-map';
-import type { DrivingContract } from 'lib/sdk.index';
+import type { DrivingContract } from 'lib/2.app/driving-ports/driving.contract';
 import { toChunkImport } from '@softarc/native-federation/domain';
 
 export function createConvertToImportMap(
