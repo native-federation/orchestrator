@@ -11,10 +11,7 @@ export { FederationManifest } from './core/1.domain/remote-entry/manifest.contra
 
 export { createConfigHandlers } from './core/5.di/config.factory';
 export { createDriving } from './core/5.di/driving.factory';
-export {
-  createInitDrivers,
-  INIT_FLOW_FACTORY,
-  createInitFlow,
-  createInitRemoteEntryFlow,
-} from './core/5.di/flows/init.factory';
+export { createInitDrivers, INIT_FLOW_FACTORY } from './core/5.di/init.factory';
+export { createInitFlow } from './core/2.app/flows/init.flow';
+export { createInitRemoteEntryFlow } from './core/2.app/flows/init-remote-entry.flow';
 export { createFederationResult, createStateDump } from './core/5.di/federation-result.factory';
