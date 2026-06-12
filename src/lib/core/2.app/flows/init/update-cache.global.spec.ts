@@ -275,7 +275,7 @@ describe('createProcessDynamicRemoteEntry - scoped', () => {
 
   it('should warn users if the requiredVersions differ and strictVersion', async () => {
     adapters.versionCheck.isCompatible = jest.fn(() => true);
-    config.strict.strictExternalCompatibility = false;
+    config.strict.strictExternalSameVersionCompatibility = false;
     adapters.sharedExternalsRepo.tryGet = jest.fn(
       (): Optional<SharedExternal> =>
         Optional.of(
@@ -320,13 +320,13 @@ describe('createProcessDynamicRemoteEntry - scoped', () => {
     });
     expect(config.log.warn).toHaveBeenCalledWith(
       8,
-      "[team/mfe1][dep-a@2.1.1] Required version '~2.1.1' does not match existing '~2.1.0'"
+      "[team/mfe1][dep-a@2.1.1] Required version-range '~2.1.1' does not match cached version-range '~2.1.0'"
     );
   });
 
   it('should throw an error if the requiredVersions differs if strictVersion and in strict mode', async () => {
     adapters.versionCheck.isCompatible = jest.fn(() => true);
-    config.strict.strictExternalCompatibility = true;
+    config.strict.strictExternalSameVersionCompatibility = true;
     adapters.sharedExternalsRepo.tryGet = jest.fn(
       (): Optional<SharedExternal> =>
         Optional.of(
@@ -351,7 +351,7 @@ describe('createProcessDynamicRemoteEntry - scoped', () => {
 
     expect(config.log.error).toHaveBeenCalledWith(
       8,
-      "[team/mfe1][dep-a@2.1.1] Required version '~2.1.1' does not match existing '~2.1.0'"
+      "[team/mfe1][dep-a@2.1.1] Required version-range '~2.1.1' does not match cached version-range '~2.1.0'"
     );
   });
 

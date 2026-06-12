@@ -357,6 +357,35 @@ describe('createProcessRemoteEntries - global', () => {
       );
     });
 
+    it('should merge into the cached version when version is missing but the fallback tag matches', async () => {
+      adapters.versionCheck.smallestVersion = jest.fn((): string => '2.1.2');
+      adapters.sharedExternalsRepo.tryGet = jest.fn(
+        (): Optional<SharedExternal> =>
+          Optional.of(
+            mockExternal.shared(
+              [mockVersion_A.v2_1_2({ remotes: ['team/mfe1'], action: 'skip' })],
+              { dirty: false }
+            )
+          )
+      );
+      const remoteEntries = [
+        mockRemoteEntry_MFE2({
+          exposes: [],
+          shared: [mockSharedInfo('dep-a', { requiredVersion: '~2.1.2', singleton: true })],
+        }),
+      ];
+
+      await processRemoteEntries(remoteEntries);
+
+      expect(adapters.sharedExternalsRepo.addOrUpdate).toHaveBeenCalledTimes(1);
+      const stored = (adapters.sharedExternalsRepo.addOrUpdate as jest.Mock).mock
+        .calls[0][1] as SharedExternal;
+      expect(stored.versions).toHaveLength(1);
+      expect(stored.versions[0]!.tag).toBe('2.1.2');
+      expect(stored.versions[0]!.remotes.map(r => r.name)).toEqual(['team/mfe1', 'team/mfe2']);
+      expect(stored.dirty).toBe(false);
+    });
+
     it('should add the correct requiredVersion from tag if empty', async () => {
       adapters.versionCheck.smallestVersion = jest.fn((): string => '2.1.1');
       adapters.sharedExternalsRepo.tryGet = jest.fn(

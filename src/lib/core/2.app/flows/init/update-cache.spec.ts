@@ -103,6 +103,36 @@ describe('createProcessDynamicRemoteEntry', () => {
       );
       expect(actual.actions).toEqual({});
     });
+
+    it('should propagate the integrity map onto the stored RemoteInfo', async () => {
+      const integrity = { 'component-a.js': 'sha384-CMP-A' };
+      const remoteEntry = mockRemoteEntry_MFE1({
+        override: false,
+        shared: [],
+        exposes: [mockExposedModuleA()],
+        integrity,
+      });
+
+      await updateCache(remoteEntry);
+
+      expect(adapters.remoteInfoRepo.addOrUpdate).toHaveBeenCalledWith('team/mfe1', {
+        ...mockRemoteInfo_MFE1({ exposes: [mockRemoteModuleA()] }),
+        integrity,
+      });
+    });
+
+    it('should omit integrity from the stored RemoteInfo when remoteEntry has none', async () => {
+      const remoteEntry = mockRemoteEntry_MFE1({
+        override: false,
+        shared: [],
+        exposes: [mockExposedModuleA()],
+      });
+
+      await updateCache(remoteEntry);
+
+      const stored = (adapters.remoteInfoRepo.addOrUpdate as jest.Mock).mock.calls[0][1];
+      expect(stored).not.toHaveProperty('integrity');
+    });
   });
 
   describe('handling a missing version property', () => {
