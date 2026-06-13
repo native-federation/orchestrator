@@ -15,7 +15,7 @@ jobs:
         with:
           node-version: "24.x"
       - name: Setup PNPM
-        uses: pnpm/action-setup@v2
+        uses: pnpm/action-setup@v4
         with:
           version: 11
 
@@ -32,7 +32,7 @@ jobs:
         run: pnpm test-ci
 
       - name: Generating coverage badges
-        uses: jpb06/coverage-badges-action@latest
+        uses: jpb06/coverage-badges-action@6bebba3f008cb03c2be0ff9b148c663df30cde4b # v1.4.11
         with:
           branches: "main"
           target-branch: badges
