@@ -5,3 +5,5 @@ lockfileIncludeTarballUrl: true
 minimumReleaseAge: 4320
 minimumReleaseAgeExclude:
   - "@softarc/*"
+  # Renovate security update: esbuild@0.28.1
+  - esbuild@0.28.1
