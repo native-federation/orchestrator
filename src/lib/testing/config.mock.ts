@@ -28,6 +28,7 @@ export const mockConfig = (): ConfigContract => ({
   },
   profile: {
     latestSharedExternal: false,
+    skipInvalidExternalVersions: false,
     overrideCachedRemotes: 'always',
     overrideCachedRemotesIfURLMatches: false,
   },

@@ -7,6 +7,7 @@ describe('config.mode', () => {
     const config = createModeConfig({ profile: defaultProfile });
     expect(config.profile).toEqual({
       latestSharedExternal: false,
+      skipInvalidExternalVersions: false,
       overrideCachedRemotes: 'init-only',
       overrideCachedRemotesIfURLMatches: false,
     });
@@ -15,6 +16,7 @@ describe('config.mode', () => {
     const config = createModeConfig({ profile: cachingProfile });
     expect(config.profile).toEqual({
       latestSharedExternal: false,
+      skipInvalidExternalVersions: false,
       overrideCachedRemotes: 'never',
       overrideCachedRemotesIfURLMatches: false,
     });

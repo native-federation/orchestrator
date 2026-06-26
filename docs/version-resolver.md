@@ -364,6 +364,21 @@ flowchart TD
     D --> J[Ready for import map generation]
 ```
 
+#### Version Validation
+
+An external's `version` is optional and may be missing or non-semver. Before it is stored, an invalid version is handled in precedence order: throw, skip, or coerce (default). The result is always valid semver.
+
+```mermaid
+flowchart TD
+    A[For each external] --> B{Version valid semver?}
+    B -->|Yes| C[Use version as tag]
+    B -->|No| D{strict.strictExternalVersion?}
+    D -->|Yes| E[Throw NFError]
+    D -->|No| F{profile.skipInvalidExternalVersions?}
+    F -->|Yes| G[Skip external]
+    F -->|No| H[Coerce to smallest version of requiredVersion range]
+```
+
 #### Determine Shared Versions
 
 When the shared externals have been discovered, it is time for the resolver to determine which version to share of each shared external. This processs is partially based on the provided config of the user. There are multiple scopes, 1 global and 1 for each shareScope, the resolver loops through the scopes as follows:
@@ -953,6 +968,11 @@ await initFederation(manifest, {
   // Skip cached remotes for performance
   profile: {
     overrideCachedRemotes: 'never',
+  },
+
+  // Drop externals with a missing/invalid version instead of coercing them
+  profile: {
+    skipInvalidExternalVersions: true,
   },
 
   // Fail on version conflicts in any scope

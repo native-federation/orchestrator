@@ -8,10 +8,7 @@ import { SharedExternal } from 'lib/core/1.domain';
 import { mockConfig } from 'lib/testing/config.mock';
 import { mockAdapters } from 'lib/testing/adapters.mock';
 import { mockRemoteEntry_MFE1 } from 'lib/testing/domain/remote-entry/remote-entry.mock';
-import {
-  mockSharedInfo,
-  mockSharedInfoE,
-} from 'lib/testing/domain/remote-entry/shared-info.mock';
+import { mockSharedInfo, mockSharedInfoE } from 'lib/testing/domain/remote-entry/shared-info.mock';
 import { mockScopedVersion, mockVersion_E } from 'lib/testing/domain/externals/version.mock';
 
 describe('createProcessRemoteEntries - scoped', () => {
@@ -64,6 +61,26 @@ describe('createProcessRemoteEntries - scoped', () => {
       expect(config.log.warn).toHaveBeenCalledWith(
         2,
         "[team/mfe1][dep-e] Version 'undefined' is not a valid version."
+      );
+    });
+
+    it('should skip the external when version is invalid and skipInvalidExternalVersions is set', async () => {
+      config.profile.skipInvalidExternalVersions = true;
+      adapters.versionCheck.isValidSemver = vi.fn(() => false);
+      const remoteEntries = [
+        mockRemoteEntry_MFE1({
+          shared: [
+            mockSharedInfo('dep-e', { version: 'not-a-version', requiredVersion: '~1.2.1' }),
+          ],
+        }),
+      ];
+
+      await processRemoteEntries(remoteEntries);
+
+      expect(adapters.scopedExternalsRepo.addExternal).not.toHaveBeenCalled();
+      expect(config.log.warn).toHaveBeenCalledWith(
+        2,
+        "[team/mfe1][dep-e] Version 'not-a-version' is not a valid version. Skipping external."
       );
     });
   });
