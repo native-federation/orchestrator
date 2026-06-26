@@ -1,5 +1,6 @@
 export type ModeProfileConfig = {
   latestSharedExternal: boolean;
+  skipInvalidExternalVersions: boolean;
   overrideCachedRemotes: 'always' | 'never' | 'init-only';
   overrideCachedRemotesIfURLMatches: boolean;
 };

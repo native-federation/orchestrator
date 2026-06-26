@@ -13,10 +13,7 @@ import {
   mockRemoteEntry_MFE1,
   mockRemoteEntry_MFE2,
 } from 'lib/testing/domain/remote-entry/remote-entry.mock';
-import {
-  mockSharedInfo,
-  mockSharedInfoA,
-} from 'lib/testing/domain/remote-entry/shared-info.mock';
+import { mockSharedInfo, mockSharedInfoA } from 'lib/testing/domain/remote-entry/shared-info.mock';
 import { mockExternal } from 'lib/testing/domain/externals/external.mock';
 import { mockVersion, mockVersion_A } from 'lib/testing/domain/externals/version.mock';
 
@@ -414,6 +411,102 @@ describe('createProcessRemoteEntries - global', () => {
       expect(config.log.warn).toHaveBeenCalledWith(
         2,
         "[team/mfe1][dep-a] Version 'undefined' is not a valid version."
+      );
+    });
+
+    it('should coerce an empty-string version to the fallback tag in non-strict mode', async () => {
+      adapters.versionCheck.smallestVersion = vi.fn((): string => '2.1.1');
+      adapters.sharedExternalsRepo.tryGet = vi.fn((): Optional<SharedExternal> => Optional.empty());
+      const remoteEntries = [
+        mockRemoteEntry_MFE1({
+          shared: [
+            mockSharedInfo('dep-a', { version: '', requiredVersion: '~2.1.1', singleton: true }),
+          ],
+        }),
+      ];
+
+      await processRemoteEntries(remoteEntries);
+
+      expect(adapters.sharedExternalsRepo.addOrUpdate).toHaveBeenCalledTimes(1);
+      expect(adapters.sharedExternalsRepo.addOrUpdate).toHaveBeenCalledWith(
+        'dep-a',
+        mockExternal.shared(
+          [
+            mockVersion.shared('2.1.1', 'dep-a', {
+              remotes: { 'team/mfe1': { requiredVersion: '~2.1.1' } },
+              action: 'skip',
+            }),
+          ],
+          { dirty: true }
+        ),
+        undefined
+      );
+      expect(config.log.warn).toHaveBeenCalledWith(
+        2,
+        "[team/mfe1][dep-a] Version '' is not a valid version."
+      );
+    });
+
+    it('should coerce a non-semver version to the fallback tag in non-strict mode', async () => {
+      adapters.versionCheck.isValidSemver = vi.fn(() => false);
+      adapters.versionCheck.smallestVersion = vi.fn((): string => '2.1.1');
+      adapters.sharedExternalsRepo.tryGet = vi.fn((): Optional<SharedExternal> => Optional.empty());
+      const remoteEntries = [
+        mockRemoteEntry_MFE1({
+          shared: [
+            mockSharedInfo('dep-a', {
+              version: 'not-a-version',
+              requiredVersion: '~2.1.1',
+              singleton: true,
+            }),
+          ],
+        }),
+      ];
+
+      await processRemoteEntries(remoteEntries);
+
+      expect(adapters.sharedExternalsRepo.addOrUpdate).toHaveBeenCalledTimes(1);
+      expect(adapters.sharedExternalsRepo.addOrUpdate).toHaveBeenCalledWith(
+        'dep-a',
+        mockExternal.shared(
+          [
+            mockVersion.shared('2.1.1', 'dep-a', {
+              remotes: { 'team/mfe1': { requiredVersion: '~2.1.1' } },
+              action: 'skip',
+            }),
+          ],
+          { dirty: true }
+        ),
+        undefined
+      );
+      expect(config.log.warn).toHaveBeenCalledWith(
+        2,
+        "[team/mfe1][dep-a] Version 'not-a-version' is not a valid version."
+      );
+    });
+
+    it('should skip the external when version is invalid and skipInvalidExternalVersions is set', async () => {
+      config.profile.skipInvalidExternalVersions = true;
+      adapters.versionCheck.isValidSemver = vi.fn(() => false);
+      adapters.sharedExternalsRepo.tryGet = vi.fn((): Optional<SharedExternal> => Optional.empty());
+      const remoteEntries = [
+        mockRemoteEntry_MFE1({
+          shared: [
+            mockSharedInfo('dep-a', {
+              version: 'not-a-version',
+              requiredVersion: '~2.1.1',
+              singleton: true,
+            }),
+          ],
+        }),
+      ];
+
+      await processRemoteEntries(remoteEntries);
+
+      expect(adapters.sharedExternalsRepo.addOrUpdate).not.toHaveBeenCalled();
+      expect(config.log.warn).toHaveBeenCalledWith(
+        2,
+        "[team/mfe1][dep-a] Version 'not-a-version' is not a valid version. Skipping external."
       );
     });
   });

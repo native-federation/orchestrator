@@ -53,6 +53,7 @@ describe('DefaultConfig', () => {
         },
         profile: {
           latestSharedExternal: false,
+          skipInvalidExternalVersions: false,
           overrideCachedRemotes: 'init-only',
           overrideCachedRemotesIfURLMatches: false,
         },

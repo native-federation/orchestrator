@@ -30,10 +30,10 @@ export type HostOptions = {
 
 ### Options:
 
-| Option            | Default     | Description                                                                                                                                                                              |
-| ----------------- | ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Option            | Default     | Description                                                                                                                                                                                          |
+| ----------------- | ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | hostRemoteEntry   | `false`     | Allows for the inclusion of a host remoteEntry.json file. The optional `integrity` field pins the host's remoteEntry.json against an SRI hash (see [Security](./security.md#subresource-integrity)). |
-| manifestIntegrity | `undefined` | SRI hash for the manifest URL passed as the first argument to `initFederation`. When set, the orchestrator verifies the manifest bytes before parsing.                                   |
+| manifestIntegrity | `undefined` | SRI hash for the manifest URL passed as the first argument to `initFederation`. When set, the orchestrator verifies the manifest bytes before parsing.                                               |
 
 ### Example
 
@@ -88,11 +88,11 @@ export type ImportMapOptions = {
 
 ### Options:
 
-| Option                 | Default                             | Description                                                                                                                                                                                                                                |
-| ---------------------- | ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| setImportMapFn         | `replaceInDOM("importmap")`         | The function that adds the importmap to the host, by default this is the DOM.                                                                                                                                                              |
-| loadModuleFn           | `url => import(url)`                | This function can mock or alter the 'import' function, necessary for libraries that shim the import function.                                                                                                                              |
-| reloadBrowserFn        | `() => {window.location.reload();}` | This function can mock or alter the "reload browser" behavior that is triggered when SSE is enabled and an user rebuilds a remote.                                                                                                         |
+| Option                 | Default                             | Description                                                                                                                                                                                                                                   |
+| ---------------------- | ----------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| setImportMapFn         | `replaceInDOM("importmap")`         | The function that adds the importmap to the host, by default this is the DOM.                                                                                                                                                                 |
+| loadModuleFn           | `url => import(url)`                | This function can mock or alter the 'import' function, necessary for libraries that shim the import function.                                                                                                                                 |
+| reloadBrowserFn        | `() => {window.location.reload();}` | This function can mock or alter the "reload browser" behavior that is triggered when SSE is enabled and an user rebuilds a remote.                                                                                                            |
 | trustedTypesPolicyName | `"nfo"`                             | Name of the [Trusted Types](./security.md) policy that wraps import-map content and dynamic-import URLs in the default `setImportMapFn` and `loadModuleFn`. Pass `false` to opt out. No effect on browsers that do not support Trusted Types. |
 
 ### Example
@@ -172,6 +172,7 @@ export type ModeOptions = {
   };
   profile?: {
     latestSharedExternal?: boolean;
+    skipInvalidExternalVersions?: boolean;
     overrideCachedRemotes?: 'always' | 'never' | 'init-only';
     overrideCachedRemotesIfURLMatches?: boolean;
   };
@@ -190,7 +191,7 @@ The strictness part will define how the orchestrator behaves when an unexpected 
 | strict.strictRemoteEntry                      | `false` | Will throw an error if anything is wrong with a fetched remoteEntry.json. When false, the remote will be skipped if something goes wrong.                                                                                                                                                                                                                                                                                                        |
 | strict.strictExternalCompatibility            | `false` | Will throw an error if any of the shared externals are incompatible with other shared external versions. If the value is false, the external will be set to "scoped" instead of "shared".                                                                                                                                                                                                                                                        |
 | strict.strictExternalSameVersionCompatibility | `false` | This is an extreme niche edge case. Will throw an error if the external's shared version (e.g. rxjs version 1.2.3) was already processed and cached, but the to-be-processed versionRange is different than the cached versionRange. This hypothetically could cause an issue when the "chosen" version was removed and this fallback was chosen as the new shared version since it supports a different version range according to the metadata |
-| strict.strictExternalVersion                  | `false` | Will throw an error if the version of an external is not valid semver or missing. If the value is set to false, the 1st version that matches the requiredVersion range of the external is chosen.                                                                                                                                                                                                                                                |
+| strict.strictExternalVersion                  | `false` | Will throw an error if the version of an external is not valid semver or missing. When false, the external is instead coerced to the smallest version that matches its requiredVersion range — unless `profile.skipInvalidExternalVersions` is enabled, in which case the external is skipped. Takes precedence over `profile.skipInvalidExternalVersions`.                                                                                      |
 | strict.strictImportMap                        | `false` | Will throw an error if anything goes wrong during the buildup of the importMap. (If something is wrong with the cached externals or the cache is corrupt).                                                                                                                                                                                                                                                                                       |
 
 #### Profiles
@@ -198,6 +199,7 @@ The strictness part will define how the orchestrator behaves when an unexpected 
 | Option                                    | Default     | Description                                                                                                                                                                                                                                                                         |
 | ----------------------------------------- | ----------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | profile.latestSharedExternal              | `false`     | When enabled, the version resolver will prioritize using the latest version of a shared external over the most optimal version.                                                                                                                                                     |
+| profile.skipInvalidExternalVersions       | `false`     | When enabled, an external whose version is not valid semver or missing is skipped (not added to storage) instead of being coerced to the smallest version of its requiredVersion range. Has no effect when `strict.strictExternalVersion` is set, which throws instead.             |
 | profile.overrideCachedRemotes             | `init-only` | When enabled, the library will override the cached remotes. The default behavior is to check if the remoteName is in the cache and the remoteEntry url differs from cached remoteEntry url (scopeUrl + "remoteEntry.json) . Available options are `never`, `init-only` and `always` |
 | profile.overrideCachedRemotesIfURLMatches | `false`     | When enabled, the library will override the cached remote, even if the remoteName already exists in cache and the remoteEntry.json URL matches the cached remoteEntry.json url.                                                                                                     |
 

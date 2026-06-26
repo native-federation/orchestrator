@@ -82,11 +82,13 @@ export function createStoreRemoteEntry(
     onSharedExternal: SharedExternalHandler
   ): void {
     remoteEntry.shared.forEach(external => {
-      validateExternalVersion(remoteEntry, external);
+      const tag = resolveVersion(remoteEntry, external);
+      if (tag === null) return;
+
       if (external.singleton) {
-        onSharedExternal(remoteEntry, external, sharedExternalContext(remoteEntry, external));
+        onSharedExternal(remoteEntry, external, sharedExternalContext(remoteEntry, external, tag));
       } else {
-        addScopedExternal(remoteEntry, external);
+        addScopedExternal(remoteEntry, external, tag);
       }
     });
   }
@@ -102,32 +104,37 @@ export function createStoreRemoteEntry(
     });
   }
 
-  function addScopedExternal(remoteEntry: RemoteEntry, sharedInfo: SharedInfo): void {
+  function addScopedExternal(remoteEntry: RemoteEntry, sharedInfo: SharedInfo, tag: string): void {
     ports.scopedExternalsRepo.addExternal(remoteEntry.name, sharedInfo.packageName, {
-      tag: sharedInfo.version ?? ports.versionCheck.smallestVersion(sharedInfo.requiredVersion),
+      tag,
       file: sharedInfo.outFileName,
       bundle: sharedInfo.bundle,
     } as ScopedVersion);
   }
 
-  function validateExternalVersion(remoteEntry: RemoteEntry, external: SharedInfo): void {
-    if (!external.version || !ports.versionCheck.isValidSemver(external.version)) {
-      const errorMsg = `[${remoteEntry.name}][${external.packageName}] Version '${external.version}' is not a valid version.`;
-
-      if (config.strict.strictExternalVersion) {
-        config.log.error(logStep, errorMsg);
-        throw new NFError(`Could not process remote '${remoteEntry.name}'`);
-      }
-      config.log.warn(logStep, errorMsg);
+  function resolveVersion(remoteEntry: RemoteEntry, external: SharedInfo): string | null {
+    if (external.version && ports.versionCheck.isValidSemver(external.version)) {
+      return external.version;
     }
+
+    const errorMsg = `[${remoteEntry.name}][${external.packageName}] Version '${external.version}' is not a valid version.`;
+    if (config.strict.strictExternalVersion) {
+      config.log.error(logStep, errorMsg);
+      throw new NFError(`Could not process remote '${remoteEntry.name}'`);
+    }
+    if (config.profile.skipInvalidExternalVersions) {
+      config.log.warn(logStep, `${errorMsg} Skipping external.`);
+      return null;
+    }
+    config.log.warn(logStep, errorMsg);
+    return ports.versionCheck.smallestVersion(external.requiredVersion);
   }
 
   function sharedExternalContext(
     remoteEntry: RemoteEntry,
-    sharedInfo: SharedInfo
+    sharedInfo: SharedInfo,
+    tag: string
   ): SharedExternalContext {
-    const tag =
-      sharedInfo.version ?? ports.versionCheck.smallestVersion(sharedInfo.requiredVersion);
     const scopeType = ports.sharedExternalsRepo.scopeType(sharedInfo.shareScope);
 
     const remote: SharedVersionMeta = {
