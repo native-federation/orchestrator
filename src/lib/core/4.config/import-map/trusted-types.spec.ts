@@ -70,6 +70,33 @@ describe('getTrustedTypesPolicy', () => {
     });
   });
 
+  describe('native return-value handling', () => {
+    const trustedScript = { toString: () => '{"imports":{}}' };
+    const trustedScriptURL = { toString: () => 'https://example.test/a.js' };
+
+    beforeEach(() => {
+      const createPolicy = vi.fn(() => ({
+        createScript: () => trustedScript,
+        createScriptURL: () => trustedScriptURL,
+      }));
+      (globalThis as { trustedTypes?: unknown }).trustedTypes = { createPolicy };
+    });
+
+    it('returns the genuine TrustedScript object from createScript', () => {
+      const policy = getTrustedTypesPolicy();
+      const result = policy.createScript('{"imports":{}}');
+      expect(result).toBe(trustedScript);
+      expect(typeof result).toBe('object');
+    });
+
+    it('coerces the TrustedScriptURL to a string from createScriptURL', () => {
+      const policy = getTrustedTypesPolicy();
+      const result = policy.createScriptURL('https://example.test/a.js');
+      expect(result).toBe('https://example.test/a.js');
+      expect(typeof result).toBe('string');
+    });
+  });
+
   describe('createScript validator', () => {
     let validator: (input: string) => string;
 
