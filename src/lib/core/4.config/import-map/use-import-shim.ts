@@ -10,7 +10,7 @@ const useShimImportMap = (
 ): ImportMapConfig => ({
   loadModuleFn: url => {
     const trusted = getTrustedTypesPolicy(trustedTypesPolicyName).createScriptURL(url);
-    return importShim(String(trusted));
+    return importShim(trusted);
   },
   setImportMapFn: replaceInDOM(
     cfg.shimMode ? 'importmap-shim' : 'importmap',

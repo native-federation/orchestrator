@@ -6,9 +6,11 @@ type TTPolicyRules = {
   createScriptURL?: TTCreateScriptURL;
 };
 
+type TrustedValue = { toString(): string };
+
 type TTPolicy = {
-  createScript: TTCreateScript;
-  createScriptURL: TTCreateScriptURL;
+  createScript: (input: string) => TrustedValue;
+  createScriptURL: (input: string) => TrustedValue;
 };
 
 type TTFactory = {
@@ -16,7 +18,8 @@ type TTFactory = {
 };
 
 export type NFTrustedTypesPolicy = {
-  createScript: (input: string) => string;
+  // `script.text` is a TrustedScript sink, so this must stay the genuine object.
+  createScript: (input: string) => TrustedValue;
   createScriptURL: (input: string) => string;
 };
 
@@ -81,8 +84,8 @@ export const getTrustedTypesPolicy = (
   });
 
   cachedPolicy = {
-    createScript: input => native.createScript(input) as unknown as string,
-    createScriptURL: input => native.createScriptURL(input) as unknown as string,
+    createScript: input => native.createScript(input),
+    createScriptURL: input => String(native.createScriptURL(input)),
   };
   return cachedPolicy;
 };
