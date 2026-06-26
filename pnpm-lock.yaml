@@ -1703,11 +1703,11 @@ packages:
     resolution: {integrity: sha512-Bf+ILmBgretUrdJxzXM0SgXLZ3XfiaUuOj/IKQHuTXip+05Xn+uyEYdVg0kYDipTBcLrCVyUzAPz7QmArb0mmw==, tarball: https://registry.npmjs.org/tinyrainbow/-/tinyrainbow-3.1.0.tgz}
     engines: {node: '>=14.0.0'}
 
-  tldts-core@7.4.3:
-    resolution: {integrity: sha512-27ep5H9PzdBrNd5OFM/j3WCU8F3kPwM9D0BOaOf7uYfxMJfyr0K5Tjj69Gri+sZlh2WXd5buIm47NuPF29CDiw==, tarball: https://registry.npmjs.org/tldts-core/-/tldts-core-7.4.3.tgz}
+  tldts-core@7.4.4:
+    resolution: {integrity: sha512-vwVLJVvvpslm7vqAH7+XNj/neA/Ynq7DT2EEcMuwc5YzN5XaMyRAqxwU+uX3azZ1FQtB2gvrvnLnAEkvYlVdfg==, tarball: https://registry.npmjs.org/tldts-core/-/tldts-core-7.4.4.tgz}
 
-  tldts@7.4.3:
-    resolution: {integrity: sha512-A3BDQBeeukYPzB4QdQ1DtdlUmp4x2OCH8n5UVhEWbyANxNep8GavottKzd1xYKFJKjUgMyPT7EzOfnBO55s8Sg==, tarball: https://registry.npmjs.org/tldts/-/tldts-7.4.3.tgz}
+  tldts@7.4.4:
+    resolution: {integrity: sha512-kFXFK7O4WPextIUAOk8qtnw9dxR9UIXP9CjuH1cTBVBZMDeQcUPgr/IazGiw1B0Yiw5L75gHLWeW4iD793r90g==, tarball: https://registry.npmjs.org/tldts/-/tldts-7.4.4.tgz}
     hasBin: true
 
   to-regex-range@5.0.1:
@@ -3329,11 +3329,11 @@ snapshots:
 
   tinyrainbow@3.1.0: {}
 
-  tldts-core@7.4.3: {}
+  tldts-core@7.4.4: {}
 
-  tldts@7.4.3:
+  tldts@7.4.4:
     dependencies:
-      tldts-core: 7.4.3
+      tldts-core: 7.4.4
 
   to-regex-range@5.0.1:
     dependencies:
@@ -3341,7 +3341,7 @@ snapshots:
 
   tough-cookie@6.0.1:
     dependencies:
-      tldts: 7.4.3
+      tldts: 7.4.4
 
   tr46@6.0.0:
     dependencies:
