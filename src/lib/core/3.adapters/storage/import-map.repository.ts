@@ -19,6 +19,23 @@ const createImportMapRepository = (config: StorageConfig): ForImportMapStorage =
       _cache = importMap;
       return this;
     },
+    merge: function (importMap: ImportMap) {
+      const merged: ImportMap = { imports: { ..._cache.imports, ...importMap.imports } };
+
+      if (_cache.scopes || importMap.scopes) {
+        merged.scopes = { ..._cache.scopes };
+        for (const [scope, imports] of Object.entries(importMap.scopes ?? {})) {
+          merged.scopes[scope] = { ...merged.scopes[scope], ...imports };
+        }
+      }
+
+      if (_cache.integrity || importMap.integrity) {
+        merged.integrity = { ..._cache.integrity, ...importMap.integrity };
+      }
+
+      _cache = merged;
+      return this;
+    },
     commit: function () {
       STORAGE.set(_cache);
       return this;

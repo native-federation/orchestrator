@@ -13,7 +13,7 @@ export const createInitFlow = ({
       .then(flow.processRemoteEntries)
       .then(flow.determineSharedExternals)
       .then(flow.generateImportMap)
-      .then(flow.commitChanges)
+      .then(importMap => flow.commitChanges(importMap, { override: true }))
       .then(flow.exposeModuleLoader)
       .then(loadRemoteModule => ({
         config,
