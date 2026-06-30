@@ -44,7 +44,9 @@ re-derives the resolver's scope/skip/override decisions.
 
 ```ts
 getShared({
-  // Mark the externals as MF singletons. Default: true.
+  // Mark the externals as MF singletons. When omitted, an external is a
+  // singleton only when native federation resolved exactly one shared version
+  // for it (the strict scope may share several exact versions side by side).
   singleton: true,
 
   // When set, requiredVersion is built as `prefix + version` (the v3 behaviour),

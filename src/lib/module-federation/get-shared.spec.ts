@@ -41,7 +41,7 @@ describe('createGetShared', () => {
   const RXJS_URL = 'https://cdn.test/host/rxjs.js';
 
   describe('global scope', () => {
-    it('maps a globally shared external to the webpack MF ShareConfig shape', () => {
+    it('maps a globally shared external to the webpack MF ShareInfos shape', () => {
       const ports = setup(
         global(
           {

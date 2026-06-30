@@ -1,11 +1,11 @@
 import type { DrivingContract } from 'lib/core/2.app/driving-ports/driving.contract';
 import type { ImportMap, SharedVersion } from 'lib/core/1.domain';
-import type { GetSharedOptions, ShareConfig, ShareObject } from './share-config.contract';
+import type { GetSharedOptions, ShareInfos, Shared } from './share-infos.contract';
 
 /**
  * Adapts native federation's shared externals to webpack Module Federation.
  *
- * Converts the orchestrator's shared externals into the `ShareConfig` shape
+ * Converts the orchestrator's shared externals into the `ShareInfos` shape
  * webpack MF expects, so an app using both federation systems can hand native
  * federation's singletons straight to MF (e.g. `init({ shared })`):
  *
@@ -30,9 +30,9 @@ export function createGetShared(
     DrivingContract,
     'sharedExternalsRepo' | 'remoteInfoRepo' | 'importMapRepo' | 'browser'
   >
-): (options?: GetSharedOptions) => ShareConfig {
+): (options?: GetSharedOptions) => ShareInfos {
   return (options = {}) => {
-    const shared: ShareConfig = {};
+    const shared: ShareInfos = {};
     const importMap = ports.importMapRepo.get();
 
     for (const scope of ports.sharedExternalsRepo.getScopes({ includeGlobal: true })) {
@@ -52,7 +52,7 @@ export function createGetShared(
               : resolveScopedUrl(importMap, version, packageName);
           if (!url) continue;
 
-          const shareObject: ShareObject = {
+          const shareObject: Shared = {
             version: version.tag,
             get: () => ports.browser.importModule(url).then(module => () => module),
             shareConfig: {

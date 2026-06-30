@@ -1,11 +1,21 @@
 /**
- * The object shape webpack Module Federation expects for its `shared` config
+ * The object shapes webpack Module Federation expects for its `shared` config
  * (the input to `init({ shared })` / `createInstance({ shared })`).
  *
- * These types mirror what `@softarc/native-federation-runtime@3.x` exposed from
- * `getShared()`, so the orchestrator's bridge stays a drop-in for that API.
+ * The type names mirror Module Federation's own (`ShareInfos`, `Shared`,
+ * `SharedConfig`), so what `getShared()` returns lines up with the types a
+ * consumer already sees on the MF side.
  */
-export type ShareObject = {
+
+/** The per-package config flags — MF's `SharedConfig`. */
+export type SharedConfig = {
+  singleton?: boolean;
+  requiredVersion: string;
+  strictVersion?: boolean;
+};
+
+/** A single shared descriptor — MF's `Shared`. */
+export type Shared = {
   version: string;
   /**
    * The Module Federation share scope. Omitted for native federation's global
@@ -15,15 +25,12 @@ export type ShareObject = {
    */
   scope?: string;
   get: () => Promise<() => unknown>;
-  shareConfig?: {
-    singleton?: boolean;
-    requiredVersion: string;
-    strictVersion?: boolean;
-  };
+  shareConfig?: SharedConfig;
 };
 
-export type ShareConfig = {
-  [packageName: string]: Array<ShareObject>;
+/** The whole `shared` map (package name → descriptors) — MF's `ShareInfos`. */
+export type ShareInfos = {
+  [packageName: string]: Array<Shared>;
 };
 
 export type GetSharedOptions = {
