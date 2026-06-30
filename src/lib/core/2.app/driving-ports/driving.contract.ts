@@ -7,6 +7,7 @@ import type { ForScopedExternalsStorage } from './for-scoped-externals-storage.p
 import type { ForSharedExternalsStorage } from './for-shared-externals-storage.port';
 import type { ForSSE } from './for-sse.port';
 import type { ForSharedChunksStorage } from './for-shared-chunks-storage.port';
+import type { ForImportMapStorage } from './for-import-map-storage.port';
 
 export type DrivingContract = {
   versionCheck: ForVersionChecking;
@@ -16,6 +17,7 @@ export type DrivingContract = {
   scopedExternalsRepo: ForScopedExternalsStorage;
   sharedExternalsRepo: ForSharedExternalsStorage;
   sharedChunksRepo: ForSharedChunksStorage;
+  importMapRepo: ForImportMapStorage;
   browser: ForBrowserTasks;
   sse: ForSSE;
 };

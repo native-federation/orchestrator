@@ -11,6 +11,7 @@ export function createCommitChanges(
     | 'scopedExternalsRepo'
     | 'sharedExternalsRepo'
     | 'sharedChunksRepo'
+    | 'importMapRepo'
     | 'browser'
   >
 ): ForCommittingChanges {
@@ -30,6 +31,7 @@ export function createCommitChanges(
 
   function addToBrowser(importMap: ImportMap) {
     ports.browser.setImportMapFn(importMap);
+    ports.importMapRepo.set(importMap);
     config.log.debug(5, 'Added import map to browser.', importMap);
     return importMap;
   }
@@ -39,6 +41,7 @@ export function createCommitChanges(
     ports.scopedExternalsRepo.commit();
     ports.sharedExternalsRepo.commit();
     ports.sharedChunksRepo.commit();
+    ports.importMapRepo.commit();
     return;
   }
 }

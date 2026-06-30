@@ -9,6 +9,7 @@ import { createScopedExternalsRepository } from 'lib/core/3.adapters/storage/sco
 import { createSharedExternalsRepository } from 'lib/core/3.adapters/storage/shared-externals.repository';
 import { createSSEHandler } from 'lib/core/3.adapters/browser/sse-handler';
 import { createChunkRepository } from 'lib/core/3.adapters/storage/chunk.repository';
+import { createImportMapRepository } from 'lib/core/3.adapters/storage/import-map.repository';
 
 export const createDriving = (
   config: ConfigContract
@@ -24,6 +25,7 @@ export const createDriving = (
     scopedExternalsRepo: createScopedExternalsRepository(config),
     sharedExternalsRepo: createSharedExternalsRepository(config),
     sharedChunksRepo: createChunkRepository(config),
+    importMapRepo: createImportMapRepository(config),
 
     browser: createBrowser(config),
     sse: createSSEHandler(config),

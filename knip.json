@@ -6,6 +6,7 @@
     "src/lib/options.index.ts",
     "src/lib/registry.index.ts",
     "src/lib/audit.index.ts",
+    "src/lib/module-federation.index.ts",
     "src/lib/node.index.ts",
     "src/scripts/quickstart.ts",
     "src/scripts/init-registry.ts",

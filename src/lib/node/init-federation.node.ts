@@ -12,6 +12,7 @@ import { createRemoteInfoRepository } from 'lib/core/3.adapters/storage/remote-i
 import { createScopedExternalsRepository } from 'lib/core/3.adapters/storage/scoped-externals.repository';
 import { createSharedExternalsRepository } from 'lib/core/3.adapters/storage/shared-externals.repository';
 import { createChunkRepository } from 'lib/core/3.adapters/storage/chunk.repository';
+import { createImportMapRepository } from 'lib/core/3.adapters/storage/import-map.repository';
 
 import { createConfigHandlers } from 'lib/core/5.di/config.factory';
 import { createInitFlow } from 'lib/core/2.app/flows/init.flow';
@@ -64,6 +65,7 @@ const buildNodeAdapters = (config: ConfigContract): DrivingContract => ({
   scopedExternalsRepo: createScopedExternalsRepository(config),
   sharedExternalsRepo: createSharedExternalsRepository(config),
   sharedChunksRepo: createChunkRepository(config),
+  importMapRepo: createImportMapRepository(config),
   browser: createBrowser(config),
   sse: createNoopSSE(),
 });
