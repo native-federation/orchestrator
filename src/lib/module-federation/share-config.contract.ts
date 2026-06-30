@@ -7,11 +7,18 @@
  */
 export type ShareObject = {
   version: string;
+  /**
+   * The Module Federation share scope. Omitted for native federation's global
+   * scope (MF then uses its `'default'` scope); set to the share-scope name for
+   * externals native federation grouped under a custom `shareScope` (or
+   * `'strict'`).
+   */
   scope?: string;
   get: () => Promise<() => unknown>;
   shareConfig?: {
     singleton?: boolean;
     requiredVersion: string;
+    strictVersion?: boolean;
   };
 };
 
@@ -21,9 +28,10 @@ export type ShareConfig = {
 
 export type GetSharedOptions = {
   /**
-   * Marks the emitted externals as Module Federation singletons. Defaults to
-   * `true` — the orchestrator only emits globally shared (`action: 'share'`)
-   * externals, which are singletons by definition.
+   * Marks the emitted externals as Module Federation singletons. When omitted,
+   * an external is a singleton when native federation resolved exactly one
+   * shared version for it (always the case for the global and custom share
+   * scopes; the `strict` scope may share several exact versions side by side).
    */
   singleton?: boolean;
   /**

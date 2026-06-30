@@ -54,9 +54,22 @@ getShared({
 });
 ```
 
-## What is included
+## Share scopes
 
-Only **globally shared** externals (those native federation resolved with
-`action: 'share'`) are emitted — these are the singletons MF needs. Packages that
-native federation deliberately *scoped* or *skipped* are not shared, and externals
-bound to a custom `shareScope` are out of scope for this bridge.
+Every share scope native federation resolved is bridged, and only versions resolved as
+`action: 'share'` are emitted (packages that were deliberately *scoped* or *skipped* are
+not shared):
+
+| Native federation scope        | Module Federation result                                              |
+| ------------------------------ | --------------------------------------------------------------------- |
+| Global (`singleton: true`)     | Shared singleton in MF's default scope (no `scope` set).              |
+| Custom `shareScope: "team-a"`  | Shared singleton with `scope: "team-a"`.                              |
+| `shareScope: "strict"`         | Every shared exact version, emitted with `scope: "strict"`, `singleton: false`, `strictVersion: true`. |
+
+```ts
+getShared();
+// {
+//   '@angular/core': [{ version: '20.0.0', get, shareConfig: { singleton: true, requiredVersion: '^20.0.0' } }],
+//   'ui-lib':        [{ version: '3.0.0', scope: 'team-a', get, shareConfig: { singleton: true, requiredVersion: '^3.0.0' } }],
+// }
+```
