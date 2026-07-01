@@ -18,7 +18,7 @@ Include `init-registry.mjs` **before** the rest of your scripts. Optionally tune
 
 ```html
 <script
-  src="https://unpkg.com/@softarc/native-federation-orchestrator@4.3.1/init-registry.mjs"
+  src="https://unpkg.com/@softarc/native-federation-orchestrator@4.4.0/init-registry.mjs"
   data-max-streams="50"
   data-max-events="50"
   data-remove-percentage="50"
