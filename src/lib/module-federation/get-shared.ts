@@ -1,39 +1,17 @@
 import type { DrivingContract } from 'lib/core/2.app/driving-ports/driving.contract';
-import type { ImportMap, SharedVersion } from 'lib/core/1.domain';
+import type { SharedVersion } from 'lib/core/1.domain';
 import type { GetSharedOptions, ShareInfos, Shared } from './share-infos.contract';
+import * as _path from 'lib/utils/path';
 
 /**
- * Adapts native federation's shared externals to webpack Module Federation.
- *
- * Converts the orchestrator's shared externals into the `ShareInfos` shape
- * webpack MF expects, so an app using both federation systems can hand native
- * federation's singletons straight to MF (e.g. `init({ shared })`):
- *
- * ```ts
- * import { createGetShared } from '@softarc/native-federation-orchestrator/module-federation';
- *
- * const result = await initFederation(...);
- * const getShared = createGetShared(result.adapters);
- * init({ name: 'host', shared: getShared() });
- * ```
- *
- * Every share scope is bridged: the global scope maps to MF's default scope,
- * while custom `shareScope` groups (and the `strict` scope) map to MF's `scope`
- * property. Only versions native federation resolved as `action: 'share'` are
- * emitted. The v3 runtime read its singletons from a flat `externals` Map; v4
- * stores the version/range metadata in the `shared-externals` repository while
- * the resolved URLs live in the generated import map. This reads both, so it
- * never re-implements the resolver's scope/skip/override logic.
+ * Adapts native federation's shared externals to the `ShareInfos` shape webpack
+ * Module Federation expects (see `docs/module-federation.md`).
  */
 export function createGetShared(
-  ports: Pick<
-    DrivingContract,
-    'sharedExternalsRepo' | 'remoteInfoRepo' | 'importMapRepo' | 'browser'
-  >
+  ports: Pick<DrivingContract, 'sharedExternalsRepo' | 'remoteInfoRepo' | 'browser'>
 ): (options?: GetSharedOptions) => ShareInfos {
   return (options = {}) => {
     const shared: ShareInfos = {};
-    const importMap = ports.importMapRepo.get();
 
     for (const scope of ports.sharedExternalsRepo.getScopes({ includeGlobal: true })) {
       const scopeType = ports.sharedExternalsRepo.scopeType(scope);
@@ -43,13 +21,13 @@ export function createGetShared(
         const shareVersions = external.versions.filter(v => v.action === 'share');
         if (shareVersions.length === 0) continue;
 
-        const singleton = options.singleton ?? shareVersions.length === 1;
+        // The strict scope is a version -> location map: every version is shared
+        // side by side and stays non-singleton. Other scopes share one singleton.
+        const versions = scopeType === 'strict' ? shareVersions : shareVersions.slice(0, 1);
+        const singleton = scopeType === 'strict' ? false : (options.singleton ?? true);
 
-        for (const version of shareVersions) {
-          const url =
-            scopeType === 'global'
-              ? importMap.imports[packageName]
-              : resolveScopedUrl(importMap, version, packageName);
+        for (const version of versions) {
+          const url = resolveUrl(version);
           if (!url) continue;
 
           const shareObject: Shared = {
@@ -57,7 +35,7 @@ export function createGetShared(
             get: () => ports.browser.importModule(url).then(module => () => module),
             shareConfig: {
               singleton,
-              requiredVersion: resolveRequiredVersion(version, options),
+              requiredVersion: resolveRequiredVersion(version, options, scopeType),
               ...(scopeType === 'strict' ? { strictVersion: true } : {}),
             },
           };
@@ -72,29 +50,27 @@ export function createGetShared(
     return shared;
   };
 
-  /**
-   * A scoped external's resolved URL lives in the import map's `scopes` (keyed by
-   * the providing remote's scope URL), not in the flat `imports`. The share
-   * version's first remote is the canonical source for that scope.
-   */
-  function resolveScopedUrl(
-    importMap: ImportMap,
-    version: SharedVersion,
-    packageName: string
-  ): string | undefined {
+  function resolveUrl(version: SharedVersion): string | undefined {
     const source = version.remotes[0];
     if (!source) return undefined;
 
     return ports.remoteInfoRepo
       .tryGet(source.name)
-      .map(remote => importMap.scopes?.[remote.scopeUrl]?.[packageName])
+      .map(remote => _path.join(remote.scopeUrl, source.file))
       .get();
   }
 }
 
-function resolveRequiredVersion(version: SharedVersion, options: GetSharedOptions): string {
+function resolveRequiredVersion(
+  version: SharedVersion,
+  options: GetSharedOptions,
+  scopeType: 'global' | 'strict' | 'shareScope'
+): string {
+  // Strict shares a specific version, not a range: pin to the exact tag so a
+  // consumer reuses only that version (MF matches via satisfy(version, required)).
+  if (scopeType === 'strict') return version.tag;
   if (typeof options.requiredVersionPrefix === 'string') {
     return `${options.requiredVersionPrefix}${version.tag}`;
   }
-  return version.remotes[0]?.requiredVersion ?? `^${version.tag}`;
+  return version.remotes[0]?.requiredVersion || `^${version.tag}`;
 }

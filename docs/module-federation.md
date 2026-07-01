@@ -1,17 +1,13 @@
 # Module Federation integration (`getShared`)
 
 If an application uses **both** native federation (via this orchestrator) **and**
-webpack **Module Federation** (MF), the two systems must share the *same* singleton
+webpack **Module Federation** (MF), the two systems must share the _same_ singleton
 instances — one `@angular/core`, one `rxjs`, and so on. Otherwise a webpack remote
 loads its own copy of Angular and dependency injection breaks (e.g. `NG0203`).
 
 The `module-federation` entry point converts the orchestrator's globally shared externals
 into the `shared` config shape webpack MF expects, so you can hand native federation's
 already-resolved singletons straight to MF.
-
-> This is the v4 replacement for `getShared()` from `@softarc/native-federation-runtime@3.x`.
-> The v3 helper read its singletons from a flat `externals` map that the orchestrator no
-> longer populates — use this entry point instead.
 
 ## Usage
 
@@ -31,14 +27,17 @@ const getShared = createGetShared(result.adapters);
 // 3. Hand the singletons to Module Federation.
 init({
   name: 'host',
-  remotes: [/* your MF remotes */],
+  remotes: [
+    /* your MF remotes */
+  ],
   shared: getShared(),
 });
 ```
 
-`createGetShared` reads the resolved URLs from the generated import map and the
-version/range metadata from the orchestrator's `shared-externals` storage, so it never
-re-derives the resolver's scope/skip/override decisions.
+`createGetShared` reads the resolved externals straight from the orchestrator's
+`shared-externals` storage and derives each URL from the providing remote's scope — the
+same way the import map is generated — so it never re-derives the resolver's
+scope/skip/override decisions and needs no persisted import map.
 
 ## Options
 
@@ -59,14 +58,14 @@ getShared({
 ## Share scopes
 
 Every share scope native federation resolved is bridged, and only versions resolved as
-`action: 'share'` are emitted (packages that were deliberately *scoped* or *skipped* are
+`action: 'share'` are emitted (packages that were deliberately _scoped_ or _skipped_ are
 not shared):
 
-| Native federation scope        | Module Federation result                                              |
-| ------------------------------ | --------------------------------------------------------------------- |
-| Global (`singleton: true`)     | Shared singleton in MF's default scope (no `scope` set).              |
-| Custom `shareScope: "team-a"`  | Shared singleton with `scope: "team-a"`.                              |
-| `shareScope: "strict"`         | Every shared exact version, emitted with `scope: "strict"`, `singleton: false`, `strictVersion: true`. |
+| Native federation scope       | Module Federation result                                                                                                                                                                                                                                                                                               |
+| ----------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Global (`singleton: true`)    | Shared singleton in MF's default scope (no `scope` set).                                                                                                                                                                                                                                                               |
+| Custom `shareScope: "team-a"` | Shared singleton with `scope: "team-a"`.                                                                                                                                                                                                                                                                               |
+| `shareScope: "strict"`        | Every shared version, emitted with `scope: "strict"`, `singleton: false`, `strictVersion: true`, and `requiredVersion` pinned to the exact version. It is a version → location map: remotes dedupe only on an identical version, never a range. The `singleton` and `requiredVersionPrefix` options do not apply here. |
 
 ```ts
 getShared();

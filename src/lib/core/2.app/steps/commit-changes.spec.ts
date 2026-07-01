@@ -25,9 +25,15 @@ describe('createCommitChanges', () => {
     expect(adapters.sharedChunksRepo.commit).toHaveBeenCalled();
   });
 
-  it('should add the importmap to the browser', async () => {
+  it('should append the importmap to the browser by default', async () => {
     await commitChanges({ imports: {} });
 
-    expect(adapters.browser.setImportMapFn).toHaveBeenCalledWith({ imports: {} });
+    expect(adapters.browser.setImportMapFn).toHaveBeenCalledWith({ imports: {} }, {});
+  });
+
+  it('should forward override to the browser so the initial map replaces stale ones', async () => {
+    await commitChanges({ imports: {} }, { override: true });
+
+    expect(adapters.browser.setImportMapFn).toHaveBeenCalledWith({ imports: {} }, { override: true });
   });
 });

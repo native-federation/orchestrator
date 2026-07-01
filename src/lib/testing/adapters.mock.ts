@@ -8,14 +8,12 @@ import { mockManifestProvider } from './adapters/manifest-provider.mock';
 import { mockRemoteEntryProvider } from './adapters/remote-entry-provider.mock';
 import { mockSSE } from './adapters/sse.mock';
 import { mockChunkRepository } from './adapters/chunk.repository.mock';
-import { mockImportMapRepository } from './adapters/import-map.repository.mock';
 
 export const mockAdapters = (): DrivingContract => ({
   remoteInfoRepo: mockRemoteInfoRepository(),
   sharedExternalsRepo: mockSharedExternalsRepository(),
   scopedExternalsRepo: mockScopedExternalsRepository(),
   sharedChunksRepo: mockChunkRepository(),
-  importMapRepo: mockImportMapRepository(),
   versionCheck: mockVersionCheck(),
   browser: mockBrowser(),
   manifestProvider: mockManifestProvider(),

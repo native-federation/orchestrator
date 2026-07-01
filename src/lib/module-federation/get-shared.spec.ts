@@ -2,7 +2,7 @@ import { createGetShared } from './get-shared';
 import { mockAdapters } from 'lib/testing/adapters.mock';
 import { mockExternal } from 'lib/testing/domain/externals/external.mock';
 import { mockSharedVersion } from 'lib/testing/domain/externals/version.mock';
-import { GLOBAL_SCOPE, STRICT_SCOPE, type ImportMap, type SharedExternal } from 'lib/core/1.domain';
+import { GLOBAL_SCOPE, STRICT_SCOPE, type SharedExternal } from 'lib/core/1.domain';
 import { Optional } from 'lib/utils/optional';
 
 const scopeTypeOf = (scope: string): 'global' | 'strict' | 'shareScope' =>
@@ -10,10 +10,11 @@ const scopeTypeOf = (scope: string): 'global' | 'strict' | 'shareScope' =>
 
 type SetupOptions = {
   scopes: Record<string, Record<string, SharedExternal>>;
-  importMap?: ImportMap;
-  /** remoteName -> scopeUrl, used to resolve scoped (non-global) URLs. */
+  /** remoteName -> scopeUrl, used to derive every external's resolved URL. */
   remotes?: Record<string, string>;
 };
+
+const HOST_SCOPE = 'https://cdn.test/host/';
 
 const setup = (opts: SetupOptions) => {
   const ports = mockAdapters();
@@ -22,7 +23,6 @@ const setup = (opts: SetupOptions) => {
   ports.sharedExternalsRepo.getFromScope.mockImplementation(
     (s = GLOBAL_SCOPE) => opts.scopes[s] ?? {}
   );
-  ports.importMapRepo.get.mockReturnValue(opts.importMap ?? { imports: {} });
   ports.remoteInfoRepo.tryGet.mockImplementation((name: string) => {
     const scopeUrl = opts.remotes?.[name];
     return scopeUrl ? Optional.of({ scopeUrl, exposes: [] }) : Optional.empty();
@@ -33,27 +33,25 @@ const setup = (opts: SetupOptions) => {
 /** Convenience for the common single-global-scope case. */
 const global = (
   externals: Record<string, SharedExternal>,
-  imports: ImportMap['imports']
-): SetupOptions => ({ scopes: { [GLOBAL_SCOPE]: externals }, importMap: { imports } });
+  remotes: Record<string, string> = { 'team/host': HOST_SCOPE }
+): SetupOptions => ({ scopes: { [GLOBAL_SCOPE]: externals }, remotes });
 
 describe('createGetShared', () => {
-  const NG_URL = 'https://cdn.test/host/core.js';
+  // Derived as `join(scopeUrl, version.remotes[0].file)`, mirroring generate-import-map.
+  const NG_URL = 'https://cdn.test/host/@angular/core.js';
   const RXJS_URL = 'https://cdn.test/host/rxjs.js';
 
   describe('global scope', () => {
     it('maps a globally shared external to the webpack MF ShareInfos shape', () => {
       const ports = setup(
-        global(
-          {
-            '@angular/core': mockExternal.shared([
-              mockSharedVersion('20.0.0', '@angular/core', {
-                remotes: { 'team/host': { requiredVersion: '^20.0.0' } },
-                action: 'share',
-              }),
-            ]),
-          },
-          { '@angular/core': NG_URL }
-        )
+        global({
+          '@angular/core': mockExternal.shared([
+            mockSharedVersion('20.0.0', '@angular/core', {
+              remotes: { 'team/host': { requiredVersion: '^20.0.0' } },
+              action: 'share',
+            }),
+          ]),
+        })
       );
 
       const shared = createGetShared(ports)();
@@ -68,17 +66,14 @@ describe('createGetShared', () => {
 
     it('does not set a scope for global externals (MF uses its default scope)', () => {
       const ports = setup(
-        global(
-          {
-            '@angular/core': mockExternal.shared([
-              mockSharedVersion('20.0.0', '@angular/core', {
-                remotes: ['team/host'],
-                action: 'share',
-              }),
-            ]),
-          },
-          { '@angular/core': NG_URL }
-        )
+        global({
+          '@angular/core': mockExternal.shared([
+            mockSharedVersion('20.0.0', '@angular/core', {
+              remotes: ['team/host'],
+              action: 'share',
+            }),
+          ]),
+        })
       );
 
       expect(createGetShared(ports)()['@angular/core']![0]!.scope).toBeUndefined();
@@ -86,17 +81,14 @@ describe('createGetShared', () => {
 
     it('resolves get() through the configured module loader and returns a factory', async () => {
       const ports = setup(
-        global(
-          {
-            '@angular/core': mockExternal.shared([
-              mockSharedVersion('20.0.0', '@angular/core', {
-                remotes: ['team/host'],
-                action: 'share',
-              }),
-            ]),
-          },
-          { '@angular/core': NG_URL }
-        )
+        global({
+          '@angular/core': mockExternal.shared([
+            mockSharedVersion('20.0.0', '@angular/core', {
+              remotes: ['team/host'],
+              action: 'share',
+            }),
+          ]),
+        })
       );
       const module = { ɵcore: true };
       ports.browser.importModule.mockResolvedValue(module);
@@ -109,20 +101,17 @@ describe('createGetShared', () => {
 
     it('emits multiple shared externals', () => {
       const ports = setup(
-        global(
-          {
-            '@angular/core': mockExternal.shared([
-              mockSharedVersion('20.0.0', '@angular/core', {
-                remotes: ['team/host'],
-                action: 'share',
-              }),
-            ]),
-            rxjs: mockExternal.shared([
-              mockSharedVersion('7.8.0', 'rxjs', { remotes: ['team/host'], action: 'share' }),
-            ]),
-          },
-          { '@angular/core': NG_URL, rxjs: RXJS_URL }
-        )
+        global({
+          '@angular/core': mockExternal.shared([
+            mockSharedVersion('20.0.0', '@angular/core', {
+              remotes: ['team/host'],
+              action: 'share',
+            }),
+          ]),
+          rxjs: mockExternal.shared([
+            mockSharedVersion('7.8.0', 'rxjs', { remotes: ['team/host'], action: 'share' }),
+          ]),
+        })
       );
 
       expect(Object.keys(createGetShared(ports)()).sort()).toEqual(['@angular/core', 'rxjs']);
@@ -139,14 +128,14 @@ describe('createGetShared', () => {
               mockSharedVersion('1.0.0', 'dep-b', { remotes: ['team/mfe2'], action: 'skip' }),
             ]),
           },
-          { 'dep-a': 'https://cdn.test/a.js', 'dep-b': 'https://cdn.test/b.js' }
+          { 'team/mfe1': 'https://cdn.test/mfe1/', 'team/mfe2': 'https://cdn.test/mfe2/' }
         )
       );
 
       expect(createGetShared(ports)()).toEqual({});
     });
 
-    it('skips a shared external that is absent from the import map', () => {
+    it('skips a shared external whose providing remote is not registered', () => {
       const ports = setup(
         global(
           {
@@ -157,7 +146,7 @@ describe('createGetShared', () => {
               }),
             ]),
           },
-          {} // no resolved URL
+          {} // remote not found -> no resolvable URL
         )
       );
 
@@ -166,17 +155,14 @@ describe('createGetShared', () => {
 
     it('builds requiredVersion from the prefix option (v3-compatible behaviour)', () => {
       const ports = setup(
-        global(
-          {
-            '@angular/core': mockExternal.shared([
-              mockSharedVersion('20.0.0', '@angular/core', {
-                remotes: { 'team/host': { requiredVersion: '^20.0.0' } },
-                action: 'share',
-              }),
-            ]),
-          },
-          { '@angular/core': NG_URL }
-        )
+        global({
+          '@angular/core': mockExternal.shared([
+            mockSharedVersion('20.0.0', '@angular/core', {
+              remotes: { 'team/host': { requiredVersion: '^20.0.0' } },
+              action: 'share',
+            }),
+          ]),
+        })
       );
 
       expect(
@@ -186,17 +172,14 @@ describe('createGetShared', () => {
 
     it('honours an empty requiredVersionPrefix (exact version)', () => {
       const ports = setup(
-        global(
-          {
-            '@angular/core': mockExternal.shared([
-              mockSharedVersion('20.0.0', '@angular/core', {
-                remotes: ['team/host'],
-                action: 'share',
-              }),
-            ]),
-          },
-          { '@angular/core': NG_URL }
-        )
+        global({
+          '@angular/core': mockExternal.shared([
+            mockSharedVersion('20.0.0', '@angular/core', {
+              remotes: ['team/host'],
+              action: 'share',
+            }),
+          ]),
+        })
       );
 
       expect(
@@ -206,17 +189,14 @@ describe('createGetShared', () => {
 
     it('respects singleton: false', () => {
       const ports = setup(
-        global(
-          {
-            '@angular/core': mockExternal.shared([
-              mockSharedVersion('20.0.0', '@angular/core', {
-                remotes: ['team/host'],
-                action: 'share',
-              }),
-            ]),
-          },
-          { '@angular/core': NG_URL }
-        )
+        global({
+          '@angular/core': mockExternal.shared([
+            mockSharedVersion('20.0.0', '@angular/core', {
+              remotes: ['team/host'],
+              action: 'share',
+            }),
+          ]),
+        })
       );
 
       expect(
@@ -226,14 +206,24 @@ describe('createGetShared', () => {
 
     it('falls back to a caret range when the shared version has no required range', () => {
       const ports = setup(
-        global(
-          {
-            '@angular/core': mockExternal.shared([
-              { tag: '20.0.0', host: true, action: 'share', remotes: [] },
-            ]),
-          },
-          { '@angular/core': NG_URL }
-        )
+        global({
+          '@angular/core': mockExternal.shared([
+            {
+              tag: '20.0.0',
+              host: true,
+              action: 'share',
+              remotes: [
+                {
+                  name: 'team/host',
+                  file: '@angular/core.js',
+                  requiredVersion: '',
+                  strictVersion: true,
+                  cached: false,
+                },
+              ],
+            },
+          ]),
+        })
       );
 
       expect(createGetShared(ports)()['@angular/core']![0]!.shareConfig).toEqual({
@@ -242,8 +232,33 @@ describe('createGetShared', () => {
       });
     });
 
+    it('emits only the first shared version when a global external has several', () => {
+      const ports = setup(
+        global(
+          {
+            'ui-lib': mockExternal.shared([
+              mockSharedVersion('1.0.0', 'ui-lib', {
+                remotes: { 'team/host': { file: 'ui-lib-1.js' } },
+                action: 'share',
+              }),
+              mockSharedVersion('2.0.0', 'ui-lib', {
+                remotes: { 'team/mfe1': { file: 'ui-lib-2.js' } },
+                action: 'share',
+              }),
+            ]),
+          },
+          { 'team/host': HOST_SCOPE, 'team/mfe1': 'https://cdn.test/mfe1/' }
+        )
+      );
+
+      const entries = createGetShared(ports)()['ui-lib'];
+
+      expect(entries).toHaveLength(1);
+      expect(entries![0]).toMatchObject({ version: '1.0.0', shareConfig: { singleton: true } });
+    });
+
     it('returns an empty config when there are no global externals', () => {
-      const ports = setup(global({}, {}));
+      const ports = setup(global({}));
       expect(createGetShared(ports)()).toEqual({});
     });
   });
@@ -262,10 +277,6 @@ describe('createGetShared', () => {
             ]),
           },
         },
-        importMap: {
-          imports: {},
-          scopes: { 'https://cdn.test/mfe1/': { 'ui-lib': 'https://cdn.test/mfe1/ui-lib.js' } },
-        },
         remotes: { 'team/mfe1': 'https://cdn.test/mfe1/' },
       });
 
@@ -280,7 +291,7 @@ describe('createGetShared', () => {
       expect(shared['ui-lib']![0]!.shareConfig!.strictVersion).toBeUndefined();
     });
 
-    it('resolves the scoped URL from the import map scopes, keyed by the providing remote', async () => {
+    it('resolves the scoped URL from the providing remote`s scope', async () => {
       const URL = 'https://cdn.test/mfe1/ui-lib.js';
       const ports = setup({
         scopes: {
@@ -293,7 +304,6 @@ describe('createGetShared', () => {
             ]),
           },
         },
-        importMap: { imports: {}, scopes: { 'https://cdn.test/mfe1/': { 'ui-lib': URL } } },
         remotes: { 'team/mfe1': 'https://cdn.test/mfe1/' },
       });
       ports.browser.importModule.mockResolvedValue({ ui: true });
@@ -307,17 +317,18 @@ describe('createGetShared', () => {
       const ports = setup({
         scopes: {
           'team-a': {
-            'ui-lib': mockExternal.shared([{ tag: '3.0.0', host: false, action: 'share', remotes: [] }]),
+            'ui-lib': mockExternal.shared([
+              { tag: '3.0.0', host: false, action: 'share', remotes: [] },
+            ]),
           },
         },
-        importMap: { imports: {}, scopes: { 'https://cdn.test/mfe1/': { 'ui-lib': 'x' } } },
         remotes: { 'team/mfe1': 'https://cdn.test/mfe1/' },
       });
 
       expect(createGetShared(ports)()).toEqual({});
     });
 
-    it('skips a scoped external whose remote is not in the import map scopes', () => {
+    it('skips a scoped external whose remote is not registered', () => {
       const ports = setup({
         scopes: {
           'team-a': {
@@ -326,7 +337,6 @@ describe('createGetShared', () => {
             ]),
           },
         },
-        importMap: { imports: {}, scopes: {} },
         remotes: {}, // remote not found
       });
 
@@ -336,8 +346,6 @@ describe('createGetShared', () => {
 
   describe('strict shareScope', () => {
     it('emits every shared version as a non-singleton, strict-version entry', () => {
-      const urlA = 'https://cdn.test/a/ui-lib.js';
-      const urlB = 'https://cdn.test/b/ui-lib.js';
       const ports = setup({
         scopes: {
           [STRICT_SCOPE]: {
@@ -351,13 +359,6 @@ describe('createGetShared', () => {
                 action: 'share',
               }),
             ]),
-          },
-        },
-        importMap: {
-          imports: {},
-          scopes: {
-            'https://cdn.test/a/': { 'ui-lib': urlA },
-            'https://cdn.test/b/': { 'ui-lib': urlB },
           },
         },
         remotes: { 'team/a': 'https://cdn.test/a/', 'team/b': 'https://cdn.test/b/' },
@@ -374,6 +375,52 @@ describe('createGetShared', () => {
         ['15.2.1', '15.2.1'],
         ['16.0.0', '16.0.0'],
       ]);
+    });
+
+    it('pins requiredVersion to the exact tag even when the remote negotiated a range', () => {
+      const ports = setup({
+        scopes: {
+          [STRICT_SCOPE]: {
+            'ui-lib': mockExternal.shared([
+              mockSharedVersion('15.2.1', 'ui-lib', {
+                remotes: { 'team/a': { requiredVersion: '^15.0.0', file: 'ui-lib.js' } },
+                action: 'share',
+              }),
+            ]),
+          },
+        },
+        remotes: { 'team/a': 'https://cdn.test/a/' },
+      });
+
+      // A range would let MF resolve any compatible version from the map; strict
+      // must only reuse the exact version, so the tag wins over the '^15.0.0' range.
+      expect(createGetShared(ports)()['ui-lib']![0]!.shareConfig!.requiredVersion).toBe('15.2.1');
+    });
+
+    it('stays non-singleton and emits every version even when singleton is forced on', () => {
+      const ports = setup({
+        scopes: {
+          [STRICT_SCOPE]: {
+            'ui-lib': mockExternal.shared([
+              mockSharedVersion('15.2.1', 'ui-lib', {
+                remotes: { 'team/a': { requiredVersion: '15.2.1', file: 'ui-lib.js' } },
+                action: 'share',
+              }),
+              mockSharedVersion('16.0.0', 'ui-lib', {
+                remotes: { 'team/b': { requiredVersion: '16.0.0', file: 'ui-lib.js' } },
+                action: 'share',
+              }),
+            ]),
+          },
+        },
+        remotes: { 'team/a': 'https://cdn.test/a/', 'team/b': 'https://cdn.test/b/' },
+      });
+
+      const entries = createGetShared(ports)({ singleton: true })['ui-lib'];
+
+      // Forcing singleton must not collapse the strict version -> location map.
+      expect(entries).toHaveLength(2);
+      entries!.forEach(entry => expect(entry.shareConfig!.singleton).toBe(false));
     });
   });
 
@@ -397,11 +444,7 @@ describe('createGetShared', () => {
           ]),
         },
       },
-      importMap: {
-        imports: { '@angular/core': NG_URL },
-        scopes: { 'https://cdn.test/mfe1/': { 'ui-lib': 'https://cdn.test/mfe1/ui-lib.js' } },
-      },
-      remotes: { 'team/mfe1': 'https://cdn.test/mfe1/' },
+      remotes: { 'team/host': HOST_SCOPE, 'team/mfe1': 'https://cdn.test/mfe1/' },
     });
 
     const shared = createGetShared(ports)();

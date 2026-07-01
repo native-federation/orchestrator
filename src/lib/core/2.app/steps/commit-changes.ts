@@ -14,7 +14,6 @@ export function createCommitChanges(
     | 'scopedExternalsRepo'
     | 'sharedExternalsRepo'
     | 'sharedChunksRepo'
-    | 'importMapRepo'
     | 'browser'
   >
 ): ForCommittingChanges {
@@ -35,9 +34,7 @@ export function createCommitChanges(
       .then(persistRepositoryChanges);
 
   function addToBrowser(importMap: ImportMap, opts: CommitOptions) {
-    ports.browser.setImportMapFn(importMap);
-    if (opts.override) ports.importMapRepo.set(importMap);
-    else ports.importMapRepo.merge(importMap);
+    ports.browser.setImportMapFn(importMap, opts);
     config.log.debug(5, 'Added import map to browser.', importMap);
     return importMap;
   }
@@ -47,7 +44,6 @@ export function createCommitChanges(
     ports.scopedExternalsRepo.commit();
     ports.sharedExternalsRepo.commit();
     ports.sharedChunksRepo.commit();
-    ports.importMapRepo.commit();
     return;
   }
 }

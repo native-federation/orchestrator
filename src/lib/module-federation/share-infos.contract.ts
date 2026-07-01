@@ -36,9 +36,8 @@ export type ShareInfos = {
 export type GetSharedOptions = {
   /**
    * Marks the emitted externals as Module Federation singletons. When omitted,
-   * an external is a singleton when native federation resolved exactly one
-   * shared version for it (always the case for the global and custom share
-   * scopes; the `strict` scope may share several exact versions side by side).
+   * externals in the global and custom share scopes are singletons; the `strict`
+   * scope's versions are not (it shares several exact versions side by side).
    */
   singleton?: boolean;
   /**
