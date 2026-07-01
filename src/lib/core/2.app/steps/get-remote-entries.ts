@@ -52,12 +52,11 @@ export function createGetRemoteEntries(
   function addHostRemoteEntry(manifest: FederationManifest): FederationManifest {
     if (!config.hostRemoteEntry) return manifest;
 
-    const { name, url, cacheTag, integrity } = config.hostRemoteEntry;
-    const urlWithCache = cacheTag ? `${url}?cacheTag=${cacheTag}` : url;
+    const { name, url, integrity } = config.hostRemoteEntry;
 
     return {
       ...manifest,
-      [name]: integrity ? { url: urlWithCache, integrity } : urlWithCache,
+      [name]: integrity ? { url, integrity } : url,
     };
   }
 
@@ -66,6 +65,22 @@ export function createGetRemoteEntries(
     integrity?: string;
   } {
     return typeof descriptor === 'string' ? { url: descriptor } : descriptor;
+  }
+
+  function withCacheTag(url: string, cacheTag?: string): string {
+    if (!cacheTag) return url;
+    return `${url}${url.includes('?') ? '&' : '?'}cacheTag=${cacheTag}`;
+  }
+
+  function resolveCacheTag(remoteName: RemoteName): string | undefined {
+    if (
+      config.hostRemoteEntry &&
+      remoteName === config.hostRemoteEntry.name &&
+      config.hostRemoteEntry.cacheTag
+    ) {
+      return config.hostRemoteEntry.cacheTag;
+    }
+    return config.profile.cacheTag;
   }
 
   async function fetchRemoteEntries(
@@ -101,10 +116,12 @@ export function createGetRemoteEntries(
 
     if (skip) return false;
 
+    const fetchUrl = withCacheTag(remoteEntryUrl, resolveCacheTag(remoteName));
+
     try {
       const remoteEntry = integrity
-        ? await ports.remoteEntryProvider.provide(remoteEntryUrl, { integrity })
-        : await ports.remoteEntryProvider.provide(remoteEntryUrl);
+        ? await ports.remoteEntryProvider.provide(fetchUrl, { integrity })
+        : await ports.remoteEntryProvider.provide(fetchUrl);
 
       config.log.debug(
         1,

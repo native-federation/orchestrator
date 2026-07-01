@@ -92,6 +92,19 @@ describe('createGetRemoteEntries', () => {
 
       expect(actual).toEqual([mockRemoteEntry_MFE1(), mockRemoteEntry_MFE2()]);
     });
+
+    it('should add a profile cacheTag query param when fetching remotes', async () => {
+      config.profile.cacheTag = '123abc';
+
+      await getRemoteEntries(mockManifest());
+
+      expect(adapters.remoteEntryProvider.provide).toHaveBeenCalledWith(
+        `${mockScopeUrl_MFE1()}remoteEntry.json?cacheTag=123abc`
+      );
+      expect(adapters.remoteEntryProvider.provide).toHaveBeenCalledWith(
+        `${mockScopeUrl_MFE2()}remoteEntry.json?cacheTag=123abc`
+      );
+    });
   });
 
   describe('inclusion of host remoteEntry', () => {
@@ -144,6 +157,24 @@ describe('createGetRemoteEntries', () => {
         mockRemoteEntry_MFE2(),
         mockRemoteEntry_HOST(),
       ]);
+    });
+
+    it('should not duplicate cacheTag when both host and profile cacheTag are set', async () => {
+      config.hostRemoteEntry = {
+        name: 'team/host',
+        url: `${mockScopeUrl_HOST()}remoteEntry.json`,
+        cacheTag: 'host-tag',
+      };
+      config.profile.cacheTag = 'profile-tag';
+
+      await getRemoteEntries(mockManifest());
+
+      expect(adapters.remoteEntryProvider.provide).toHaveBeenCalledWith(
+        `${mockScopeUrl_HOST()}remoteEntry.json?cacheTag=host-tag`
+      );
+      expect(adapters.remoteEntryProvider.provide).toHaveBeenCalledWith(
+        `${mockScopeUrl_MFE1()}remoteEntry.json?cacheTag=profile-tag`
+      );
     });
 
     it('should rename host remoteName to config defined name', async () => {

@@ -3,6 +3,7 @@ export type ModeProfileConfig = {
   skipInvalidExternalVersions: boolean;
   overrideCachedRemotes: 'always' | 'never' | 'init-only';
   overrideCachedRemotesIfURLMatches: boolean;
+  cacheTag?: string;
 };
 
 export type ModeStrictnessConfig = {
