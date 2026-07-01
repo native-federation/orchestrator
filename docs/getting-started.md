@@ -48,7 +48,7 @@ The simplest approach uses the pre-built runtime script with declarative configu
     </script>
 
     <!-- Include the orchestrator -->
-    <script src="https://unpkg.com/@softarc/native-federation-orchestrator@4.4.0/quickstart.mjs"></script>
+    <script src="https://unpkg.com/@softarc/native-federation-orchestrator@4.4.1/quickstart.mjs"></script>
   </head>
   <body>
     <!-- Use your loaded components -->
@@ -137,7 +137,7 @@ In this example, the micro frontends register themselves as custom elements (par
 
 ```html
 <!-- Development and quick testing -->
-<script src="https://unpkg.com/@softarc/native-federation-orchestrator@4.4.0/quickstart.mjs"></script>
+<script src="https://unpkg.com/@softarc/native-federation-orchestrator@4.4.1/quickstart.mjs"></script>
 ```
 
 ## Avoiding race conditions
@@ -151,7 +151,7 @@ Custom browser events are unfortunately vulnerable to unwanted race conditions, 
     <title>My Application</title>
 
     <!-- 1. Init registry -->
-    <script src="https://unpkg.com/@softarc/native-federation-orchestrator@4.4.0/init-registry.mjs"></script>
+    <script src="https://unpkg.com/@softarc/native-federation-orchestrator@4.4.1/init-registry.mjs"></script>
 
     <!-- Enable shim-mode for optimal browser support, this is optional -->
     <script type="esms-options">
@@ -175,7 +175,7 @@ Custom browser events are unfortunately vulnerable to unwanted race conditions, 
     </script>
 
     <!-- 4. Include the orchestrator runtime -->
-    <script src="https://unpkg.com/@softarc/native-federation-orchestrator@4.4.0/quickstart.mjs"></script>
+    <script src="https://unpkg.com/@softarc/native-federation-orchestrator@4.4.1/quickstart.mjs"></script>
   </head>
   <body>
     <!-- 5. Use your loaded components -->
@@ -387,9 +387,12 @@ await initFederation(manifest, {
     latestSharedExternal: true, // Always use latest dependency versions
     overrideCachedRemotes: 'never', // Skip re-fetching known micro frontends
     overrideCachedRemotesIfURLMatches: false,
+    cacheTag: 'v1.2.3', // Bust HTTP caches for every remoteEntry.json request
   },
 });
 ```
+
+The `profile.cacheTag` appends a `?cacheTag=<value>` query param to **every** remoteEntry.json request, so changing it forces the browser to re-download all remotes. The host's own `hostRemoteEntry.cacheTag` (see below) takes precedence for the host remoteEntry when both are set.
 
 **Optimize your orchestrator**: Different applications can have different tolerance for risk. A strict mode setup fails fast when dependency versions are incompatible, The errors will still be runtime so be aware! The caching profile optimizes for performance by skipping already downloaded micro frontends. This can be useful but will cause the orchestrator to miss recently deployed versions of the remotes since it only takes from cache.
 

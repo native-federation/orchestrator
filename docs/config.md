@@ -175,6 +175,7 @@ export type ModeOptions = {
     skipInvalidExternalVersions?: boolean;
     overrideCachedRemotes?: 'always' | 'never' | 'init-only';
     overrideCachedRemotesIfURLMatches?: boolean;
+    cacheTag?: string;
   };
 };
 ```
@@ -202,6 +203,7 @@ The strictness part will define how the orchestrator behaves when an unexpected 
 | profile.skipInvalidExternalVersions       | `false`     | When enabled, an external whose version is not valid semver or missing is skipped (not added to storage) instead of being coerced to the smallest version of its requiredVersion range. Has no effect when `strict.strictExternalVersion` is set, which throws instead.             |
 | profile.overrideCachedRemotes             | `init-only` | When enabled, the library will override the cached remotes. The default behavior is to check if the remoteName is in the cache and the remoteEntry url differs from cached remoteEntry url (scopeUrl + "remoteEntry.json) . Available options are `never`, `init-only` and `always` |
 | profile.overrideCachedRemotesIfURLMatches | `false`     | When enabled, the library will override the cached remote, even if the remoteName already exists in cache and the remoteEntry.json URL matches the cached remoteEntry.json url.                                                                                                     |
+| profile.cacheTag                          | `undefined` | When set, the given value is appended as a `?cacheTag=<value>` query param to every remoteEntry.json request, letting you bust HTTP caches across all remotes at once. The host's own `hostRemoteEntry.cacheTag` takes precedence for the host remoteEntry when both are set.        |
 
 ### Example
 
