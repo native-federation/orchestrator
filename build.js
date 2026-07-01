@@ -114,6 +114,14 @@ async function generateBundles() {
       sourcemap: true
     },
 
+    '@softarc/native-federation-orchestrator/module-federation': {
+      ...baseConfig,
+      entryPoints: ['src/lib/module-federation.index.ts'],
+      outfile: path.join(OUTPUT_PATHS.fesm2022, 'module-federation.mjs'),
+      bundle: true,
+      sourcemap: true
+    },
+
     '@softarc/native-federation-orchestrator/quickstart': {
       ...baseConfig,
       entryPoints: [path.join(PATHS.scripts, "quickstart.ts")],
@@ -191,6 +199,11 @@ function generatePackageExports() {
       "./audit": {
         "types": "./types/lib/audit.index.d.ts",
         "default": "./fesm2022/audit.mjs"
+      },
+
+      "./module-federation": {
+        "types": "./types/lib/module-federation.index.d.ts",
+        "default": "./fesm2022/module-federation.mjs"
       },
 
       "./node": {

@@ -1,5 +1,8 @@
 import type { DrivingContract } from '../driving-ports/driving.contract';
-import type { ForCommittingChanges } from '../driver-ports/init/for-committing-changes.port';
+import type {
+  CommitOptions,
+  ForCommittingChanges,
+} from '../driver-ports/init/for-committing-changes.port';
 import type { ImportMap } from 'lib/core/1.domain/import-map/import-map.contract';
 import type { LoggingConfig } from 'lib/core/2.app/config';
 
@@ -25,11 +28,13 @@ export function createCommitChanges(
    *
    * @param adapters
    */
-  return (importMap: ImportMap) =>
-    Promise.resolve(importMap).then(addToBrowser).then(persistRepositoryChanges);
+  return (importMap: ImportMap, opts: CommitOptions = {}) =>
+    Promise.resolve(importMap)
+      .then(map => addToBrowser(map, opts))
+      .then(persistRepositoryChanges);
 
-  function addToBrowser(importMap: ImportMap) {
-    ports.browser.setImportMapFn(importMap);
+  function addToBrowser(importMap: ImportMap, opts: CommitOptions) {
+    ports.browser.setImportMapFn(importMap, opts);
     config.log.debug(5, 'Added import map to browser.', importMap);
     return importMap;
   }
