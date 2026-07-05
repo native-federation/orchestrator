@@ -52,7 +52,7 @@ importers:
         specifier: ^29.1.1
         version: 29.1.1
       knip:
-        specifier: ^6.18.0
+        specifier: ^6.22.0
         version: 6.22.0
       typescript:
         specifier: ^6.0.0
