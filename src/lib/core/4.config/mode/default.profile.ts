@@ -5,4 +5,5 @@ export const defaultProfile: ModeProfileConfig = {
   skipInvalidExternalVersions: false,
   overrideCachedRemotes: 'init-only',
   overrideCachedRemotesIfURLMatches: false,
+  useAutoExternalPooling: false,
 };

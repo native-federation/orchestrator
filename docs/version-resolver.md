@@ -436,6 +436,70 @@ flowchart LR
     F --> K[Available only to specific micro frontend]
 ```
 
+## Dependency Pooling
+
+The resolver above resolves every shared external **independently**. For a globally-shared
+singleton, the winning version's *source remote* is whichever remote first contributed that
+version tag — so `@angular/core` and `@angular/common` can end up served from **different**
+remote builds even when their versions match.
+
+For AOT-compiled frameworks like Angular the whole `@angular/*` family must come from **one
+coherent build** (same version *and* same remote). Mixing builds causes duplicate instances and
+DI errors (`NG0203`), because equal version ≠ equal build.
+
+**Pooling** groups such externals so every member resolves from a single coherent source. It is a
+*re-resolution* layered on top of the normal resolution (it emits nothing new) with two
+guarantees:
+
+1. All pooled members for the anchor remote come from **one** source build.
+2. **All-or-nothing per remote:** for any remote, either *every* pool member is served from the
+   shared anchor, or *every* member is scoped to that remote's own build — never a mix.
+
+### Enabling pooling
+
+Pooling is opt-in and inert by default. There are two ways an external joins a pool:
+
+- **Auto (by npm scope).** Set `useAutoExternalPooling: true` in the mode profile. Externals are
+  then grouped by their npm scope ("company") — `@angular/core`, `@angular/common` → pool
+  `angular`. **Scoped packages only**; unscoped packages (`rxjs`, `tslib`) are not auto-pooled.
+- **Remote-declared tag.** A remote may self-declare membership with an optional `pool` field on a
+  shared external in its `remoteEntry.json` (mirrors the existing `shareScope`). Upstream
+  `@softarc/native-federation` does not emit `pool`, so JSON without it parses unchanged.
+
+```ts
+initFederation(manifest, {
+  profile: { useAutoExternalPooling: true },
+});
+```
+
+**Membership precedence:** a non-empty remote `pool` tag wins; otherwise, when
+`useAutoExternalPooling` is on, the npm scope is used. An explicit tag always beats
+auto-derivation. Conflicting non-empty tags across remotes → a warning, first (sorted) tag wins.
+
+### How pooling resolves
+
+Per pool, per scope, one **anchor remote** — a remote that provides *every* member — is chosen
+with the same precedence as the per-external resolver: **host → `latestSharedExternal` →
+fewest-remotes-forced-to-scope → remote-name**. Selection is deterministic across page reloads
+(it ignores the `cached` flag). Every other remote is then classified once for the whole pool:
+
+- **FOLLOW** — compatible with the anchor: all members fall through to the shared anchor.
+- **SCOPE** — strict-incompatible with the anchor on *any* member: the remote's *entire* family is
+  served from its own build (all-or-nothing).
+
+If no single remote provides every member, pooling leaves the externals unpooled (and throws
+under `strictImportMap`). A forced scope under `strictExternalCompatibility` throws, matching the
+per-external resolver.
+
+Pooling applies to the **global scope and named shareScopes**; the `strict` scope is never pooled.
+It runs in **both** the initial pipeline and dynamic init (`initRemoteEntry`).
+
+**Dynamic-init limitation:** because the import map is immutable once committed, the dynamic pass
+is additive — it only adjusts the *newly loaded* remote. If a runtime remote's pool family is
+incompatible with the already-committed anchor (or would introduce a new global anchor while
+another member already follows an existing one), that remote's entire family is scoped to its own
+build. Already-committed remotes are never retro-corrected.
+
 ## Dynamic Init
 
 > **Important!:** This feature currently only works with the `use-import-shim` import-map type.

@@ -144,6 +144,7 @@ export function createStoreRemoteEntry(
       strictVersion: sharedInfo.strictVersion,
       cached: false,
       requiredVersion: scopeType === 'strict' ? tag : sharedInfo.requiredVersion || tag,
+      pool: sharedInfo.pool,
     };
 
     const cached: SharedExternal = ports.sharedExternalsRepo

@@ -16,6 +16,7 @@ export const mockVersionRemote = (
   strictVersion: options.strictVersion ?? true,
   cached: options.cached ?? false,
   bundle: options.bundle,
+  pool: options.pool,
 });
 
 type mockSharedVersionOptions = {

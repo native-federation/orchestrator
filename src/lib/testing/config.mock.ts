@@ -31,5 +31,6 @@ export const mockConfig = (): ConfigContract => ({
     skipInvalidExternalVersions: false,
     overrideCachedRemotes: 'always',
     overrideCachedRemotesIfURLMatches: false,
+    useAutoExternalPooling: false,
   },
 });

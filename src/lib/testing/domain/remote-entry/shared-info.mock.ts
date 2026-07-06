@@ -14,6 +14,7 @@ export const mockSharedInfo = (
     outFileName?: string;
     shareScope?: string;
     bundle?: string;
+    pool?: string;
   }
 ): SharedInfo => ({
   outFileName: `${packageName}.js`,
@@ -24,6 +25,7 @@ export const mockSharedInfo = (
   version: options.version,
   shareScope: options.shareScope,
   bundle: options.bundle,
+  pool: options.pool,
 });
 
 type SharedInfoOptions = {
@@ -33,6 +35,7 @@ type SharedInfoOptions = {
   outFileName?: string;
   shareScope?: string;
   bundle?: string;
+  pool?: string;
 };
 
 export const mockSharedInfoA = {
