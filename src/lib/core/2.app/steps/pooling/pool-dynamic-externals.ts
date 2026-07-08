@@ -7,17 +7,29 @@ export function createPoolDynamicExternals(config: ModeConfig): ForPoolingDynami
   /**
    * Dynamic-init counterpart of pool-shared-externals. The import map for existing remotes is
    * already committed and immutable, so this step is strictly **additive**: it only adjusts the
-   * *newly loaded* remote's own actions, never the existing shared versions.
+   * *newly loaded* remote's own actions, never the existing shared versions. Host precedence is
+   * honored by construction — the committed shared versions a `skip` follows were already elected
+   * with host-first precedence in the init step; this step never re-elects.
    *
-   * Per pool in the new entry: if any member would be `scope` (incompatible with the existing
-   * anchor), or a member would introduce a new global `share` while another member already
-   * follows an existing anchor (`skip`), the remote cannot stay coherent by mixing sources —
-   * force its *entire* pool family to `scope` (served from its own build) and drop any override.
-   * All members compatibly `skip`, or the remote introducing the whole pool itself (all `share`),
-   * are left untouched.
+   * Per pool in the new entry, mirroring the anchor model's reason-carrying classification:
+   *  - **incompatibility-forced** (any member is `scope` — strict-incompatible with the committed
+   *    build): scope the *entire* family with **no** dedup. Deduping a same-version sibling here is
+   *    exactly what would inject a foreign build via a shared intermediary.
+   *  - **coverage-forced** (members mix `share` and `skip`, none `scope`): a `share` member would
+   *    introduce a new global shared version, impossible on an immutable committed map — so it scopes
+   *    its own copy. `skip` members are same-version as the committed build and **dedup** (stay
+   *    `skip`, fall through to the shared build — no extra download).
+   *  - all `skip` (fully compatible) or all `share` (this remote introduces the whole pool): untouched.
    */
   return ({ entry, actions }) => {
     const { useAutoExternalPooling } = config.profile;
+
+    // has-pool early-out: with auto-pooling off, only an explicit `pool` tag on this entry can
+    // form a pool. A short-circuiting probe over the new entry's own shared list (the only input
+    // this additive step reads) skips the work below when nothing here is poolable.
+    if (!useAutoExternalPooling && !(entry.shared ?? []).some(e => e.pool?.trim())) {
+      return Promise.resolve({ entry, actions });
+    }
 
     const pools = new Map<PoolName, string[]>();
     for (const external of entry.shared ?? []) {
@@ -33,17 +45,21 @@ export function createPoolDynamicExternals(config: ModeConfig): ForPoolingDynami
       pools.set(poolName, [...(pools.get(poolName) ?? []), external.packageName]);
     }
 
+    const scope = (name: string) => {
+      actions[name]!.action = 'scope';
+      delete actions[name]!.override;
+    };
+
     for (const members of pools.values()) {
       const memberActions = members.map(name => actions[name]!.action);
-      const forceScope =
-        memberActions.includes('scope') ||
-        (memberActions.includes('share') && memberActions.includes('skip'));
 
-      if (!forceScope) continue;
-
-      for (const name of members) {
-        actions[name]!.action = 'scope';
-        delete actions[name]!.override;
+      if (memberActions.includes('scope')) {
+        // Incompatibility-forced: whole family scopes, no dedup.
+        members.forEach(scope);
+      } else if (memberActions.includes('share') && memberActions.includes('skip')) {
+        // Coverage-forced: only the new-share (orphan) members scope; same-version `skip` members
+        // dedup and fall through to the committed shared build.
+        members.filter(name => actions[name]!.action === 'share').forEach(scope);
       }
     }
 

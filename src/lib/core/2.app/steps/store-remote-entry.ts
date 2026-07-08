@@ -86,6 +86,7 @@ export function createStoreRemoteEntry(
       if (tag === null) return;
 
       if (external.singleton) {
+        if (external.pool?.trim()) ports.sharedExternalsRepo.markPoolTagSeen();
         onSharedExternal(remoteEntry, external, sharedExternalContext(remoteEntry, external, tag));
       } else {
         addScopedExternal(remoteEntry, external, tag);

@@ -440,20 +440,25 @@ flowchart LR
 
 The resolver above resolves every shared external **independently**. For a globally-shared
 singleton, the winning version's *source remote* is whichever remote first contributed that
-version tag — so `@angular/core` and `@angular/common` can end up served from **different**
-remote builds even when their versions match.
+version tag — so `@angular/core` and `@angular/common` can end up resolved against **different**
+versions even when a single coherent version exists.
 
-For AOT-compiled frameworks like Angular the whole `@angular/*` family must come from **one
-coherent build** (same version *and* same remote). Mixing builds causes duplicate instances and
-DI errors (`NG0203`), because equal version ≠ equal build.
+The real hazard is **transitive version coupling**. Some packages must move together: `@angular/core`
+and `@angular/common` are *directly* coupled (they release in lockstep), but the sharper case is a
+design system `@acme/ds` built *against* `@angular/core`. Suppose `@acme/ds` is shared from mfe-A
+(built on Angular 15) and mfe-B (on Angular 16) consumes that **shared** `ds`. mfe-B now runs with
+**two Angulars** — its own `core@16` plus the `core@15` the shared `ds` drags in — and you get
+duplicate DI instances (`NG0203`). The invariant is *"the coupled group resolves to one
+mutually-compatible **version** together"*, and this must hold **transitively** through intermediaries
+like `ds`.
 
-**Pooling** groups such externals so every member resolves from a single coherent source. It is a
-*re-resolution* layered on top of the normal resolution (it emits nothing new) with two
-guarantees:
+**Pooling** groups such externals so the whole coupled group resolves to one mutually-compatible
+version. It is a *re-resolution* layered on top of the normal resolution (it emits nothing new).
 
-1. All pooled members for the anchor remote come from **one** source build.
-2. **All-or-nothing per remote:** for any remote, either *every* pool member is served from the
-   shared anchor, or *every* member is scoped to that remote's own build — never a mix.
+> **Auto-pooling only groups by npm scope**, so it catches `@angular/*` but will **not** discover a
+> transitive coupling like `@acme/ds` → `@angular/core` — they share no scope. A design system that is
+> version-coupled to a framework must **declare** it: tag `@acme/ds` with `pool: "angular"` (or tag the
+> whole group under one name). Auto-scope grouping alone can never protect a transitive coupling.
 
 ### Enabling pooling
 
@@ -478,27 +483,48 @@ auto-derivation. Conflicting non-empty tags across remotes → a warning, first 
 
 ### How pooling resolves
 
-Per pool, per scope, one **anchor remote** — a remote that provides *every* member — is chosen
-with the same precedence as the per-external resolver: **host → `latestSharedExternal` →
-fewest-remotes-forced-to-scope → remote-name**. Selection is deterministic across page reloads
-(it ignores the `cached` flag). Every other remote is then classified once for the whole pool:
+Per pool, per scope, one **anchor remote** is chosen. Real portfolios are ragged — MFE-A uses
+`@angular/forms`, MFE-B uses `@angular/cdk`, nobody imports the full union — so the anchor may be
+**partial**: it provides *some* members, and any member no anchor provides is handled separately
+(see *scoped-only* below). The anchor is chosen with a waterfall of selectors:
 
-- **FOLLOW** — compatible with the anchor: all members fall through to the shared anchor.
-- **SCOPE** — strict-incompatible with the anchor on *any* member: the remote's *entire* family is
-  served from its own build (all-or-nothing).
+- **host** — a host-provided remote wins unconditionally (even as a partial anchor);
+- **`latestSharedExternal`** — otherwise, the remote providing the newest versions;
+- **min-downloads** — otherwise, the remote minimizing total re-downloads
+  `|members(anchor)| + Σ_{scoped r} |used(r)|`. Because scoping is all-or-nothing, cost is measured in
+  **downloaded members**, not scoped-remote count — a remote that scopes three 1-member remotes is
+  cheaper than one that scopes a single 5-member remote;
+- **remote-name** — deterministic tiebreak.
 
-If no single remote provides every member, pooling leaves the externals unpooled (and throws
-under `strictImportMap`). A forced scope under `strictExternalCompatibility` throws, matching the
-per-external resolver.
+Selection is deterministic across page reloads (it ignores the `cached` flag). Every other remote is
+then classified once for the whole pool, carrying *why* it scopes:
+
+- **FOLLOW** — compatible on every member the anchor provides: falls through to the shared build.
+- **SCOPE (incompatibility-forced)** — strict-incompatible with the anchor on *any* member: the
+  remote's *entire* family is served from its own build, with **no** dedup. Deduping a same-version
+  sibling here is exactly what would inject a foreign build via a shared intermediary (the `@acme/ds`
+  hazard above). Incompatibility **dominates** coverage.
+- **SCOPE (coverage-forced)** — compatible everywhere the anchor covers, but uses ≥1 member the anchor
+  does not provide. It scopes that member's own copy, but **may dedup**: for any member whose version
+  *equals* the shared version it falls through to the shared build (no extra download) — safe because
+  there is no version conflict to transmit.
+
+**Scoped-only members.** When *no* winning anchor provides a member (an orphan), that member has **no**
+shared build: every remote using it serves its own copy, and pooling logs
+`'<member>' is scoped-only — no coherent shared build provides it; N remotes download their own copy`.
+Pooling no longer bails just because no single remote covers the union — a best partial anchor is
+always chosen. A forced scope under `strictExternalCompatibility` throws, matching the per-external
+resolver.
 
 Pooling applies to the **global scope and named shareScopes**; the `strict` scope is never pooled.
 It runs in **both** the initial pipeline and dynamic init (`initRemoteEntry`).
 
-**Dynamic-init limitation:** because the import map is immutable once committed, the dynamic pass
-is additive — it only adjusts the *newly loaded* remote. If a runtime remote's pool family is
-incompatible with the already-committed anchor (or would introduce a new global anchor while
-another member already follows an existing one), that remote's entire family is scoped to its own
-build. Already-committed remotes are never retro-corrected.
+**Dynamic-init limitation:** because the import map is immutable once committed, the dynamic pass is
+additive — it only adjusts the *newly loaded* remote, never retro-correcting committed remotes. It
+honors the same distinction: if the new remote is **incompatibility-forced** (strict-incompatible with
+a committed member) its *entire* family scopes with no dedup; if it is merely **coverage-forced** (it
+would introduce a new global share for some member while others follow the committed build), only the
+new-share members scope and the same-version members dedup (fall through to the committed build).
 
 ## Dynamic Init
 

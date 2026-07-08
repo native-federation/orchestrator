@@ -98,6 +98,32 @@ describe('createProcessRemoteEntries', () => {
     });
   });
 
+  describe('pool-tag memo', () => {
+    it('flags the shared-externals repo when a shared external declares a pool tag', async () => {
+      const remoteEntries = [
+        mockRemoteEntry_MFE1({
+          shared: [mockSharedInfo('dep-a', { singleton: true, pool: 'grp' })],
+        }),
+      ];
+
+      await processRemoteEntries(remoteEntries);
+
+      expect(adapters.sharedExternalsRepo.markPoolTagSeen).toHaveBeenCalled();
+    });
+
+    it('does not flag the repo when no shared external declares a pool tag', async () => {
+      const remoteEntries = [
+        mockRemoteEntry_MFE1({
+          shared: [mockSharedInfo('dep-a', { singleton: true })],
+        }),
+      ];
+
+      await processRemoteEntries(remoteEntries);
+
+      expect(adapters.sharedExternalsRepo.markPoolTagSeen).not.toHaveBeenCalled();
+    });
+  });
+
   describe('handling a missing version property', () => {
     it('should handle invalid versions in strict mode', async () => {
       config.strict.strictExternalVersion = true;

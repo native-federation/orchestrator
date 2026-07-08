@@ -49,7 +49,10 @@ describe('createPoolDynamicExternals', () => {
     expect(result.actions['@angular/common']).toEqual({ action: 'scope' });
   });
 
-  it('forces scope when a member introduces a new global share while another follows an existing anchor', async () => {
+  it('coverage-forced: scopes only the new-share member; the same-version skip member dedups', async () => {
+    // No member is `scope` (no strict incompatibility), so this is coverage — not incompatibility.
+    // @angular/common would introduce a new global share (impossible on the committed map) → scopes.
+    // @angular/core is same-version as the committed build → stays skip (dedup, no extra download).
     const entry = entryWith(shared('@angular/core'), shared('@angular/common'));
     const actions: SharedInfoActions = {
       '@angular/core': { action: 'skip', override: 'http://host/core.js' },
@@ -58,8 +61,25 @@ describe('createPoolDynamicExternals', () => {
 
     const result = await poolDynamicExternals({ entry, actions });
 
+    expect(result.actions['@angular/core']).toEqual({ action: 'skip', override: 'http://host/core.js' });
+    expect(result.actions['@angular/common']).toEqual({ action: 'scope' });
+  });
+
+  it('incompatibility-forced: scopes the whole family with no dedup, even the same-version member', async () => {
+    // One member is strict-incompatible (`scope`), so the WHOLE family scopes — the same-version
+    // `skip` member does NOT dedup (that would bridge the incompatible build via a shared intermediary).
+    const entry = entryWith(shared('@angular/core'), shared('@angular/common'), shared('@angular/cdk'));
+    const actions: SharedInfoActions = {
+      '@angular/core': { action: 'skip', override: 'http://host/core.js' },
+      '@angular/common': { action: 'share' },
+      '@angular/cdk': { action: 'scope' },
+    };
+
+    const result = await poolDynamicExternals({ entry, actions });
+
     expect(result.actions['@angular/core']).toEqual({ action: 'scope' });
     expect(result.actions['@angular/common']).toEqual({ action: 'scope' });
+    expect(result.actions['@angular/cdk']).toEqual({ action: 'scope' });
   });
 
   it('leaves a whole-pool-introducing remote (all share) untouched', async () => {
@@ -105,5 +125,24 @@ describe('createPoolDynamicExternals', () => {
 
     expect(result.actions.foo).toEqual({ action: 'scope' });
     expect(result.actions.bar).toEqual({ action: 'scope' });
+  });
+
+  it('has-pool early-out: an incompatible family is left untouched when auto-pooling is off and the entry has no pool tag', async () => {
+    // Without the gate this family would coordinate; with auto-pooling off and no tag on the entry
+    // there is no pool, so the actions determine produced must pass through unchanged.
+    config.profile.useAutoExternalPooling = false;
+    const entry = entryWith(shared('@angular/core'), shared('@angular/common'));
+    const actions: SharedInfoActions = {
+      '@angular/core': { action: 'skip', override: 'http://host/core.js' },
+      '@angular/common': { action: 'scope' },
+    };
+
+    const result = await poolDynamicExternals({ entry, actions });
+
+    expect(result.actions['@angular/core']).toEqual({
+      action: 'skip',
+      override: 'http://host/core.js',
+    });
+    expect(result.actions['@angular/common']).toEqual({ action: 'scope' });
   });
 });

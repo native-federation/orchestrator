@@ -81,15 +81,16 @@ describe('pooling (integration)', () => {
   };
 
   it('anchors an entire @angular family on a single remote build', async () => {
-    // Two coherent builds. Left to determine-shared-externals alone, core would anchor on mfe-a
-    // (its version listed first) and common on mfe-b — an incoherent split. Pooling must unify them.
+    // mfe-a provides the winning build (17.0.0) for the whole family; mfe-b ships a newer,
+    // compatible tag. determine elects mfe-a@17.0.0 for every member and pooling anchors the family
+    // on it — mfe-b follows the anchor (skip) rather than splitting the family across two sources.
     seed('@angular/core', [
       version('17.0.0', '@angular/core', [{ remote: 'team/mfe-a', req: '^17.0.0' }]),
       version('17.1.0', '@angular/core', [{ remote: 'team/mfe-b', req: '^17.0.0' }]),
     ]);
     seed('@angular/common', [
-      version('17.1.0', '@angular/common', [{ remote: 'team/mfe-b', req: '^17.0.0' }]),
       version('17.0.0', '@angular/common', [{ remote: 'team/mfe-a', req: '^17.0.0' }]),
+      version('17.1.0', '@angular/common', [{ remote: 'team/mfe-b', req: '^17.0.0' }]),
     ]);
 
     const importMap = await runInit();
@@ -106,8 +107,8 @@ describe('pooling (integration)', () => {
       version('18.0.0', '@angular/core', [{ remote: 'team/mfe-c', req: '^18.0.0' }]),
     ]);
     seed('@angular/common', [
-      version('17.1.0', '@angular/common', [{ remote: 'team/mfe-b', req: '^17.0.0' }]),
       version('17.0.0', '@angular/common', [{ remote: 'team/mfe-a', req: '^17.0.0' }]),
+      version('17.1.0', '@angular/common', [{ remote: 'team/mfe-b', req: '^17.0.0' }]),
       version('18.0.0', '@angular/common', [{ remote: 'team/mfe-c', req: '^18.0.0' }]),
     ]);
 
@@ -122,6 +123,90 @@ describe('pooling (integration)', () => {
     const cScope = importMap.scopes?.[SCOPE['team/mfe-c']];
     expect(cScope?.['@angular/core']).toContain(SCOPE['team/mfe-c']);
     expect(cScope?.['@angular/common']).toContain(SCOPE['team/mfe-c']);
+  });
+
+  it('pools around a partial anchor when no remote covers the union; orphan is scoped-only', async () => {
+    // Ragged portfolio: mfe-a has core+common, mfe-b has common+forms. No remote covers the whole
+    // @angular family. Pooling anchors on the best partial anchor (mfe-a) and the orphan (forms)
+    // resolves scoped-only.
+    seed('@angular/core', [version('17.0.0', '@angular/core', [{ remote: 'team/mfe-a', req: '^17.0.0' }])]);
+    seed('@angular/common', [
+      version('17.0.0', '@angular/common', [{ remote: 'team/mfe-a', req: '^17.0.0' }]),
+      version('17.0.0', '@angular/common', [{ remote: 'team/mfe-b', req: '^17.0.0' }]),
+    ]);
+    seed('@angular/forms', [version('17.0.0', '@angular/forms', [{ remote: 'team/mfe-b', req: '^17.0.0' }])]);
+
+    const importMap = await runInit();
+
+    // core + common share around the partial anchor mfe-a.
+    expect(importMap.imports['@angular/core']).toContain(SCOPE['team/mfe-a']);
+    expect(importMap.imports['@angular/common']).toContain(SCOPE['team/mfe-a']);
+    // mfe-b dedups common (same version) — no scoped re-download of it.
+    expect(importMap.scopes?.[SCOPE['team/mfe-b']]?.['@angular/common']).toBeUndefined();
+
+    // forms is an orphan — no anchor provides it — so it resolves scoped-only from mfe-b.
+    expect(importMap.imports['@angular/forms']).toBeUndefined();
+    expect(importMap.scopes?.[SCOPE['team/mfe-b']]?.['@angular/forms']).toContain(SCOPE['team/mfe-b']);
+  });
+
+  it('a tagged design system scopes its whole family for an incompatible consumer (no foreign Angular)', async () => {
+    // @acme/ds is version-coupled to @angular/core and joins the pool via a `pool: "angular"` tag.
+    // mfe-b runs Angular 18 (incompatible with the mfe-a@17 anchor), so it is incompatibility-forced
+    // and scopes its ENTIRE family — including its own @acme/ds — with NO dedup. This is exactly what
+    // prevents mfe-b from consuming mfe-a's shared ds (built against core@17) and ending up with two
+    // Angulars (NG0203).
+    const dsMeta = (remote: string) =>
+      mockVersionRemote(remote, '@acme/ds', { requiredVersion: '^1.0.0', strictVersion: true, pool: 'angular' });
+    seed('@angular/core', [
+      version('17.0.0', '@angular/core', [{ remote: 'team/mfe-a', req: '^17.0.0' }]),
+      version('18.0.0', '@angular/core', [{ remote: 'team/mfe-b', req: '^18.0.0' }]),
+    ]);
+    seed('@acme/ds', [
+      { tag: '1.0.0', host: false, action: 'skip', remotes: [dsMeta('team/mfe-a')] },
+      { tag: '1.0.0', host: false, action: 'skip', remotes: [dsMeta('team/mfe-b')] },
+    ]);
+
+    const importMap = await runInit();
+
+    // Shared family (core + ds) is single-source on mfe-a.
+    expect(importMap.imports['@angular/core']).toContain(SCOPE['team/mfe-a']);
+    expect(importMap.imports['@acme/ds']).toContain(SCOPE['team/mfe-a']);
+
+    // mfe-b scopes its WHOLE family — ds is NOT deduped despite matching version 1.0.0, so no foreign
+    // Angular leaks in through the shared design system.
+    const bScope = importMap.scopes?.[SCOPE['team/mfe-b']];
+    expect(bScope?.['@angular/core']).toContain(SCOPE['team/mfe-b']);
+    expect(bScope?.['@acme/ds']).toContain(SCOPE['team/mfe-b']);
+  });
+
+  it('coverage-forced dedups a same-version member while incompatibility-forced scopes its whole family', async () => {
+    // mfe-a is the anchor (core+common). mfe-b is coverage-forced (uses cdk, the orphan; core@17
+    // matches). mfe-c is incompatibility-forced (core@18). End-to-end contrast through the import map.
+    seed('@angular/core', [
+      version('17.0.0', '@angular/core', [{ remote: 'team/mfe-a', req: '^17.0.0' }]),
+      version('17.0.0', '@angular/core', [{ remote: 'team/mfe-b', req: '^17.0.0' }]),
+      version('18.0.0', '@angular/core', [{ remote: 'team/mfe-c', req: '^18.0.0' }]),
+    ]);
+    seed('@angular/common', [
+      version('17.0.0', '@angular/common', [{ remote: 'team/mfe-a', req: '^17.0.0' }]),
+      version('17.0.0', '@angular/common', [{ remote: 'team/mfe-c', req: '^17.0.0' }]),
+    ]);
+    seed('@angular/cdk', [version('17.0.0', '@angular/cdk', [{ remote: 'team/mfe-b', req: '^17.0.0' }])]);
+
+    const importMap = await runInit();
+
+    // core: shared on mfe-a; mfe-b dedups (no scoped copy); mfe-c scopes (incompatible).
+    expect(importMap.imports['@angular/core']).toContain(SCOPE['team/mfe-a']);
+    expect(importMap.scopes?.[SCOPE['team/mfe-b']]?.['@angular/core']).toBeUndefined();
+    expect(importMap.scopes?.[SCOPE['team/mfe-c']]?.['@angular/core']).toContain(SCOPE['team/mfe-c']);
+
+    // common: shared on mfe-a; mfe-c scopes it too (whole-family, no dedup) even at the same version.
+    expect(importMap.imports['@angular/common']).toContain(SCOPE['team/mfe-a']);
+    expect(importMap.scopes?.[SCOPE['team/mfe-c']]?.['@angular/common']).toContain(SCOPE['team/mfe-c']);
+
+    // cdk: orphan → scoped-only on mfe-b.
+    expect(importMap.imports['@angular/cdk']).toBeUndefined();
+    expect(importMap.scopes?.[SCOPE['team/mfe-b']]?.['@angular/cdk']).toContain(SCOPE['team/mfe-b']);
   });
 
   it('scopes a dynamically-added incompatible remote whole family (dynamic init path)', async () => {
