@@ -18,16 +18,14 @@ const createSharedExternalsRepository = (config: StorageConfig): ForSharedExtern
 
   const _cache: SharedExternals = STORAGE.get()!;
 
-  // App-scoped memo of "did any remote declare a pool tag", set while storing remote entries and
-  // read by the pooling step to skip its scope walk when nothing is poolable. Not persisted: it is
-  // re-derived from the freshly processed entries on every init, before the pooling step runs.
+  // Not persisted: re-derived from the freshly processed entries on every init, before pooling runs.
   let _sawPoolTag = false;
 
   return {
-    markPoolTagSeen: function () {
+    markPoolTagPresent: function () {
       _sawPoolTag = true;
     },
-    hasSeenPoolTag: function () {
+    hasPoolTag: function () {
       return _sawPoolTag;
     },
     getFromScope: function (shareScope?: string) {

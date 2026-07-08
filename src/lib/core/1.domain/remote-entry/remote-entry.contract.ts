@@ -6,9 +6,7 @@ import type {
   SharedInfo as BaseSharedInfo,
 } from '@softarc/native-federation/domain';
 
-// Widen upstream `SharedInfo` with an optional, additive `pool` tag: a remote may
-// self-declare pool membership (mirrors the existing `shareScope?`). Upstream JSON
-// without `pool` still parses unchanged.
+// Todo: Remove when upstream includes pool prop
 type SharedInfo = BaseSharedInfo & { pool?: string };
 
 type RemoteEntry = Omit<FederationInfo, 'shared'> & {

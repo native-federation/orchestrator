@@ -35,13 +35,13 @@ describe('createSharedExternalsRepository', () => {
   describe('pool-tag memo', () => {
     it('has not seen a pool tag on a fresh repository', () => {
       const { externalsRepo } = setupWithCache();
-      expect(externalsRepo.hasSeenPoolTag()).toBe(false);
+      expect(externalsRepo.hasPoolTag()).toBe(false);
     });
 
     it('reports a pool tag once marked', () => {
       const { externalsRepo } = setupWithCache();
-      externalsRepo.markPoolTagSeen();
-      expect(externalsRepo.hasSeenPoolTag()).toBe(true);
+      externalsRepo.markPoolTagPresent();
+      expect(externalsRepo.hasPoolTag()).toBe(true);
     });
   });
 

@@ -108,7 +108,7 @@ describe('createProcessRemoteEntries', () => {
 
       await processRemoteEntries(remoteEntries);
 
-      expect(adapters.sharedExternalsRepo.markPoolTagSeen).toHaveBeenCalled();
+      expect(adapters.sharedExternalsRepo.markPoolTagPresent).toHaveBeenCalled();
     });
 
     it('does not flag the repo when no shared external declares a pool tag', async () => {
@@ -120,7 +120,7 @@ describe('createProcessRemoteEntries', () => {
 
       await processRemoteEntries(remoteEntries);
 
-      expect(adapters.sharedExternalsRepo.markPoolTagSeen).not.toHaveBeenCalled();
+      expect(adapters.sharedExternalsRepo.markPoolTagPresent).not.toHaveBeenCalled();
     });
   });
 

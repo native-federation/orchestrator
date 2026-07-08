@@ -12,13 +12,7 @@ export type ForSharedExternalsStorage = {
     external: SharedExternal,
     shareScope?: string
   ) => ForSharedExternalsStorage;
-  /**
-   * Record that a remote declared a `pool` tag on some external. Set once while remote entries
-   * are stored (where each tag is already read), it memoizes the observation so the pooling step
-   * can early-out without re-walking every external — see `pool-shared-externals`.
-   */
-  markPoolTagSeen: () => void;
-  /** Whether any remote declared a `pool` tag during entry storage. */
-  hasSeenPoolTag: () => boolean;
+  markPoolTagPresent: () => void;
+  hasPoolTag: () => boolean;
   commit: () => ForSharedExternalsStorage;
 };
