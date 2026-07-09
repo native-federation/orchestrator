@@ -111,7 +111,7 @@ describe('createConvertToImportMap', () => {
         shared: [mockSharedInfoE.v1_2_3()],
       });
       const actions: SharedInfoActions = {
-        'dep-e': { action: 'scope', override: mockScopeUrl_MFE1({ file: 'dep-e.js' }) },
+        'dep-e': { action: 'scope', override: { 'dep-e': mockScopeUrl_MFE1({ file: 'dep-e.js' }) } },
       };
 
       const importMap = await convertToImportMap({ entry: remoteEntry, actions });
@@ -148,7 +148,7 @@ describe('createConvertToImportMap', () => {
         shared: [mockSharedInfoA.v2_1_2({ shareScope: 'custom-scope' })],
       });
       const actions: SharedInfoActions = {
-        'dep-a': { action: 'skip', override: mockScopeUrl_MFE1({ file: 'dep-a.js' }) },
+        'dep-a': { action: 'skip', override: { 'dep-a': mockScopeUrl_MFE1({ file: 'dep-a.js' }) } },
       };
 
       const importMap = await convertToImportMap({ entry: remoteEntry, actions });
@@ -159,6 +159,48 @@ describe('createConvertToImportMap', () => {
             'dep-a': mockScopeUrl_MFE1({ file: 'dep-a.js' }),
           },
         },
+      });
+    });
+
+    it('should remap all entrypoints when skip action has a multi-entry override', async () => {
+      const remoteEntry: RemoteEntry = mockRemoteEntry_MFE2({
+        exposes: [],
+        shared: [mockSharedInfoA.v2_1_2({ shareScope: 'custom-scope' })],
+      });
+      const actions: SharedInfoActions = {
+        'dep-a': {
+          action: 'skip',
+          override: {
+            'dep-a': mockScopeUrl_MFE1({ file: 'dep-a.js' }),
+            'dep-a/sub': mockScopeUrl_MFE1({ file: 'dep-a-sub.js' }),
+          },
+        },
+      };
+
+      const importMap = await convertToImportMap({ entry: remoteEntry, actions });
+      expect(importMap).toEqual({
+        imports: {},
+        scopes: {
+          [mockScopeUrl_MFE2()]: {
+            'dep-a': mockScopeUrl_MFE1({ file: 'dep-a.js' }),
+            'dep-a/sub': mockScopeUrl_MFE1({ file: 'dep-a-sub.js' }),
+          },
+        },
+      });
+    });
+
+    it('should skip externals with skip action and shareScope but no override', async () => {
+      const remoteEntry: RemoteEntry = mockRemoteEntry_MFE2({
+        exposes: [],
+        shared: [mockSharedInfoA.v2_1_2({ shareScope: 'custom-scope' })],
+      });
+      const actions: SharedInfoActions = {
+        'dep-a': { action: 'skip' },
+      };
+
+      const importMap = await convertToImportMap({ entry: remoteEntry, actions });
+      expect(importMap).toEqual({
+        imports: {},
       });
     });
   });
@@ -289,6 +331,77 @@ describe('createConvertToImportMap', () => {
     });
   });
 
+  describe('Shared Externals - secondary entrypoints (entries)', () => {
+    it('should expand entries for non-singleton scoped externals', async () => {
+      const remoteEntry: RemoteEntry = mockRemoteEntry_MFE2({
+        exposes: [],
+        shared: [
+          mockSharedInfoE.v1_2_3({ entries: { 'dep-e': 'dep-e.js', 'dep-e/sub': 'dep-e-sub.js' } }),
+        ],
+      });
+      const actions: SharedInfoActions = {};
+
+      const importMap = await convertToImportMap({ entry: remoteEntry, actions });
+      expect(importMap).toEqual({
+        imports: {},
+        scopes: {
+          [mockScopeUrl_MFE2()]: {
+            'dep-e': mockScopeUrl_MFE2({ file: 'dep-e.js' }),
+            'dep-e/sub': mockScopeUrl_MFE2({ file: 'dep-e-sub.js' }),
+          },
+        },
+      });
+    });
+
+    it('should expand entries for singleton "scope" action externals', async () => {
+      const remoteEntry: RemoteEntry = mockRemoteEntry_MFE2({
+        exposes: [],
+        shared: [
+          mockSharedInfoA.v2_1_2({
+            shareScope: 'custom-scope',
+            entries: { 'dep-a': 'dep-a.js', 'dep-a/sub': 'dep-a-sub.js' },
+          }),
+        ],
+      });
+      const actions: SharedInfoActions = {
+        'dep-a': { action: 'scope' },
+      };
+
+      const importMap = await convertToImportMap({ entry: remoteEntry, actions });
+      expect(importMap).toEqual({
+        imports: {},
+        scopes: {
+          [mockScopeUrl_MFE2()]: {
+            'dep-a': mockScopeUrl_MFE2({ file: 'dep-a.js' }),
+            'dep-a/sub': mockScopeUrl_MFE2({ file: 'dep-a-sub.js' }),
+          },
+        },
+      });
+    });
+
+    it('should expand entries for globally shared externals', async () => {
+      const remoteEntry: RemoteEntry = mockRemoteEntry_MFE2({
+        exposes: [],
+        shared: [
+          mockSharedInfoA.v2_1_2({
+            entries: { 'dep-a': 'dep-a.js', 'dep-a/sub': 'dep-a-sub.js' },
+          }),
+        ],
+      });
+      const actions: SharedInfoActions = {
+        'dep-a': { action: 'share' },
+      };
+
+      const importMap = await convertToImportMap({ entry: remoteEntry, actions });
+      expect(importMap).toEqual({
+        imports: {
+          'dep-a': mockScopeUrl_MFE2({ file: 'dep-a.js' }),
+          'dep-a/sub': mockScopeUrl_MFE2({ file: 'dep-a-sub.js' }),
+        },
+      });
+    });
+  });
+
   describe('Chunk Imports', () => {
     it('should not add chunk imports when no bundles are present', async () => {
       const remoteEntry: RemoteEntry = mockRemoteEntry_MFE2({
@@ -367,12 +480,7 @@ describe('createConvertToImportMap', () => {
     it('should add chunk imports for non-singleton externals with bundle', async () => {
       const remoteEntry: RemoteEntry = mockRemoteEntry_MFE2({
         exposes: [],
-        shared: [
-          {
-            ...mockSharedInfoE.v1_2_3(),
-            bundle: 'scoped',
-          },
-        ],
+        shared: [mockSharedInfoE.v1_2_3({ bundle: 'scoped' })],
       });
       const actions: SharedInfoActions = {};
       ports.sharedChunksRepo.tryGet = vi.fn((remote, bundle) => {

@@ -9,6 +9,7 @@ export type Version = {
 export type ScopedVersion = Version & {
   file: string;
   bundle?: string;
+  entries: Record<string, string>;
 };
 
 export type SharedVersion = Version & {
@@ -26,4 +27,5 @@ export type SharedVersionMeta = {
   cached: boolean;
   name: RemoteName;
   bundle?: string;
+  entries: Record<string, string>;
 };

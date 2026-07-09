@@ -16,6 +16,7 @@ export const mockVersionRemote = (
   strictVersion: options.strictVersion ?? true,
   cached: options.cached ?? false,
   bundle: options.bundle,
+  entries: options.entries ?? { [external]: options.file ?? `${external}.js` },
 });
 
 type mockSharedVersionOptions = {
@@ -55,6 +56,7 @@ export const mockSharedVersion = (
 export const mockScopedVersion = (tag: string, external: string = 'test-dep'): ScopedVersion => ({
   tag,
   file: `${external}.js`,
+  entries: { [external]: `${external}.js` },
 });
 
 export const mockVersion = {

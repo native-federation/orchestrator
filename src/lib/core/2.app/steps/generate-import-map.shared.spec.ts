@@ -64,6 +64,31 @@ describe('createGenerateImportMap (shared-externals)', () => {
     });
   });
 
+  it('should expand secondary entrypoints (entries) of a globally shared external', async () => {
+    adapters.sharedExternalsRepo.getFromScope = vi.fn(() => ({
+      'dep-a': mockExternal_A({
+        dirty: false,
+        versions: [
+          mockVersion_A.v2_1_1({
+            action: 'share',
+            remotes: {
+              'team/mfe1': { entries: { 'dep-a': 'dep-a.js', 'dep-a/sub': 'dep-a-sub.js' } },
+            },
+          }),
+        ],
+      }),
+    }));
+
+    const actual = await generateImportMap();
+
+    expect(actual).toEqual({
+      imports: {
+        'dep-a': mockScopeUrl_MFE1({ file: 'dep-a.js' }),
+        'dep-a/sub': mockScopeUrl_MFE1({ file: 'dep-a-sub.js' }),
+      },
+    });
+  });
+
   it('should only add the shared version of the shared external to the global scope.', async () => {
     adapters.sharedExternalsRepo.getFromScope = vi.fn(() => ({
       'dep-a': mockExternal_A({

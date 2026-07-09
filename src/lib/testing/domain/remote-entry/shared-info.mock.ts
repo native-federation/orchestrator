@@ -14,17 +14,22 @@ export const mockSharedInfo = (
     outFileName?: string;
     shareScope?: string;
     bundle?: string;
+    entries?: Record<string, string>;
   }
-): SharedInfo => ({
-  outFileName: `${packageName}.js`,
-  packageName,
-  singleton: options.singleton ?? false,
-  strictVersion: options.strictVersion ?? true,
-  requiredVersion: options.requiredVersion,
-  version: options.version,
-  shareScope: options.shareScope,
-  bundle: options.bundle,
-});
+): SharedInfo => {
+  const common = {
+    packageName,
+    singleton: options.singleton ?? false,
+    strictVersion: options.strictVersion ?? true,
+    requiredVersion: options.requiredVersion,
+    version: options.version,
+    shareScope: options.shareScope,
+    bundle: options.bundle,
+  };
+  return options.entries
+    ? { ...common, entries: options.entries }
+    : { ...common, outFileName: options.outFileName ?? `${packageName}.js` };
+};
 
 type SharedInfoOptions = {
   singleton?: boolean;
@@ -33,6 +38,7 @@ type SharedInfoOptions = {
   outFileName?: string;
   shareScope?: string;
   bundle?: string;
+  entries?: Record<string, string>;
 };
 
 export const mockSharedInfoA = {
@@ -115,30 +121,34 @@ export const mockSharedInfoD = {
 };
 
 export const mockSharedInfoE = {
-  v1_2_3: () =>
+  v1_2_3: (o: SharedInfoOptions = {}) =>
     mockSharedInfo('dep-e', {
-      requiredVersion: '~1.2.0',
+      ...o,
+      requiredVersion: o.requiredVersion ?? '~1.2.0',
       version: '1.2.3',
       singleton: false,
     }),
-  v1_2_4: () =>
+  v1_2_4: (o: SharedInfoOptions = {}) =>
     mockSharedInfo('dep-e', {
-      requiredVersion: '~1.2.0',
+      ...o,
+      requiredVersion: o.requiredVersion ?? '~1.2.0',
       version: '1.2.4',
       singleton: false,
     }),
 };
 
 export const mockSharedInfoF = {
-  v1_2_3: () =>
+  v1_2_3: (o: SharedInfoOptions = {}) =>
     mockSharedInfo('dep-f', {
-      requiredVersion: '~1.2.0',
+      ...o,
+      requiredVersion: o.requiredVersion ?? '~1.2.0',
       version: '1.2.3',
       singleton: false,
     }),
-  v1_2_4: () =>
+  v1_2_4: (o: SharedInfoOptions = {}) =>
     mockSharedInfo('dep-f', {
-      requiredVersion: '~1.2.0',
+      ...o,
+      requiredVersion: o.requiredVersion ?? '~1.2.0',
       version: '1.2.4',
       singleton: false,
     }),

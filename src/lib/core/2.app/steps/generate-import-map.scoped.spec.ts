@@ -78,6 +78,30 @@ describe('createGenerateImportMap (scoped-externals)', () => {
     });
   });
 
+  it('should expand secondary entrypoints (entries) into the scope', async () => {
+    adapters.scopedExternalsRepo.getAll = vi.fn(() => ({
+      'team/mfe1': {
+        'dep-e': {
+          tag: '1.2.3',
+          file: 'dep-e.js',
+          entries: { 'dep-e': 'dep-e.js', 'dep-e/sub': 'dep-e-sub.js' },
+        },
+      },
+    }));
+
+    const actual = await generateImportMap();
+
+    expect(actual).toEqual({
+      imports: {},
+      scopes: {
+        [mockScopeUrl_MFE1()]: {
+          'dep-e': mockScopeUrl_MFE1({ file: 'dep-e.js' }),
+          'dep-e/sub': mockScopeUrl_MFE1({ file: 'dep-e-sub.js' }),
+        },
+      },
+    });
+  });
+
   it('should throw an error if the remote doesnt exist', async () => {
     adapters.scopedExternalsRepo.getAll = vi.fn(() => ({
       'team/mfe3': { ...mockExternal_E() },

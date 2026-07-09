@@ -1,11 +1,12 @@
-import type {
-  RemoteEntry,
-  RemoteInfo,
-  ScopedVersion,
-  SharedExternal,
-  SharedInfo,
-  SharedVersion,
-  SharedVersionMeta,
+import {
+  type RemoteEntry,
+  type RemoteInfo,
+  type ScopedVersion,
+  type SharedExternal,
+  type SharedInfo,
+  type SharedVersion,
+  type SharedVersionMeta,
+  sharedInfoEntries,
 } from 'lib/core/1.domain';
 import type { DrivingContract } from '../driving-ports/driving.contract';
 import type { LoggingConfig } from '../config/log.contract';
@@ -105,10 +106,12 @@ export function createStoreRemoteEntry(
   }
 
   function addScopedExternal(remoteEntry: RemoteEntry, sharedInfo: SharedInfo, tag: string): void {
+    const entries = sharedInfoEntries(sharedInfo);
     ports.scopedExternalsRepo.addExternal(remoteEntry.name, sharedInfo.packageName, {
       tag,
-      file: sharedInfo.outFileName,
+      file: entries[sharedInfo.packageName]!,
       bundle: sharedInfo.bundle,
+      entries,
     } as ScopedVersion);
   }
 
@@ -137,13 +140,15 @@ export function createStoreRemoteEntry(
   ): SharedExternalContext {
     const scopeType = ports.sharedExternalsRepo.scopeType(sharedInfo.shareScope);
 
+    const entries = sharedInfoEntries(sharedInfo);
     const remote: SharedVersionMeta = {
-      file: sharedInfo.outFileName,
+      file: entries[sharedInfo.packageName]!,
       name: remoteEntry.name,
       bundle: sharedInfo.bundle,
       strictVersion: sharedInfo.strictVersion,
       cached: false,
       requiredVersion: scopeType === 'strict' ? tag : sharedInfo.requiredVersion || tag,
+      entries,
     };
 
     const cached: SharedExternal = ports.sharedExternalsRepo

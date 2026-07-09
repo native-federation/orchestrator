@@ -219,6 +219,7 @@ describe('createGetShared', () => {
                   requiredVersion: '',
                   strictVersion: true,
                   cached: false,
+                  entries: { '@angular/core': '@angular/core.js' },
                 },
               ],
             },

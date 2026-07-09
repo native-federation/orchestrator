@@ -81,6 +81,43 @@ describe('createGenerateImportMap (shareScope-externals)', () => {
     });
   });
 
+  it('should expand secondary entrypoints (entries) of a shared shareScope external', async () => {
+    adapters.sharedExternalsRepo.getFromScope = vi.fn((scope?: string): shareScope => {
+      return !scope || scope === GLOBAL_SCOPE
+        ? {}
+        : {
+            'dep-a': mockExternal_A({
+              dirty: false,
+              versions: [
+                mockVersion_A.v2_1_2({
+                  action: 'share',
+                  remotes: {
+                    'team/mfe1': { entries: { 'dep-a': 'dep-a.js', 'dep-a/sub': 'dep-a-sub.js' } },
+                    'team/mfe2': {},
+                  },
+                }),
+              ],
+            }),
+          };
+    });
+
+    const actual = await generateImportMap();
+
+    expect(actual).toEqual({
+      imports: {},
+      scopes: {
+        [mockScopeUrl_MFE1()]: {
+          'dep-a': mockScopeUrl_MFE1({ file: 'dep-a.js' }),
+          'dep-a/sub': mockScopeUrl_MFE1({ file: 'dep-a-sub.js' }),
+        },
+        [mockScopeUrl_MFE2()]: {
+          'dep-a': mockScopeUrl_MFE1({ file: 'dep-a.js' }),
+          'dep-a/sub': mockScopeUrl_MFE1({ file: 'dep-a-sub.js' }),
+        },
+      },
+    });
+  });
+
   it('should should scope all remotes in a scoped version.', async () => {
     adapters.sharedExternalsRepo.getFromScope = vi.fn((scope?: string): shareScope => {
       return !scope || scope === GLOBAL_SCOPE
@@ -141,6 +178,43 @@ describe('createGenerateImportMap (shareScope-externals)', () => {
         },
         [mockScopeUrl_MFE2()]: {
           'dep-a': mockScopeUrl_MFE1({ file: 'dep-a.js' }),
+        },
+      },
+    });
+  });
+
+  it('should remap all entrypoints of a skipped external to the override provider', async () => {
+    adapters.sharedExternalsRepo.getFromScope = vi.fn((scope?: string): shareScope => {
+      return !scope || scope === GLOBAL_SCOPE
+        ? {}
+        : {
+            'dep-a': mockExternal_A({
+              dirty: false,
+              versions: [
+                mockVersion_A.v2_1_2({
+                  action: 'share',
+                  remotes: {
+                    'team/mfe1': { entries: { 'dep-a': 'dep-a.js', 'dep-a/sub': 'dep-a-sub.js' } },
+                  },
+                }),
+                mockVersion_A.v2_1_1({ action: 'skip', remotes: ['team/mfe2'] }),
+              ],
+            }),
+          };
+    });
+
+    const actual = await generateImportMap();
+
+    expect(actual).toEqual({
+      imports: {},
+      scopes: {
+        [mockScopeUrl_MFE1()]: {
+          'dep-a': mockScopeUrl_MFE1({ file: 'dep-a.js' }),
+          'dep-a/sub': mockScopeUrl_MFE1({ file: 'dep-a-sub.js' }),
+        },
+        [mockScopeUrl_MFE2()]: {
+          'dep-a': mockScopeUrl_MFE1({ file: 'dep-a.js' }),
+          'dep-a/sub': mockScopeUrl_MFE1({ file: 'dep-a-sub.js' }),
         },
       },
     });
