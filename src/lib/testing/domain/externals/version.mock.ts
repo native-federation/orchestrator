@@ -15,11 +15,14 @@ export const mockVersionRemote = (
   strictVersion: options.strictVersion ?? true,
   cached: options.cached ?? false,
   bundle: options.bundle,
+  pool: options.pool,
   entries: options.entries ?? { [external]: options.file ?? `${external}.js` },
 });
 
 type mockSharedVersionOptions = {
-  remotes: string[] | Record<string, Partial<SharedVersionMeta> & { host?: boolean; file?: string }>;
+  remotes:
+    | string[]
+    | Record<string, Partial<SharedVersionMeta> & { host?: boolean; file?: string }>;
   host?: boolean;
   action?: SharedVersionAction;
 };

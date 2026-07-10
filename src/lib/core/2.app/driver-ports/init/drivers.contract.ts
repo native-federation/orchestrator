@@ -1,5 +1,7 @@
 import type { ForCommittingChanges } from './for-committing-changes.port';
 import type { ForDeterminingSharedExternals } from './for-determining-shared-externals.port';
+import type { ForPoolingSharedExternals } from './for-pooling-shared-externals.port';
+import type { ForPoolingDynamicExternals } from './for-pooling-dynamic-externals.port';
 import type { ForExposingModuleLoader } from './for-exposing-module-loader.port';
 import type { ForGeneratingImportMap } from './for-generating-import-map';
 import type { ForGettingRemoteEntries } from './for-getting-remote-entries.port';
@@ -14,11 +16,13 @@ export type InitDriversContract = {
   getRemoteEntries: ForGettingRemoteEntries;
   processRemoteEntries: ForProcessingRemoteEntries;
   determineSharedExternals: ForDeterminingSharedExternals;
+  poolSharedExternals: ForPoolingSharedExternals;
   generateImportMap: ForGeneratingImportMap;
   commitChanges: ForCommittingChanges;
   exposeModuleLoader: ForExposingModuleLoader;
   getRemoteEntry: ForGettingRemoteEntry;
   updateCache: ForUpdatingCache;
+  poolDynamicExternals: ForPoolingDynamicExternals;
   convertToImportMap: ForConvertingToImportMap;
 };
 

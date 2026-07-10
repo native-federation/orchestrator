@@ -59,6 +59,7 @@ describe('DefaultConfig', () => {
         },
         feature: {
           convertFlatSharedInfo: false,
+          useAutoExternalPooling: false,
         },
       });
     });

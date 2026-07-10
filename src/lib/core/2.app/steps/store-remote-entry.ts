@@ -86,6 +86,7 @@ export function createStoreRemoteEntry(
       if (tag === null) return;
 
       if (external.singleton) {
+        if (external.pool?.trim()) ports.sharedExternalsRepo.markPoolTagPresent();
         onSharedExternal(remoteEntry, external, sharedExternalContext(remoteEntry, external, tag));
       } else {
         addScopedExternal(remoteEntry, external, tag);
@@ -147,6 +148,7 @@ export function createStoreRemoteEntry(
       strictVersion: sharedInfo.strictVersion,
       cached: false,
       requiredVersion: scopeType === 'strict' ? tag : sharedInfo.requiredVersion || tag,
+      ...(sharedInfo.pool?.trim() ? { pool: sharedInfo.pool } : {}),
       entries: sharedInfo.entries,
     };
 

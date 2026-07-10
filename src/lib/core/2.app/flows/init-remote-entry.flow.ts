@@ -7,7 +7,11 @@ export const createInitRemoteEntryFlow = ({
   flow,
 }: FLOW_FACTORY<InitDriversContract>): InitRemoteEntryFlow => {
   const processDynamicRemoteEntry = (remoteEntry: RemoteEntry) =>
-    flow.updateCache(remoteEntry).then(flow.convertToImportMap).then(flow.commitChanges);
+    flow
+      .updateCache(remoteEntry)
+      .then(flow.poolDynamicExternals)
+      .then(flow.convertToImportMap)
+      .then(flow.commitChanges);
 
   return (remoteEntryUrl, remote) =>
     flow
