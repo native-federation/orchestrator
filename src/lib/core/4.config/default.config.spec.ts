@@ -56,6 +56,9 @@ describe('DefaultConfig', () => {
           skipInvalidExternalVersions: false,
           overrideCachedRemotes: 'init-only',
           overrideCachedRemotesIfURLMatches: false,
+        },
+        feature: {
+          convertFlatSharedInfo: false,
           useAutoExternalPooling: false,
         },
       });

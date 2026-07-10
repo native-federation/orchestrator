@@ -7,6 +7,7 @@ import { ForProvidingRemoteEntries } from 'lib/core/2.app/driving-ports/for-prov
 import { mockFederationInfo_MFE1 } from 'lib/testing/domain/remote-entry/federation-info.mock';
 import { mockRemoteEntry_MFE1 } from 'lib/testing/domain/remote-entry/remote-entry.mock';
 import { mockScopeUrl_MFE1 } from 'lib/testing/domain/scope-url.mock';
+import { mockConfig } from 'lib/testing/config.mock';
 import { NFError } from 'lib/core/native-federation.error';
 
 const sriOf = async (input: string): Promise<string> => {
@@ -34,7 +35,7 @@ describe('createRemoteEntryProvider (integrity)', () => {
   let provider: ForProvidingRemoteEntries;
 
   beforeEach(() => {
-    provider = createRemoteEntryProvider();
+    provider = createRemoteEntryProvider(mockConfig());
   });
 
   it('should fetch without integrity verification when no integrity is provided', async () => {

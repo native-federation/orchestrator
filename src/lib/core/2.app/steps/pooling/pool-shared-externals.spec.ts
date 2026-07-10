@@ -30,7 +30,10 @@ const sharedVersion = (
   o: { host?: boolean; action?: SharedVersion['action'] } = {}
 ): SharedVersion => ({ tag, host: o.host ?? false, action: o.action ?? 'skip', remotes });
 
-const external = (versions: SharedVersion[], dirty = false): SharedExternal => ({ dirty, versions });
+const external = (versions: SharedVersion[], dirty = false): SharedExternal => ({
+  dirty,
+  versions,
+});
 
 describe('createPoolSharedExternals', () => {
   let poolSharedExternals: ForPoolingSharedExternals;
@@ -68,7 +71,7 @@ describe('createPoolSharedExternals', () => {
     });
 
     it('is a no-op for a single-remote pool', async () => {
-      config.profile.useAutoExternalPooling = true;
+      config.feature.useAutoExternalPooling = true;
       givenExternals({
         '@framework/core': external([sharedVersion('17', [meta('mfe1')], { action: 'share' })]),
         '@framework/common': external([sharedVersion('17', [meta('mfe1')], { action: 'share' })]),
@@ -80,7 +83,7 @@ describe('createPoolSharedExternals', () => {
     });
 
     it('is a no-op for a single-member pool', async () => {
-      config.profile.useAutoExternalPooling = true;
+      config.feature.useAutoExternalPooling = true;
       givenExternals({
         '@framework/core': external([
           sharedVersion('17', [meta('mfe1')], { action: 'share' }),
@@ -94,7 +97,7 @@ describe('createPoolSharedExternals', () => {
     });
 
     it('skips the strict scope entirely', async () => {
-      config.profile.useAutoExternalPooling = true;
+      config.feature.useAutoExternalPooling = true;
       adapters.sharedExternalsRepo.getScopes = vi.fn(() => ['strict']);
       adapters.sharedExternalsRepo.scopeType = vi.fn(() => 'strict' as const);
 
@@ -107,7 +110,7 @@ describe('createPoolSharedExternals', () => {
 
   describe('has-pool early-out', () => {
     it('skips the scope walk entirely when auto-pooling is off and no pool tag was seen', async () => {
-      config.profile.useAutoExternalPooling = false;
+      config.feature.useAutoExternalPooling = false;
       adapters.sharedExternalsRepo.hasPoolTag = vi.fn(() => false);
 
       await poolSharedExternals();
@@ -118,7 +121,7 @@ describe('createPoolSharedExternals', () => {
     });
 
     it('still pools when a pool tag was seen even with auto-pooling off', async () => {
-      config.profile.useAutoExternalPooling = false;
+      config.feature.useAutoExternalPooling = false;
       adapters.sharedExternalsRepo.hasPoolTag = vi.fn(() => true);
       givenExternals({
         foo: external([
@@ -140,7 +143,7 @@ describe('createPoolSharedExternals', () => {
     });
 
     it('never early-outs when auto-pooling is on, regardless of the pool-tag memo', async () => {
-      config.profile.useAutoExternalPooling = true;
+      config.feature.useAutoExternalPooling = true;
       adapters.sharedExternalsRepo.hasPoolTag = vi.fn(() => false);
       givenExternals({
         '@framework/core': external([
@@ -182,7 +185,7 @@ describe('createPoolSharedExternals', () => {
 
   describe('anchoring', () => {
     it('re-points every member of an auto-pool to a single anchor remote', async () => {
-      config.profile.useAutoExternalPooling = true;
+      config.feature.useAutoExternalPooling = true;
       givenExternals({
         '@framework/core': external([
           sharedVersion('17', [meta('mfe1'), meta('mfe2')], { action: 'share' }),
@@ -204,7 +207,7 @@ describe('createPoolSharedExternals', () => {
     });
 
     it('prefers the host remote as anchor', async () => {
-      config.profile.useAutoExternalPooling = true;
+      config.feature.useAutoExternalPooling = true;
       const build = () =>
         external([
           sharedVersion('17', [meta('host')], { host: true, action: 'share' }),
@@ -221,7 +224,7 @@ describe('createPoolSharedExternals', () => {
 
   describe('all-or-nothing classification', () => {
     it('scopes a strict-incompatible remote entire family, others follow', async () => {
-      config.profile.useAutoExternalPooling = true;
+      config.feature.useAutoExternalPooling = true;
       // determine already scoped the strict-incompatible v18 (action 'scope'); pooling reads that.
       const build = () =>
         external([
@@ -255,7 +258,7 @@ describe('createPoolSharedExternals', () => {
     });
 
     it('pools around the best partial anchor, orphan member scoped-only', async () => {
-      config.profile.useAutoExternalPooling = true;
+      config.feature.useAutoExternalPooling = true;
       givenExternals(disjoint());
 
       await poolSharedExternals();
@@ -273,7 +276,7 @@ describe('createPoolSharedExternals', () => {
     });
 
     it('does not throw under strictImportMap (a partial anchor always exists)', async () => {
-      config.profile.useAutoExternalPooling = true;
+      config.feature.useAutoExternalPooling = true;
       config.strict.strictImportMap = true;
       givenExternals(disjoint());
 
@@ -282,7 +285,7 @@ describe('createPoolSharedExternals', () => {
     });
 
     it('warns that the orphan member is scoped-only', async () => {
-      config.profile.useAutoExternalPooling = true;
+      config.feature.useAutoExternalPooling = true;
       givenExternals(disjoint());
 
       await poolSharedExternals();
@@ -294,7 +297,7 @@ describe('createPoolSharedExternals', () => {
     });
 
     it('does not warn when every member is shared', async () => {
-      config.profile.useAutoExternalPooling = true;
+      config.feature.useAutoExternalPooling = true;
       givenExternals({
         '@framework/core': external([
           sharedVersion('17', [meta('mfe1'), meta('mfe2')], { action: 'share' }),
@@ -315,7 +318,7 @@ describe('createPoolSharedExternals', () => {
 
   describe('coverage dedup vs incompatibility scope-all', () => {
     it('dedups a coverage-forced remote on same-version members but scopes an incompat family whole', async () => {
-      config.profile.useAutoExternalPooling = true;
+      config.feature.useAutoExternalPooling = true;
       // Anchor 'a' covers core+common. 'b' is coverage-forced (uses orphan cdk; core@17 matches).
       // 'c' is incompatibility-forced (core@18, determine marked it 'scope').
       givenExternals({
@@ -330,7 +333,9 @@ describe('createPoolSharedExternals', () => {
             action: 'share',
           }),
         ]),
-        '@framework/cdk': external([sharedVersion('17', [meta('b', { req: '17' })], { action: 'share' })]),
+        '@framework/cdk': external([
+          sharedVersion('17', [meta('b', { req: '17' })], { action: 'share' }),
+        ]),
       });
 
       await poolSharedExternals();
@@ -340,7 +345,9 @@ describe('createPoolSharedExternals', () => {
       const core = rebuiltFor('@framework/core')!;
       const coreShare = core.versions.find(v => v.action === 'share')!;
       expect(coreShare.remotes.map(r => r.name).sort()).toEqual(['a', 'b']);
-      expect(core.versions.find(v => v.action === 'scope')!.remotes.map(r => r.name)).toEqual(['c']);
+      expect(core.versions.find(v => v.action === 'scope')!.remotes.map(r => r.name)).toEqual([
+        'c',
+      ]);
 
       // common: 'c' scopes its WHOLE family (incompat) — no dedup even though common@17 matches.
       const common = rebuiltFor('@framework/common')!;
@@ -360,7 +367,7 @@ describe('createPoolSharedExternals', () => {
 
   describe('conservative path (reads determine, no compatibility check)', () => {
     it('anchors a full-coverage pool without calling versionCheck.isCompatible', async () => {
-      config.profile.useAutoExternalPooling = true;
+      config.feature.useAutoExternalPooling = true;
       const isCompatible = vi.fn(() => true);
       adapters.versionCheck.isCompatible = isCompatible;
       // One remote (mfe1) provides the winning tag for every member — the full-witness case.
@@ -384,12 +391,14 @@ describe('createPoolSharedExternals', () => {
     });
 
     it('anchors the max-coverage remote (P/Q), sharing a member only one remote provides', async () => {
-      config.profile.useAutoExternalPooling = true;
+      config.feature.useAutoExternalPooling = true;
       // m1 is provided by P and Q, m2 only by Q. Q covers both, so it anchors and m2 is shared — not
       // name-earliest P, which would orphan m2.
       givenExternals({
         '@pool/m1': external([
-          sharedVersion('1', [meta('P', { req: '1' }), meta('Q', { req: '1' })], { action: 'share' }),
+          sharedVersion('1', [meta('P', { req: '1' }), meta('Q', { req: '1' })], {
+            action: 'share',
+          }),
         ]),
         '@pool/m2': external([sharedVersion('1', [meta('Q', { req: '1' })], { action: 'share' })]),
       });
@@ -406,7 +415,7 @@ describe('createPoolSharedExternals', () => {
 
   describe('strict compatibility', () => {
     it('does not throw under strictExternalCompatibility for a coverage-forced remote', async () => {
-      config.profile.useAutoExternalPooling = true;
+      config.feature.useAutoExternalPooling = true;
       config.strict.strictExternalCompatibility = true;
       // 'b' is coverage-forced (uses cdk, which anchor 'a' lacks). A coverage gap is not a version
       // conflict, so strict mode must NOT abort.
@@ -422,16 +431,18 @@ describe('createPoolSharedExternals', () => {
 
       // core shares from anchor 'a'; 'b' dedups its same-version copy; cdk is scoped-only on 'b'.
       const core = rebuiltFor('@framework/core')!;
-      expect(core.versions.find(v => v.action === 'share')!.remotes.map(r => r.name).sort()).toEqual([
-        'a',
-        'b',
-      ]);
+      expect(
+        core.versions
+          .find(v => v.action === 'share')!
+          .remotes.map(r => r.name)
+          .sort()
+      ).toEqual(['a', 'b']);
       const cdk = rebuiltFor('@framework/cdk')!;
       expect(cdk.versions.every(v => v.action === 'scope')).toBe(true);
     });
 
     it('throws under strictExternalCompatibility when a member is version-incompatible', async () => {
-      config.profile.useAutoExternalPooling = true;
+      config.feature.useAutoExternalPooling = true;
       config.strict.strictExternalCompatibility = true;
       // 'c' is strict-incompatible (determine marked its v18 `scope`) — a genuine conflict, not a
       // coverage gap, so strict mode rejects the pool.

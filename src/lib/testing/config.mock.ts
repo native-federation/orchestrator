@@ -33,4 +33,7 @@ export const mockConfig = (): ConfigContract => ({
     overrideCachedRemotesIfURLMatches: false,
     useAutoExternalPooling: false,
   },
+  feature: {
+    convertFlatSharedInfo: false,
+  },
 });

@@ -101,7 +101,7 @@ export function createPoolSharedExternals(
    * `strict` scope is never pooled.
    */
   return () => {
-    const { useAutoExternalPooling } = config.profile;
+    const { useAutoExternalPooling } = config.feature;
 
     // With auto-pooling off and no `pool` tag ever seen, nothing can be pooled — skip the scope
     // walk. Auto-pooling on must never early-out: any scoped package is potentially poolable.
@@ -208,13 +208,21 @@ export function createPoolSharedExternals(
         dirty: false,
         versions:
           entries.length > 0
-            ? [{ tag: entries[0]!.tag, host: false, action: 'scope', remotes: entries.map(e => e.meta) }]
+            ? [
+                {
+                  tag: entries[0]!.tag,
+                  host: false,
+                  action: 'scope',
+                  remotes: entries.map(e => e.meta),
+                },
+              ]
             : [],
       };
     }
 
-    const anchorMeta = entries.find(e => e.remote === anchor.anchorRemote && e.tag === anchorTag)!
-      .meta;
+    const anchorMeta = entries.find(
+      e => e.remote === anchor.anchorRemote && e.tag === anchorTag
+    )!.meta;
     const anchorHost = member.external.versions.find(v => v.tag === anchorTag)?.host ?? false;
 
     // Incompatibility-forced remotes scope their whole family with no dedup: deduping a same-version

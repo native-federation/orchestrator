@@ -188,6 +188,38 @@ Dependencies with `singleton: false` are always scoped to their individual remot
 
 **Result**: This external is placed in the scope of its remote. And therefore only available to that specific remote.
 
+### Secondary entrypoints (the `entries` map)
+
+A package can expose more than one import specifier — a primary entrypoint (`@angular/core`) and one or
+more secondary entrypoints (`@angular/core/testing`, `@angular/core/rxjs-interop`, …). Core v4.3.0 groups
+these under a single `DenseSharedInfo`, replacing the flat `outFileName` with an `entries` map from each
+specifier to its output file:
+
+```json
+// In remoteEntry.json
+{
+  "shared": [
+    {
+      "packageName": "@angular/core",
+      "singleton": true,
+      "version": "20.0.0",
+      "requiredVersion": "^20.0.0",
+      "entries": {
+        "@angular/core": "core.js",
+        "@angular/core/testing": "core-testing.js"
+      }
+    }
+  ]
+}
+```
+
+The resolver treats the whole `entries` map as one shared external: version negotiation happens once per
+package, and every specifier in `entries` follows the winning version's placement — scoped, shareScope,
+global, or the skip/override redirect. When a shared version wins, the winning remote's `entries` serve
+**all** consumers of that version, so each secondary entrypoint resolves to the same provider as its
+parent. (Older/flat remote builds emit one `SharedInfo` per specifier; set
+[`feature.convertFlatSharedInfo`](./config.md#modeConfig) to group them at runtime.)
+
 ### Shared scopes
 
 By default, externals with the `singleton: true` property are shared globally between all remotes. The `shareScope` property can be used for externals that should only be shared over a select group of remotes. The `shareScope` property creates a logical group for dependency resolution. Externals with the same shared scope are resolved together in isolation from other share scopes.
@@ -458,7 +490,7 @@ versions.
 
 Pooling is opt-in and inert by default. An external joins a pool in one of two ways:
 
-- **Auto (by npm scope).** Set `useAutoExternalPooling: true` in the mode profile. Scoped packages
+- **Auto (by npm scope).** Set `useAutoExternalPooling: true` in the mode `feature` block. Scoped packages
   are grouped by their scope — `@framework/core`, `@framework/common` → pool `framework`. Unscoped
   packages (`utils`, `tslib`) are never auto-pooled. The scope is derived from the package name, so
   this grouping is global and cannot drift.
@@ -470,7 +502,7 @@ Pooling is opt-in and inert by default. An external joins a pool in one of two w
 
 ```ts
 initFederation(manifest, {
-  profile: { useAutoExternalPooling: true },
+  feature: { useAutoExternalPooling: true },
 });
 ```
 

@@ -5,5 +5,4 @@ export const cachingProfile: ModeProfileConfig = {
   skipInvalidExternalVersions: false,
   overrideCachedRemotes: 'never',
   overrideCachedRemotesIfURLMatches: false,
-  useAutoExternalPooling: false,
 };

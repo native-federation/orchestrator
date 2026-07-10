@@ -3,8 +3,12 @@ export type ModeProfileConfig = {
   skipInvalidExternalVersions: boolean;
   overrideCachedRemotes: 'always' | 'never' | 'init-only';
   overrideCachedRemotesIfURLMatches: boolean;
-  useAutoExternalPooling: boolean;
   cacheTag?: string;
+};
+
+export type ModeFeatureConfig = {
+  convertFlatSharedInfo: boolean;
+  useAutoExternalPooling: boolean;
 };
 
 export type ModeStrictnessConfig = {
@@ -18,9 +22,11 @@ export type ModeStrictnessConfig = {
 export type ModeConfig = {
   strict: ModeStrictnessConfig;
   profile: ModeProfileConfig;
+  feature: ModeFeatureConfig;
 };
 
 export type ModeOptions = {
   strict?: Partial<ModeStrictnessConfig> | boolean;
   profile?: Partial<ModeProfileConfig>;
+  feature?: Partial<ModeFeatureConfig>;
 };

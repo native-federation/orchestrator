@@ -38,7 +38,7 @@ describe('pooling (integration)', () => {
 
   beforeEach(() => {
     config = mockConfig();
-    config.profile.useAutoExternalPooling = true;
+    config.feature.useAutoExternalPooling = true;
 
     adapters = mockAdapters();
     adapters.versionCheck = createVersionCheck();
@@ -127,12 +127,16 @@ describe('pooling (integration)', () => {
   it('pools around a partial anchor when no remote covers the union; orphan is scoped-only', async () => {
     // Ragged portfolio: mfe-a has core+common, mfe-b has common+forms — no remote covers the whole
     // family. Pooling anchors on the best partial (mfe-a); the orphan (forms) resolves scoped-only.
-    seed('@framework/core', [version('17.0.0', '@framework/core', [{ remote: 'team/mfe-a', req: '^17.0.0' }])]);
+    seed('@framework/core', [
+      version('17.0.0', '@framework/core', [{ remote: 'team/mfe-a', req: '^17.0.0' }]),
+    ]);
     seed('@framework/common', [
       version('17.0.0', '@framework/common', [{ remote: 'team/mfe-a', req: '^17.0.0' }]),
       version('17.0.0', '@framework/common', [{ remote: 'team/mfe-b', req: '^17.0.0' }]),
     ]);
-    seed('@framework/forms', [version('17.0.0', '@framework/forms', [{ remote: 'team/mfe-b', req: '^17.0.0' }])]);
+    seed('@framework/forms', [
+      version('17.0.0', '@framework/forms', [{ remote: 'team/mfe-b', req: '^17.0.0' }]),
+    ]);
 
     const importMap = await runInit();
 
@@ -144,7 +148,9 @@ describe('pooling (integration)', () => {
 
     // forms is an orphan — no anchor provides it — so it resolves scoped-only from mfe-b.
     expect(importMap.imports['@framework/forms']).toBeUndefined();
-    expect(importMap.scopes?.[SCOPE['team/mfe-b']]?.['@framework/forms']).toContain(SCOPE['team/mfe-b']);
+    expect(importMap.scopes?.[SCOPE['team/mfe-b']]?.['@framework/forms']).toContain(
+      SCOPE['team/mfe-b']
+    );
   });
 
   it('a tagged design system scopes its whole family for an incompatible consumer (no foreign framework runtime)', async () => {
@@ -153,14 +159,38 @@ describe('pooling (integration)', () => {
     // it scopes its ENTIRE family — ui included, with NO dedup — so no second framework runtime leaks
     // in through the shared design system.
     const tagged = (remote: string, external: string, req: string) =>
-      mockVersionRemote(remote, external, { requiredVersion: req, strictVersion: true, pool: 'framework' });
+      mockVersionRemote(remote, external, {
+        requiredVersion: req,
+        strictVersion: true,
+        pool: 'framework',
+      });
     seed('@framework/core', [
-      { tag: '17.0.0', host: false, action: 'skip', remotes: [tagged('team/mfe-a', '@framework/core', '^17.0.0')] },
-      { tag: '18.0.0', host: false, action: 'skip', remotes: [tagged('team/mfe-b', '@framework/core', '^18.0.0')] },
+      {
+        tag: '17.0.0',
+        host: false,
+        action: 'skip',
+        remotes: [tagged('team/mfe-a', '@framework/core', '^17.0.0')],
+      },
+      {
+        tag: '18.0.0',
+        host: false,
+        action: 'skip',
+        remotes: [tagged('team/mfe-b', '@framework/core', '^18.0.0')],
+      },
     ]);
     seed('@design-system/ui', [
-      { tag: '1.0.0', host: false, action: 'skip', remotes: [tagged('team/mfe-a', '@design-system/ui', '^1.0.0')] },
-      { tag: '1.0.0', host: false, action: 'skip', remotes: [tagged('team/mfe-b', '@design-system/ui', '^1.0.0')] },
+      {
+        tag: '1.0.0',
+        host: false,
+        action: 'skip',
+        remotes: [tagged('team/mfe-a', '@design-system/ui', '^1.0.0')],
+      },
+      {
+        tag: '1.0.0',
+        host: false,
+        action: 'skip',
+        remotes: [tagged('team/mfe-b', '@design-system/ui', '^1.0.0')],
+      },
     ]);
 
     const importMap = await runInit();
@@ -188,22 +218,30 @@ describe('pooling (integration)', () => {
       version('17.0.0', '@framework/common', [{ remote: 'team/mfe-a', req: '^17.0.0' }]),
       version('17.0.0', '@framework/common', [{ remote: 'team/mfe-c', req: '^17.0.0' }]),
     ]);
-    seed('@framework/cdk', [version('17.0.0', '@framework/cdk', [{ remote: 'team/mfe-b', req: '^17.0.0' }])]);
+    seed('@framework/cdk', [
+      version('17.0.0', '@framework/cdk', [{ remote: 'team/mfe-b', req: '^17.0.0' }]),
+    ]);
 
     const importMap = await runInit();
 
     // core: shared on mfe-a; mfe-b dedups (no scoped copy); mfe-c scopes (incompatible).
     expect(importMap.imports['@framework/core']).toContain(SCOPE['team/mfe-a']);
     expect(importMap.scopes?.[SCOPE['team/mfe-b']]?.['@framework/core']).toBeUndefined();
-    expect(importMap.scopes?.[SCOPE['team/mfe-c']]?.['@framework/core']).toContain(SCOPE['team/mfe-c']);
+    expect(importMap.scopes?.[SCOPE['team/mfe-c']]?.['@framework/core']).toContain(
+      SCOPE['team/mfe-c']
+    );
 
     // common: shared on mfe-a; mfe-c scopes it too (whole-family, no dedup) even at the same version.
     expect(importMap.imports['@framework/common']).toContain(SCOPE['team/mfe-a']);
-    expect(importMap.scopes?.[SCOPE['team/mfe-c']]?.['@framework/common']).toContain(SCOPE['team/mfe-c']);
+    expect(importMap.scopes?.[SCOPE['team/mfe-c']]?.['@framework/common']).toContain(
+      SCOPE['team/mfe-c']
+    );
 
     // cdk: orphan → scoped-only on mfe-b.
     expect(importMap.imports['@framework/cdk']).toBeUndefined();
-    expect(importMap.scopes?.[SCOPE['team/mfe-b']]?.['@framework/cdk']).toContain(SCOPE['team/mfe-b']);
+    expect(importMap.scopes?.[SCOPE['team/mfe-b']]?.['@framework/cdk']).toContain(
+      SCOPE['team/mfe-b']
+    );
   });
 
   it('scopes a dynamically-added incompatible remote whole family (dynamic init path)', async () => {
@@ -211,11 +249,24 @@ describe('pooling (integration)', () => {
     const shareVersion = (external: string): SharedExternal => ({
       dirty: false,
       versions: [
-        { tag: '17.0.0', host: false, action: 'share', remotes: [meta('team/mfe-a', external, '^17.0.0')] },
+        {
+          tag: '17.0.0',
+          host: false,
+          action: 'share',
+          remotes: [meta('team/mfe-a', external, '^17.0.0')],
+        },
       ],
     });
-    adapters.sharedExternalsRepo.addOrUpdate('@framework/core', shareVersion('@framework/core'), undefined);
-    adapters.sharedExternalsRepo.addOrUpdate('@framework/common', shareVersion('@framework/common'), undefined);
+    adapters.sharedExternalsRepo.addOrUpdate(
+      '@framework/core',
+      shareVersion('@framework/core'),
+      undefined
+    );
+    adapters.sharedExternalsRepo.addOrUpdate(
+      '@framework/common',
+      shareVersion('@framework/common'),
+      undefined
+    );
 
     const entryC: RemoteEntry = {
       name: 'team/mfe-c',

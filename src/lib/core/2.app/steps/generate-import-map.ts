@@ -64,12 +64,9 @@ export function createGenerateImportMap(
       addToScope(importMap, remote.scopeUrl, createScopeModules(externals, remote.scopeUrl));
 
       for (const version of Object.values(externals)) {
-        addIntegrity(
-          importMap,
-          _path.join(remote.scopeUrl, version.file),
-          remoteName,
-          version.file
-        );
+        for (const file of Object.values(version.entries)) {
+          addIntegrity(importMap, _path.join(remote.scopeUrl, file), remoteName, file);
+        }
       }
 
       Object.values(externals)
@@ -83,8 +80,10 @@ export function createGenerateImportMap(
   function createScopeModules(externals: ScopedExternal, scope: string): Imports {
     const modules: Imports = {};
 
-    for (const [external, version] of Object.entries(externals)) {
-      modules[external] = _path.join(scope, version.file);
+    for (const version of Object.values(externals)) {
+      for (const [packageName, file] of Object.entries(version.entries)) {
+        modules[packageName] = _path.join(scope, file);
+      }
     }
 
     return modules;
@@ -123,52 +122,57 @@ export function createGenerateImportMap(
         if (version.action === 'scope') {
           for (const remote of version.remotes) {
             const remoteScope = getScope(shareScope, remote.name, externalName);
-            const url = _path.join(remoteScope, remote.file);
-            addToScope(importMap, remoteScope, {
-              [externalName]: url,
-            });
-            addIntegrity(importMap, url, remote.name, remote.file);
+            for (const [packageName, file] of Object.entries(remote.entries)) {
+              const url = _path.join(remoteScope, file);
+              addToScope(importMap, remoteScope, { [packageName]: url });
+              addIntegrity(importMap, url, remote.name, file);
+            }
             registerBundleChunks(chunkBundles, remote.name, remote.bundle);
             remote.cached = true;
           }
           continue;
         }
 
-        const scope = getScope(shareScope, version.remotes[0]!.name, externalName);
-
-        let targetFileUrl: string = _path.join(scope, version.remotes[0]!.file);
-        let targetFileSource: { name: RemoteName; file: string } = {
-          name: version.remotes[0]!.name,
-          file: version.remotes[0]!.file,
-        };
         version.remotes[0]!.cached = true;
 
-        if (version.action === 'share') {
-          registerBundleChunks(chunkBundles, version.remotes[0]!.name, version.remotes[0]!.bundle);
-        }
+        // Serve every entrypoint from one source: the winning remote, or the override
+        // provider when a 'skip' version is redirected elsewhere.
+        let source = version.remotes[0]!;
+        let sourceScope = getScope(shareScope, source.name, externalName);
 
-        if (version.action === 'skip') {
+        if (version.action === 'share') {
+          registerBundleChunks(chunkBundles, source.name, source.bundle);
+        } else if (version.action === 'skip') {
           if (!override) {
             override = findOverride(external, shareScope, externalName) ?? 'NOT_AVAILABLE';
           }
           if (override !== 'NOT_AVAILABLE') {
             if (!overrideScope)
               overrideScope = getScope(shareScope, override.remotes[0]!.name, externalName);
-            targetFileUrl = _path.join(overrideScope, override.remotes[0]!.file);
-            targetFileSource = {
-              name: override.remotes[0]!.name,
-              file: override.remotes[0]!.file,
-            };
+            source = override.remotes[0]!;
+            sourceScope = overrideScope;
             override.remotes[0]!.cached = true;
-
             version.remotes[0]!.cached = false;
           }
         }
+
+        const mappings: { packageName: string; url: string; name: RemoteName; file: string }[] =
+          Object.entries(source.entries).map(([packageName, file]) => ({
+            packageName,
+            url: _path.join(sourceScope, file),
+            name: source.name,
+            file,
+          }));
+
         version.remotes.forEach(r => {
-          const scope = getScope(shareScope, r.name, externalName);
-          addToScope(importMap, scope, { [externalName]: targetFileUrl });
+          const rScope = getScope(shareScope, r.name, externalName);
+          for (const m of mappings) {
+            addToScope(importMap, rScope, { [m.packageName]: m.url });
+          }
         });
-        addIntegrity(importMap, targetFileUrl, targetFileSource.name, targetFileSource.file);
+        for (const m of mappings) {
+          addIntegrity(importMap, m.url, m.name, m.file);
+        }
       }
       ports.sharedExternalsRepo.addOrUpdate(externalName, external, shareScope);
     }
@@ -229,11 +233,11 @@ export function createGenerateImportMap(
         if (version.action === 'scope') {
           for (const remote of version.remotes) {
             const remoteScope = getScope(GLOBAL_SCOPE, remote.name, externalName);
-            const url = _path.join(remoteScope, remote.file);
-            addToScope(importMap, remoteScope, {
-              [externalName]: url,
-            });
-            addIntegrity(importMap, url, remote.name, remote.file);
+            for (const [packageName, file] of Object.entries(remote.entries)) {
+              const url = _path.join(remoteScope, file);
+              addToScope(importMap, remoteScope, { [packageName]: url });
+              addIntegrity(importMap, url, remote.name, file);
+            }
             remote.cached = true;
             registerBundleChunks(chunkBundles, remote.name, remote.bundle);
           }
@@ -246,9 +250,11 @@ export function createGenerateImportMap(
         }
 
         const scope = getScope(GLOBAL_SCOPE, version.remotes[0]!.name, externalName);
-        const url = _path.join(scope, version.remotes[0]!.file);
-        addToGlobal(importMap, { [externalName]: url });
-        addIntegrity(importMap, url, version.remotes[0]!.name, version.remotes[0]!.file);
+        for (const [packageName, file] of Object.entries(version.remotes[0]!.entries)) {
+          const url = _path.join(scope, file);
+          addToGlobal(importMap, { [packageName]: url });
+          addIntegrity(importMap, url, version.remotes[0]!.name, file);
+        }
         registerBundleChunks(chunkBundles, version.remotes[0]!.name, version.remotes[0]!.bundle);
 
         version.remotes[0]!.cached = true;

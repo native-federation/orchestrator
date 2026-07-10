@@ -7,8 +7,8 @@ export type Version = {
 };
 
 export type ScopedVersion = Version & {
-  file: string;
   bundle?: string;
+  entries: Record<string, string>;
 };
 
 export type SharedVersion = Version & {
@@ -20,11 +20,11 @@ export type SharedVersion = Version & {
 export type SharedVersionAction = 'skip' | 'scope' | 'share';
 
 export type SharedVersionMeta = {
-  file: string;
   requiredVersion: string;
   strictVersion: boolean;
   cached: boolean;
   name: RemoteName;
   bundle?: string;
   pool?: string;
+  entries: Record<string, string>;
 };

@@ -1,7 +1,7 @@
 import type { ForUpdatingCache } from '../driver-ports/init/for-updating-cache';
 import {
   type RemoteEntry,
-  type SharedInfo,
+  type DenseSharedInfo,
   type SharedInfoActions,
   type SharedVersion,
   type SharedVersionAction,
@@ -40,8 +40,8 @@ export function createUpdateCache(
         const { action, sharedVersion } = resolveSharedExternal(entry, external, ctx);
         actions[external.packageName] = { action };
 
-        if (action === 'skip' && external.shareScope && sharedVersion?.remotes[0]?.file) {
-          actions[external.packageName]!.override = resolveOverrideUrl(
+        if (action === 'skip' && external.shareScope && sharedVersion?.remotes[0]?.entries) {
+          actions[external.packageName]!.override = resolveOverrideEntries(
             entry,
             external,
             sharedVersion
@@ -57,7 +57,7 @@ export function createUpdateCache(
 
   function resolveSharedExternal(
     remoteEntry: RemoteEntry,
-    sharedInfo: SharedInfo,
+    sharedInfo: DenseSharedInfo,
     {
       tag,
       remote,
@@ -103,14 +103,21 @@ export function createUpdateCache(
     return { action, sharedVersion };
   }
 
-  function resolveOverrideUrl(
+  function resolveOverrideEntries(
     remoteEntry: RemoteEntry,
-    external: SharedInfo,
+    external: DenseSharedInfo,
     sharedVersion: SharedVersion
-  ): string {
+  ): Record<string, string> {
     return ports.remoteInfoRepo
       .tryGet(sharedVersion.remotes[0]!.name)
-      .map(remote => _path.join(remote.scopeUrl, sharedVersion.remotes[0]!.file))
+      .map(remote =>
+        Object.fromEntries(
+          Object.entries(sharedVersion.remotes[0]!.entries).map(([packageName, file]) => [
+            packageName,
+            _path.join(remote.scopeUrl, file),
+          ])
+        )
+      )
       .orThrow(() => {
         config.log.error(
           8,

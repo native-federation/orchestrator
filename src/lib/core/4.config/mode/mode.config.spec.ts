@@ -10,7 +10,6 @@ describe('config.mode', () => {
       skipInvalidExternalVersions: false,
       overrideCachedRemotes: 'init-only',
       overrideCachedRemotesIfURLMatches: false,
-      useAutoExternalPooling: false,
     });
   });
   it('should set most optimal caching when caching profile is chosen', () => {
@@ -20,7 +19,6 @@ describe('config.mode', () => {
       skipInvalidExternalVersions: false,
       overrideCachedRemotes: 'never',
       overrideCachedRemotesIfURLMatches: false,
-      useAutoExternalPooling: false,
     });
   });
 

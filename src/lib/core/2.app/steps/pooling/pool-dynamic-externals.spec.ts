@@ -14,7 +14,12 @@ const shared = (name: string, opt: { pool?: string; shareScope?: string } = {}):
   });
 
 const entryWith = (...externals: SharedInfo[]): RemoteEntry =>
-  ({ name: 'mfe', url: 'http://mfe/remoteEntry.json', exposes: [], shared: externals }) as RemoteEntry;
+  ({
+    name: 'mfe',
+    url: 'http://mfe/remoteEntry.json',
+    exposes: [],
+    shared: externals,
+  }) as RemoteEntry;
 
 describe('createPoolDynamicExternals', () => {
   let poolDynamicExternals: ForPoolingDynamicExternals;
@@ -22,7 +27,7 @@ describe('createPoolDynamicExternals', () => {
 
   beforeEach(() => {
     config = mockConfig();
-    config.profile.useAutoExternalPooling = true;
+    config.feature.useAutoExternalPooling = true;
     poolDynamicExternals = createPoolDynamicExternals(config);
   });
 
@@ -65,14 +70,21 @@ describe('createPoolDynamicExternals', () => {
 
     const result = await poolDynamicExternals({ entry, actions });
 
-    expect(result.actions['@framework/core']).toEqual({ action: 'skip', override: 'http://host/core.js' });
+    expect(result.actions['@framework/core']).toEqual({
+      action: 'skip',
+      override: 'http://host/core.js',
+    });
     expect(result.actions['@framework/common']).toEqual({ action: 'scope' });
   });
 
   it('incompatibility-forced: scopes the whole family with no dedup, even the same-version member', async () => {
     // One member is `scope`, so the WHOLE family scopes — the same-version `skip` member does NOT
     // dedup (that would bridge the incompatible build via a shared intermediary).
-    const entry = entryWith(shared('@framework/core'), shared('@framework/common'), shared('@framework/cdk'));
+    const entry = entryWith(
+      shared('@framework/core'),
+      shared('@framework/common'),
+      shared('@framework/cdk')
+    );
     const actions: SharedInfoActions = {
       '@framework/core': { action: 'skip', override: 'http://host/core.js' },
       '@framework/common': { action: 'share' },
@@ -102,7 +114,7 @@ describe('createPoolDynamicExternals', () => {
   });
 
   it('does nothing when auto-pooling is off and there are no pool tags', async () => {
-    config.profile.useAutoExternalPooling = false;
+    config.feature.useAutoExternalPooling = false;
     const entry = entryWith(shared('@framework/core'), shared('@framework/common'));
     const actions: SharedInfoActions = {
       '@framework/core': { action: 'skip' },
@@ -158,7 +170,7 @@ describe('createPoolDynamicExternals', () => {
   });
 
   it('pools via an explicit pool tag even when auto-pooling is off', async () => {
-    config.profile.useAutoExternalPooling = false;
+    config.feature.useAutoExternalPooling = false;
     const entry = entryWith(shared('foo', { pool: 'grp' }), shared('bar', { pool: 'grp' }));
     const actions: SharedInfoActions = {
       foo: { action: 'skip', override: 'http://host/foo.js' },
@@ -173,7 +185,7 @@ describe('createPoolDynamicExternals', () => {
 
   it('has-pool early-out: an incompatible family is left untouched when auto-pooling is off and the entry has no pool tag', async () => {
     // Auto-pooling off and no tag on the entry → no pool, so determine's actions pass through.
-    config.profile.useAutoExternalPooling = false;
+    config.feature.useAutoExternalPooling = false;
     const entry = entryWith(shared('@framework/core'), shared('@framework/common'));
     const actions: SharedInfoActions = {
       '@framework/core': { action: 'skip', override: 'http://host/core.js' },

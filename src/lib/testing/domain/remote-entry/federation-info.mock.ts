@@ -1,4 +1,7 @@
-import { ExposesInfo, SharedInfo } from 'lib/core/1.domain/remote-entry/remote-entry.contract';
+import {
+  ExposesInfo,
+  DenseSharedInfo,
+} from 'lib/core/1.domain/remote-entry/remote-entry.contract';
 import { mockExposedModuleA, mockExposedModuleB, mockExposedModuleC } from './exposes-info.mock';
 import {
   mockSharedInfoA,
@@ -14,7 +17,7 @@ import {
  */
 export const mockFederationInfo = (
   name: string,
-  o: { exposes: ExposesInfo[]; shared: SharedInfo[] }
+  o: { exposes: ExposesInfo[]; shared: DenseSharedInfo[] }
 ) => ({
   name,
   exposes: o.exposes,
@@ -22,7 +25,7 @@ export const mockFederationInfo = (
 });
 
 export const mockFederationInfo_MFE1 = (
-  o: { exposes?: ExposesInfo[]; shared?: SharedInfo[] } = {}
+  o: { exposes?: ExposesInfo[]; shared?: DenseSharedInfo[] } = {}
 ) =>
   mockFederationInfo('team/mfe1', {
     exposes: o.exposes ?? [mockExposedModuleA()],
@@ -35,7 +38,7 @@ export const mockFederationInfo_MFE1 = (
   });
 
 export const mockFederationInfo_MFE2 = (
-  o: { exposes?: ExposesInfo[]; shared?: SharedInfo[] } = {}
+  o: { exposes?: ExposesInfo[]; shared?: DenseSharedInfo[] } = {}
 ) =>
   mockFederationInfo('team/mfe2', {
     exposes: o.exposes ?? [mockExposedModuleB(), mockExposedModuleC()],
@@ -48,7 +51,7 @@ export const mockFederationInfo_MFE2 = (
   });
 
 export const mockFederationInfo_HOST = (
-  o: { exposes?: ExposesInfo[]; shared?: SharedInfo[] } = {}
+  o: { exposes?: ExposesInfo[]; shared?: DenseSharedInfo[] } = {}
 ) =>
   mockFederationInfo('team/host', {
     exposes: o.exposes ?? [],

@@ -11,7 +11,7 @@ export function createPoolDynamicExternals(config: ModeConfig): ForPoolingDynami
    * See docs/version-resolver.md.
    */
   return ({ entry, actions }) => {
-    const { useAutoExternalPooling } = config.profile;
+    const { useAutoExternalPooling } = config.feature;
 
     // With auto-pooling off, only an explicit `pool` tag on this entry can form a pool.
     if (!useAutoExternalPooling && !(entry.shared ?? []).some(e => e.pool?.trim())) {

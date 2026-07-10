@@ -18,7 +18,7 @@ export const createDriving = (
 
     manifestProvider: createManifestProvider(),
 
-    remoteEntryProvider: createRemoteEntryProvider(),
+    remoteEntryProvider: createRemoteEntryProvider(config),
 
     remoteInfoRepo: createRemoteInfoRepository(config),
     scopedExternalsRepo: createScopedExternalsRepository(config),
