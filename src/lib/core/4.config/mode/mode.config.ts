@@ -23,5 +23,8 @@ export const createModeConfig = (override: ModeOptions): ModeConfig => {
   return {
     strict: strictnessConfig,
     profile: { ...defaultProfile, ...(override.profile ?? {}) },
+    feature: {
+      convertFlatSharedInfo: override.feature?.convertFlatSharedInfo ?? false,
+    },
   };
 };

@@ -17,7 +17,7 @@ export function createGetShared(
       const scopeType = ports.sharedExternalsRepo.scopeType(scope);
       const externals = ports.sharedExternalsRepo.getFromScope(scope);
 
-      for (const [packageName, external] of Object.entries(externals)) {
+      for (const external of Object.values(externals)) {
         const shareVersions = external.versions.filter(v => v.action === 'share');
         if (shareVersions.length === 0) continue;
 
@@ -27,22 +27,29 @@ export function createGetShared(
         const singleton = scopeType === 'strict' ? false : (options.singleton ?? true);
 
         for (const version of versions) {
-          const url = resolveUrl(version);
-          if (!url) continue;
+          const source = version.remotes[0];
+          if (!source) continue;
 
-          const shareObject: Shared = {
-            version: version.tag,
-            get: () => ports.browser.importModule(url).then(module => () => module),
-            shareConfig: {
-              singleton,
-              requiredVersion: resolveRequiredVersion(version, options, scopeType),
-              ...(scopeType === 'strict' ? { strictVersion: true } : {}),
-            },
-          };
-          if (scopeType !== 'global') shareObject.scope = scope;
+          // MF's shared config is flat: one key per entrypoint. Emit a separate
+          // Shared for each entry so secondary entrypoints reach MF consumers.
+          for (const [entryName, file] of Object.entries(source.entries)) {
+            const url = resolveUrl(version, file);
+            if (!url) continue;
 
-          if (!shared[packageName]) shared[packageName] = [];
-          shared[packageName]!.push(shareObject);
+            const shareObject: Shared = {
+              version: version.tag,
+              get: () => ports.browser.importModule(url).then(module => () => module),
+              shareConfig: {
+                singleton,
+                requiredVersion: resolveRequiredVersion(version, options, scopeType),
+                ...(scopeType === 'strict' ? { strictVersion: true } : {}),
+              },
+            };
+            if (scopeType !== 'global') shareObject.scope = scope;
+
+            if (!shared[entryName]) shared[entryName] = [];
+            shared[entryName]!.push(shareObject);
+          }
         }
       }
     }
@@ -50,13 +57,13 @@ export function createGetShared(
     return shared;
   };
 
-  function resolveUrl(version: SharedVersion): string | undefined {
+  function resolveUrl(version: SharedVersion, file: string): string | undefined {
     const source = version.remotes[0];
     if (!source) return undefined;
 
     return ports.remoteInfoRepo
       .tryGet(source.name)
-      .map(remote => _path.join(remote.scopeUrl, source.file))
+      .map(remote => _path.join(remote.scopeUrl, file))
       .get();
   }
 }

@@ -1,22 +1,25 @@
 import type { ImportMap } from 'lib/core/1.domain/import-map/import-map.contract';
-import type { RemoteEntry, SharedInfoActions } from 'lib/core/1.domain';
+import { type RemoteEntry, type SharedInfoActions } from 'lib/core/1.domain';
 import type { LoggingConfig } from '../config/log.contract';
+import type { ModeConfig } from '../config/mode.contract';
 import * as _path from 'lib/utils/path';
 import type { ForConvertingToImportMap } from 'lib/core/2.app/driver-ports/init/for-converting-to-import-map';
 import type { DrivingContract } from 'lib/core/2.app/driving-ports/driving.contract';
+import { NFError } from 'lib/core/native-federation.error';
 import { toChunkImport } from '@softarc/native-federation/domain';
 
 export function createConvertToImportMap(
-  { log }: LoggingConfig,
+  config: LoggingConfig & ModeConfig,
   ports: Pick<DrivingContract, 'sharedChunksRepo'>
 ): ForConvertingToImportMap {
-  return ({ entry, actions }) => {
+  const { log } = config;
+  return async ({ entry, actions }) => {
     const importMap: ImportMap = { imports: {} };
 
     addExternals(entry, actions, importMap);
     addRemoteInfos(entry, importMap);
     log.debug(9, `[${entry.name}] Processed actions:`, actions);
-    return Promise.resolve(importMap);
+    return importMap;
   };
 
   function addExternals(
@@ -35,9 +38,12 @@ export function createConvertToImportMap(
     remoteEntry.shared.forEach(external => {
       // Scoped externals
       if (!external.singleton) {
-        const url = _path.join(remoteEntryScope, external.outFileName);
-        addToScopes(remoteEntryScope, external.packageName, url, importMap);
-        addIntegrity(importMap, url, integrityMap, external.outFileName);
+        Object.entries(external.entries).forEach(([packageName, fileName]) => {
+          const url = _path.join(remoteEntryScope, fileName);
+          addToScopes(remoteEntryScope, packageName, url, importMap);
+          addIntegrity(importMap, url, integrityMap, fileName);
+        });
+
         if (external?.bundle) chunkBundles.add(external?.bundle);
         return;
       }
@@ -50,19 +56,31 @@ export function createConvertToImportMap(
         return;
       }
 
-      // Skipped shared externals
+      // Skipped externals are provided by another remote. A global skip is served
+      // by the global share elsewhere; a shareScope skip is always paired with an
+      // override (see update-cache) that remaps its entrypoints.
       if (actions[external.packageName]!.action === 'skip') {
+        const override = actions[external.packageName]!.override;
         if (!external.shareScope) return;
-
-        if (actions[external.packageName]!.override) {
-          addToScopes(
-            remoteEntryScope,
-            external.packageName,
-            actions[external.packageName]!.override!,
-            importMap
-          );
+        if (override) {
+          Object.entries(override).forEach(([packageName, url]) => {
+            addToScopes(remoteEntryScope, packageName, url, importMap);
+          });
           return;
         }
+        // Reaching here means the resolver failed to produce the expected override.
+        log.error(
+          9,
+          `[${remoteEntry.name}][${external.packageName}] shareScope skip has no override.`
+        );
+        if (config.strict.strictImportMap) throw new NFError('Could not create ImportMap.');
+        // Non-strict fallback: serve from the remote's own scope (matches init).
+        Object.entries(external.entries).forEach(([packageName, fileName]) => {
+          const url = _path.join(remoteEntryScope, fileName);
+          addToScopes(remoteEntryScope, packageName, url, importMap);
+          addIntegrity(importMap, url, integrityMap, fileName);
+        });
+        return;
       }
 
       // Chunks for shared externals
@@ -70,24 +88,31 @@ export function createConvertToImportMap(
 
       //  Scoped shared externals
       if (actions[external.packageName]!.action === 'scope') {
-        const url = _path.join(remoteEntryScope, external.outFileName);
-        addToScopes(remoteEntryScope, external.packageName, url, importMap);
-        addIntegrity(importMap, url, integrityMap, external.outFileName);
+        Object.entries(external.entries).forEach(([packageName, fileName]) => {
+          const url = _path.join(remoteEntryScope, fileName);
+          addToScopes(remoteEntryScope, packageName, url, importMap);
+          addIntegrity(importMap, url, integrityMap, fileName);
+        });
         return;
       }
 
       // Shared externals with shareScope
       if (external.shareScope) {
-        const url = _path.join(remoteEntryScope, external.outFileName);
-        addToScopes(remoteEntryScope, external.packageName, url, importMap);
-        addIntegrity(importMap, url, integrityMap, external.outFileName);
+        Object.entries(external.entries).forEach(([packageName, fileName]) => {
+          const url = _path.join(remoteEntryScope, fileName);
+          addToScopes(remoteEntryScope, packageName, url, importMap);
+          addIntegrity(importMap, url, integrityMap, fileName);
+        });
         return;
       }
 
       // Default case: shared globally
-      const url = _path.join(remoteEntryScope, external.outFileName);
-      importMap.imports[external.packageName] = url;
-      addIntegrity(importMap, url, integrityMap, external.outFileName);
+      Object.entries(external.entries).forEach(([packageName, fileName]) => {
+        const url = _path.join(remoteEntryScope, fileName);
+        importMap.imports[packageName] = url;
+
+        addIntegrity(importMap, url, integrityMap, fileName);
+      });
     });
 
     addChunkImports(importMap, remoteEntry, remoteEntryScope, chunkBundles);

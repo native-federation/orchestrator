@@ -210,7 +210,7 @@ describe('createGenerateImportMap (chunk-imports)', () => {
   it('should add chunk imports for scoped externals with bundle', async () => {
     adapters.scopedExternalsRepo.getAll = vi.fn(() => ({
       'team/mfe1': {
-        'dep-a': { tag: '1.0.0', file: 'dep-a.js', bundle: 'scoped' },
+        'dep-a': { tag: '1.0.0', bundle: 'scoped', entries: { 'dep-a': 'dep-a.js' } },
       },
     }));
     adapters.sharedChunksRepo.tryGet = vi.fn((remote, bundle) => {

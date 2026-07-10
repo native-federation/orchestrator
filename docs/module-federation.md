@@ -70,7 +70,15 @@ not shared):
 ```ts
 getShared();
 // {
-//   '@angular/core': [{ version: '20.0.0', get, shareConfig: { singleton: true, requiredVersion: '^20.0.0' } }],
-//   'ui-lib':        [{ version: '3.0.0', scope: 'team-a', get, shareConfig: { singleton: true, requiredVersion: '^3.0.0' } }],
+//   '@angular/core':         [{ version: '20.0.0', get, shareConfig: { singleton: true, requiredVersion: '^20.0.0' } }],
+//   '@angular/core/testing': [{ version: '20.0.0', get, shareConfig: { singleton: true, requiredVersion: '^20.0.0' } }],
+//   'ui-lib':                [{ version: '3.0.0', scope: 'team-a', get, shareConfig: { singleton: true, requiredVersion: '^3.0.0' } }],
 // }
 ```
+
+## Secondary entrypoints
+
+MF's `shared` config is flat — one key per import specifier, with no nested `entries` shape it can
+consume. So each secondary entrypoint of a shared package is emitted as its own top-level `ShareInfos`
+key (`@angular/core/testing` above), resolving to its own file/url alongside the primary entrypoint.
+See [`entries` in the version resolver](./version-resolver.md).

@@ -78,7 +78,48 @@ describe('createProcessDynamicRemoteEntry - scoped', () => {
     );
 
     expect(actual.actions).toEqual({
-      'dep-a': { action: 'skip', override: mockScopeUrl_MFE2({ file: 'dep-a.js' }) },
+      'dep-a': { action: 'skip', override: { 'dep-a': mockScopeUrl_MFE2({ file: 'dep-a.js' }) } },
+    });
+  });
+
+  it('should build a multi-entry override map from the provider entries', async () => {
+    adapters.versionCheck.isCompatible = vi.fn(() => true);
+
+    adapters.sharedExternalsRepo.tryGet = vi.fn(
+      (): Optional<SharedExternal> =>
+        Optional.of(
+          mockExternal.shared(
+            [
+              mockVersion_A.v2_1_2({
+                remotes: {
+                  'team/mfe2': {
+                    cached: true,
+                    entries: { 'dep-a': 'dep-a.js', 'dep-a/sub': 'dep-a-sub.js' },
+                  },
+                },
+                action: 'share',
+              }),
+            ],
+            { dirty: false }
+          )
+        )
+    );
+
+    const remoteEntry = mockRemoteEntry_MFE1({
+      shared: [mockSharedInfoA.v2_1_1({ shareScope: 'custom-scope' })],
+      exposes: [],
+    });
+
+    const actual = await updateCache(remoteEntry);
+
+    expect(actual.actions).toEqual({
+      'dep-a': {
+        action: 'skip',
+        override: {
+          'dep-a': mockScopeUrl_MFE2({ file: 'dep-a.js' }),
+          'dep-a/sub': mockScopeUrl_MFE2({ file: 'dep-a-sub.js' }),
+        },
+      },
     });
   });
 
@@ -164,7 +205,7 @@ describe('createProcessDynamicRemoteEntry - scoped', () => {
     );
 
     expect(result.actions).toEqual({
-      'dep-a': { action: 'skip', override: mockScopeUrl_MFE2({ file: 'dep-a.js' }) },
+      'dep-a': { action: 'skip', override: { 'dep-a': mockScopeUrl_MFE2({ file: 'dep-a.js' }) } },
     });
   });
 

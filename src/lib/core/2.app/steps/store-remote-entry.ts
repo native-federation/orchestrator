@@ -1,11 +1,11 @@
-import type {
-  RemoteEntry,
-  RemoteInfo,
-  ScopedVersion,
-  SharedExternal,
-  SharedInfo,
-  SharedVersion,
-  SharedVersionMeta,
+import {
+  type RemoteEntry,
+  type RemoteInfo,
+  type ScopedVersion,
+  type SharedExternal,
+  type DenseSharedInfo,
+  type SharedVersion,
+  type SharedVersionMeta,
 } from 'lib/core/1.domain';
 import type { DrivingContract } from '../driving-ports/driving.contract';
 import type { LoggingConfig } from '../config/log.contract';
@@ -20,7 +20,7 @@ export type StoreRemoteEntry = (
 
 export type SharedExternalHandler = (
   remoteEntry: RemoteEntry,
-  external: SharedInfo,
+  external: DenseSharedInfo,
   ctx: SharedExternalContext
 ) => void;
 
@@ -104,15 +104,19 @@ export function createStoreRemoteEntry(
     });
   }
 
-  function addScopedExternal(remoteEntry: RemoteEntry, sharedInfo: SharedInfo, tag: string): void {
+  function addScopedExternal(
+    remoteEntry: RemoteEntry,
+    sharedInfo: DenseSharedInfo,
+    tag: string
+  ): void {
     ports.scopedExternalsRepo.addExternal(remoteEntry.name, sharedInfo.packageName, {
       tag,
-      file: sharedInfo.outFileName,
       bundle: sharedInfo.bundle,
+      entries: sharedInfo.entries,
     } as ScopedVersion);
   }
 
-  function resolveVersion(remoteEntry: RemoteEntry, external: SharedInfo): string | null {
+  function resolveVersion(remoteEntry: RemoteEntry, external: DenseSharedInfo): string | null {
     if (external.version && ports.versionCheck.isValidSemver(external.version)) {
       return external.version;
     }
@@ -132,18 +136,18 @@ export function createStoreRemoteEntry(
 
   function sharedExternalContext(
     remoteEntry: RemoteEntry,
-    sharedInfo: SharedInfo,
+    sharedInfo: DenseSharedInfo,
     tag: string
   ): SharedExternalContext {
     const scopeType = ports.sharedExternalsRepo.scopeType(sharedInfo.shareScope);
 
     const remote: SharedVersionMeta = {
-      file: sharedInfo.outFileName,
       name: remoteEntry.name,
       bundle: sharedInfo.bundle,
       strictVersion: sharedInfo.strictVersion,
       cached: false,
       requiredVersion: scopeType === 'strict' ? tag : sharedInfo.requiredVersion || tag,
+      entries: sharedInfo.entries,
     };
 
     const cached: SharedExternal = ports.sharedExternalsRepo
