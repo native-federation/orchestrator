@@ -18,7 +18,16 @@ const createSharedExternalsRepository = (config: StorageConfig): ForSharedExtern
 
   const _cache: SharedExternals = STORAGE.get()!;
 
+  // Not persisted: re-derived from the freshly processed entries on every init, before pooling runs.
+  let _sawPoolTag = false;
+
   return {
+    markPoolTagPresent: function () {
+      _sawPoolTag = true;
+    },
+    hasPoolTag: function () {
+      return _sawPoolTag;
+    },
     getFromScope: function (shareScope?: string) {
       return { ..._cache[shareScope ?? GLOBAL_SCOPE] };
     },

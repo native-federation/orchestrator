@@ -179,6 +179,7 @@ export type ModeOptions = {
   };
   feature?: {
     convertFlatSharedInfo?: boolean;
+    useAutoExternalPooling?: boolean;
   };
 };
 ```
@@ -206,13 +207,14 @@ The strictness part will define how the orchestrator behaves when an unexpected 
 | profile.skipInvalidExternalVersions       | `false`     | When enabled, an external whose version is not valid semver or missing is skipped (not added to storage) instead of being coerced to the smallest version of its requiredVersion range. Has no effect when `strict.strictExternalVersion` is set, which throws instead.             |
 | profile.overrideCachedRemotes             | `init-only` | When enabled, the library will override the cached remotes. The default behavior is to check if the remoteName is in the cache and the remoteEntry url differs from cached remoteEntry url (scopeUrl + "remoteEntry.json) . Available options are `never`, `init-only` and `always` |
 | profile.overrideCachedRemotesIfURLMatches | `false`     | When enabled, the library will override the cached remote, even if the remoteName already exists in cache and the remoteEntry.json URL matches the cached remoteEntry.json url.                                                                                                     |
-| profile.cacheTag                          | `undefined` | When set, the given value is appended as a `?cacheTag=<value>` query param to every remoteEntry.json request, letting you bust HTTP caches across all remotes at once. The host's own `hostRemoteEntry.cacheTag` takes precedence for the host remoteEntry when both are set.        |
+| profile.cacheTag                          | `undefined` | When set, the given value is appended as a `?cacheTag=<value>` query param to every remoteEntry.json request, letting you bust HTTP caches across all remotes at once. The host's own `hostRemoteEntry.cacheTag` takes precedence for the host remoteEntry when both are set.       |
 
 #### Features
 
-| Option                       | Default | Description                                                                                                                                                                                                                                                                                                                                                                                                                     |
-| ---------------------------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| feature.convertFlatSharedInfo | `false` | Opts into runtime densification of remoteEntry shared externals. Core v4.3.0 emits `DenseSharedInfo` (a per-package `entries` map covering primary and secondary entrypoints) natively; those pass through unchanged. For older/flat remote builds that emit one flat `SharedInfo` per entrypoint, enabling this groups secondary entrypoints under their parent package (by npm scope) so they resolve as one shared external. |
+| Option                         | Default | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| ------------------------------ | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| feature.convertFlatSharedInfo  | `false` | Opts into runtime densification of remoteEntry shared externals. Core v4.3.0 emits `DenseSharedInfo` (a per-package `entries` map covering primary and secondary entrypoints) natively; those pass through unchanged. For older/flat remote builds that emit one flat `SharedInfo` per entrypoint, enabling this groups secondary entrypoints under their parent package (by npm scope) so they resolve as one shared external.                                     |
+| feature.useAutoExternalPooling | `false` | When enabled, shared externals are grouped into pools by their npm scope (`@framework/core`, `@framework/common` → pool `framework`) so a coupled family resolves to one mutually-compatible version from a single remote build. Unscoped packages are not auto-pooled; a remote can also opt a specific external into a pool with a `pool` tag on its shared external regardless of this flag. See [Dependency Pooling](./version-resolver.md#dependency-pooling). |
 
 ### Example
 
@@ -222,7 +224,7 @@ import { defaultProfile, cachingProfile } from '@softarc/native-federation-orche
 
 initFederation('http://example.org/manifest.json', {
   strict: true, // All settings to strict: true
-  profile: cachingProfile, // { latestSharedExternal: false, overrideCachedRemotes: 'never', overrideCachedRemotesIfURLMatches: false }
+  profile: cachingProfile, // { latestSharedExternal: false, skipInvalidExternalVersions: false, overrideCachedRemotes: 'never', overrideCachedRemotesIfURLMatches: false }
 });
 ```
 

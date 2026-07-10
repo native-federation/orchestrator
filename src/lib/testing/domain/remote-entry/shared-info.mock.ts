@@ -14,6 +14,7 @@ export const mockSharedInfo = (
     outFileName?: string;
     shareScope?: string;
     bundle?: string;
+    pool?: string;
     entries?: Record<string, string>;
   }
 ): DenseSharedInfo => {
@@ -24,6 +25,7 @@ export const mockSharedInfo = (
     requiredVersion: options.requiredVersion,
     version: options.version,
     shareScope: options.shareScope,
+    pool: options.pool,
     bundle: options.bundle,
   };
   return {
@@ -39,6 +41,7 @@ type SharedInfoOptions = {
   outFileName?: string;
   shareScope?: string;
   bundle?: string;
+  pool?: string;
   entries?: Record<string, string>;
 };
 

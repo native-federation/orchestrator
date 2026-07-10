@@ -25,5 +25,6 @@ export type SharedVersionMeta = {
   cached: boolean;
   name: RemoteName;
   bundle?: string;
+  pool?: string;
   entries: Record<string, string>;
 };

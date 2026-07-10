@@ -32,6 +32,19 @@ describe('createSharedExternalsRepository', () => {
     return { mockStorage, externalsRepo };
   };
 
+  describe('pool-tag memo', () => {
+    it('has not seen a pool tag on a fresh repository', () => {
+      const { externalsRepo } = setupWithCache();
+      expect(externalsRepo.hasPoolTag()).toBe(false);
+    });
+
+    it('reports a pool tag once marked', () => {
+      const { externalsRepo } = setupWithCache();
+      externalsRepo.markPoolTagPresent();
+      expect(externalsRepo.hasPoolTag()).toBe(true);
+    });
+  });
+
   describe('initialization', () => {
     it('should initialize the entry with the first value', () => {
       const mockStorage = { 'shared-externals': undefined };
