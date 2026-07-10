@@ -1,7 +1,7 @@
 import type { ForUpdatingCache } from '../driver-ports/init/for-updating-cache';
 import {
   type RemoteEntry,
-  type SharedInfo,
+  type DenseSharedInfo,
   type SharedInfoActions,
   type SharedVersion,
   type SharedVersionAction,
@@ -57,7 +57,7 @@ export function createUpdateCache(
 
   function resolveSharedExternal(
     remoteEntry: RemoteEntry,
-    sharedInfo: SharedInfo,
+    sharedInfo: DenseSharedInfo,
     {
       tag,
       remote,
@@ -105,7 +105,7 @@ export function createUpdateCache(
 
   function resolveOverrideEntries(
     remoteEntry: RemoteEntry,
-    external: SharedInfo,
+    external: DenseSharedInfo,
     sharedVersion: SharedVersion
   ): Record<string, string> {
     return ports.remoteInfoRepo

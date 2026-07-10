@@ -83,7 +83,6 @@ describe('createGenerateImportMap (scoped-externals)', () => {
       'team/mfe1': {
         'dep-e': {
           tag: '1.2.3',
-          file: 'dep-e.js',
           entries: { 'dep-e': 'dep-e.js', 'dep-e/sub': 'dep-e-sub.js' },
         },
       },

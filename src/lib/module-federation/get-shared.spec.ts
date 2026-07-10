@@ -215,7 +215,6 @@ describe('createGetShared', () => {
               remotes: [
                 {
                   name: 'team/host',
-                  file: '@angular/core.js',
                   requiredVersion: '',
                   strictVersion: true,
                   cached: false,
@@ -422,6 +421,67 @@ describe('createGetShared', () => {
       // Forcing singleton must not collapse the strict version -> location map.
       expect(entries).toHaveLength(2);
       entries!.forEach(entry => expect(entry.shareConfig!.singleton).toBe(false));
+    });
+  });
+
+  describe('secondary entrypoints', () => {
+    it('emits a separate ShareInfos key per entrypoint, each resolving to its own url', async () => {
+      const ports = setup(
+        global({
+          '@angular/core': mockExternal.shared([
+            mockSharedVersion('20.0.0', '@angular/core', {
+              remotes: {
+                'team/host': {
+                  requiredVersion: '^20.0.0',
+                  entries: {
+                    '@angular/core': '@angular/core.js',
+                    '@angular/core/testing': '@angular/core-testing.js',
+                  },
+                },
+              },
+              action: 'share',
+            }),
+          ]),
+        })
+      );
+
+      const shared = createGetShared(ports)();
+
+      expect(Object.keys(shared).sort()).toEqual(['@angular/core', '@angular/core/testing']);
+      expect(shared['@angular/core']).toHaveLength(1);
+      expect(shared['@angular/core/testing']).toHaveLength(1);
+
+      ports.browser.importModule.mockResolvedValue({});
+      await shared['@angular/core']![0]!.get();
+      await shared['@angular/core/testing']![0]!.get();
+      expect(ports.browser.importModule).toHaveBeenCalledWith(NG_URL);
+      expect(ports.browser.importModule).toHaveBeenCalledWith(
+        'https://cdn.test/host/@angular/core-testing.js'
+      );
+    });
+
+    it('emits a secondary entrypoint even when the parent has no primary entry', async () => {
+      const ports = setup(
+        global({
+          '@angular/core': mockExternal.shared([
+            mockSharedVersion('20.0.0', '@angular/core', {
+              remotes: {
+                'team/host': { entries: { '@angular/core/testing': '@angular/core-testing.js' } },
+              },
+              action: 'share',
+            }),
+          ]),
+        })
+      );
+
+      const shared = createGetShared(ports)();
+
+      expect(Object.keys(shared)).toEqual(['@angular/core/testing']);
+      ports.browser.importModule.mockResolvedValue({});
+      await shared['@angular/core/testing']![0]!.get();
+      expect(ports.browser.importModule).toHaveBeenCalledWith(
+        'https://cdn.test/host/@angular/core-testing.js'
+      );
     });
   });
 

@@ -6,6 +6,10 @@ export type ModeProfileConfig = {
   cacheTag?: string;
 };
 
+export type ModeFeatureConfig = {
+  convertFlatSharedInfo: boolean;
+};
+
 export type ModeStrictnessConfig = {
   strictRemoteEntry: boolean;
   strictExternalCompatibility: boolean;
@@ -17,9 +21,11 @@ export type ModeStrictnessConfig = {
 export type ModeConfig = {
   strict: ModeStrictnessConfig;
   profile: ModeProfileConfig;
+  feature: ModeFeatureConfig;
 };
 
 export type ModeOptions = {
   strict?: Partial<ModeStrictnessConfig> | boolean;
   profile?: Partial<ModeProfileConfig>;
+  feature?: Partial<ModeFeatureConfig>;
 };

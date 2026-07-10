@@ -8,9 +8,8 @@ import {
 export const mockVersionRemote = (
   name: string,
   external: string = 'test-dep',
-  options: Partial<SharedVersionMeta> = {}
+  options: Partial<SharedVersionMeta> & { file?: string } = {}
 ): SharedVersionMeta => ({
-  file: options.file ?? `${external}.js`,
   name,
   requiredVersion: options.requiredVersion || '~2.1.0',
   strictVersion: options.strictVersion ?? true,
@@ -20,7 +19,7 @@ export const mockVersionRemote = (
 });
 
 type mockSharedVersionOptions = {
-  remotes: string[] | Record<string, Partial<SharedVersionMeta> & { host?: boolean }>;
+  remotes: string[] | Record<string, Partial<SharedVersionMeta> & { host?: boolean; file?: string }>;
   host?: boolean;
   action?: SharedVersionAction;
 };
@@ -55,7 +54,6 @@ export const mockSharedVersion = (
 
 export const mockScopedVersion = (tag: string, external: string = 'test-dep'): ScopedVersion => ({
   tag,
-  file: `${external}.js`,
   entries: { [external]: `${external}.js` },
 });
 

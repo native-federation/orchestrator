@@ -1,7 +1,7 @@
-import { LoggingConfig } from '../config/log.contract';
 import { ForConvertingToImportMap } from 'lib/core/2.app/driver-ports/init/for-converting-to-import-map';
 import { createConvertToImportMap } from './convert-to-import-map';
 import { RemoteEntry, SharedInfoActions } from 'lib/core/1.domain';
+import { ConfigContract } from 'lib/core/2.app/config';
 import { mockConfig } from 'lib/testing/config.mock';
 import { mockRemoteEntry_MFE2 } from 'lib/testing/domain/remote-entry/remote-entry.mock';
 import { mockScopeUrl_MFE2 } from 'lib/testing/domain/scope-url.mock';
@@ -23,7 +23,7 @@ const HASH_CHUNK = 'sha384-CHK';
 
 describe('createConvertToImportMap (integrity)', () => {
   let convertToImportMap: ForConvertingToImportMap;
-  let config: LoggingConfig;
+  let config: ConfigContract;
   let ports: Pick<DrivingContract, 'sharedChunksRepo'>;
 
   beforeEach(() => {

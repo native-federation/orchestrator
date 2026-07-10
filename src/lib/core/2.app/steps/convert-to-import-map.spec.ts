@@ -1,7 +1,8 @@
-import { LoggingConfig } from '../config/log.contract';
 import { ForConvertingToImportMap } from 'lib/core/2.app/driver-ports/init/for-converting-to-import-map';
 import { createConvertToImportMap } from './convert-to-import-map';
 import { RemoteEntry, SharedInfoActions } from 'lib/core/1.domain';
+import { ConfigContract } from 'lib/core/2.app/config';
+import { NFError } from 'lib/core/native-federation.error';
 import { mockConfig } from 'lib/testing/config.mock';
 import { mockRemoteEntry_MFE2 } from 'lib/testing/domain/remote-entry/remote-entry.mock';
 import { mockScopeUrl_MFE1, mockScopeUrl_MFE2 } from 'lib/testing/domain/scope-url.mock';
@@ -22,7 +23,7 @@ import { DrivingContract } from 'lib/core/2.app/driving-ports/driving.contract';
 
 describe('createConvertToImportMap', () => {
   let convertToImportMap: ForConvertingToImportMap;
-  let config: LoggingConfig;
+  let config: ConfigContract;
   let ports: Pick<DrivingContract, 'sharedChunksRepo'>;
 
   beforeEach(() => {
@@ -189,7 +190,7 @@ describe('createConvertToImportMap', () => {
       });
     });
 
-    it('should skip externals with skip action and shareScope but no override', async () => {
+    it('should fall back to the own scope when skip has shareScope but no override (non-strict)', async () => {
       const remoteEntry: RemoteEntry = mockRemoteEntry_MFE2({
         exposes: [],
         shared: [mockSharedInfoA.v2_1_2({ shareScope: 'custom-scope' })],
@@ -201,7 +202,26 @@ describe('createConvertToImportMap', () => {
       const importMap = await convertToImportMap({ entry: remoteEntry, actions });
       expect(importMap).toEqual({
         imports: {},
+        scopes: {
+          [mockScopeUrl_MFE2()]: {
+            'dep-a': mockScopeUrl_MFE2({ file: 'dep-a.js' }),
+          },
+        },
       });
+      expect(config.log.error).toHaveBeenCalled();
+    });
+
+    it('should throw under strictImportMap when skip has shareScope but no override', async () => {
+      config.strict.strictImportMap = true;
+      const remoteEntry: RemoteEntry = mockRemoteEntry_MFE2({
+        exposes: [],
+        shared: [mockSharedInfoA.v2_1_2({ shareScope: 'custom-scope' })],
+      });
+      const actions: SharedInfoActions = {
+        'dep-a': { action: 'skip' },
+      };
+
+      await expect(convertToImportMap({ entry: remoteEntry, actions })).rejects.toThrow(NFError);
     });
   });
 

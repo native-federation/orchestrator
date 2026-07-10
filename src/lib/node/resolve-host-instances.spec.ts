@@ -1,21 +1,21 @@
 /**
  * @vitest-environment node
  */
-import type { RemoteEntry, SharedInfo } from 'lib/core/1.domain';
+import type { DenseSharedInfo, RemoteEntry } from 'lib/core/1.domain';
 import type { LogHandler } from 'lib/core/2.app/config/log.contract';
 import type { ForProvidingRemoteEntries } from 'lib/core/2.app/driving-ports/for-providing-remote-entries.port';
 import { resolveHostInstances } from './resolve-host-instances';
 
-const shared = (packageName: string, singleton: boolean): SharedInfo =>
+const shared = (packageName: string, singleton: boolean): DenseSharedInfo =>
   ({
     packageName,
     singleton,
-    outFileName: `${packageName}.js`,
+    entries: { [packageName]: `${packageName}.js` },
     requiredVersion: '*',
-  }) as SharedInfo;
+  }) as DenseSharedInfo;
 
 const makeDeps = (
-  sharedInfos: SharedInfo[],
+  sharedInfos: DenseSharedInfo[],
   hostRemoteEntry: Parameters<
     typeof resolveHostInstances
   >[1]['hostRemoteEntry'] = './remoteEntry.json'

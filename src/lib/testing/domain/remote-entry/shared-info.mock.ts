@@ -1,4 +1,4 @@
-import { SharedInfo } from 'lib/core/1.domain';
+import { DenseSharedInfo } from 'lib/core/1.domain';
 
 /* --------------------------------------
  *  SHARED INFO
@@ -16,7 +16,7 @@ export const mockSharedInfo = (
     bundle?: string;
     entries?: Record<string, string>;
   }
-): SharedInfo => {
+): DenseSharedInfo => {
   const common = {
     packageName,
     singleton: options.singleton ?? false,
@@ -26,9 +26,10 @@ export const mockSharedInfo = (
     shareScope: options.shareScope,
     bundle: options.bundle,
   };
-  return options.entries
-    ? { ...common, entries: options.entries }
-    : { ...common, outFileName: options.outFileName ?? `${packageName}.js` };
+  return {
+    ...common,
+    entries: options.entries ?? { [packageName]: options.outFileName ?? `${packageName}.js` },
+  };
 };
 
 type SharedInfoOptions = {
