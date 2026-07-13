@@ -1,6 +1,4 @@
 import {
-  densifyExternals,
-  toDenseSharedInfoFormat,
   type RawRemoteEntry,
   type RemoteEntry,
 } from 'lib/core/1.domain/remote-entry/remote-entry.contract';
@@ -8,6 +6,10 @@ import type { ForProvidingRemoteEntries } from 'lib/core/2.app/driving-ports/for
 import { NFError } from 'lib/core/native-federation.error';
 import type { ModeConfig } from 'lib/core/2.app/config/mode.contract';
 import { verifyIntegrity } from 'lib/utils/integrity';
+import {
+  densifyExternals,
+  toDenseSharedInfoFormat,
+} from '@softarc/native-federation/internal/browser';
 
 const createRemoteEntryProvider = (config: ModeConfig): ForProvidingRemoteEntries => {
   const ensureOk = (response: Response) => {
