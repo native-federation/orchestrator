@@ -59,9 +59,8 @@ describe('createPoolDynamicExternals', () => {
     expect(result.actions['@framework/common']).toEqual({ action: 'scope' });
   });
 
-  it('coverage-forced: scopes only the new-share member; the same-version skip member dedups', async () => {
-    // No member is `scope`, so this is coverage, not incompatibility. common would need a new global
-    // share (impossible on the committed map) → scopes; core is same-version → stays skip (dedup).
+  it('defers a share+skip mix (coverage gap, not a conflict): every member keeps its verdict', async () => {
+    // No member is `scope`, so this is coverage, not incompatibility — the loaded remote follows.
     const entry = entryWith(shared('@framework/core'), shared('@framework/common'));
     const actions: SharedInfoActions = {
       '@framework/core': { action: 'skip', override: 'http://host/core.js' },
@@ -74,7 +73,7 @@ describe('createPoolDynamicExternals', () => {
       action: 'skip',
       override: 'http://host/core.js',
     });
-    expect(result.actions['@framework/common']).toEqual({ action: 'scope' });
+    expect(result.actions['@framework/common']).toEqual({ action: 'share' });
   });
 
   it('incompatibility-forced: scopes the whole family with no dedup, even the same-version member', async () => {
@@ -201,26 +200,22 @@ describe('createPoolDynamicExternals', () => {
     expect(result.actions['@framework/common']).toEqual({ action: 'scope' });
   });
 
-  it('never pools the strict scope (leaves a strict member untouched)', async () => {
-    // The strict scope is never pooled: a strict @framework/core must not be dragged into the
-    // `framework` pool by a global sibling.
+  it('never pools the strict scope (an incompatible global sibling cannot island it)', async () => {
+    // The strict scope is never pooled: a strict @framework/core must not be islanded by an
+    // incompatible global sibling.
     const entry = entryWith(
       shared('@framework/core', { shareScope: 'strict' }),
       shared('@framework/common')
     );
     const actions: SharedInfoActions = {
       '@framework/core': { action: 'share' },
-      '@framework/common': { action: 'skip', override: 'http://host/common.js' },
+      '@framework/common': { action: 'scope' },
     };
 
     const result = await poolDynamicExternals({ entry, actions });
 
-    // Without the strict-scope skip, the mix (share + skip) would coverage-force core to scope.
     expect(result.actions['@framework/core']).toEqual({ action: 'share' });
-    expect(result.actions['@framework/common']).toEqual({
-      action: 'skip',
-      override: 'http://host/common.js',
-    });
+    expect(result.actions['@framework/common']).toEqual({ action: 'scope' });
   });
 
   it('coordinates each shareScope independently (no cross-scope pooling)', async () => {

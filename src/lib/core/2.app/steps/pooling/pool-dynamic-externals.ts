@@ -45,14 +45,11 @@ export function createPoolDynamicExternals(config: ModeConfig): ForPoolingDynami
       for (const members of groupByMembership(candidates).values()) {
         const memberActions = members.map(name => actions[name]!.action);
 
+        // Island-or-defer: only a real incompatibility scopes the whole family (no dedup — a
+        // same-version sibling would bridge the foreign build). A `share`+`skip` mix is a coverage
+        // gap, not a conflict, so the loaded remote keeps the resolver's verdict.
         if (memberActions.includes('scope')) {
-          // Incompatibility-forced: whole family scopes with no dedup — deduping a same-version
-          // sibling would inject a foreign build via a shared intermediary.
           members.forEach(scope);
-        } else if (memberActions.includes('share') && memberActions.includes('skip')) {
-          // Coverage-forced: a `share` member would need a new global shared version, impossible on
-          // the committed map, so it scopes; `skip` members are same-version and dedup.
-          members.filter(name => actions[name]!.action === 'share').forEach(scope);
         }
       }
     }
