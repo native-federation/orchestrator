@@ -530,50 +530,44 @@ winning version (`share`) and marked every other version `skip` (compatible) or 
 (strict-incompatible). Pooling reads those verdicts and reconciles the family; it makes no
 `isCompatible` calls of its own.
 
-Per pool, per scope, it picks one **anchor remote**: the remote providing the winning tag for the
-most members, with the remote name as a deterministic tiebreak. Host and `latestSharedExternal`
-precedence are inherited for free — the resolver already applied them when electing each winner — and
-selection is stable across page reloads. Real portfolios are ragged (mfe-A ships `@framework/forms`,
-mfe-B ships `@framework/cdk`, nobody imports the union), so the anchor may be **partial**; when one
-remote provides the winning tag of every member (the common case under lockstep bumps), the family
-simply shares its build.
+The rule is **island-or-defer**. A remote that the resolver marked `scope` on _any_ member of the pool
+is **islanded**: its **entire** family is served from its own build, with **no** dedup — even on a
+member where its version matches the shared one. This is the whole point of pooling and the one thing
+the per-external resolver cannot do: deduping that matching sibling is exactly what would leak a
+foreign build in through a shared intermediary (the `@design-system/ui`-against-`core@15` hazard). One
+incompatibility anywhere in the family islands the remote everywhere.
 
-Every other remote is then classified once for the whole pool. Because the anchor's tag for a member
-equals that member's winning tag, the resolver's stored verdict already says whether each remote is
-compatible — no recompute needed:
-
-| Classification                     | Condition                                                                    | Result                                                                                                                                                                                                                                                    |
-| ---------------------------------- | ---------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Follow**                         | Every member it uses is `skip` against the winner (compatible).              | Falls through to the shared build.                                                                                                                                                                                                                        |
-| **Scope** (incompatibility-forced) | The resolver marked its version `scope` on _any_ member.                     | Its **entire** family is served from its own build, with **no** dedup — deduping a same-version sibling is exactly what would leak a foreign build in through a shared intermediary (the `@design-system/ui` hazard). Incompatibility dominates coverage. |
-| **Scope** (coverage-forced)        | Compatible everywhere the anchor covers, but uses a member the anchor lacks. | Scopes that member's own copy, but **may dedup**: any member whose version equals the shared version falls through to the shared build — safe, since there is no version conflict to transmit.                                                            |
+Every _other_ remote keeps the resolver's per-member verdict untouched — the winner stays `share`, its
+compatible dedups stay `skip`. Pooling adds nothing here; a fully compatible pool is a near no-op. It
+does **not** re-point members onto a single "anchor" remote: coherence is a property of _versions_
+(guaranteed by islanding), not of a common source, so different members may legitimately share from
+different remotes.
 
 ```mermaid
 flowchart TD
     A[Pool: coupled externals in one scope] --> B{≥2 members<br/>and ≥2 remotes?}
     B -->|No| Z[Nothing to coordinate<br/>keep per-external result]
-    B -->|Yes| C[Choose anchor remote:<br/>provides the winning tag for the most members<br/>remote name breaks ties]
-    C --> D[For each other remote in the pool]
-    D --> E{Any member marked<br/>SCOPE against the winner?}
-    E -->|Yes| F[SCOPE incompatibility-forced<br/>entire family from own build, no dedup]
-    E -->|No| G{Uses a member the<br/>anchor does not provide?}
-    G -->|Yes| H[SCOPE coverage-forced<br/>scope that member; dedup same-version members]
-    G -->|No| I[FOLLOW<br/>use the shared build]
+    B -->|Yes| C[For each remote copy in the pool]
+    C --> D{Remote islanded?<br/>marked SCOPE on any member}
+    D -->|Yes| E[SCOPE this copy<br/>whole family from own build, no dedup]
+    D -->|No| F[Keep base verdict<br/>SHARE winner / SKIP dedup]
 ```
 
-**Scoped-only members.** When no anchor provides a member (an orphan), it has no shared build: every
-remote using it serves its own copy, and pooling logs `'<member>' is scoped-only — no coherent shared build provides it; N remotes download their own copy`.
-A best partial anchor is always chosen rather than bailing on the whole pool. Under
-`strictExternalCompatibility` only an incompatibility-forced scope (a genuine version conflict)
-throws, matching the per-external resolver; a coverage-forced scope (the anchor simply does not ship a
-member) is not a conflict and resolves scoped without aborting.
+**Scoped-only members.** If the winner's providers were all islanded away, the member has no shared
+build left: its remaining copies fall to `scope` (self-serve) and the member is scope-only. Pooling
+does **not** re-elect a surviving lower version — the pool exists to keep an _incompatible_ remote's
+family coherent, not to recover a dedup for bystanders. When a scoped-only member has more than one
+consumer (sharing was genuinely possible and lost) pooling logs
+`'<member>' is scoped-only — no coherent shared build provides it; N remotes download their own copy`;
+a single-consumer member is one download either way, so it is silent.
 
-> **Conservative by construction.** The anchor is chosen from members' _winning tags_ only, so a
-> member whose winning tag came from a remote other than the anchor becomes scoped-only — even if the
-> anchor happens to ship a coherent older build of it. Pooling trusts the resolver's per-member
-> verdicts rather than re-searching raw versions, so a genuinely drifted portfolio may scope more than
-> an exhaustive download-minimizing search would. This trades optimal sharing for a cheap single pass;
-> coherent and lockstep families — the overwhelmingly common case — are unaffected.
+Under `strictExternalCompatibility` any island throws (defensively — the per-external resolver already
+throws on a real incompatibility before pooling runs).
+
+> **Compatible portfolios are unaffected.** Because pooling defers to the resolver everywhere except a
+> real incompatibility, coherent and lockstep families — the overwhelmingly common case — pass through
+> exactly as the per-external resolver left them. Pooling earns its keep only in the ragged,
+> incompatible case, which is exactly where islanding fires.
 
 ### Scope and dynamic init
 
@@ -582,9 +576,9 @@ runs in both the initial pipeline and dynamic init (`initRemoteEntry`).
 
 Because the import map is immutable once committed, the dynamic pass is **additive** — it adjusts only
 the newly loaded remote and never retro-corrects committed remotes. It coordinates each shareScope
-independently and honors the same distinction: an incompatibility-forced remote scopes its entire
-family with no dedup; a merely coverage-forced remote scopes only its new-share members and dedups the
-same-version ones against the committed build.
+independently and applies the same rule: if any member is `scope` the whole family scopes with no
+dedup; otherwise the remote keeps the resolver's verdict (a `share`+`skip` mix is a coverage gap, not a
+conflict, so it is not forced to scope).
 
 ## Dynamic Init
 

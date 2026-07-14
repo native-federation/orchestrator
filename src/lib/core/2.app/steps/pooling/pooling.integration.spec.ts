@@ -80,9 +80,9 @@ describe('pooling (integration)', () => {
     return createGenerateImportMap(config, adapters)();
   };
 
-  it('anchors an entire @framework family on a single remote build', async () => {
+  it('keeps an entire compatible @framework family on a single remote build', async () => {
     // mfe-a provides the winning build (17.0.0) for the whole family; mfe-b ships a newer compatible
-    // tag. Pooling anchors on mfe-a and mfe-b follows, rather than splitting across two sources.
+    // tag that dedups onto it, so the family stays single-source rather than splitting.
     seed('@framework/core', [
       version('17.0.0', '@framework/core', [{ remote: 'team/mfe-a', req: '^17.0.0' }]),
       version('17.1.0', '@framework/core', [{ remote: 'team/mfe-b', req: '^17.0.0' }]),
@@ -124,9 +124,9 @@ describe('pooling (integration)', () => {
     expect(cScope?.['@framework/common']).toContain(SCOPE['team/mfe-c']);
   });
 
-  it('pools around a partial anchor when no remote covers the union; orphan is scoped-only', async () => {
-    // Ragged portfolio: mfe-a has core+common, mfe-b has common+forms — no remote covers the whole
-    // family. Pooling anchors on the best partial (mfe-a); the orphan (forms) resolves scoped-only.
+  it('shares every member of a compatible ragged family, including a single-provider one', async () => {
+    // Ragged portfolio, all on 17: mfe-a has core+common, mfe-b has common+forms. Nothing is
+    // incompatible, so pooling defers to the base resolver — every member is shared, forms included.
     seed('@framework/core', [
       version('17.0.0', '@framework/core', [{ remote: 'team/mfe-a', req: '^17.0.0' }]),
     ]);
@@ -140,17 +140,14 @@ describe('pooling (integration)', () => {
 
     const importMap = await runInit();
 
-    // core + common share around the partial anchor mfe-a.
     expect(importMap.imports['@framework/core']).toContain(SCOPE['team/mfe-a']);
     expect(importMap.imports['@framework/common']).toContain(SCOPE['team/mfe-a']);
     // mfe-b dedups common (same version) — no scoped re-download of it.
     expect(importMap.scopes?.[SCOPE['team/mfe-b']]?.['@framework/common']).toBeUndefined();
 
-    // forms is an orphan — no anchor provides it — so it resolves scoped-only from mfe-b.
-    expect(importMap.imports['@framework/forms']).toBeUndefined();
-    expect(importMap.scopes?.[SCOPE['team/mfe-b']]?.['@framework/forms']).toContain(
-      SCOPE['team/mfe-b']
-    );
+    // forms is single-provider but compatible, so it is shared from mfe-b, not scoped-only.
+    expect(importMap.imports['@framework/forms']).toContain(SCOPE['team/mfe-b']);
+    expect(importMap.scopes?.[SCOPE['team/mfe-b']]?.['@framework/forms']).toBeUndefined();
   });
 
   it('a tagged design system scopes its whole family for an incompatible consumer (no foreign framework runtime)', async () => {
@@ -206,9 +203,9 @@ describe('pooling (integration)', () => {
     expect(bScope?.['@design-system/ui']).toContain(SCOPE['team/mfe-b']);
   });
 
-  it('coverage-forced dedups a same-version member while incompatibility-forced scopes its whole family', async () => {
-    // mfe-a is the anchor (core+common). mfe-b is coverage-forced (uses orphan cdk; core@17 matches).
-    // mfe-c is incompatibility-forced (core@18).
+  it('shares a single-provider member while an incompatible remote scopes its whole family', async () => {
+    // mfe-b is compatible (core@17 matches) and sole provider of cdk. mfe-c is incompatible (core@18)
+    // and islanded across its whole family.
     seed('@framework/core', [
       version('17.0.0', '@framework/core', [{ remote: 'team/mfe-a', req: '^17.0.0' }]),
       version('17.0.0', '@framework/core', [{ remote: 'team/mfe-b', req: '^17.0.0' }]),
@@ -237,11 +234,9 @@ describe('pooling (integration)', () => {
       SCOPE['team/mfe-c']
     );
 
-    // cdk: orphan → scoped-only on mfe-b.
-    expect(importMap.imports['@framework/cdk']).toBeUndefined();
-    expect(importMap.scopes?.[SCOPE['team/mfe-b']]?.['@framework/cdk']).toContain(
-      SCOPE['team/mfe-b']
-    );
+    // cdk: single-provider but compatible → shared from mfe-b (no orphan penalty).
+    expect(importMap.imports['@framework/cdk']).toContain(SCOPE['team/mfe-b']);
+    expect(importMap.scopes?.[SCOPE['team/mfe-b']]?.['@framework/cdk']).toBeUndefined();
   });
 
   it('scopes a dynamically-added incompatible remote whole family (dynamic init path)', async () => {

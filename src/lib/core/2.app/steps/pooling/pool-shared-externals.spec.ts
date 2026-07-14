@@ -58,6 +58,12 @@ describe('createPoolSharedExternals', () => {
   const rebuiltFor = (name: string): SharedExternal | undefined =>
     vi.mocked(adapters.sharedExternalsRepo.addOrUpdate).mock.calls.find(c => c[0] === name)?.[1];
 
+  const namesOf = (external: SharedExternal, action: SharedVersion['action']): string[] =>
+    external.versions
+      .filter(v => v.action === action)
+      .flatMap(v => v.remotes.map(r => r.name))
+      .sort();
+
   describe('when inert', () => {
     it('does nothing when pooling is disabled and no pool tags are present', async () => {
       givenExternals({
@@ -139,7 +145,7 @@ describe('createPoolSharedExternals', () => {
       await poolSharedExternals();
 
       expect(adapters.sharedExternalsRepo.getFromScope).toHaveBeenCalled();
-      expect(rebuiltFor('foo')?.versions[0]!.remotes[0]!.name).toBe('mfe1');
+      expect(namesOf(rebuiltFor('foo')!, 'share')).toEqual(['mfe1', 'mfe2']);
     });
 
     it('never early-outs when auto-pooling is on, regardless of the pool-tag memo', async () => {
@@ -178,19 +184,18 @@ describe('createPoolSharedExternals', () => {
 
       await poolSharedExternals();
 
-      expect(rebuiltFor('foo')?.versions[0]!.remotes[0]!.name).toBe('mfe1');
-      expect(rebuiltFor('bar')?.versions[0]!.remotes[0]!.name).toBe('mfe1');
+      expect(namesOf(rebuiltFor('foo')!, 'share')).toEqual(['mfe1', 'mfe2']);
+      expect(namesOf(rebuiltFor('bar')!, 'share')).toEqual(['mfe1', 'mfe2']);
     });
   });
 
-  describe('anchoring', () => {
-    it('re-points every member of an auto-pool to a single anchor remote', async () => {
+  describe('defers to the base resolver for compatible families', () => {
+    it('keeps every member shared, no scoping, when nothing is incompatible', async () => {
       config.feature.useAutoExternalPooling = true;
       givenExternals({
         '@framework/core': external([
           sharedVersion('17', [meta('mfe1'), meta('mfe2')], { action: 'share' }),
         ]),
-        // note: mfe2 listed first — pooling must re-point this to the mfe1 anchor.
         '@framework/common': external([
           sharedVersion('17', [meta('mfe2'), meta('mfe1')], { action: 'share' }),
         ]),
@@ -200,13 +205,34 @@ describe('createPoolSharedExternals', () => {
 
       const core = rebuiltFor('@framework/core')!;
       const common = rebuiltFor('@framework/common')!;
-      expect(core.versions).toHaveLength(1);
-      expect(core.versions[0]!.action).toBe('share');
-      expect(core.versions[0]!.remotes[0]!.name).toBe('mfe1');
-      expect(common.versions[0]!.remotes[0]!.name).toBe('mfe1');
+      expect(namesOf(core, 'share')).toEqual(['mfe1', 'mfe2']);
+      expect(namesOf(common, 'share')).toEqual(['mfe1', 'mfe2']);
+      expect(core.versions.some(v => v.action === 'scope')).toBe(false);
+      expect(common.versions.some(v => v.action === 'scope')).toBe(false);
     });
 
-    it('prefers the host remote as anchor', async () => {
+    it('leaves a single-provider member shared instead of scoping it (no anchor coverage penalty)', async () => {
+      config.feature.useAutoExternalPooling = true;
+      // m2 is provided by Q alone. Under the old anchor model an anchor that lacked m2 orphaned it;
+      // now a compatible single-provider member simply stays shared.
+      givenExternals({
+        '@pool/m1': external([
+          sharedVersion('1', [meta('P', { req: '1' }), meta('Q', { req: '1' })], {
+            action: 'share',
+          }),
+        ]),
+        '@pool/m2': external([sharedVersion('1', [meta('Q', { req: '1' })], { action: 'share' })]),
+      });
+
+      await poolSharedExternals();
+
+      expect(namesOf(rebuiltFor('@pool/m1')!, 'share')).toEqual(['P', 'Q']);
+      const m2 = rebuiltFor('@pool/m2')!;
+      expect(namesOf(m2, 'share')).toEqual(['Q']);
+      expect(m2.versions.some(v => v.action === 'scope')).toBe(false);
+    });
+
+    it('preserves the base resolver host winner', async () => {
       config.feature.useAutoExternalPooling = true;
       const build = () =>
         external([
@@ -218,81 +244,155 @@ describe('createPoolSharedExternals', () => {
       await poolSharedExternals();
 
       const share = rebuiltFor('@framework/core')!.versions.find(v => v.action === 'share')!;
+      expect(share.host).toBe(true);
       expect(share.remotes[0]!.name).toBe('host');
+    });
+
+    it('reads determine actions without calling versionCheck.isCompatible', async () => {
+      config.feature.useAutoExternalPooling = true;
+      const isCompatible = vi.fn(() => true);
+      adapters.versionCheck.isCompatible = isCompatible;
+      givenExternals({
+        '@framework/core': external([
+          sharedVersion('17', [meta('mfe1'), meta('mfe2')], { action: 'share' }),
+        ]),
+        '@framework/common': external([
+          sharedVersion('17', [meta('mfe1'), meta('mfe2')], { action: 'share' }),
+        ]),
+      });
+
+      await poolSharedExternals();
+
+      expect(isCompatible).not.toHaveBeenCalled();
     });
   });
 
-  describe('all-or-nothing classification', () => {
-    it('scopes a strict-incompatible remote entire family, others follow', async () => {
+  describe('islands version-incompatible remotes (family-island gate)', () => {
+    it('scopes an islanded remote across the whole family, no dedup on its matching copy', async () => {
       config.feature.useAutoExternalPooling = true;
-      // determine already scoped the strict-incompatible v18 (action 'scope'); pooling reads that.
-      const build = () =>
-        external([
+      // determine marked mfe3's core@18 `scope`; mfe3 also ships common@17, matching the 17 winner.
+      // Islanding must still scope that matching copy (no dedup) to keep mfe3's family coherent.
+      givenExternals({
+        '@framework/core': external([
           sharedVersion('17', [meta('mfe1', { req: '17' }), meta('mfe2', { req: '17' })], {
             action: 'share',
           }),
           sharedVersion('18', [meta('mfe3', { req: '18', strict: true })], { action: 'scope' }),
-        ]);
-      givenExternals({ '@framework/core': build(), '@framework/common': build() });
+        ]),
+        '@framework/common': external([
+          sharedVersion(
+            '17',
+            [meta('mfe1', { req: '17' }), meta('mfe2', { req: '17' }), meta('mfe3', { req: '17' })],
+            { action: 'share' }
+          ),
+        ]),
+      });
 
       await poolSharedExternals();
 
       const core = rebuiltFor('@framework/core')!;
-      const share = core.versions.find(v => v.action === 'share')!;
-      const scope = core.versions.find(v => v.action === 'scope')!;
-      expect(share.remotes.map(r => r.name)).toEqual(['mfe1', 'mfe2']);
-      expect(scope.remotes.map(r => r.name)).toEqual(['mfe3']);
+      expect(namesOf(core, 'share')).toEqual(['mfe1', 'mfe2']);
+      expect(namesOf(core, 'scope')).toEqual(['mfe3']);
 
-      // Family coherence: @framework/common lands its mfe3 family in scope too.
       const common = rebuiltFor('@framework/common')!;
-      expect(common.versions.find(v => v.action === 'scope')!.remotes.map(r => r.name)).toEqual([
-        'mfe3',
-      ]);
+      expect(namesOf(common, 'share')).toEqual(['mfe1', 'mfe2']);
+      expect(namesOf(common, 'scope')).toEqual(['mfe3']);
+    });
+
+    it('groups scope versions by each remote real tag (F3)', async () => {
+      config.feature.useAutoExternalPooling = true;
+      givenExternals({
+        '@framework/core': external([
+          sharedVersion('22.0.6', [meta('a', { req: '22' }), meta('b', { req: '22' })], {
+            action: 'share',
+          }),
+          sharedVersion('21.2.17', [meta('c', { req: '21', strict: true })], { action: 'scope' }),
+        ]),
+        '@framework/common': external([
+          sharedVersion('22.0.6', [meta('a', { req: '22' }), meta('b', { req: '22' })], {
+            action: 'share',
+          }),
+          sharedVersion('22.0.5', [meta('c', { req: '22' })]),
+        ]),
+      });
+
+      await poolSharedExternals();
+
+      const coreScope = rebuiltFor('@framework/core')!.versions.find(v => v.action === 'scope')!;
+      expect(coreScope.tag).toBe('21.2.17');
+      expect(coreScope.remotes.map(r => r.name)).toEqual(['c']);
+
+      // c's common copy (22.0.5) is islanded via the sibling conflict; its scope tag is its real one.
+      const commonScope = rebuiltFor('@framework/common')!.versions.find(
+        v => v.action === 'scope'
+      )!;
+      expect(commonScope.tag).toBe('22.0.5');
+      expect(commonScope.remotes.map(r => r.name)).toEqual(['c']);
+    });
+
+    it('scopes a member whose only shared build was islanded away (orphaned skip)', async () => {
+      config.feature.useAutoExternalPooling = true;
+      // c is islanded via core@18. cdk winner is c@18 (share); b@18 dedups onto it (skip). With c
+      // islanded, cdk has no shared build, so b's skip self-serves too — cdk is scope-only.
+      givenExternals({
+        '@framework/core': external([
+          sharedVersion('17', [meta('a', { req: '17' })], { action: 'share' }),
+          sharedVersion('18', [meta('c', { req: '18', strict: true })], { action: 'scope' }),
+        ]),
+        '@framework/cdk': external([
+          sharedVersion('18', [meta('c', { req: '18' })], { action: 'share' }),
+          sharedVersion('18', [meta('b', { req: '18' })], { action: 'skip' }),
+        ]),
+      });
+
+      await poolSharedExternals();
+
+      const cdk = rebuiltFor('@framework/cdk')!;
+      expect(cdk.versions.every(v => v.action === 'scope')).toBe(true);
+      expect(namesOf(cdk, 'scope')).toEqual(['b', 'c']);
     });
   });
 
-  describe('partial anchor (no remote covers the union)', () => {
-    const disjoint = () => ({
-      '@framework/core': external([sharedVersion('17', [meta('mfe1')], { action: 'share' })]),
-      '@framework/common': external([sharedVersion('17', [meta('mfe2')], { action: 'share' })]),
-    });
-
-    it('pools around the best partial anchor, orphan member scoped-only', async () => {
+  describe('scoped-only warning (F4)', () => {
+    it('warns when a scoped-only member lost sharing across more than one consumer', async () => {
       config.feature.useAutoExternalPooling = true;
-      givenExternals(disjoint());
-
-      await poolSharedExternals();
-
-      // Anchor is mfe1 (covers @framework/core): core shares from mfe1.
-      const core = rebuiltFor('@framework/core')!;
-      expect(core.versions).toHaveLength(1);
-      expect(core.versions[0]!.action).toBe('share');
-      expect(core.versions[0]!.remotes.map(r => r.name)).toEqual(['mfe1']);
-
-      // @framework/common is an orphan — mfe1 provides no build for it — so it resolves scoped-only.
-      const common = rebuiltFor('@framework/common')!;
-      expect(common.versions.every(v => v.action === 'scope')).toBe(true);
-      expect(common.versions.flatMap(v => v.remotes.map(r => r.name))).toEqual(['mfe2']);
-    });
-
-    it('does not throw under strictImportMap (a partial anchor always exists)', async () => {
-      config.feature.useAutoExternalPooling = true;
-      config.strict.strictImportMap = true;
-      givenExternals(disjoint());
-
-      await expect(poolSharedExternals()).resolves.toBeUndefined();
-      expect(adapters.sharedExternalsRepo.addOrUpdate).toHaveBeenCalled();
-    });
-
-    it('warns that the orphan member is scoped-only', async () => {
-      config.feature.useAutoExternalPooling = true;
-      givenExternals(disjoint());
+      givenExternals({
+        '@framework/core': external([
+          sharedVersion('17', [meta('a', { req: '17' })], { action: 'share' }),
+          sharedVersion('18', [meta('c', { req: '18', strict: true })], { action: 'scope' }),
+        ]),
+        '@framework/cdk': external([
+          sharedVersion('18', [meta('c', { req: '18' })], { action: 'share' }),
+          sharedVersion('18', [meta('b', { req: '18' })], { action: 'skip' }),
+        ]),
+      });
 
       await poolSharedExternals();
 
       expect(config.log.warn).toHaveBeenCalledWith(
         3,
-        expect.stringContaining("'@framework/common' is scoped-only")
+        expect.stringContaining("'@framework/cdk' is scoped-only")
+      );
+    });
+
+    it('stays silent for a single-consumer scoped-only member', async () => {
+      config.feature.useAutoExternalPooling = true;
+      // priv is shipped only by the islanded c, so it is scoped-only but one download either way.
+      givenExternals({
+        '@framework/core': external([
+          sharedVersion('17', [meta('a', { req: '17' })], { action: 'share' }),
+          sharedVersion('18', [meta('c', { req: '18', strict: true })], { action: 'scope' }),
+        ]),
+        '@framework/priv': external([
+          sharedVersion('18', [meta('c', { req: '18' })], { action: 'share' }),
+        ]),
+      });
+
+      await poolSharedExternals();
+
+      expect(config.log.warn).not.toHaveBeenCalledWith(
+        3,
+        expect.stringContaining("'@framework/priv' is scoped-only")
       );
     });
 
@@ -316,109 +416,10 @@ describe('createPoolSharedExternals', () => {
     });
   });
 
-  describe('coverage dedup vs incompatibility scope-all', () => {
-    it('dedups a coverage-forced remote on same-version members but scopes an incompat family whole', async () => {
-      config.feature.useAutoExternalPooling = true;
-      // Anchor 'a' covers core+common. 'b' is coverage-forced (uses orphan cdk; core@17 matches).
-      // 'c' is incompatibility-forced (core@18, determine marked it 'scope').
-      givenExternals({
-        '@framework/core': external([
-          sharedVersion('17', [meta('a', { req: '17' }), meta('b', { req: '17' })], {
-            action: 'share',
-          }),
-          sharedVersion('18', [meta('c', { req: '18', strict: true })], { action: 'scope' }),
-        ]),
-        '@framework/common': external([
-          sharedVersion('17', [meta('a', { req: '17' }), meta('c', { req: '17' })], {
-            action: 'share',
-          }),
-        ]),
-        '@framework/cdk': external([
-          sharedVersion('17', [meta('b', { req: '17' })], { action: 'share' }),
-        ]),
-      });
-
-      await poolSharedExternals();
-
-      // core: 'b' (coverage-forced, same version 17) dedups → shares alongside anchor 'a';
-      //       'c' (incompat) scopes.
-      const core = rebuiltFor('@framework/core')!;
-      const coreShare = core.versions.find(v => v.action === 'share')!;
-      expect(coreShare.remotes.map(r => r.name).sort()).toEqual(['a', 'b']);
-      expect(core.versions.find(v => v.action === 'scope')!.remotes.map(r => r.name)).toEqual([
-        'c',
-      ]);
-
-      // common: 'c' scopes its WHOLE family (incompat) — no dedup even though common@17 matches.
-      const common = rebuiltFor('@framework/common')!;
-      expect(common.versions.find(v => v.action === 'share')!.remotes.map(r => r.name)).toEqual([
-        'a',
-      ]);
-      expect(common.versions.find(v => v.action === 'scope')!.remotes.map(r => r.name)).toEqual([
-        'c',
-      ]);
-
-      // cdk: orphan (anchor 'a' lacks it) → 'b' scoped-only.
-      const cdk = rebuiltFor('@framework/cdk')!;
-      expect(cdk.versions.every(v => v.action === 'scope')).toBe(true);
-      expect(cdk.versions.flatMap(v => v.remotes.map(r => r.name))).toEqual(['b']);
-    });
-  });
-
-  describe('conservative path (reads determine, no compatibility check)', () => {
-    it('anchors a full-coverage pool without calling versionCheck.isCompatible', async () => {
-      config.feature.useAutoExternalPooling = true;
-      const isCompatible = vi.fn(() => true);
-      adapters.versionCheck.isCompatible = isCompatible;
-      // One remote (mfe1) provides the winning tag for every member — the full-witness case.
-      givenExternals({
-        '@framework/core': external([
-          sharedVersion('17', [meta('mfe1'), meta('mfe2')], { action: 'share' }),
-        ]),
-        '@framework/common': external([
-          sharedVersion('17', [meta('mfe1'), meta('mfe2')], { action: 'share' }),
-        ]),
-      });
-
-      await poolSharedExternals();
-
-      const core = rebuiltFor('@framework/core')!;
-      expect(core.versions).toHaveLength(1);
-      expect(core.versions[0]!.action).toBe('share');
-      expect(core.versions[0]!.remotes.map(r => r.name)).toEqual(['mfe1', 'mfe2']);
-      // The cheap path: classification reads determine's actions, never re-checks versions.
-      expect(isCompatible).not.toHaveBeenCalled();
-    });
-
-    it('anchors the max-coverage remote (P/Q), sharing a member only one remote provides', async () => {
-      config.feature.useAutoExternalPooling = true;
-      // m1 is provided by P and Q, m2 only by Q. Q covers both, so it anchors and m2 is shared — not
-      // name-earliest P, which would orphan m2.
-      givenExternals({
-        '@pool/m1': external([
-          sharedVersion('1', [meta('P', { req: '1' }), meta('Q', { req: '1' })], {
-            action: 'share',
-          }),
-        ]),
-        '@pool/m2': external([sharedVersion('1', [meta('Q', { req: '1' })], { action: 'share' })]),
-      });
-
-      await poolSharedExternals();
-
-      const m1 = rebuiltFor('@pool/m1')!;
-      expect(m1.versions.find(v => v.action === 'share')!.remotes[0]!.name).toBe('Q');
-
-      const m2 = rebuiltFor('@pool/m2')!;
-      expect(m2.versions.find(v => v.action === 'share')!.remotes.map(r => r.name)).toEqual(['Q']);
-    });
-  });
-
   describe('strict compatibility', () => {
-    it('does not throw under strictExternalCompatibility for a coverage-forced remote', async () => {
+    it('does not throw for a compatible family with a single-provider member', async () => {
       config.feature.useAutoExternalPooling = true;
       config.strict.strictExternalCompatibility = true;
-      // 'b' is coverage-forced (uses cdk, which anchor 'a' lacks). A coverage gap is not a version
-      // conflict, so strict mode must NOT abort.
       givenExternals({
         '@framework/core': external([
           sharedVersion('17', [meta('a'), meta('b')], { action: 'share' }),
@@ -429,23 +430,13 @@ describe('createPoolSharedExternals', () => {
 
       await expect(poolSharedExternals()).resolves.toBeUndefined();
 
-      // core shares from anchor 'a'; 'b' dedups its same-version copy; cdk is scoped-only on 'b'.
-      const core = rebuiltFor('@framework/core')!;
-      expect(
-        core.versions
-          .find(v => v.action === 'share')!
-          .remotes.map(r => r.name)
-          .sort()
-      ).toEqual(['a', 'b']);
-      const cdk = rebuiltFor('@framework/cdk')!;
-      expect(cdk.versions.every(v => v.action === 'scope')).toBe(true);
+      expect(namesOf(rebuiltFor('@framework/core')!, 'share')).toEqual(['a', 'b']);
+      expect(namesOf(rebuiltFor('@framework/cdk')!, 'share')).toEqual(['b']);
     });
 
-    it('throws under strictExternalCompatibility when a member is version-incompatible', async () => {
+    it('throws under strictExternalCompatibility when a remote is islanded', async () => {
       config.feature.useAutoExternalPooling = true;
       config.strict.strictExternalCompatibility = true;
-      // 'c' is strict-incompatible (determine marked its v18 `scope`) — a genuine conflict, not a
-      // coverage gap, so strict mode rejects the pool.
       const build = () =>
         external([
           sharedVersion('17', [meta('a', { req: '17' }), meta('b', { req: '17' })], {

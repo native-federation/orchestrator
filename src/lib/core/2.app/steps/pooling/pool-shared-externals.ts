@@ -5,87 +5,17 @@ import type { DrivingContract } from '../../driving-ports/driving.contract';
 import type { LoggingConfig } from '../../config/log.contract';
 import type { ModeConfig } from '../../config/mode.contract';
 import { buildPools } from './pool-graph';
-import { remotesInPool, versionForRemote } from './pool.util';
-import type { PoolAnchor, PoolMember, PoolName, RemoteClassification } from './pool.types';
+import { remotesInPool } from './pool.util';
+import type { PoolMember, PoolName } from './pool.types';
 
-type PoolWinner = { member: PoolMember; tag: string; providers: Set<RemoteName> };
-
-// The `?? '' / ?? []` fallbacks are defensive only: pooled externals live in non-strict scopes and
-// always carry a `share` version by the time determine-shared-externals has run.
-function poolWinners(members: PoolMember[]): PoolWinner[] {
-  return members.map(member => {
-    const share = member.external.versions.find(v => v.action === 'share');
-    return {
-      member,
-      tag: share?.tag ?? '',
-      providers: new Set((share?.remotes ?? []).map(r => r.name)),
-    };
-  });
-}
-
-// Anchor = remote providing the winning tag for the most members (name-earliest breaks ties, for
-// reload-stability). The anchor may be partial: members it does not cover become orphans
-// (scoped-only) via rebuildMember's `!anchorTag` branch.
-function selectCoverageAnchor(winners: PoolWinner[]): PoolAnchor | undefined {
-  const coverage = new Map<RemoteName, number>();
-  for (const winner of winners)
-    for (const remote of winner.providers) coverage.set(remote, (coverage.get(remote) ?? 0) + 1);
-  if (coverage.size === 0) return undefined;
-
-  const anchorRemote = [...coverage.keys()].sort(
-    (a, b) => coverage.get(b)! - coverage.get(a)! || a.localeCompare(b)
-  )[0]!;
-
-  return {
-    anchorRemote,
-    tagPerMember: Object.fromEntries(
-      winners.filter(w => w.providers.has(anchorRemote)).map(w => [w.member.name, w.tag])
-    ),
-  };
-}
-
-// Classify every remote by reading determine's stored per-version actions rather than re-running
-// isCompatible. Sound because every anchor tag equals that member's winning tag, so determine has
-// already classified each version against it (`skip` ⇒ compatible ⇒ follow, `scope` ⇒
-// strict-incompatible ⇒ scope). Precedence: scope-incompat > scope-coverage > follow.
-function classifyPoolConservative(
-  members: PoolMember[],
-  anchor: PoolAnchor
-): Map<RemoteName, RemoteClassification> {
-  const classification = new Map<RemoteName, RemoteClassification>();
-
-  for (const remote of remotesInPool(members)) {
-    let coverageForced = false;
-    let verdict: RemoteClassification = 'follow';
-
-    for (const member of members) {
-      const version = versionForRemote(member, remote);
-      if (!version) continue;
-
-      const anchorTag = anchor.tagPerMember[member.name];
-      if (!anchorTag) {
-        // Remote uses this member but the anchor provides no build for it.
-        coverageForced = true;
-        continue;
-      }
-      if (version.tag === anchorTag) continue;
-
-      // Different tag against the winning tag: `scope` means strict-incompatible, which dominates
-      // and forces the whole family to scope. `skip` is tolerated and stays a follow.
-      if (version.action === 'scope') {
-        verdict = 'scope-incompat';
-        break;
-      }
-    }
-
-    classification.set(
-      remote,
-      verdict === 'scope-incompat' ? 'scope-incompat' : coverageForced ? 'scope-coverage' : 'follow'
-    );
-  }
-
-  classification.set(anchor.anchorRemote, 'follow');
-  return classification;
+// Remotes that are strict-incompatible on any member (determine marked a version `scope`). Reads
+// stored actions only — pooling makes no compatibility call — and islands across the WHOLE family.
+function islandedRemotes(members: PoolMember[]): Set<RemoteName> {
+  const islanded = new Set<RemoteName>();
+  for (const member of members)
+    for (const version of member.external.versions)
+      if (version.action === 'scope') for (const remote of version.remotes) islanded.add(remote.name);
+  return islanded;
 }
 
 export function createPoolSharedExternals(
@@ -93,9 +23,10 @@ export function createPoolSharedExternals(
   ports: Pick<DrivingContract, 'sharedExternalsRepo'>
 ): ForPoolingSharedExternals {
   /**
-   * Runs after determine-shared-externals: re-resolve each pool (e.g. `@framework/*`) so every member
-   * resolves from ONE anchor remote — same version and same build. Layered on the per-external
-   * result; emits nothing, only mutates `SharedExternal.versions`. See docs/version-resolver.md.
+   * Runs after determine-shared-externals: for each pool, a remote that is version-incompatible on any
+   * member is islanded (its whole family scopes, no dedup) so a foreign build cannot leak in through a
+   * shared sibling; every other remote keeps the base per-external verdict. Emits nothing, only
+   * mutates `SharedExternal.versions`. See docs/version-resolver.md.
    *
    * Inert unless `useAutoExternalPooling` is on or an external carries a remote `pool` tag. The
    * `strict` scope is never pooled.
@@ -144,39 +75,32 @@ export function createPoolSharedExternals(
     const allRemotes = remotesInPool(members);
     if (allRemotes.length < 2) return;
 
-    const anchor = selectCoverageAnchor(poolWinners(members));
-    if (!anchor) return; // defensive: a real pool always yields one
-
-    const classification = classifyPoolConservative(members, anchor);
+    const islanded = islandedRemotes(members);
 
     config.log.debug(
       3,
-      `[${scope}][pool:${poolName}] members=[${members.map(m => m.name).join(', ')}], anchor=${anchor.anchorRemote}, remotes={${allRemotes.map(r => `${r}:${classification.get(r)}`).join(', ')}}`
+      `[${scope}][pool:${poolName}] ${members.length} members across ${allRemotes.length} remotes, islanded={${[...islanded].join(', ') || '∅'}}\n` +
+        members.map(m => `  - ${m.name}`).join('\n')
     );
 
-    // Only a genuine version incompatibility (`scope-incompat`) aborts under strict mode. A
-    // `scope-coverage` remote — one that merely uses a member the anchor does not ship — is a
-    // benign coverage gap (a ragged portfolio), not a conflict, so it resolves scoped just as it
-    // does outside strict mode. (In strict mode determine-shared-externals already throws on real
-    // incompatibilities, so this guard is defensive.)
-    const incompatForced = allRemotes.some(r => classification.get(r) === 'scope-incompat');
-    if (incompatForced && config.strict.strictExternalCompatibility) {
+    // Defensive: determine already throws on real incompatibilities under strictExternalCompatibility.
+    if (islanded.size > 0 && config.strict.strictExternalCompatibility) {
       config.log.error(
         3,
-        `[${scope}][pool:${poolName}] A remote is version-incompatible with anchor '${anchor.anchorRemote}'.`
+        `[${scope}][pool:${poolName}] version-incompatible remotes cannot be pooled: {${[...islanded].join(', ')}}.`
       );
       throw new NFError(`Could not pool '${poolName}' in scope ${scope}.`);
     }
 
     for (const member of members) {
-      const rebuilt = rebuildMember(member, anchor, classification);
+      const rebuilt = rebuildMember(member, islanded);
       warnIfScopedOnly(poolName, member.name, rebuilt, scope);
       ports.sharedExternalsRepo.addOrUpdate(member.name, rebuilt, scope);
     }
   }
 
-  // Warn when a member is scoped-only (no `share` version): no remote provides a build the family
-  // can share, so every using remote downloads its own copy — coherence is not achievable here.
+  // Warn only when sharing was genuinely possible and lost: a scoped-only member with >1 consumer. A
+  // single-consumer member is one download either way, so pooling could not have improved it.
   function warnIfScopedOnly(
     poolName: PoolName,
     memberName: string,
@@ -184,68 +108,49 @@ export function createPoolSharedExternals(
     scope: string
   ): void {
     if (rebuilt.versions.some(v => v.action === 'share')) return;
-    const copies = rebuilt.versions.reduce((n, v) => n + v.remotes.length, 0);
+    const consumers = new Set(rebuilt.versions.flatMap(v => v.remotes.map(r => r.name))).size;
+    if (consumers < 2) return;
     config.log.warn(
       3,
-      `[${scope}][pool:${poolName}] '${memberName}' is scoped-only — no coherent shared build provides it; ${copies} remotes download their own copy.`
+      `[${scope}][pool:${poolName}] '${memberName}' is scoped-only — no coherent shared build provides it; ${consumers} remotes download their own copy.`
     );
   }
 
-  function rebuildMember(
-    member: PoolMember,
-    anchor: PoolAnchor,
-    classification: Map<RemoteName, RemoteClassification>
-  ): SharedExternal {
-    const anchorTag = anchor.tagPerMember[member.name];
+  // Island-or-defer at remote-copy granularity: islanded (or already-`scope`) copies self-serve;
+  // every other copy keeps its base verdict. Scope versions group by each copy's real tag (F3).
+  function rebuildMember(member: PoolMember, islanded: Set<RemoteName>): SharedExternal {
     const entries = member.external.versions.flatMap(v =>
-      v.remotes.map(meta => ({ remote: meta.name, tag: v.tag, host: v.host, meta }))
+      v.remotes.map(meta => ({ remote: meta.name, tag: v.tag, host: v.host, action: v.action, meta }))
     );
 
-    // Orphan member: no shared build, every using remote scopes its own copy. The scope version's
-    // tag/host are inert here — import-map generation reads only each remote's meta.
-    if (!anchorTag) {
-      return {
-        dirty: false,
-        versions:
-          entries.length > 0
-            ? [
-                {
-                  tag: entries[0]!.tag,
-                  host: false,
-                  action: 'scope',
-                  remotes: entries.map(e => e.meta),
-                },
-              ]
-            : [],
-      };
+    const isScoped = (e: (typeof entries)[number]) =>
+      islanded.has(e.remote) || e.action === 'scope';
+
+    let scoped = entries.filter(isScoped);
+    let clean = entries.filter(e => !isScoped(e));
+
+    // Winner islanded away: no shared build survives, so the orphaned `skip` copies self-serve too.
+    if (!clean.some(e => e.action === 'share')) {
+      scoped = [...scoped, ...clean];
+      clean = [];
     }
 
-    const anchorMeta = entries.find(
-      e => e.remote === anchor.anchorRemote && e.tag === anchorTag
-    )!.meta;
-    const anchorHost = member.external.versions.find(v => v.tag === anchorTag)?.host ?? false;
-
-    // Incompatibility-forced remotes scope their whole family with no dedup: deduping a same-version
-    // sibling would inject a foreign build via a shared intermediary. Coverage-forced remotes scope
-    // only members that differ from the shared version; on the same version they dedup.
-    const scopes = (e: { remote: RemoteName; tag: string }) => {
-      const cls = classification.get(e.remote);
-      return cls === 'scope-incompat' || (cls === 'scope-coverage' && e.tag !== anchorTag);
-    };
-
-    const shareOnAnchor = entries.filter(
-      e => e.remote !== anchor.anchorRemote && e.tag === anchorTag && !scopes(e)
-    );
-    const shareVersion: SharedVersion = {
-      tag: anchorTag,
-      host: anchorHost,
-      action: 'share',
-      remotes: [anchorMeta, ...shareOnAnchor.map(e => e.meta)],
-    };
+    const shareEntries = clean.filter(e => e.action === 'share');
+    const shareVersion: SharedVersion[] =
+      shareEntries.length > 0
+        ? [
+            {
+              tag: shareEntries[0]!.tag,
+              host: shareEntries[0]!.host,
+              action: 'share',
+              remotes: shareEntries.map(e => e.meta),
+            },
+          ]
+        : [];
 
     const skipByTag = new Map<string, SharedVersion>();
-    for (const e of entries) {
-      if (e.tag === anchorTag || scopes(e)) continue;
+    for (const e of clean) {
+      if (e.action !== 'skip') continue;
       const version = skipByTag.get(e.tag) ?? {
         tag: e.tag,
         host: e.host,
@@ -256,15 +161,21 @@ export function createPoolSharedExternals(
       skipByTag.set(e.tag, version);
     }
 
-    const scoped = entries.filter(e => scopes(e));
-    const scopeVersion: SharedVersion[] =
-      scoped.length > 0
-        ? [{ tag: anchorTag, host: false, action: 'scope', remotes: scoped.map(e => e.meta) }]
-        : [];
+    const scopeByTag = new Map<string, SharedVersion>();
+    for (const e of scoped) {
+      const version = scopeByTag.get(e.tag) ?? {
+        tag: e.tag,
+        host: false,
+        action: 'scope' as const,
+        remotes: [],
+      };
+      version.remotes.push(e.meta);
+      scopeByTag.set(e.tag, version);
+    }
 
     return {
       dirty: false,
-      versions: [shareVersion, ...skipByTag.values(), ...scopeVersion],
+      versions: [...shareVersion, ...skipByTag.values(), ...scopeByTag.values()],
     };
   }
 }
