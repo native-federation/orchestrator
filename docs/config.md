@@ -169,6 +169,7 @@ export type ModeOptions = {
     strictExternalSameVersionCompatibility?: boolean;
     strictExternalVersion?: boolean;
     strictImportMap?: boolean;
+    strictEntryPointCoverage?: boolean;
   };
   profile?: {
     latestSharedExternal?: boolean;
@@ -198,6 +199,7 @@ The strictness part will define how the orchestrator behaves when an unexpected 
 | strict.strictExternalSameVersionCompatibility | `false` | This is an extreme niche edge case. Will throw an error if the external's shared version (e.g. rxjs version 1.2.3) was already processed and cached, but the to-be-processed versionRange is different than the cached versionRange. This hypothetically could cause an issue when the "chosen" version was removed and this fallback was chosen as the new shared version since it supports a different version range according to the metadata |
 | strict.strictExternalVersion                  | `false` | Will throw an error if the version of an external is not valid semver or missing. When false, the external is instead coerced to the smallest version that matches its requiredVersion range — unless `profile.skipInvalidExternalVersions` is enabled, in which case the external is skipped. Takes precedence over `profile.skipInvalidExternalVersions`.                                                                                      |
 | strict.strictImportMap                        | `false` | Will throw an error if anything goes wrong during the buildup of the importMap. (If something is wrong with the cached externals or the cache is corrupt).                                                                                                                                                                                                                                                                                       |
+| strict.strictEntryPointCoverage               | `false` | Forbids "entrypoint tearing". When false, a secondary entrypoint the shared winner cannot provide is served from the consuming remote's own build (self-fill) so nothing is lost. When true, a version whose entrypoints the winner cannot fully cover is promoted to "scoped" during resolution (served coherently from its own build); an uncovered entrypoint that still reaches import-map generation is refused (warn, or error under `strictImportMap`). See [Entrypoint coverage and tearing](./version-resolver.md#entrypoint-coverage-and-tearing).                                             |
 
 #### Profiles
 

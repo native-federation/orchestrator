@@ -88,6 +88,15 @@ export function createUpdateCache(
       config.log.warn(8, errorMsg);
     }
 
+    if (
+      action === 'skip' &&
+      config.strict.strictEntryPointCoverage &&
+      sharedVersion &&
+      Object.keys(remote.entries).some(e => !(e in sharedVersion.remotes[0]!.entries))
+    ) {
+      action = 'scope';
+    }
+
     const matchingVersion = cached.versions.find(cached => cached.tag === tag);
 
     if (matchingVersion) {
