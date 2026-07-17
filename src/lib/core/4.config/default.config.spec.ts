@@ -50,6 +50,7 @@ describe('DefaultConfig', () => {
           strictExternalSameVersionCompatibility: false,
           strictExternalVersion: false,
           strictImportMap: false,
+          strictEntryPointCoverage: false,
         },
         profile: {
           latestSharedExternal: false,

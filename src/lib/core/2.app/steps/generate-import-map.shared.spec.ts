@@ -89,6 +89,64 @@ describe('createGenerateImportMap (shared-externals)', () => {
     });
   });
 
+  it('should self-fill a global entrypoint declared only by a skipped version', async () => {
+    // Skip (v2_1_3) is processed before the share (v2_1_2) in the desc-sorted loop; the
+    // second pass fills 'dep-a/sub' from the skip's own scope regardless of order.
+    adapters.sharedExternalsRepo.getFromScope = vi.fn(() => ({
+      'dep-a': mockExternal_A({
+        dirty: false,
+        versions: [
+          mockVersion_A.v2_1_3({
+            action: 'skip',
+            remotes: {
+              'team/mfe2': { entries: { 'dep-a': 'dep-a.js', 'dep-a/sub': 'dep-a-sub.js' } },
+            },
+          }),
+          mockVersion_A.v2_1_2({ action: 'share', remotes: ['team/host'] }),
+        ],
+      }),
+    }));
+
+    const actual = await generateImportMap();
+
+    expect(actual).toEqual({
+      imports: {
+        'dep-a': mockScopeUrl_HOST({ file: 'dep-a.js' }),
+        'dep-a/sub': mockScopeUrl_MFE2({ file: 'dep-a-sub.js' }),
+      },
+    });
+  });
+
+  it('should not self-fill an uncovered global entrypoint when strictEntryPointCoverage is on', async () => {
+    config.strict.strictEntryPointCoverage = true;
+    adapters.sharedExternalsRepo.getFromScope = vi.fn(() => ({
+      'dep-a': mockExternal_A({
+        dirty: false,
+        versions: [
+          mockVersion_A.v2_1_3({
+            action: 'skip',
+            remotes: {
+              'team/mfe2': { entries: { 'dep-a': 'dep-a.js', 'dep-a/sub': 'dep-a-sub.js' } },
+            },
+          }),
+          mockVersion_A.v2_1_2({ action: 'share', remotes: ['team/host'] }),
+        ],
+      }),
+    }));
+
+    const actual = await generateImportMap();
+
+    expect(actual).toEqual({
+      imports: {
+        'dep-a': mockScopeUrl_HOST({ file: 'dep-a.js' }),
+      },
+    });
+    expect(config.log.warn).toHaveBeenCalledWith(
+      4,
+      "[__GLOBAL__][dep-a][team/mfe2] Entrypoint 'dep-a/sub' is not covered by the shared version."
+    );
+  });
+
   it('should only add the shared version of the shared external to the global scope.', async () => {
     adapters.sharedExternalsRepo.getFromScope = vi.fn(() => ({
       'dep-a': mockExternal_A({

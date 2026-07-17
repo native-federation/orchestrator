@@ -181,4 +181,182 @@ describe('createDetermineSharedExternals', () => {
       );
     });
   });
+
+  describe('entrypoint coverage tiebreaker', () => {
+    it('should break a download tie toward the version with the richest entrypoint coverage', async () => {
+      // Both versions compatible => equal (zero) extra downloads. The lower-semver version
+      // covers every entrypoint, so it wins the tie over the higher-semver poorer one.
+      adapters.versionCheck.isCompatible = vi.fn(() => true);
+      adapters.sharedExternalsRepo.getFromScope = vi.fn(() => ({
+        'dep-b': mockExternal_B({
+          dirty: true,
+          versions: [
+            mockVersion_B.v2_1_2({ remotes: ['team/mfe1'], action: 'skip' }),
+            mockVersion_B.v2_1_1({
+              remotes: {
+                'team/mfe2': { entries: { 'dep-b': 'dep-b.js', 'dep-b/sub': 'dep-b-sub.js' } },
+              },
+              action: 'skip',
+            }),
+          ],
+        }),
+      }));
+
+      await determineSharedExternals();
+
+      expect(adapters.sharedExternalsRepo.addOrUpdate).toHaveBeenCalledWith(
+        'dep-b',
+        mockExternal_B({
+          dirty: false,
+          versions: [
+            mockVersion_B.v2_1_2({ remotes: ['team/mfe1'], action: 'skip' }),
+            mockVersion_B.v2_1_1({
+              remotes: {
+                'team/mfe2': { entries: { 'dep-b': 'dep-b.js', 'dep-b/sub': 'dep-b-sub.js' } },
+              },
+              action: 'share',
+            }),
+          ],
+        }),
+        '__GLOBAL__'
+      );
+    });
+
+    it('should not let coverage override a decisive extra-downloads winner', async () => {
+      // Only 2.2.2 is compatible with the others => it has zero extra downloads while 2.1.1
+      // has more. It wins on downloads despite covering fewer entrypoints.
+      adapters.versionCheck.isCompatible = vi.fn((tag: string) => tag === '2.2.2');
+      adapters.sharedExternalsRepo.getFromScope = vi.fn(() => ({
+        'dep-b': mockExternal_B({
+          dirty: true,
+          versions: [
+            mockVersion_B.v2_2_2({ remotes: ['team/mfe1'], action: 'skip' }),
+            mockVersion_B.v2_1_1({
+              remotes: {
+                'team/mfe2': { entries: { 'dep-b': 'dep-b.js', 'dep-b/sub': 'dep-b-sub.js' } },
+              },
+              action: 'skip',
+            }),
+          ],
+        }),
+      }));
+
+      await determineSharedExternals();
+
+      expect(adapters.sharedExternalsRepo.addOrUpdate).toHaveBeenCalledWith(
+        'dep-b',
+        mockExternal_B({
+          dirty: false,
+          versions: [
+            mockVersion_B.v2_2_2({ remotes: ['team/mfe1'], action: 'share' }),
+            mockVersion_B.v2_1_1({
+              remotes: {
+                'team/mfe2': { entries: { 'dep-b': 'dep-b.js', 'dep-b/sub': 'dep-b-sub.js' } },
+              },
+              action: 'skip',
+            }),
+          ],
+        }),
+        '__GLOBAL__'
+      );
+    });
+  });
+
+  describe('strictEntryPointCoverage', () => {
+    beforeEach(() => {
+      adapters.versionCheck.isCompatible = vi.fn(() => true);
+    });
+
+    // The host version (poorer basis) is pinned as the winner so the promotion is isolated
+    // from the §4 coverage tiebreaker, which would otherwise pick the richer version.
+    const externalWithUncoveredSkip = () => ({
+      'dep-b': mockExternal_B({
+        dirty: true,
+        versions: [
+          mockVersion_B.v2_1_2({ remotes: ['team/host'], action: 'skip' }),
+          mockVersion_B.v2_1_1({
+            remotes: {
+              'team/mfe2': { entries: { 'dep-b': 'dep-b.js', 'dep-b/sub': 'dep-b-sub.js' } },
+            },
+            action: 'skip',
+          }),
+        ],
+      }),
+    });
+
+    it('should promote a skip version whose entrypoints the shared winner lacks to scope', async () => {
+      config.strict.strictEntryPointCoverage = true;
+      adapters.sharedExternalsRepo.getFromScope = vi.fn(externalWithUncoveredSkip);
+
+      await determineSharedExternals();
+
+      expect(adapters.sharedExternalsRepo.addOrUpdate).toHaveBeenCalledWith(
+        'dep-b',
+        mockExternal_B({
+          dirty: false,
+          versions: [
+            mockVersion_B.v2_1_2({ remotes: ['team/host'], action: 'share' }),
+            mockVersion_B.v2_1_1({
+              remotes: {
+                'team/mfe2': { entries: { 'dep-b': 'dep-b.js', 'dep-b/sub': 'dep-b-sub.js' } },
+              },
+              action: 'scope',
+            }),
+          ],
+        }),
+        '__GLOBAL__'
+      );
+    });
+
+    it('should leave the same uncovered skip version as skip when the flag is off', async () => {
+      config.strict.strictEntryPointCoverage = false;
+      adapters.sharedExternalsRepo.getFromScope = vi.fn(externalWithUncoveredSkip);
+
+      await determineSharedExternals();
+
+      expect(adapters.sharedExternalsRepo.addOrUpdate).toHaveBeenCalledWith(
+        'dep-b',
+        mockExternal_B({
+          dirty: false,
+          versions: [
+            mockVersion_B.v2_1_2({ remotes: ['team/host'], action: 'share' }),
+            mockVersion_B.v2_1_1({
+              remotes: {
+                'team/mfe2': { entries: { 'dep-b': 'dep-b.js', 'dep-b/sub': 'dep-b-sub.js' } },
+              },
+              action: 'skip',
+            }),
+          ],
+        }),
+        '__GLOBAL__'
+      );
+    });
+
+    it('should keep a fully covered skip version as skip', async () => {
+      config.strict.strictEntryPointCoverage = true;
+      adapters.sharedExternalsRepo.getFromScope = vi.fn(() => ({
+        'dep-b': mockExternal_B({
+          dirty: true,
+          versions: [
+            mockVersion_B.v2_1_2({ remotes: ['team/host'], action: 'skip' }),
+            mockVersion_B.v2_1_1({ remotes: ['team/mfe2'], action: 'skip' }),
+          ],
+        }),
+      }));
+
+      await determineSharedExternals();
+
+      expect(adapters.sharedExternalsRepo.addOrUpdate).toHaveBeenCalledWith(
+        'dep-b',
+        mockExternal_B({
+          dirty: false,
+          versions: [
+            mockVersion_B.v2_1_2({ remotes: ['team/host'], action: 'share' }),
+            mockVersion_B.v2_1_1({ remotes: ['team/mfe2'], action: 'skip' }),
+          ],
+        }),
+        '__GLOBAL__'
+      );
+    });
+  });
 });

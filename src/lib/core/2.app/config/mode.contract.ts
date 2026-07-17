@@ -17,6 +17,7 @@ export type ModeStrictnessConfig = {
   strictExternalSameVersionCompatibility: boolean;
   strictExternalVersion: boolean;
   strictImportMap: boolean;
+  strictEntryPointCoverage: boolean;
 };
 
 export type ModeConfig = {
