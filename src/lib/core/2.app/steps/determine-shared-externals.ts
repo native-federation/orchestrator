@@ -1,5 +1,5 @@
 import type { ForDeterminingSharedExternals } from '../driver-ports/init/for-determining-shared-externals.port';
-import { GLOBAL_SCOPE, type SharedExternal } from 'lib/core/1.domain';
+import { GLOBAL_SCOPE, type SharedExternal, type SharedVersion } from 'lib/core/1.domain';
 import { NFError } from 'lib/core/native-federation.error';
 import type { DrivingContract } from '../driving-ports/driving.contract';
 import type { LoggingConfig } from '../config/log.contract';
@@ -62,6 +62,19 @@ export function createDetermineSharedExternals(
     return Promise.resolve();
   };
 
+  // Entrypoints declared by the versions `winner` would skip that its basis can't serve.
+  function uncoveredTears(external: SharedExternal, winner: SharedVersion): number {
+    const basis = winner.remotes[0]!.entries;
+    return external.versions.reduce((sum, v) => {
+      if (v === winner) return sum;
+      if (!ports.versionCheck.isCompatible(winner.tag, v.remotes[0]!.requiredVersion)) return sum;
+      return (
+        sum +
+        v.remotes.reduce((n, r) => n + Object.keys(r.entries).filter(e => !(e in basis)).length, 0)
+      );
+    }, 0);
+  }
+
   function setVersionActions(externalName: string, external: SharedExternal) {
     if (external.versions.length === 1) {
       external.versions[0]!.action = 'share';
@@ -78,6 +91,7 @@ export function createDetermineSharedExternals(
     if (!sharedVersion) {
       // find version with least extra downloads, sorted by SEMVER version (O^2 complexity)
       let leastExtraDownloads = Number.MAX_VALUE;
+      let leastTears = Number.MAX_VALUE;
       external.versions.forEach(vA => {
         const extraDownloads = external.versions.filter(
           vB =>
@@ -85,8 +99,15 @@ export function createDetermineSharedExternals(
             vB.remotes[0]!.strictVersion &&
             !ports.versionCheck.isCompatible(vA.tag, vB.remotes[0]!.requiredVersion)
         ).length;
-        if (extraDownloads < leastExtraDownloads) {
+        // Tiebreak equal-download candidates toward the one that leaves fewest entrypoints
+        // uncovered across the versions it would skip (fewest tears / scope-promotions).
+        const tears = uncoveredTears(external, vA);
+        if (
+          extraDownloads < leastExtraDownloads ||
+          (extraDownloads === leastExtraDownloads && tears < leastTears)
+        ) {
           leastExtraDownloads = extraDownloads;
+          leastTears = tears;
           sharedVersion = vA;
         }
       });
@@ -115,6 +136,24 @@ export function createDetermineSharedExternals(
     });
 
     sharedVersion.action = 'share';
+
+    if (config.strict.strictEntryPointCoverage) {
+      const basis = sharedVersion.remotes[0]!.entries;
+      external.versions.forEach(v => {
+        if (v.action !== 'skip') return;
+        const uncovered = v.remotes.some(r =>
+          Object.keys(r.entries).some(entrypoint => !(entrypoint in basis))
+        );
+        if (uncovered) {
+          v.action = 'scope';
+          config.log.debug(
+            3,
+            `[${externalName}@${v.tag}] Scoped: entrypoints not covered by shared ${externalName}@${sharedVersion!.tag}.`
+          );
+        }
+      });
+    }
+
     external.dirty = false;
     return external;
   }

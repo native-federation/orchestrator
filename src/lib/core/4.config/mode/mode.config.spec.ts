@@ -35,6 +35,25 @@ describe('config.mode', () => {
       strictExternalSameVersionCompatibility: false,
       strictExternalVersion: false,
       strictImportMap: false,
+      strictEntryPointCoverage: false,
     });
+  });
+
+  it('should expand a strict: true shorthand to every strict flag, coverage included', () => {
+    const config = createModeConfig({ strict: true });
+    expect(config.strict).toEqual({
+      strictRemoteEntry: true,
+      strictExternalCompatibility: true,
+      strictExternalSameVersionCompatibility: true,
+      strictExternalVersion: true,
+      strictImportMap: true,
+      strictEntryPointCoverage: true,
+    });
+  });
+
+  it('should default strictEntryPointCoverage to false when other strict flags are set', () => {
+    const config = createModeConfig({ strict: { strictImportMap: true } });
+    expect(config.strict.strictEntryPointCoverage).toBe(false);
+    expect(config.strict.strictImportMap).toBe(true);
   });
 });

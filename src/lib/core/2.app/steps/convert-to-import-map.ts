@@ -66,6 +66,17 @@ export function createConvertToImportMap(
           Object.entries(override).forEach(([packageName, url]) => {
             addToScopes(remoteEntryScope, packageName, url, importMap);
           });
+          // Entrypoints the override can't supply are served from this remote's own build.
+          Object.entries(external.entries).forEach(([packageName, fileName]) => {
+            if (packageName in override) return;
+            if (config.strict.strictEntryPointCoverage) {
+              warnUncoveredEntrypoint(remoteEntry.name, external.packageName, packageName);
+              return;
+            }
+            const url = _path.join(remoteEntryScope, fileName);
+            addToScopes(remoteEntryScope, packageName, url, importMap);
+            addIntegrity(importMap, url, integrityMap, fileName);
+          });
           return;
         }
         // Reaching here means the resolver failed to produce the expected override.
@@ -157,6 +168,19 @@ export function createConvertToImportMap(
       });
     });
     return importMap;
+  }
+
+  function warnUncoveredEntrypoint(
+    remoteName: string,
+    externalName: string,
+    packageName: string
+  ): void {
+    const msg = `[${remoteName}][${externalName}] Entrypoint '${packageName}' is not covered by the override.`;
+    if (config.strict.strictImportMap) {
+      log.error(9, msg);
+      throw new NFError('Could not create ImportMap.');
+    }
+    log.warn(9, msg);
   }
 
   function addIntegrity(

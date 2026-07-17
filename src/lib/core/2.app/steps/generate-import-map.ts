@@ -169,6 +169,18 @@ export function createGenerateImportMap(
           for (const m of mappings) {
             addToScope(importMap, rScope, { [m.packageName]: m.url });
           }
+          // Entrypoints the shared source can't provide are served from this remote's own build.
+          for (const [packageName, file] of Object.entries(r.entries)) {
+            if (packageName in source.entries) continue;
+            if (config.strict.strictEntryPointCoverage) {
+              warnUncoveredEntrypoint(shareScope, externalName, r.name, packageName);
+              continue;
+            }
+            const url = _path.join(rScope, file);
+            addToScope(importMap, rScope, { [packageName]: url });
+            addIntegrity(importMap, url, r.name, file);
+            r.cached = true;
+          }
         });
         for (const m of mappings) {
           addIntegrity(importMap, m.url, m.name, m.file);
@@ -259,10 +271,44 @@ export function createGenerateImportMap(
 
         version.remotes[0]!.cached = true;
       }
+
+      // Second pass, so the winner has claimed its imports first: fill entrypoints only a
+      // skipped version declares from its own build.
+      for (const version of external.versions) {
+        if (version.action !== 'skip') continue;
+        const remote = version.remotes[0]!;
+        for (const [packageName, file] of Object.entries(remote.entries)) {
+          if (importMap.imports[packageName]) continue;
+          if (config.strict.strictEntryPointCoverage) {
+            warnUncoveredEntrypoint(GLOBAL_SCOPE, externalName, remote.name, packageName);
+            continue;
+          }
+          const scope = getScope(GLOBAL_SCOPE, remote.name, externalName);
+          const url = _path.join(scope, file);
+          addToGlobal(importMap, { [packageName]: url });
+          addIntegrity(importMap, url, remote.name, file);
+          registerBundleChunks(chunkBundles, remote.name, remote.bundle);
+          remote.cached = true;
+        }
+      }
       ports.sharedExternalsRepo.addOrUpdate(externalName, external);
     }
 
     return importMap;
+  }
+
+  function warnUncoveredEntrypoint(
+    scope: string,
+    externalName: string,
+    remoteName: RemoteName,
+    packageName: string
+  ): void {
+    const msg = `[${scope}][${externalName}][${remoteName}] Entrypoint '${packageName}' is not covered by the shared version.`;
+    if (config.strict.strictImportMap) {
+      config.log.error(4, msg);
+      throw new NFError('Could not create ImportMap.');
+    }
+    config.log.warn(4, msg);
   }
 
   function notifyDuplicateGlobalExternal(externalName: string): void {

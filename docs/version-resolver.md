@@ -215,10 +215,41 @@ specifier to its output file:
 
 The resolver treats the whole `entries` map as one shared external: version negotiation happens once per
 package, and every specifier in `entries` follows the winning version's placement — scoped, shareScope,
-global, or the skip/override redirect. When a shared version wins, the winning remote's `entries` serve
-**all** consumers of that version, so each secondary entrypoint resolves to the same provider as its
-parent. (Older/flat remote builds emit one `SharedInfo` per specifier; set
+global, or the skip/override redirect. When a shared version wins, the winning remote's `entries` are the
+**source** served to every consumer of that version, so each secondary entrypoint resolves to the same
+provider as its primary. (Older/flat remote builds emit one `SharedInfo` per specifier; set
 [`feature.convertFlatSharedInfo`](./config.md#modeConfig) to group them at runtime.)
+
+#### Entrypoint coverage and tearing
+
+The source's `entries` are not guaranteed to list every specifier a consumer needs. A `skip` version
+redirected to the winner, or a sibling remote of the same shared version, can declare a secondary
+entrypoint the source's build does not contain — for example the winner ships `@angular/core` while a
+compatible, deduped remote also imports `@angular/core/testing`:
+
+```
+@angular/core  20.0.0  share  mfe-a  entries { @angular/core }
+@angular/core  20.1.0  skip   mfe-b  entries { @angular/core, @angular/core/testing }
+```
+
+The default behaviour is **self-fill**: any specifier a remote declares that the source cannot provide is
+served from that remote's **own** build. Above, `mfe-b` gets `@angular/core` from `mfe-a` (deduped) and
+`@angular/core/testing` from its own scope. Nothing is dropped. The trade-off is a **tear** — one
+package's specifiers resolve to two different builds. That is harmless for most libraries but can break
+packages whose secondary entrypoints share module-singleton state with the primary.
+
+To forbid tearing, enable [`strict.strictEntryPointCoverage`](./config.md#modeConfig) (opt-in, default
+`false`). In this mode a version whose specifiers the shared winner cannot fully cover is **promoted to
+`scope`** during resolution — its whole `entries` bunch is served coherently from its own build instead
+of being redirected. The additive dynamic-init path applies the same promotion to a runtime remote. As a
+last-resort net, if an uncovered specifier still reaches import-map generation it is refused rather than
+torn: a warning, or an error under [`strict.strictImportMap`](./config.md#modeConfig).
+
+To minimise tears (and, under strict coverage, scope promotions) the resolver also uses coverage as a
+**tiebreaker** when choosing the shared version: among candidates that tie on the extra-downloads
+heuristic, it prefers the one whose `entries` leave the fewest specifiers uncovered across the versions it
+would skip. A decisive extra-downloads winner is never overridden, and an exact tie still keeps the
+highest version.
 
 ### Shared scopes
 
@@ -449,6 +480,11 @@ flowchart TD
     G8 --> H
 ```
 
+> The "least extra downloads" choice (F5) is tie-broken by entrypoint coverage, and with
+> [`strict.strictEntryPointCoverage`](./config.md#modeConfig) a `SKIP` version whose specifiers the
+> winner cannot cover is promoted to `SCOPE`. See
+> [Entrypoint coverage and tearing](#entrypoint-coverage-and-tearing).
+
 ### Step 4: Generate Import Map
 
 The resolver creates different import map sections based on scope and actions:
@@ -636,7 +672,7 @@ Each new dependency gets one of these actions during dynamic init:
 | --------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **SKIP**  | Version already exists or use existing shared version. In a shareScope context this action is used for overriding by skipping the provided external and loading a compatible cached version instead. |
 | **SHARE** | No compatible version exists (yet), become the shared version for this scope                                                                                                                         |
-| **SCOPE** | Incompatible version with strictVersion: true                                                                                                                                                        |
+| **SCOPE** | Incompatible version with strictVersion: true, or (under `strictEntryPointCoverage`) a version whose entrypoints the shared winner cannot cover — served coherently from its own build.               |
 
 ### Example: Dynamic Loading Scenario
 
