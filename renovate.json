@@ -10,6 +10,11 @@
   "minimumReleaseAge": "3 days",
   "packageRules": [
     {
+      "description": "Do not open 'Pin dependencies' PRs",
+      "matchUpdateTypes": ["pin"],
+      "enabled": false
+    },
+    {
       "description": "Group the eslint/prettier toolchain into one PR",
       "groupName": "linting",
       "matchPackageNames": [
