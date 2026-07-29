@@ -69,6 +69,7 @@ const createSharedExternalsRepository = (config: StorageConfig): ForSharedExtern
             if (remotes.length === 0) {
               external.versions.splice(i, 1);
               removedVersion = true;
+              _dirty = true;
             }
           }
 

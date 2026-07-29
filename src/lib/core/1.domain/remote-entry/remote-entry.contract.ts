@@ -20,9 +20,7 @@ type SharedInfoActions = Record<
   string,
   {
     action: SharedVersionAction;
-    // Where a shareScope skip's entrypoints are remapped to.
     override?: Record<string, string>;
-    // Entrypoints the shared source provides; the rest are self-filled.
     covered?: string[];
   }
 >;

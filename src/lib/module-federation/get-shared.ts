@@ -29,6 +29,8 @@ export function createGetShared(
         for (const version of versions) {
           if (!version.remotes[0]) continue;
 
+          const requiredVersion = resolveRequiredVersion(version, options, scopeType);
+
           // MF's shared config is flat: one key per entrypoint. Emit a separate
           // Shared for each entry so secondary entrypoints reach MF consumers.
           const claimed = new Set<string>();
@@ -45,7 +47,7 @@ export function createGetShared(
                 get: () => ports.browser.importModule(url).then(module => () => module),
                 shareConfig: {
                   singleton,
-                  requiredVersion: resolveRequiredVersion(version, options, scopeType),
+                  requiredVersion,
                   ...(scopeType === 'strict' ? { strictVersion: true } : {}),
                 },
               };
@@ -81,5 +83,12 @@ function resolveRequiredVersion(
   if (typeof options.requiredVersionPrefix === 'string') {
     return `${options.requiredVersionPrefix}${version.tag}`;
   }
+  // `remotes[0]` is the serving basis, ordered by entrypoint coverage: it says nothing about
+  // what the version demands. Advertising its range would let MF hand a sibling a copy that
+  // sibling's own range rejects, so a disagreement pins to the tag — the only value no remote
+  // can reject, and the one the import map already commits to.
+  const declared = new Set(version.remotes.map(r => r.requiredVersion));
+  if (declared.size > 1) return version.tag;
+
   return version.remotes[0]?.requiredVersion || `^${version.tag}`;
 }

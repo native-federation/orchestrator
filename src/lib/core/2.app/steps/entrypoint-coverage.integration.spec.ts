@@ -9,6 +9,7 @@ import {
   type ImportMap,
   type RemoteInfo,
   type SharedExternal,
+  type SharedVersionMeta,
 } from 'lib/core/1.domain';
 import type { LoggingConfig } from '../config/log.contract';
 import type { ModeConfig } from '../config/mode.contract';
@@ -134,6 +135,123 @@ describe('entrypoint coverage (integration)', () => {
       '@angular/material/table': `http://feed/${DI}/table-DI.js`,
       '@angular/material/sort': `http://feed/${DI}/sort-DI.js`,
       '@angular/material/paginator': `http://feed/${MU}/pag-MU.js`,
+    });
+  });
+
+  // A remote added to a manifest whose version is already cached and resolved: the tag list does
+  // not change, so `dirty` used to stay false and the cached actions were never revisited.
+  describe('a remote joining an already-resolved version', () => {
+    const cachedRemote = (
+      name: string,
+      entries: Record<string, string>,
+      overrides: Partial<SharedVersionMeta> = {}
+    ): SharedVersionMeta => ({
+      name,
+      requiredVersion: '~22.0.6',
+      strictVersion: true,
+      cached: true,
+      entries,
+      ...overrides,
+    });
+
+    const warmCache = (versions: SharedExternal['versions']): void => {
+      stored = { dirty: false, versions };
+    };
+
+    const servedByDI = () =>
+      warmCache([
+        {
+          tag: '22.0.6',
+          host: false,
+          action: 'share',
+          remotes: [cachedRemote(DI, { '@angular/material/table': 'table-DI.js' })],
+        },
+      ]);
+
+    it('should scope the joining remote when the cached basis cannot cover it', async () => {
+      config.profile.scopeUncoveredEntrypoints = true;
+      servedByDI();
+
+      const { map } = await run([REMOTES[2]!]);
+
+      expect(stored!.versions.map(v => [v.tag, v.action, v.remotes.map(r => r.name)])).toEqual([
+        ['22.0.6', 'share', [DI]],
+        ['22.0.6', 'scope', [MU]],
+      ]);
+      expect(map.imports).toEqual({
+        '@angular/material/table': `http://feed/${DI}/table-DI.js`,
+      });
+      // The whole bunch from MU's own build, so the package is not torn.
+      expect(map.scopes?.[`http://feed/${MU}/`]).toEqual({
+        '@angular/material/sort': `http://feed/${MU}/sort-MU.js`,
+        '@angular/material/table': `http://feed/${MU}/table-MU.js`,
+      });
+    });
+
+    it('should self-fill the joining remote by default', async () => {
+      servedByDI();
+
+      const { map } = await run([REMOTES[2]!]);
+
+      expect(map.imports).toEqual({
+        '@angular/material/table': `http://feed/${DI}/table-DI.js`,
+        '@angular/material/sort': `http://feed/${MU}/sort-MU.js`,
+      });
+    });
+
+    it('should re-resolve compatibility when a strict remote joins a skipped version', async () => {
+      adapters.versionCheck.isCompatible = vi.fn(
+        (tag: string, range: string) => range === `~${tag}`
+      );
+      warmCache([
+        {
+          tag: '22.0.6',
+          host: false,
+          action: 'share',
+          remotes: [cachedRemote(DI, { '@angular/material/table': 'table-DI.js' })],
+        },
+        {
+          tag: '22.0.5',
+          host: false,
+          action: 'skip',
+          remotes: [
+            cachedRemote(PP, { '@angular/material/table': 'table-PP.js' }, {
+              requiredVersion: '~22.0.5',
+              strictVersion: false,
+              cached: false,
+            }),
+          ],
+        },
+      ]);
+
+      await createProcessRemoteEntries(
+        config,
+        adapters
+      )([
+        {
+          name: MU,
+          url: `http://feed/${MU}/remoteEntry.json`,
+          exposes: [],
+          host: false,
+          shared: [
+            {
+              packageName: MATERIAL,
+              singleton: true,
+              strictVersion: true,
+              version: '22.0.5',
+              requiredVersion: '~22.0.5',
+              entries: { '@angular/material/table': 'table-MU.js' },
+            },
+          ],
+        },
+      ] as never);
+      await createDetermineSharedExternals(config, adapters)();
+
+      // MU pins ~22.0.5, so 22.0.6 can no longer be the shared copy and DI keeps its own build.
+      expect(stored!.versions.map(v => [v.tag, v.action])).toEqual([
+        ['22.0.6', 'scope'],
+        ['22.0.5', 'share'],
+      ]);
     });
   });
 });

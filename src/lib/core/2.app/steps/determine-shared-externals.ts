@@ -1,13 +1,15 @@
 import type { ForDeterminingSharedExternals } from '../driver-ports/init/for-determining-shared-externals.port';
 import {
   GLOBAL_SCOPE,
-  countUncoveredEntrypoints,
-  uncoveredEntrypoints,
-  versionDemands,
   type SharedExternal,
   type SharedVersion,
   type SharedVersionMeta,
 } from 'lib/core/1.domain';
+import {
+  countUncoveredEntrypoints,
+  uncoveredEntrypoints,
+  versionDemands,
+} from 'lib/core/1.domain/externals/basis';
 import { NFError } from 'lib/core/native-federation.error';
 import type { DrivingContract } from '../driving-ports/driving.contract';
 import type { LoggingConfig } from '../config/log.contract';

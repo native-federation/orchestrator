@@ -586,7 +586,7 @@ The repository is organized **flow-first**: every published subpath of the packa
 
 ```
 core/
-  1.domain/            Pure domain contracts (remote entries, externals, import maps)
+  1.domain/            Pure domain contracts and their invariants (remote entries, externals, import maps)
   2.app/               Application logic
     flows/               The pipelines: which steps run in which order (init, initRemoteEntry)
     steps/               The pipeline steps (1-6 run during init, 7-9 back initRemoteEntry)

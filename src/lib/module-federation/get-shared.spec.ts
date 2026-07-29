@@ -2,7 +2,12 @@ import { createGetShared } from './get-shared';
 import { mockAdapters } from 'lib/testing/adapters.mock';
 import { mockExternal } from 'lib/testing/domain/externals/external.mock';
 import { mockSharedVersion } from 'lib/testing/domain/externals/version.mock';
-import { GLOBAL_SCOPE, STRICT_SCOPE, type SharedExternal } from 'lib/core/1.domain';
+import {
+  GLOBAL_SCOPE,
+  STRICT_SCOPE,
+  type SharedExternal,
+  type SharedVersionMeta,
+} from 'lib/core/1.domain';
 import { Optional } from 'lib/utils/optional';
 
 const scopeTypeOf = (scope: string): 'global' | 'strict' | 'shareScope' =>
@@ -482,6 +487,99 @@ describe('createGetShared', () => {
       expect(ports.browser.importModule).toHaveBeenCalledWith(
         'https://cdn.test/host/@angular/core-testing.js'
       );
+    });
+  });
+
+  describe('requiredVersion across sibling remotes', () => {
+    const siblings = (
+      remotes: Record<string, Partial<SharedVersionMeta> & { file?: string }>
+    ): SetupOptions =>
+      global(
+        {
+          'ui-lib': mockExternal.shared([
+            mockSharedVersion('2.1.0', 'ui-lib', { remotes, action: 'share' }),
+          ]),
+        },
+        { 'team/a': 'https://cdn.test/a/', 'team/b': 'https://cdn.test/b/' }
+      );
+
+    const WIDE = {
+      requiredVersion: '^2.0.0',
+      entries: { 'ui-lib': 'ui-lib.js', 'ui-lib/sub': 'ui-lib-sub.js' },
+    };
+    const NARROW = { requiredVersion: '~2.1.0' };
+
+    it('passes a unanimous range through to every entrypoint', () => {
+      const ports = setup(
+        siblings({
+          'team/a': { requiredVersion: '^2.0.0' },
+          'team/b': WIDE,
+        })
+      );
+
+      const shared = createGetShared(ports)();
+
+      expect(shared['ui-lib']![0]!.shareConfig!.requiredVersion).toBe('^2.0.0');
+      expect(shared['ui-lib/sub']![0]!.shareConfig!.requiredVersion).toBe('^2.0.0');
+    });
+
+    it('pins to the tag when siblings disagree on the range', () => {
+      const ports = setup(siblings({ 'team/a': NARROW, 'team/b': WIDE }));
+
+      const shared = createGetShared(ports)();
+
+      expect(shared['ui-lib']![0]!.shareConfig!.requiredVersion).toBe('2.1.0');
+      expect(shared['ui-lib/sub']![0]!.shareConfig!.requiredVersion).toBe('2.1.0');
+    });
+
+    it('advertises the same range whichever sibling holds the basis slot', () => {
+      const advertised = (remotes: Parameters<typeof siblings>[0]) =>
+        createGetShared(setup(siblings(remotes)))()['ui-lib']![0]!.shareConfig!.requiredVersion;
+
+      // The wide copy wins the basis slot on coverage, so reversing arrival order swaps
+      // which range sits in `remotes[0]`.
+      expect(advertised({ 'team/a': NARROW, 'team/b': WIDE })).toBe(
+        advertised({ 'team/b': WIDE, 'team/a': NARROW })
+      );
+    });
+
+    it('still falls back to a caret range when no sibling declares one', () => {
+      const noRange = (name: string, entries: Record<string, string>): SharedVersionMeta => ({
+        name,
+        requiredVersion: '',
+        strictVersion: true,
+        cached: false,
+        entries,
+      });
+      const ports = setup(
+        global(
+          {
+            'ui-lib': mockExternal.shared([
+              {
+                tag: '2.1.0',
+                host: false,
+                action: 'share',
+                remotes: [
+                  noRange('team/a', { 'ui-lib': 'ui-lib.js' }),
+                  noRange('team/b', WIDE.entries),
+                ],
+              },
+            ]),
+          },
+          { 'team/a': 'https://cdn.test/a/', 'team/b': 'https://cdn.test/b/' }
+        )
+      );
+
+      expect(createGetShared(ports)()['ui-lib']![0]!.shareConfig!.requiredVersion).toBe('^2.1.0');
+    });
+
+    it('lets requiredVersionPrefix win over a disagreement', () => {
+      const ports = setup(siblings({ 'team/a': NARROW, 'team/b': WIDE }));
+
+      expect(
+        createGetShared(ports)({ requiredVersionPrefix: '^' })['ui-lib']![0]!.shareConfig!
+          .requiredVersion
+      ).toBe('^2.1.0');
     });
   });
 

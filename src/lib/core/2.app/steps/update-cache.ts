@@ -5,11 +5,13 @@ import {
   type SharedInfoActions,
   type SharedVersion,
   type SharedVersionAction,
+  GLOBAL_SCOPE,
+} from 'lib/core/1.domain';
+import {
   addRemoteToVersion,
   findVersionForTag,
   uncoveredEntrypoints,
-  GLOBAL_SCOPE,
-} from 'lib/core/1.domain';
+} from 'lib/core/1.domain/externals/basis';
 import type { DrivingContract } from '../driving-ports/driving.contract';
 import type { LoggingConfig } from '../config/log.contract';
 import * as _path from 'lib/utils/path';
