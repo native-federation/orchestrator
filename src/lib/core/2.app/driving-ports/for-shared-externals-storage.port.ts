@@ -6,7 +6,7 @@ export type ForSharedExternalsStorage = {
   getFromScope: (shareScope?: string) => shareScope;
   getScopes: (o?: { includeGlobal: boolean }) => string[];
   scopeType: (shareScope?: string) => 'global' | 'strict' | 'shareScope';
-  removeFromAllScopes: (remoteName: RemoteName) => void;
+  removeFromAllScopes: (remoteNames: ReadonlySet<RemoteName>) => void;
   addOrUpdate: (
     name: string,
     external: SharedExternal,

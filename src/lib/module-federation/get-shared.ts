@@ -1,5 +1,5 @@
 import type { DrivingContract } from 'lib/core/2.app/driving-ports/driving.contract';
-import type { SharedVersion } from 'lib/core/1.domain';
+import type { SharedVersion, SharedVersionMeta } from 'lib/core/1.domain';
 import type { GetSharedOptions, ShareInfos, Shared } from './share-infos.contract';
 import * as _path from 'lib/utils/path';
 
@@ -27,28 +27,35 @@ export function createGetShared(
         const singleton = scopeType === 'strict' ? false : (options.singleton ?? true);
 
         for (const version of versions) {
-          const source = version.remotes[0];
-          if (!source) continue;
+          if (!version.remotes[0]) continue;
+
+          const requiredVersion = resolveRequiredVersion(version, options, scopeType);
 
           // MF's shared config is flat: one key per entrypoint. Emit a separate
           // Shared for each entry so secondary entrypoints reach MF consumers.
-          for (const [entryName, file] of Object.entries(source.entries)) {
-            const url = resolveUrl(version, file);
-            if (!url) continue;
+          const claimed = new Set<string>();
+          for (const source of version.remotes) {
+            for (const [entryName, file] of Object.entries(source.entries)) {
+              if (claimed.has(entryName)) continue;
+              claimed.add(entryName);
 
-            const shareObject: Shared = {
-              version: version.tag,
-              get: () => ports.browser.importModule(url).then(module => () => module),
-              shareConfig: {
-                singleton,
-                requiredVersion: resolveRequiredVersion(version, options, scopeType),
-                ...(scopeType === 'strict' ? { strictVersion: true } : {}),
-              },
-            };
-            if (scopeType !== 'global') shareObject.scope = scope;
+              const url = resolveUrl(source, file);
+              if (!url) continue;
 
-            if (!shared[entryName]) shared[entryName] = [];
-            shared[entryName]!.push(shareObject);
+              const shareObject: Shared = {
+                version: version.tag,
+                get: () => ports.browser.importModule(url).then(module => () => module),
+                shareConfig: {
+                  singleton,
+                  requiredVersion,
+                  ...(scopeType === 'strict' ? { strictVersion: true } : {}),
+                },
+              };
+              if (scopeType !== 'global') shareObject.scope = scope;
+
+              if (!shared[entryName]) shared[entryName] = [];
+              shared[entryName]!.push(shareObject);
+            }
           }
         }
       }
@@ -57,10 +64,7 @@ export function createGetShared(
     return shared;
   };
 
-  function resolveUrl(version: SharedVersion, file: string): string | undefined {
-    const source = version.remotes[0];
-    if (!source) return undefined;
-
+  function resolveUrl(source: SharedVersionMeta, file: string): string | undefined {
     return ports.remoteInfoRepo
       .tryGet(source.name)
       .map(remote => _path.join(remote.scopeUrl, file))
@@ -79,5 +83,12 @@ function resolveRequiredVersion(
   if (typeof options.requiredVersionPrefix === 'string') {
     return `${options.requiredVersionPrefix}${version.tag}`;
   }
+  // `remotes[0]` is the serving basis, ordered by entrypoint coverage: it says nothing about
+  // what the version demands. Advertising its range would let MF hand a sibling a copy that
+  // sibling's own range rejects, so a disagreement pins to the tag — the only value no remote
+  // can reject, and the one the import map already commits to.
+  const declared = new Set(version.remotes.map(r => r.requiredVersion));
+  if (declared.size > 1) return version.tag;
+
   return version.remotes[0]?.requiredVersion || `^${version.tag}`;
 }

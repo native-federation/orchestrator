@@ -18,7 +18,11 @@ type RemoteEntry = Omit<FederationInfo, 'shared'> & {
 
 type SharedInfoActions = Record<
   string,
-  { action: SharedVersionAction; override?: Record<string, string> }
+  {
+    action: SharedVersionAction;
+    override?: Record<string, string>;
+    covered?: string[];
+  }
 >;
 
 export {

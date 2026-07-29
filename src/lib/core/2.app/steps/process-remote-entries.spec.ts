@@ -8,7 +8,10 @@ import { ModeConfig } from 'lib/core/2.app/config/mode.contract';
 import { SharedExternal } from 'lib/core/1.domain';
 import { mockConfig } from 'lib/testing/config.mock';
 import { mockAdapters } from 'lib/testing/adapters.mock';
-import { mockRemoteEntry_MFE1 } from 'lib/testing/domain/remote-entry/remote-entry.mock';
+import {
+  mockRemoteEntry_MFE1,
+  mockRemoteEntry_MFE2,
+} from 'lib/testing/domain/remote-entry/remote-entry.mock';
 import { mockScopeUrl_MFE1 } from 'lib/testing/domain/scope-url.mock';
 import { mockRemoteModuleA } from 'lib/testing/domain/remote-info/remote-module.mock';
 import { mockSharedInfo } from 'lib/testing/domain/remote-entry/shared-info.mock';
@@ -38,7 +41,54 @@ describe('createProcessRemoteEntries', () => {
 
       expect(adapters.remoteInfoRepo.remove).toHaveBeenCalledWith('team/mfe1');
       expect(adapters.scopedExternalsRepo.remove).toHaveBeenCalledWith('team/mfe1');
-      expect(adapters.sharedExternalsRepo.removeFromAllScopes).toHaveBeenCalledWith('team/mfe1');
+      expect(adapters.sharedExternalsRepo.removeFromAllScopes).toHaveBeenCalledWith(
+        new Set(['team/mfe1'])
+      );
+    });
+
+    it('should evict every overridden remote in a single call', async () => {
+      const remoteEntries = [
+        mockRemoteEntry_MFE1({ override: true }),
+        mockRemoteEntry_MFE2({ override: true }),
+      ];
+
+      await processRemoteEntries(remoteEntries);
+
+      expect(adapters.sharedExternalsRepo.removeFromAllScopes).toHaveBeenCalledTimes(1);
+      expect(adapters.sharedExternalsRepo.removeFromAllScopes).toHaveBeenCalledWith(
+        new Set(['team/mfe1', 'team/mfe2'])
+      );
+    });
+
+    it('should fall back to evicting per entry when a remote name repeats in the batch', async () => {
+      const remoteEntries = [
+        mockRemoteEntry_MFE1({ override: true }),
+        mockRemoteEntry_MFE1({ override: true }),
+      ];
+
+      await processRemoteEntries(remoteEntries);
+
+      expect(adapters.sharedExternalsRepo.removeFromAllScopes).toHaveBeenCalledTimes(2);
+      expect(adapters.sharedExternalsRepo.removeFromAllScopes).toHaveBeenNthCalledWith(
+        1,
+        new Set(['team/mfe1'])
+      );
+      expect(adapters.sharedExternalsRepo.removeFromAllScopes).toHaveBeenNthCalledWith(
+        2,
+        new Set(['team/mfe1'])
+      );
+    });
+
+    it('should not evict a repeated remote name that is not marked as override', async () => {
+      const remoteEntries = [
+        mockRemoteEntry_MFE1({ override: true }),
+        mockRemoteEntry_MFE1({ override: true }),
+        mockRemoteEntry_MFE1({ override: false }),
+      ];
+
+      await processRemoteEntries(remoteEntries);
+
+      expect(adapters.sharedExternalsRepo.removeFromAllScopes).toHaveBeenCalledTimes(2);
     });
 
     it('should not remove the old version if the remoteEntry is not marked as override', async () => {

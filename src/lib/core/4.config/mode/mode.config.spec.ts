@@ -8,6 +8,7 @@ describe('config.mode', () => {
     expect(config.profile).toEqual({
       latestSharedExternal: false,
       skipInvalidExternalVersions: false,
+      scopeUncoveredEntrypoints: false,
       overrideCachedRemotes: 'init-only',
       overrideCachedRemotesIfURLMatches: false,
     });
@@ -17,6 +18,7 @@ describe('config.mode', () => {
     expect(config.profile).toEqual({
       latestSharedExternal: false,
       skipInvalidExternalVersions: false,
+      scopeUncoveredEntrypoints: false,
       overrideCachedRemotes: 'never',
       overrideCachedRemotesIfURLMatches: false,
     });

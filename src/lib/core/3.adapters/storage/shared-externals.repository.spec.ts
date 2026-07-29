@@ -29,7 +29,8 @@ describe('createSharedExternalsRepository', () => {
       storage: mockStorageEntry,
       clearStorage: false,
     });
-    return { mockStorage, externalsRepo };
+    const entry = mockStorageEntry.mock.results[0]!.value;
+    return { mockStorage, externalsRepo, entry };
   };
 
   describe('pool-tag memo', () => {
@@ -46,16 +47,19 @@ describe('createSharedExternalsRepository', () => {
   });
 
   describe('initialization', () => {
-    it('should initialize the entry with the first value', () => {
+    it('should not write to storage before a mutation is committed', () => {
       const mockStorage = { 'shared-externals': undefined };
       const mockStorageEntry = createStorageHandlerMock(mockStorage);
 
-      createSharedExternalsRepository({
+      const externalsRepo = createSharedExternalsRepository({
         storage: mockStorageEntry,
         clearStorage: false,
       });
+      externalsRepo.commit();
 
-      expect(mockStorage['shared-externals']).toEqual({ [GLOBAL_SCOPE]: {} });
+      expect(mockStorage['shared-externals']).toBeUndefined();
+      expect(externalsRepo.getScopes()).toEqual([GLOBAL_SCOPE]);
+      expect(externalsRepo.getFromScope()).toEqual({});
     });
 
     it('should reset cache when in config', () => {
@@ -396,7 +400,7 @@ describe('createSharedExternalsRepository', () => {
         },
       });
 
-      externalsRepo.removeFromAllScopes('team/mfe1');
+      externalsRepo.removeFromAllScopes(new Set(['team/mfe1']));
       externalsRepo.commit();
 
       expect(mockStorage['shared-externals']).toEqual({
@@ -422,7 +426,7 @@ describe('createSharedExternalsRepository', () => {
         },
       });
 
-      externalsRepo.removeFromAllScopes('team/mfe1');
+      externalsRepo.removeFromAllScopes(new Set(['team/mfe1']));
       externalsRepo.commit();
 
       const versionB1_withoutTeam1 = mockVersion.shared(v2_1_2, 'dep-b', {
@@ -434,6 +438,70 @@ describe('createSharedExternalsRepository', () => {
           'dep-d': { dirty: false, versions: [versionD1] },
         },
       });
+    });
+
+    it('should remove a batch of remotes in one traversal', () => {
+      const versionA1 = mockVersion.shared(v2_1_2, 'dep-a', {
+        remotes: ['team/mfe1', 'team/mfe2', 'team/mfe3'],
+      });
+      const { externalsRepo } = setupWithCache({
+        [GLOBAL_SCOPE]: { 'dep-a': { dirty: false, versions: [versionA1] } },
+      });
+
+      // Every record is tested against the batch exactly once per traversal, so the lookup count
+      // is the traversal count: one pass tests 3, a call per remote would test 3 + 1.
+      const remoteNames = new Set(['team/mfe1', 'team/mfe2']);
+      const has = remoteNames.has.bind(remoteNames);
+      let lookups = 0;
+      remoteNames.has = (name: string) => {
+        lookups++;
+        return has(name);
+      };
+
+      externalsRepo.removeFromAllScopes(remoteNames);
+
+      expect(lookups).toBe(3);
+      expect(externalsRepo.getFromScope()['dep-a']!.versions[0]!.remotes).toEqual([
+        versionA1.remotes[2],
+      ]);
+    });
+
+    it('should remove versions emptied by any member of the batch', () => {
+      const versionA1 = mockVersion.shared(v2_1_2, 'dep-a', { remotes: ['team/mfe1'] });
+      const versionA2 = mockVersion.shared(v2_1_1, 'dep-a', { remotes: ['team/mfe2'] });
+      const versionD1 = mockVersion.shared(v2_1_2, 'dep-d', { remotes: ['team/mfe3'] });
+
+      const { externalsRepo, mockStorage } = setupWithCache({
+        [GLOBAL_SCOPE]: {
+          'dep-a': { dirty: false, versions: [versionA1, versionA2] },
+          'dep-d': { dirty: false, versions: [versionD1] },
+        },
+      });
+
+      externalsRepo.removeFromAllScopes(new Set(['team/mfe1', 'team/mfe3']));
+      externalsRepo.commit();
+
+      expect(mockStorage['shared-externals']).toEqual({
+        [GLOBAL_SCOPE]: {
+          'dep-a': { dirty: true, versions: [versionA2] },
+        },
+      });
+    });
+
+    it('should not traverse the graph for an empty batch', () => {
+      const { entry, externalsRepo } = setupWithCache({
+        [GLOBAL_SCOPE]: {
+          'dep-a': {
+            dirty: false,
+            versions: [mockVersion.shared(v2_1_1, 'dep-a', { remotes: ['team/mfe1'] })],
+          },
+        },
+      });
+
+      externalsRepo.removeFromAllScopes(new Set());
+      externalsRepo.commit();
+
+      expect(entry.set).not.toHaveBeenCalled();
     });
 
     it('should remove an externals if all versions are gone', () => {
@@ -449,7 +517,7 @@ describe('createSharedExternalsRepository', () => {
         },
       });
 
-      externalsRepo.removeFromAllScopes('team/mfe1');
+      externalsRepo.removeFromAllScopes(new Set(['team/mfe1']));
       externalsRepo.commit();
 
       expect(mockStorage['shared-externals']).toEqual({
@@ -457,6 +525,67 @@ describe('createSharedExternalsRepository', () => {
           'dep-d': { dirty: false, versions: [versionD1] },
         },
       });
+    });
+  });
+
+  describe('commit', () => {
+    it('should persist the cache after a mutation', () => {
+      const { entry, externalsRepo } = setupWithCache({ [GLOBAL_SCOPE]: {} });
+
+      externalsRepo.addOrUpdate('dep-a', mockExternal_A());
+      externalsRepo.commit();
+
+      expect(entry.set).toHaveBeenCalledTimes(1);
+    });
+
+    it('should not persist the cache when nothing changed', () => {
+      const { entry, externalsRepo } = setupWithCache({
+        [GLOBAL_SCOPE]: { 'dep-a': mockExternal_A() },
+      });
+
+      externalsRepo.getFromScope();
+      externalsRepo.tryGet('dep-a');
+      externalsRepo.getScopes();
+      externalsRepo.commit();
+
+      expect(entry.set).not.toHaveBeenCalled();
+    });
+
+    it('should not persist the cache when removing an unknown remote', () => {
+      const { entry, externalsRepo } = setupWithCache({
+        [GLOBAL_SCOPE]: { 'dep-a': mockExternal_A() },
+      });
+
+      externalsRepo.removeFromAllScopes(new Set(['team/mfe-unknown']));
+      externalsRepo.commit();
+
+      expect(entry.set).not.toHaveBeenCalled();
+    });
+
+    it('should persist the cache after removing a known remote', () => {
+      const { entry, externalsRepo } = setupWithCache({
+        [GLOBAL_SCOPE]: {
+          'dep-a': {
+            dirty: false,
+            versions: [mockVersion.shared(v2_1_1, 'dep-a', { remotes: ['team/mfe1'] })],
+          },
+        },
+      });
+
+      externalsRepo.removeFromAllScopes(new Set(['team/mfe1']));
+      externalsRepo.commit();
+
+      expect(entry.set).toHaveBeenCalledTimes(1);
+    });
+
+    it('should not persist the cache twice without a new mutation', () => {
+      const { entry, externalsRepo } = setupWithCache({ [GLOBAL_SCOPE]: {} });
+
+      externalsRepo.addOrUpdate('dep-a', mockExternal_A());
+      externalsRepo.commit();
+      externalsRepo.commit();
+
+      expect(entry.set).toHaveBeenCalledTimes(1);
     });
   });
 });

@@ -14,11 +14,10 @@ const globalThisStorageEntry: StorageEntryCreator =
     const storage = (globalThis as unknown as { [namespace]: { [P in typeof key]: TValue } })[
       namespace
     ]!;
-    if (!storage[key]) storage[key] = initialValue;
 
     const entry: StorageEntry<TValue> = {
       get(): TValue {
-        return cloneEntry(key, storage[key])!;
+        return cloneEntry(key, key in storage ? storage[key] : initialValue)!;
       },
       set(value: TValue): StorageEntry<TValue> {
         storage[key] = cloneEntry(key, value);

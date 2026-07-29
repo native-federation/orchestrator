@@ -10,16 +10,22 @@ const createRemoteInfoRepository = (config: StorageConfig): ForRemoteInfoStorage
 
   const _cache: Remotes = STORAGE.get() ?? {};
 
+  let _dirty = false;
+
   return {
     contains: function (remoteName: RemoteName) {
       return !!_cache[remoteName];
     },
     remove: function (remoteName: RemoteName) {
-      delete _cache[remoteName];
+      if (remoteName in _cache) {
+        delete _cache[remoteName];
+        _dirty = true;
+      }
       return this;
     },
     addOrUpdate: function (remoteName: string, remote: RemoteInfo) {
       _cache[remoteName] = remote;
+      _dirty = true;
       return this;
     },
     tryGet: function (remoteName: RemoteName) {
@@ -34,7 +40,9 @@ const createRemoteInfoRepository = (config: StorageConfig): ForRemoteInfoStorage
       return _cache;
     },
     commit: function () {
+      if (!_dirty) return this;
       STORAGE.set(_cache);
+      _dirty = false;
       return this;
     },
   };

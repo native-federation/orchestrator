@@ -258,8 +258,8 @@ describe('createGenerateImportMap (shareScope-externals)', () => {
     });
   });
 
-  it('should warn and drop the uncovered entrypoint when strictEntryPointCoverage is on', async () => {
-    config.strict.strictEntryPointCoverage = true;
+  it('should warn and drop the uncovered entrypoint when scopeUncoveredEntrypoints is on', async () => {
+    config.profile.scopeUncoveredEntrypoints = true;
     adapters.sharedExternalsRepo.getFromScope = vi.fn((scope?: string): shareScope => {
       return !scope || scope === GLOBAL_SCOPE
         ? {}
@@ -441,6 +441,36 @@ describe('createGenerateImportMap (shareScope-externals)', () => {
       }),
       'custom-scope'
     );
+  });
+
+  it('should not update the versions in storage if they are already "cached".', async () => {
+    adapters.sharedExternalsRepo.getFromScope = vi.fn((scope?: string): shareScope => {
+      return !scope || scope === GLOBAL_SCOPE
+        ? {}
+        : {
+            'dep-a': mockExternal_A({
+              dirty: false,
+              versions: [
+                mockVersion_A.v2_1_3({
+                  action: 'share',
+                  remotes: { 'team/mfe3': { cached: true } },
+                }),
+                mockVersion_A.v2_1_2({
+                  action: 'scope',
+                  remotes: { 'team/mfe1': { cached: true } },
+                }),
+                mockVersion_A.v2_1_1({
+                  action: 'skip',
+                  remotes: { 'team/mfe2': { cached: false } },
+                }),
+              ],
+            }),
+          };
+    });
+
+    await generateImportMap();
+
+    expect(adapters.sharedExternalsRepo.addOrUpdate).not.toHaveBeenCalled();
   });
 
   it('should warn the user about 2 shared versions and choose the most recent one if in non-strict mode.', async () => {

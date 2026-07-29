@@ -108,7 +108,9 @@ describe('createProcessRemoteEntries - global', () => {
               action: 'skip',
             }),
           ],
-          { dirty: false }
+          // The joined remote can take the basis slot and always widens the version's
+          // demands, so the cached actions have to be re-resolved.
+          { dirty: true }
         ),
         undefined
       );
@@ -142,7 +144,7 @@ describe('createProcessRemoteEntries - global', () => {
               host: true,
             }),
           ],
-          { dirty: false }
+          { dirty: true }
         ),
         undefined
       );
@@ -176,7 +178,7 @@ describe('createProcessRemoteEntries - global', () => {
               host: true,
             }),
           ],
-          { dirty: false }
+          { dirty: true }
         ),
         undefined
       );
@@ -220,7 +222,7 @@ describe('createProcessRemoteEntries - global', () => {
               action: 'skip',
             }),
           ],
-          { dirty: false }
+          { dirty: true }
         ),
         undefined
       );
@@ -380,7 +382,7 @@ describe('createProcessRemoteEntries - global', () => {
       expect(stored.versions).toHaveLength(1);
       expect(stored.versions[0]!.tag).toBe('2.1.2');
       expect(stored.versions[0]!.remotes.map(r => r.name)).toEqual(['team/mfe1', 'team/mfe2']);
-      expect(stored.dirty).toBe(false);
+      expect(stored.dirty).toBe(true);
     });
 
     it('should add the correct requiredVersion from tag if empty', async () => {
