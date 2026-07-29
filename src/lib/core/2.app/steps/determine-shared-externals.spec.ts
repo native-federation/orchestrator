@@ -1,3 +1,4 @@
+import type { Mock } from 'vitest';
 import { ForDeterminingSharedExternals } from '../driver-ports/init/for-determining-shared-externals.port';
 import { DrivingContract } from '../driving-ports/driving.contract';
 import { createDetermineSharedExternals } from './determine-shared-externals';
@@ -237,6 +238,36 @@ describe('createDetermineSharedExternals', () => {
         }),
         'custom-scope'
       );
+    });
+  });
+
+  describe('version-compatibility memo', () => {
+    it('should ask the version checker each distinct question once per resolve', async () => {
+      adapters.versionCheck.isCompatible = vi.fn(() => true);
+      adapters.sharedExternalsRepo.getFromScope = vi.fn(() => ({
+        'dep-a': mockExternal_A({
+          dirty: true,
+          versions: [
+            mockVersion_A.v2_1_2({ remotes: ['team/mfe1'], action: 'skip' }),
+            mockVersion_A.v2_1_1({ remotes: ['team/mfe2'], action: 'skip' }),
+          ],
+        }),
+        'dep-b': mockExternal_B({
+          dirty: true,
+          versions: [
+            mockVersion_B.v2_1_2({ remotes: ['team/mfe3'], action: 'skip' }),
+            mockVersion_B.v2_1_1({ remotes: ['team/mfe4'], action: 'skip' }),
+          ],
+        }),
+      }));
+
+      await determineSharedExternals();
+
+      const calls = (adapters.versionCheck.isCompatible as Mock).mock.calls;
+      const distinct = new Set(calls.map(([tag, range]) => `${tag}|${range}`));
+
+      expect(calls.length).toBe(distinct.size);
+      expect(distinct).toEqual(new Set(['2.1.2|~2.1.0', '2.1.1|~2.1.0']));
     });
   });
 

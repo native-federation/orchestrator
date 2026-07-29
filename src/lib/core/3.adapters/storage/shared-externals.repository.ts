@@ -43,28 +43,37 @@ const createSharedExternalsRepository = (config: StorageConfig): ForSharedExtern
       if (o.includeGlobal) return Object.keys(_cache);
       return Object.keys(_cache).filter(s => s !== GLOBAL_SCOPE);
     },
-    removeFromAllScopes: function (remoteName: string) {
+    // Batched: one traversal of the graph per init instead of one per overridden remote.
+    removeFromAllScopes: function (remoteNames: ReadonlySet<string>) {
+      if (remoteNames.size === 0) return;
+
       Object.values(_cache).forEach(scope => {
         const removeExternals: string[] = [];
 
         Object.entries(scope).forEach(([name, external]) => {
-          const removeVersionIdx: number[] = [];
-          external.versions.forEach((version, i) => {
-            const versionRemoteIDX = version.remotes.findIndex(r => r.name === remoteName);
-            if (~versionRemoteIDX) {
-              version.remotes.splice(versionRemoteIDX, 1);
+          let removedVersion = false;
+
+          for (let i = external.versions.length - 1; i >= 0; i--) {
+            const remotes = external.versions[i]!.remotes;
+
+            let keep = 0;
+            for (let r = 0; r < remotes.length; r++) {
+              if (remoteNames.has(remotes[r]!.name)) continue;
+              remotes[keep++] = remotes[r]!;
+            }
+            if (keep !== remotes.length) {
+              remotes.length = keep;
               _dirty = true;
             }
 
-            if (version.remotes.length === 0) removeVersionIdx.push(i);
-          });
-
-          if (removeVersionIdx.length > 0) {
-            for (let i = removeVersionIdx.length - 1; i >= 0; i--) {
-              external.versions.splice(removeVersionIdx[i]!, 1);
+            if (remotes.length === 0) {
+              external.versions.splice(i, 1);
+              removedVersion = true;
             }
-            external.dirty = true;
+          }
 
+          if (removedVersion) {
+            external.dirty = true;
             if (external.versions.length === 0) removeExternals.push(name);
           }
         });

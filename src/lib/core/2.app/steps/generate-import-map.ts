@@ -285,7 +285,7 @@ export function createGenerateImportMap(
         version.remotes[0]!.cached = true;
 
         // Siblings build the same tag, so filling from one is not version tearing.
-        selfFillUncovered(importMap, chunkBundles, externalName, version.remotes.slice(1));
+        selfFillUncovered(importMap, chunkBundles, externalName, version.remotes, 1);
       }
 
       // Second pass, so winners have claimed their imports first.
@@ -306,9 +306,11 @@ export function createGenerateImportMap(
     importMap: ImportMap,
     chunkBundles: Record<string, Set<string>>,
     externalName: string,
-    remotes: SharedVersionMeta[]
+    remotes: SharedVersionMeta[],
+    from = 0
   ): void {
-    for (const remote of remotes) {
+    for (let i = from; i < remotes.length; i++) {
+      const remote = remotes[i]!;
       for (const [packageName, file] of Object.entries(remote.entries)) {
         if (importMap.imports[packageName]) continue;
         if (config.strict.strictEntryPointCoverage || config.profile.scopeUncoveredEntrypoints) {

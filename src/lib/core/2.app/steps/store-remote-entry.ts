@@ -1,6 +1,7 @@
 import {
   type RemoteEntry,
   type RemoteInfo,
+  type RemoteName,
   type ScopedVersion,
   type SharedExternal,
   type DenseSharedInfo,
@@ -18,6 +19,27 @@ export type StoreRemoteEntry = (
   onSharedExternal: SharedExternalHandler
 ) => void;
 
+export type RemoveCachedRemoteEntries = (remoteNames: ReadonlySet<RemoteName>) => void;
+
+/**
+ * Evict overridden remotes before their replacements are merged in. Kept out of `storeRemoteEntry`
+ * because `removeFromAllScopes` costs a full traversal of the shared-externals graph: the init
+ * pipeline evicts its whole override set at once, the dynamic pipeline passes a single name.
+ */
+export function createRemoveCachedRemoteEntries(
+  ports: Pick<DrivingContract, 'remoteInfoRepo' | 'scopedExternalsRepo' | 'sharedExternalsRepo'>
+): RemoveCachedRemoteEntries {
+  return remoteNames => {
+    if (remoteNames.size === 0) return;
+
+    for (const remoteName of remoteNames) {
+      ports.remoteInfoRepo.remove(remoteName);
+      ports.scopedExternalsRepo.remove(remoteName);
+    }
+    ports.sharedExternalsRepo.removeFromAllScopes(remoteNames);
+  };
+}
+
 export type SharedExternalHandler = (
   remoteEntry: RemoteEntry,
   external: DenseSharedInfo,
@@ -34,12 +56,13 @@ export type SharedExternalContext = {
 };
 
 /**
- * Not a pipeline step but the template both storage steps specialize: it owns the full
- * storage sequence for a remoteEntry, and only the resolution of a singleton external
- * differs between the init pipeline (process-remote-entries, step 2) and the dynamic
- * pipeline (update-cache, step 8), injected per call. The pipelines must not be merged,
- * see docs/version-resolver.md "Dynamic Init". If a change ever needs a flag or
- * parameter here to serve only one caller, inline this back into the steps instead.
+ * Not a pipeline step but the template both storage steps specialize: it owns the merge sequence
+ * for a remoteEntry, and only the resolution of a singleton external differs between the init
+ * pipeline (process-remote-entries, step 2) and the dynamic pipeline (update-cache, step 8),
+ * injected per call. Evicting an overridden remote is the caller's job, see
+ * `createRemoveCachedRemoteEntries` — every entry reaching here is merged additively. The
+ * pipelines must not be merged, see docs/version-resolver.md "Dynamic Init". If a change ever
+ * needs a flag or parameter here to serve only one caller, inline this back into the steps instead.
  */
 export function createStoreRemoteEntry(
   config: LoggingConfig & ModeConfig,
@@ -54,17 +77,10 @@ export function createStoreRemoteEntry(
   logStep: number
 ): StoreRemoteEntry {
   return (remoteEntry, onSharedExternal) => {
-    if (remoteEntry?.override) removeCachedRemoteEntry(remoteEntry);
     addRemoteInfoToStorage(remoteEntry);
     addExternalsToStorage(remoteEntry, onSharedExternal);
     addSharedChunksToStorage(remoteEntry);
   };
-
-  function removeCachedRemoteEntry(remoteEntry: RemoteEntry): void {
-    ports.remoteInfoRepo.remove(remoteEntry.name);
-    ports.scopedExternalsRepo.remove(remoteEntry.name);
-    ports.sharedExternalsRepo.removeFromAllScopes(remoteEntry.name);
-  }
 
   function addRemoteInfoToStorage({ name, url, exposes, integrity }: RemoteEntry): void {
     ports.remoteInfoRepo.addOrUpdate(name, {

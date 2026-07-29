@@ -1,6 +1,7 @@
 import type { ForDeterminingSharedExternals } from '../driver-ports/init/for-determining-shared-externals.port';
 import {
   GLOBAL_SCOPE,
+  countUncoveredEntrypoints,
   uncoveredEntrypoints,
   versionDemands,
   type SharedExternal,
@@ -36,6 +37,20 @@ export function createDetermineSharedExternals(
    * @returns
    */
   return () => {
+    // The selection loop asks this O(versions² × demands) times but has only
+    // (candidate tag × distinct requiredVersion) distinct questions to ask. Scoped to one resolve,
+    // so the map needs no bound.
+    const memo = new Map<string, boolean>();
+    const isCompatible = (tag: string, requiredVersion: string): boolean => {
+      const key = `${tag}|${requiredVersion}`;
+      let hit = memo.get(key);
+      if (hit === undefined) {
+        hit = ports.versionCheck.isCompatible(tag, requiredVersion);
+        memo.set(key, hit);
+      }
+      return hit;
+    };
+
     for (const shareScope of ports.sharedExternalsRepo.getScopes()) {
       const sharedExternals = ports.sharedExternalsRepo.getFromScope(shareScope);
 
@@ -45,7 +60,7 @@ export function createDetermineSharedExternals(
           .forEach(([name, external]) =>
             ports.sharedExternalsRepo.addOrUpdate(
               name,
-              setVersionActions(name, external),
+              setVersionActions(name, external, isCompatible),
               shareScope
             )
           );
@@ -79,14 +94,15 @@ export function createDetermineSharedExternals(
     return external.versions.reduce((sum, v) => {
       if (v === winner) return sum;
       if (!accepts(v, winner.tag)) return sum;
-      return (
-        sum +
-        v.remotes.reduce((n, r) => n + Object.keys(r.entries).filter(e => !(e in basis)).length, 0)
-      );
+      return sum + v.remotes.reduce((n, r) => n + countUncoveredEntrypoints(r, basis), 0);
     }, 0);
   }
 
-  function setVersionActions(externalName: string, external: SharedExternal) {
+  function setVersionActions(
+    externalName: string,
+    external: SharedExternal,
+    isCompatible: (tag: string, requiredVersion: string) => boolean
+  ) {
     if (external.versions.length === 1) {
       external.versions[0]!.action = 'share';
       applyEntrypointCoveragePolicy(externalName, external);
@@ -102,14 +118,12 @@ export function createDetermineSharedExternals(
 
     // A version can only be redirected to `tag` if none of its remotes rejects that tag.
     const accepts = (version: SharedVersion, tag: string): boolean =>
-      demands.get(version)!.every(d => ports.versionCheck.isCompatible(tag, d.requiredVersion));
+      demands.get(version)!.every(d => isCompatible(tag, d.requiredVersion));
 
     // The remote that makes the redirect unsafe: it rejects `tag` and pinned `strictVersion`,
     // so it has to keep its own build instead of being deduped away.
     const objector = (version: SharedVersion, tag: string): SharedVersionMeta | undefined =>
-      demands
-        .get(version)!
-        .find(d => d.strictVersion && !ports.versionCheck.isCompatible(tag, d.requiredVersion));
+      demands.get(version)!.find(d => d.strictVersion && !isCompatible(tag, d.requiredVersion));
 
     let sharedVersion = external.versions.find(v => v.host);
 
@@ -127,21 +141,20 @@ export function createDetermineSharedExternals(
         const extraDownloads = external.versions.filter(vB =>
           demands
             .get(vB)!
-            .some(
-              d =>
-                !d.cached &&
-                d.strictVersion &&
-                !ports.versionCheck.isCompatible(vA.tag, d.requiredVersion)
-            )
+            .some(d => !d.cached && d.strictVersion && !isCompatible(vA.tag, d.requiredVersion))
         ).length;
         // Tiebreak equal-download candidates toward the one that leaves fewest entrypoints
         // uncovered across the versions it would skip (fewest tears / scope-promotions).
-        const tears = uncoveredTears(external, vA, accepts);
-        if (
-          extraDownloads < leastExtraDownloads ||
-          (extraDownloads === leastExtraDownloads && tears < leastTears)
-        ) {
+        if (extraDownloads < leastExtraDownloads) {
           leastExtraDownloads = extraDownloads;
+          leastTears = uncoveredTears(external, vA, accepts);
+          sharedVersion = vA;
+          return;
+        }
+        if (extraDownloads > leastExtraDownloads) return;
+
+        const tears = uncoveredTears(external, vA, accepts);
+        if (tears < leastTears) {
           leastTears = tears;
           sharedVersion = vA;
         }

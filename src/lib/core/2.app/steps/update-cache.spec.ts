@@ -56,7 +56,9 @@ describe('createProcessDynamicRemoteEntry', () => {
 
       expect(adapters.remoteInfoRepo.remove).toHaveBeenCalledWith('team/mfe1');
       expect(adapters.scopedExternalsRepo.remove).toHaveBeenCalledWith('team/mfe1');
-      expect(adapters.sharedExternalsRepo.removeFromAllScopes).toHaveBeenCalledWith('team/mfe1');
+      expect(adapters.sharedExternalsRepo.removeFromAllScopes).toHaveBeenCalledWith(
+        new Set(['team/mfe1'])
+      );
     });
 
     it('should not remove the old version if the remoteEntry is not marked as override', async () => {

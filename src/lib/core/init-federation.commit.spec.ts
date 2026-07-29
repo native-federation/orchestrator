@@ -101,4 +101,29 @@ describe('initFederation (storage commits)', () => {
       expect.arrayContaining(['added.remotes', 'added.shared-externals'])
     );
   });
+
+  it('should reproduce the cold result when every cached remote is overridden', async () => {
+    let importMap: unknown;
+    const initWith = (profile?: { overrideCachedRemotesIfURLMatches: boolean }) =>
+      initFederation(mockManifest(), {
+        storage: sessionStorageEntry,
+        storageNamespace: 'overridden',
+        setImportMapFn: async map => {
+          importMap = map;
+          return map;
+        },
+        loadModuleFn: async () => ({}),
+        ...(profile ? { profile } : {}),
+      });
+
+    await initWith();
+    const afterCold = { storage: storageSnapshot(), importMap };
+    fetches = 0;
+
+    await initWith({ overrideCachedRemotesIfURLMatches: true });
+
+    expect(fetches).toBe(2);
+    expect(importMap).toEqual(afterCold.importMap);
+    expect(storageSnapshot()).toEqual(afterCold.storage);
+  });
 });

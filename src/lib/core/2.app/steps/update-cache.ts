@@ -15,7 +15,11 @@ import type { LoggingConfig } from '../config/log.contract';
 import * as _path from 'lib/utils/path';
 import { NFError } from 'lib/core/native-federation.error';
 import type { ModeConfig } from 'lib/core/2.app/config/mode.contract';
-import { createStoreRemoteEntry, type SharedExternalContext } from './store-remote-entry';
+import {
+  createRemoveCachedRemoteEntries,
+  createStoreRemoteEntry,
+  type SharedExternalContext,
+} from './store-remote-entry';
 
 export function createUpdateCache(
   config: LoggingConfig & ModeConfig,
@@ -29,6 +33,7 @@ export function createUpdateCache(
   >
 ): ForUpdatingCache {
   const storeRemoteEntry = createStoreRemoteEntry(config, ports, 8);
+  const removeCachedRemoteEntries = createRemoveCachedRemoteEntries(ports);
 
   /**
    * Step 8 (dynamic init): merge a runtime-loaded remoteEntry into the cache. The
@@ -38,6 +43,8 @@ export function createUpdateCache(
   return remoteEntry => {
     try {
       const actions: SharedInfoActions = {};
+
+      if (remoteEntry?.override) removeCachedRemoteEntries(new Set([remoteEntry.name]));
 
       storeRemoteEntry(remoteEntry, (entry, external, ctx) => {
         const { action, sharedVersion } = resolveSharedExternal(entry, external, ctx);

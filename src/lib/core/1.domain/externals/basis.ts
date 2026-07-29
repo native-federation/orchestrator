@@ -65,3 +65,16 @@ export function uncoveredEntrypoints(
 ): string[] {
   return Object.keys(remote.entries).filter(entrypoint => !(entrypoint in basis));
 }
+
+// `uncoveredEntrypoints` without materializing the names: the resolver's O(versions²) selection
+// loop asks this once per remote per candidate and only needs the count. Keep the two in sync.
+export function countUncoveredEntrypoints(
+  remote: SharedVersionMeta,
+  basis: Record<string, string>
+): number {
+  let uncovered = 0;
+  for (const entrypoint in remote.entries) {
+    if (!(entrypoint in basis)) uncovered++;
+  }
+  return uncovered;
+}
