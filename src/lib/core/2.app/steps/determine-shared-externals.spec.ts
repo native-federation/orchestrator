@@ -146,6 +146,64 @@ describe('createDetermineSharedExternals', () => {
         new NFError('Could not determine shared externals in scope __GLOBAL__.', expect.any(Error))
       );
     });
+
+    // `remotes[0]` is the serving basis, ordered by coverage — it says nothing about what the
+    // version demands. Reading `strictVersion` off it would let a wide non-strict sibling
+    // redirect a pinned remote to a version its range rejects.
+    describe('when only a non-basis remote pinned the version', () => {
+      beforeEach(() => {
+        // Range-aware, so 2.2.2 stays self-compatible and only 2.1.1's remotes reject it.
+        adapters.versionCheck.isCompatible = vi.fn(
+          (tag: string, range: string) => range === `~${tag.slice(0, 3)}.0`
+        );
+      });
+
+      const withStrictSibling = (remotes: Record<string, { strictVersion: boolean }>) =>
+        vi.fn(() => ({
+          'dep-b': mockExternal_B({
+            dirty: true,
+            versions: [
+              mockVersion_B.v2_2_2({ remotes: ['team/mfe1'], action: 'skip' }),
+              mockVersion_B.v2_1_1({ remotes, action: 'skip' }),
+            ],
+          }),
+        }));
+
+      const LOOSE = { 'team/mfe2': { strictVersion: false } };
+      const STRICT = { 'team/mfe3': { strictVersion: true } };
+
+      // The basis is the widest copy, so either remote can hold that slot.
+      it.each([
+        ['non-strict remote as basis', { ...LOOSE, ...STRICT }],
+        ['strict remote as basis', { ...STRICT, ...LOOSE }],
+      ])('should set "scope" with the %s', async (_label, remotes) => {
+        config.strict.strictExternalCompatibility = false;
+        adapters.sharedExternalsRepo.getFromScope = withStrictSibling(remotes);
+
+        await determineSharedExternals();
+
+        expect(adapters.sharedExternalsRepo.addOrUpdate).toHaveBeenCalledWith(
+          'dep-b',
+          mockExternal_B({
+            dirty: false,
+            versions: [
+              mockVersion_B.v2_2_2({ remotes: ['team/mfe1'], action: 'share' }),
+              mockVersion_B.v2_1_1({ remotes, action: 'scope' }),
+            ],
+          }),
+          '__GLOBAL__'
+        );
+      });
+
+      it('should throw in strict mode even though the basis is not strict', async () => {
+        config.strict.strictExternalCompatibility = true;
+        adapters.sharedExternalsRepo.getFromScope = withStrictSibling({ ...LOOSE, ...STRICT });
+
+        await expect(determineSharedExternals()).rejects.toEqual(
+          new NFError('Could not determine shared externals in scope __GLOBAL__.', expect.any(Error))
+        );
+      });
+    });
   });
 
   describe('Custom scope', () => {
@@ -285,7 +343,7 @@ describe('createDetermineSharedExternals', () => {
     });
 
     it('should promote a skip version whose entrypoints the shared winner lacks to scope', async () => {
-      config.strict.strictEntryPointCoverage = true;
+      config.profile.scopeUncoveredEntrypoints = true;
       adapters.sharedExternalsRepo.getFromScope = vi.fn(externalWithUncoveredSkip);
 
       await determineSharedExternals();
@@ -332,8 +390,120 @@ describe('createDetermineSharedExternals', () => {
       );
     });
 
-    it('should keep a fully covered skip version as skip', async () => {
+    it('should split an uncovered sibling of a single-version external into a scope version', async () => {
+      config.profile.scopeUncoveredEntrypoints = true;
+      adapters.sharedExternalsRepo.getFromScope = vi.fn(() => ({
+        'dep-b': mockExternal_B({
+          dirty: true,
+          versions: [
+            mockVersion_B.v2_1_2({
+              remotes: {
+                'team/mfe1': { entries: { 'dep-b': 'dep-b.js', 'dep-b/x': 'dep-b-x.js' } },
+                'team/mfe2': { entries: { 'dep-b': 'dep-b.js', 'dep-b/y': 'dep-b-y.js' } },
+              },
+            }),
+          ],
+        }),
+      }));
+
+      await determineSharedExternals();
+
+      expect(adapters.sharedExternalsRepo.addOrUpdate).toHaveBeenCalledWith(
+        'dep-b',
+        mockExternal_B({
+          dirty: false,
+          versions: [
+            mockVersion_B.v2_1_2({
+              remotes: {
+                'team/mfe1': { entries: { 'dep-b': 'dep-b.js', 'dep-b/x': 'dep-b-x.js' } },
+              },
+              action: 'share',
+            }),
+            mockVersion_B.v2_1_2({
+              remotes: {
+                'team/mfe2': { entries: { 'dep-b': 'dep-b.js', 'dep-b/y': 'dep-b-y.js' } },
+              },
+              action: 'scope',
+            }),
+          ],
+        }),
+        '__GLOBAL__'
+      );
+    });
+
+    it('should split only the uncovered sibling and keep covered ones sharing', async () => {
+      config.profile.scopeUncoveredEntrypoints = true;
+      adapters.sharedExternalsRepo.getFromScope = vi.fn(() => ({
+        'dep-b': mockExternal_B({
+          dirty: true,
+          versions: [
+            mockVersion_B.v2_1_2({
+              remotes: {
+                'team/mfe1': { entries: { 'dep-b': 'dep-b.js', 'dep-b/x': 'dep-b-x.js' } },
+                'team/mfe2': { entries: { 'dep-b': 'dep-b.js' } },
+                'team/mfe3': { entries: { 'dep-b': 'dep-b.js', 'dep-b/y': 'dep-b-y.js' } },
+              },
+            }),
+          ],
+        }),
+      }));
+
+      await determineSharedExternals();
+
+      expect(adapters.sharedExternalsRepo.addOrUpdate).toHaveBeenCalledWith(
+        'dep-b',
+        mockExternal_B({
+          dirty: false,
+          versions: [
+            mockVersion_B.v2_1_2({
+              remotes: {
+                'team/mfe1': { entries: { 'dep-b': 'dep-b.js', 'dep-b/x': 'dep-b-x.js' } },
+                'team/mfe2': { entries: { 'dep-b': 'dep-b.js' } },
+              },
+              action: 'share',
+            }),
+            mockVersion_B.v2_1_2({
+              remotes: {
+                'team/mfe3': { entries: { 'dep-b': 'dep-b.js', 'dep-b/y': 'dep-b-y.js' } },
+              },
+              action: 'scope',
+            }),
+          ],
+        }),
+        '__GLOBAL__'
+      );
+    });
+
+    it('should reject when strictEntryPointCoverage is on and a copy is uncovered', async () => {
       config.strict.strictEntryPointCoverage = true;
+      adapters.sharedExternalsRepo.getFromScope = vi.fn(externalWithUncoveredSkip);
+
+      await expect(determineSharedExternals()).rejects.toThrow(
+        'Could not determine shared externals in scope __GLOBAL__.'
+      );
+      expect(config.log.error).toHaveBeenCalledWith(
+        3,
+        "[dep-b@2.1.1][team/mfe2] Entrypoints not covered by the shared version: dep-b/sub."
+      );
+    });
+
+    it('should not reject when strictEntryPointCoverage is on and every copy is covered', async () => {
+      config.strict.strictEntryPointCoverage = true;
+      adapters.sharedExternalsRepo.getFromScope = vi.fn(() => ({
+        'dep-b': mockExternal_B({
+          dirty: true,
+          versions: [
+            mockVersion_B.v2_1_2({ remotes: ['team/host'], action: 'skip' }),
+            mockVersion_B.v2_1_1({ remotes: ['team/mfe2'], action: 'skip' }),
+          ],
+        }),
+      }));
+
+      await expect(determineSharedExternals()).resolves.toBeUndefined();
+    });
+
+    it('should keep a fully covered skip version as skip', async () => {
+      config.profile.scopeUncoveredEntrypoints = true;
       adapters.sharedExternalsRepo.getFromScope = vi.fn(() => ({
         'dep-b': mockExternal_B({
           dirty: true,

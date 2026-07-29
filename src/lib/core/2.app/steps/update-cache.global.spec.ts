@@ -117,7 +117,7 @@ describe('createProcessDynamicRemoteEntry - scoped', () => {
     );
 
     expect(actual.actions).toEqual({
-      'dep-a': { action: 'skip' },
+      'dep-a': { action: 'skip', covered: ['dep-a'] },
     });
   });
 
@@ -161,7 +161,7 @@ describe('createProcessDynamicRemoteEntry - scoped', () => {
     );
 
     expect(actual.actions).toEqual({
-      'dep-b': { action: 'skip' },
+      'dep-b': { action: 'skip', covered: ['dep-b'] },
     });
   });
 
@@ -269,7 +269,7 @@ describe('createProcessDynamicRemoteEntry - scoped', () => {
     );
 
     expect(result.actions).toEqual({
-      'dep-a': { action: 'skip' },
+      'dep-a': { action: 'skip', covered: ['dep-a'] },
     });
   });
 
@@ -316,7 +316,7 @@ describe('createProcessDynamicRemoteEntry - scoped', () => {
     );
 
     expect(result.actions).toEqual({
-      'dep-a': { action: 'skip' },
+      'dep-a': { action: 'skip', covered: ['dep-a'] },
     });
     expect(config.log.warn).toHaveBeenCalledWith(
       8,
@@ -479,7 +479,7 @@ describe('createProcessDynamicRemoteEntry - scoped', () => {
     );
 
     expect(actual.actions).toEqual({
-      'dep-a': { action: 'skip', override: undefined },
+      'dep-a': { action: 'skip', covered: ['dep-a'] },
     });
   });
 

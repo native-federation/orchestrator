@@ -18,7 +18,13 @@ type RemoteEntry = Omit<FederationInfo, 'shared'> & {
 
 type SharedInfoActions = Record<
   string,
-  { action: SharedVersionAction; override?: Record<string, string> }
+  {
+    action: SharedVersionAction;
+    // Where a shareScope skip's entrypoints are remapped to.
+    override?: Record<string, string>;
+    // Entrypoints the shared source provides; the rest are self-filled.
+    covered?: string[];
+  }
 >;
 
 export {

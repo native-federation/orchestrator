@@ -5,6 +5,9 @@ import {
   type SharedInfoActions,
   type SharedVersion,
   type SharedVersionAction,
+  addRemoteToVersion,
+  findVersionForTag,
+  uncoveredEntrypoints,
   GLOBAL_SCOPE,
 } from 'lib/core/1.domain';
 import type { DrivingContract } from '../driving-ports/driving.contract';
@@ -40,12 +43,16 @@ export function createUpdateCache(
         const { action, sharedVersion } = resolveSharedExternal(entry, external, ctx);
         actions[external.packageName] = { action };
 
-        if (action === 'skip' && external.shareScope && sharedVersion?.remotes[0]?.entries) {
-          actions[external.packageName]!.override = resolveOverrideEntries(
-            entry,
-            external,
-            sharedVersion
-          );
+        if (action === 'skip' && sharedVersion?.remotes[0]?.entries) {
+          actions[external.packageName]!.covered = Object.keys(sharedVersion.remotes[0].entries);
+
+          if (external.shareScope) {
+            actions[external.packageName]!.override = resolveOverrideEntries(
+              entry,
+              external,
+              sharedVersion
+            );
+          }
         }
       });
 
@@ -88,20 +95,33 @@ export function createUpdateCache(
       config.log.warn(8, errorMsg);
     }
 
-    if (
-      action === 'skip' &&
-      config.strict.strictEntryPointCoverage &&
-      sharedVersion &&
-      Object.keys(remote.entries).some(e => !(e in sharedVersion.remotes[0]!.entries))
-    ) {
-      action = 'scope';
+    if (action === 'skip' && sharedVersion) {
+      const uncovered = uncoveredEntrypoints(remote, sharedVersion.remotes[0]!.entries);
+      if (uncovered.length > 0) {
+        const msg = `[${sharedInfo.shareScope ?? GLOBAL_SCOPE}][${remoteEntry.name}][${sharedInfo.packageName}] Entrypoints not covered by the shared version: ${uncovered.join(', ')}.`;
+
+        if (config.strict.strictEntryPointCoverage) {
+          config.log.error(8, msg);
+          throw new NFError(`Could not process remote '${remoteEntry.name}'`);
+        }
+        if (config.profile.scopeUncoveredEntrypoints) {
+          config.log.debug(8, msg);
+          action = 'scope';
+        }
+      }
     }
 
-    const matchingVersion = cached.versions.find(cached => cached.tag === tag);
+    const matchingVersion = findVersionForTag(cached.versions, tag);
 
-    if (matchingVersion) {
+    if (action === 'scope') {
+      // Inside a shareable version a later import-map build would redirect it to the basis.
+      remote.cached = true;
+      const scoped = cached.versions.find(v => v.tag === tag && v.action === 'scope');
+      if (scoped) scoped.remotes.push(remote);
+      else cached.versions.push({ tag, action, host: false, remotes: [remote] });
+    } else if (matchingVersion) {
       assertSameVersionCompatibility(matchingVersion);
-      matchingVersion.remotes.push(remote);
+      addRemoteToVersion(matchingVersion, remote);
     } else {
       if (!sharedVersion) action = 'share';
       remote.cached = action !== 'skip';

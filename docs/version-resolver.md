@@ -215,16 +215,34 @@ specifier to its output file:
 
 The resolver treats the whole `entries` map as one shared external: version negotiation happens once per
 package, and every specifier in `entries` follows the winning version's placement — scoped, shareScope,
-global, or the skip/override redirect. When a shared version wins, the winning remote's `entries` are the
-**source** served to every consumer of that version, so each secondary entrypoint resolves to the same
+global, or the skip/override redirect. When a shared version wins, the **basis** remote's `entries` are the
+source served to every consumer of that version, so each secondary entrypoint resolves to the same
 provider as its primary. (Older/flat remote builds emit one `SharedInfo` per specifier; set
 [`feature.convertFlatSharedInfo`](./config.md#modeConfig) to group them at runtime.)
 
+#### The basis of a version
+
+Several remotes can report the same version of a package, and they all land in one `SharedVersion` as its
+`remotes` list. They build the same tag, but each bundles only the entrypoints it actually imports, so the
+lists can differ. `remotes[0]` is the version's **basis** — the copy whose `entries` every consumer
+resolves to — and the cache keeps it sorted on insert by this precedence:
+
+1. **host** — the shell's build is already loaded in the browser and cannot be repointed.
+2. **cached** — an already-served copy; repointing it would invalidate a committed import map and force a
+   redundant download.
+3. **widest coverage** — the copy declaring the most entrypoints, so siblings need no self-fill.
+4. **arrival order** — ties keep the incumbent, so generated import maps stay byte-stable.
+
+Rule 3 is what makes a superset copy win: given `{table}`, `{table}` and `{sort, table}` of one version,
+the third becomes the basis and serves both specifiers from a single build. Rules 1 and 2 deliberately
+outrank it — stability beats optimality — so a host or already-served basis can still leave gaps, which
+fall through to the coverage policy below.
+
 #### Entrypoint coverage and tearing
 
-The source's `entries` are not guaranteed to list every specifier a consumer needs. A `skip` version
+The basis's `entries` are not guaranteed to list every specifier a consumer needs. A `skip` version
 redirected to the winner, or a sibling remote of the same shared version, can declare a secondary
-entrypoint the source's build does not contain — for example the winner ships `@angular/core` while a
+entrypoint the basis's build does not contain — for example the basis ships `@angular/core` while a
 compatible, deduped remote also imports `@angular/core/testing`:
 
 ```
@@ -232,24 +250,27 @@ compatible, deduped remote also imports `@angular/core/testing`:
 @angular/core  20.1.0  skip   mfe-b  entries { @angular/core, @angular/core/testing }
 ```
 
-The default behaviour is **self-fill**: any specifier a remote declares that the source cannot provide is
-served from that remote's **own** build. Above, `mfe-b` gets `@angular/core` from `mfe-a` (deduped) and
-`@angular/core/testing` from its own scope. Nothing is dropped. The trade-off is a **tear** — one
-package's specifiers resolve to two different builds. That is harmless for most libraries but can break
-packages whose secondary entrypoints share module-singleton state with the primary.
+Serving those two specifiers from two different builds is a **tear**. It is harmless for most libraries but
+can break packages whose secondary entrypoints share module-singleton state with the primary. Three
+behaviours are available, in precedence order:
 
-To forbid tearing, enable [`strict.strictEntryPointCoverage`](./config.md#modeConfig) (opt-in, default
-`false`). In this mode a version whose specifiers the shared winner cannot fully cover is **promoted to
-`scope`** during resolution — its whole `entries` bunch is served coherently from its own build instead
-of being redirected. The additive dynamic-init path applies the same promotion to a runtime remote. As a
-last-resort net, if an uncovered specifier still reaches import-map generation it is refused rather than
-torn: a warning, or an error under [`strict.strictImportMap`](./config.md#modeConfig).
+| Setting | Behaviour on an uncovered entrypoint |
+| --- | --- |
+| [`strict.strictEntryPointCoverage`](./config.md#modeConfig) | **Throws.** Resolution refuses to share a package it cannot serve coherently. |
+| [`profile.scopeUncoveredEntrypoints`](./config.md#modeConfig) | **Scopes.** The uncovered copy is split out into a `scope` version of its own tag and serves its whole `entries` bunch from its own build. Sharing continues for the copies the basis does cover. |
+| neither (default) | **Self-fills.** The specifier is served from the declaring remote's own build and a warning is logged. Nothing is dropped; the package tears. |
 
-To minimise tears (and, under strict coverage, scope promotions) the resolver also uses coverage as a
-**tiebreaker** when choosing the shared version: among candidates that tie on the extra-downloads
-heuristic, it prefers the one whose `entries` leave the fewest specifiers uncovered across the versions it
-would skip. A decisive extra-downloads winner is never overridden, and an exact tie still keeps the
-highest version.
+Scoping is per remote copy, not per version: given a basis `{table, sort}`, a covered `{table}` and an
+uncovered `{table, paginator}`, only the third is split out — the first two keep sharing. The additive
+dynamic-init path applies the same policy to a runtime remote, and the import-map builders keep a
+last-resort net for stale storage: an uncovered specifier reaching them is refused under
+`strictEntryPointCoverage` or [`strict.strictImportMap`](./config.md#modeConfig), and warned about
+otherwise.
+
+To minimise tears (and scope promotions) the resolver also uses coverage as a **tiebreaker** when choosing
+the shared version: among candidates that tie on the extra-downloads heuristic, it prefers the one whose
+`entries` leave the fewest specifiers uncovered across the versions it would skip. A decisive
+extra-downloads winner is never overridden, and an exact tie still keeps the highest version.
 
 ### Shared scopes
 

@@ -8,6 +8,7 @@ import {
   type RemoteInfo,
   type SharedExternal,
   type SharedVersion,
+  type SharedVersionMeta,
 } from 'lib/core/1.domain';
 import type { LoggingConfig } from '../config/log.contract';
 import type { ModeConfig } from '../config/mode.contract';
@@ -172,7 +173,10 @@ export function createGenerateImportMap(
           // Entrypoints the shared source can't provide are served from this remote's own build.
           for (const [packageName, file] of Object.entries(r.entries)) {
             if (packageName in source.entries) continue;
-            if (config.strict.strictEntryPointCoverage) {
+            if (
+              config.strict.strictEntryPointCoverage ||
+              config.profile.scopeUncoveredEntrypoints
+            ) {
               warnUncoveredEntrypoint(shareScope, externalName, r.name, packageName);
               continue;
             }
@@ -270,31 +274,44 @@ export function createGenerateImportMap(
         registerBundleChunks(chunkBundles, version.remotes[0]!.name, version.remotes[0]!.bundle);
 
         version.remotes[0]!.cached = true;
+
+        // Siblings build the same tag, so filling from one is not version tearing.
+        selfFillUncovered(importMap, chunkBundles, externalName, version.remotes.slice(1));
       }
 
-      // Second pass, so the winner has claimed its imports first: fill entrypoints only a
-      // skipped version declares from its own build.
+      // Second pass, so winners have claimed their imports first.
       for (const version of external.versions) {
         if (version.action !== 'skip') continue;
-        const remote = version.remotes[0]!;
-        for (const [packageName, file] of Object.entries(remote.entries)) {
-          if (importMap.imports[packageName]) continue;
-          if (config.strict.strictEntryPointCoverage) {
-            warnUncoveredEntrypoint(GLOBAL_SCOPE, externalName, remote.name, packageName);
-            continue;
-          }
-          const scope = getScope(GLOBAL_SCOPE, remote.name, externalName);
-          const url = _path.join(scope, file);
-          addToGlobal(importMap, { [packageName]: url });
-          addIntegrity(importMap, url, remote.name, file);
-          registerBundleChunks(chunkBundles, remote.name, remote.bundle);
-          remote.cached = true;
-        }
+        selfFillUncovered(importMap, chunkBundles, externalName, version.remotes);
       }
       ports.sharedExternalsRepo.addOrUpdate(externalName, external);
     }
 
     return importMap;
+  }
+
+  // Reaching here with a coverage policy set means stale storage, so it is refused instead.
+  function selfFillUncovered(
+    importMap: ImportMap,
+    chunkBundles: Record<string, Set<string>>,
+    externalName: string,
+    remotes: SharedVersionMeta[]
+  ): void {
+    for (const remote of remotes) {
+      for (const [packageName, file] of Object.entries(remote.entries)) {
+        if (importMap.imports[packageName]) continue;
+        if (config.strict.strictEntryPointCoverage || config.profile.scopeUncoveredEntrypoints) {
+          warnUncoveredEntrypoint(GLOBAL_SCOPE, externalName, remote.name, packageName);
+          continue;
+        }
+        const scope = getScope(GLOBAL_SCOPE, remote.name, externalName);
+        const url = _path.join(scope, file);
+        addToGlobal(importMap, { [packageName]: url });
+        addIntegrity(importMap, url, remote.name, file);
+        registerBundleChunks(chunkBundles, remote.name, remote.bundle);
+        remote.cached = true;
+      }
+    }
   }
 
   function warnUncoveredEntrypoint(
@@ -304,7 +321,7 @@ export function createGenerateImportMap(
     packageName: string
   ): void {
     const msg = `[${scope}][${externalName}][${remoteName}] Entrypoint '${packageName}' is not covered by the shared version.`;
-    if (config.strict.strictImportMap) {
+    if (config.strict.strictEntryPointCoverage || config.strict.strictImportMap) {
       config.log.error(4, msg);
       throw new NFError('Could not create ImportMap.');
     }

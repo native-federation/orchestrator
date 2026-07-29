@@ -216,8 +216,8 @@ describe('createConvertToImportMap', () => {
       });
     });
 
-    it('should not self-fill an uncovered entrypoint when strictEntryPointCoverage is on', async () => {
-      config.strict.strictEntryPointCoverage = true;
+    it('should not self-fill an uncovered entrypoint when scopeUncoveredEntrypoints is on', async () => {
+      config.profile.scopeUncoveredEntrypoints = true;
       const remoteEntry: RemoteEntry = mockRemoteEntry_MFE2({
         exposes: [],
         shared: [

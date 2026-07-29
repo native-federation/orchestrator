@@ -55,6 +55,7 @@ describe('DefaultConfig', () => {
         profile: {
           latestSharedExternal: false,
           skipInvalidExternalVersions: false,
+      scopeUncoveredEntrypoints: false,
           overrideCachedRemotes: 'init-only',
           overrideCachedRemotesIfURLMatches: false,
         },

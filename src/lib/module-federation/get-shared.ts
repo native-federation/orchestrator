@@ -1,5 +1,5 @@
 import type { DrivingContract } from 'lib/core/2.app/driving-ports/driving.contract';
-import type { SharedVersion } from 'lib/core/1.domain';
+import type { SharedVersion, SharedVersionMeta } from 'lib/core/1.domain';
 import type { GetSharedOptions, ShareInfos, Shared } from './share-infos.contract';
 import * as _path from 'lib/utils/path';
 
@@ -27,28 +27,33 @@ export function createGetShared(
         const singleton = scopeType === 'strict' ? false : (options.singleton ?? true);
 
         for (const version of versions) {
-          const source = version.remotes[0];
-          if (!source) continue;
+          if (!version.remotes[0]) continue;
 
           // MF's shared config is flat: one key per entrypoint. Emit a separate
           // Shared for each entry so secondary entrypoints reach MF consumers.
-          for (const [entryName, file] of Object.entries(source.entries)) {
-            const url = resolveUrl(version, file);
-            if (!url) continue;
+          const claimed = new Set<string>();
+          for (const source of version.remotes) {
+            for (const [entryName, file] of Object.entries(source.entries)) {
+              if (claimed.has(entryName)) continue;
+              claimed.add(entryName);
 
-            const shareObject: Shared = {
-              version: version.tag,
-              get: () => ports.browser.importModule(url).then(module => () => module),
-              shareConfig: {
-                singleton,
-                requiredVersion: resolveRequiredVersion(version, options, scopeType),
-                ...(scopeType === 'strict' ? { strictVersion: true } : {}),
-              },
-            };
-            if (scopeType !== 'global') shareObject.scope = scope;
+              const url = resolveUrl(source, file);
+              if (!url) continue;
 
-            if (!shared[entryName]) shared[entryName] = [];
-            shared[entryName]!.push(shareObject);
+              const shareObject: Shared = {
+                version: version.tag,
+                get: () => ports.browser.importModule(url).then(module => () => module),
+                shareConfig: {
+                  singleton,
+                  requiredVersion: resolveRequiredVersion(version, options, scopeType),
+                  ...(scopeType === 'strict' ? { strictVersion: true } : {}),
+                },
+              };
+              if (scopeType !== 'global') shareObject.scope = scope;
+
+              if (!shared[entryName]) shared[entryName] = [];
+              shared[entryName]!.push(shareObject);
+            }
           }
         }
       }
@@ -57,10 +62,7 @@ export function createGetShared(
     return shared;
   };
 
-  function resolveUrl(version: SharedVersion, file: string): string | undefined {
-    const source = version.remotes[0];
-    if (!source) return undefined;
-
+  function resolveUrl(source: SharedVersionMeta, file: string): string | undefined {
     return ports.remoteInfoRepo
       .tryGet(source.name)
       .map(remote => _path.join(remote.scopeUrl, file))

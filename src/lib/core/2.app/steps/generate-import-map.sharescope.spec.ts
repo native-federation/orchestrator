@@ -258,8 +258,8 @@ describe('createGenerateImportMap (shareScope-externals)', () => {
     });
   });
 
-  it('should warn and drop the uncovered entrypoint when strictEntryPointCoverage is on', async () => {
-    config.strict.strictEntryPointCoverage = true;
+  it('should warn and drop the uncovered entrypoint when scopeUncoveredEntrypoints is on', async () => {
+    config.profile.scopeUncoveredEntrypoints = true;
     adapters.sharedExternalsRepo.getFromScope = vi.fn((scope?: string): shareScope => {
       return !scope || scope === GLOBAL_SCOPE
         ? {}
