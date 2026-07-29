@@ -20,7 +20,7 @@
   },
   "license": "MIT",
   "engines": {
-    "node": ">=22.14.0"
+    "node": ">=24.16.0"
   },
   "devDependencies": {
     "@softarc/native-federation": "^4.3.2",
