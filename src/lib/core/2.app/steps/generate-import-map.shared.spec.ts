@@ -384,6 +384,22 @@ describe('createGenerateImportMap (shared-externals)', () => {
     );
   });
 
+  it('should not update the version in storage if it is already "cached".', async () => {
+    adapters.sharedExternalsRepo.getFromScope = vi.fn(() => ({
+      'dep-a': mockExternal_A({
+        dirty: false,
+        versions: [
+          mockVersion_A.v2_1_3({ action: 'share', remotes: { 'team/mfe2': { cached: true } } }),
+          mockVersion_A.v2_1_1({ action: 'scope', remotes: { 'team/mfe1': { cached: true } } }),
+        ],
+      }),
+    }));
+
+    await generateImportMap();
+
+    expect(adapters.sharedExternalsRepo.addOrUpdate).not.toHaveBeenCalled();
+  });
+
   it('should warn the user about 2 shared versions and choose the most recent one if in non-strict mode.', async () => {
     config.strict.strictImportMap = false;
 

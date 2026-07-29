@@ -19,13 +19,18 @@ describe('createRemoteInfoRepository', () => {
       clearStorage: false,
     };
     const remoteInfoRepo = createRemoteInfoRepository(mockConfig);
-    return { mockStorage, mockStorageEntry, remoteInfoRepo };
+    const entry = mockStorageEntry.mock.results[0]!.value;
+    return { mockStorage, mockStorageEntry, remoteInfoRepo, entry };
   };
 
   describe('initialization', () => {
-    it('should initialize the entry with the first value', () => {
-      const { mockStorage } = setupWithCache(undefined);
-      expect(mockStorage['remotes']).toEqual({});
+    it('should not write to storage before a mutation is committed', () => {
+      const { mockStorage, remoteInfoRepo } = setupWithCache(undefined);
+
+      remoteInfoRepo.commit();
+
+      expect(mockStorage['remotes']).toBeUndefined();
+      expect(remoteInfoRepo.getAll()).toEqual({});
     });
 
     it('should reset cache when in config', () => {
@@ -238,6 +243,50 @@ describe('createRemoteInfoRepository', () => {
       const { remoteInfoRepo } = setupWithCache({});
       const result = remoteInfoRepo.remove('scope-a');
       expect(result).toBe(remoteInfoRepo);
+    });
+  });
+
+  describe('commit', () => {
+    it('should persist the cache after a mutation', () => {
+      const { entry, remoteInfoRepo } = setupWithCache({});
+
+      remoteInfoRepo.addOrUpdate('team/mfe1', mockRemoteInfo_MFE1());
+      remoteInfoRepo.commit();
+
+      expect(entry.set).toHaveBeenCalledTimes(1);
+    });
+
+    it('should not persist the cache when nothing changed', () => {
+      const { entry, remoteInfoRepo } = setupWithCache({
+        'team/mfe1': mockRemoteInfo_MFE1(),
+      });
+
+      remoteInfoRepo.tryGet('team/mfe1');
+      remoteInfoRepo.getAll();
+      remoteInfoRepo.commit();
+
+      expect(entry.set).not.toHaveBeenCalled();
+    });
+
+    it('should not persist the cache when removing an unknown remote', () => {
+      const { entry, remoteInfoRepo } = setupWithCache({
+        'team/mfe1': mockRemoteInfo_MFE1(),
+      });
+
+      remoteInfoRepo.remove('team/mfe2');
+      remoteInfoRepo.commit();
+
+      expect(entry.set).not.toHaveBeenCalled();
+    });
+
+    it('should not persist the cache twice without a new mutation', () => {
+      const { entry, remoteInfoRepo } = setupWithCache({});
+
+      remoteInfoRepo.addOrUpdate('team/mfe1', mockRemoteInfo_MFE1());
+      remoteInfoRepo.commit();
+      remoteInfoRepo.commit();
+
+      expect(entry.set).toHaveBeenCalledTimes(1);
     });
   });
 });

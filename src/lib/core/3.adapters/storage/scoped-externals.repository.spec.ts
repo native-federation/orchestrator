@@ -17,13 +17,18 @@ describe('createScopedExternalsRepository', () => {
       clearStorage: false,
     };
     const externalsRepo = createScopedExternalsRepository(mockConfig);
-    return { mockStorage, externalsRepo };
+    const entry = mockStorageEntry.mock.results[0]!.value;
+    return { mockStorage, externalsRepo, entry };
   };
 
   describe('initialization', () => {
-    it('should initialize the entry with the first value', () => {
-      const { mockStorage } = setupWithCache(undefined);
-      expect(mockStorage['scoped-externals']).toEqual({});
+    it('should not write to storage before a mutation is committed', () => {
+      const { mockStorage, externalsRepo } = setupWithCache(undefined);
+
+      externalsRepo.commit();
+
+      expect(mockStorage['scoped-externals']).toBeUndefined();
+      expect(externalsRepo.getAll()).toEqual({});
     });
 
     it('should reset cache when in config', () => {
@@ -252,6 +257,50 @@ describe('createScopedExternalsRepository', () => {
       const { externalsRepo } = setupWithCache({});
       const result = externalsRepo.remove('scope-a');
       expect(result).toBe(externalsRepo);
+    });
+  });
+
+  describe('commit', () => {
+    it('should persist the cache after a mutation', () => {
+      const { entry, externalsRepo } = setupWithCache({});
+
+      externalsRepo.addExternal('team/mfe1', 'dep-x', mockVersion.scoped('9.9.9', 'dep-x'));
+      externalsRepo.commit();
+
+      expect(entry.set).toHaveBeenCalledTimes(1);
+    });
+
+    it('should not persist the cache when nothing changed', () => {
+      const { entry, externalsRepo } = setupWithCache({
+        ['team/mfe1']: { ...mockExternal_E() },
+      });
+
+      externalsRepo.tryGet('team/mfe1');
+      externalsRepo.getAll();
+      externalsRepo.commit();
+
+      expect(entry.set).not.toHaveBeenCalled();
+    });
+
+    it('should not persist the cache when removing an unknown remote', () => {
+      const { entry, externalsRepo } = setupWithCache({
+        ['team/mfe1']: { ...mockExternal_E() },
+      });
+
+      externalsRepo.remove('team/mfe2');
+      externalsRepo.commit();
+
+      expect(entry.set).not.toHaveBeenCalled();
+    });
+
+    it('should not persist the cache twice without a new mutation', () => {
+      const { entry, externalsRepo } = setupWithCache({});
+
+      externalsRepo.addExternal('team/mfe1', 'dep-x', mockVersion.scoped('9.9.9', 'dep-x'));
+      externalsRepo.commit();
+      externalsRepo.commit();
+
+      expect(entry.set).toHaveBeenCalledTimes(1);
     });
   });
 });

@@ -26,13 +26,12 @@ describe('sessionStorageEntry', () => {
     vi.clearAllMocks();
   });
 
-  it('Create entry with default value on init', () => {
-    storageEntryHandler('remotes', { 'team/mfe1': mockRemoteInfo_MFE1() });
+  it('Does not write to storage on init', () => {
+    const entry = storageEntryHandler('remotes', { 'team/mfe1': mockRemoteInfo_MFE1() });
 
-    expect(mockStorage[`${'namespace'}.remotes`]).toBeDefined();
-    expect(JSON.parse(mockStorage[`${'namespace'}.remotes`])).toEqual({
-      'team/mfe1': mockRemoteInfo_MFE1(),
-    });
+    expect(mockStorage[`${'namespace'}.remotes`]).toBeUndefined();
+    expect(sessionStorage.setItem).not.toHaveBeenCalled();
+    expect(entry.get()).toEqual({ 'team/mfe1': mockRemoteInfo_MFE1() });
   });
 
   describe('get', () => {

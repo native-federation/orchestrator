@@ -11,14 +11,20 @@ const createScopedExternalsRepository = (config: StorageConfig): ForScopedExtern
 
   const _cache: ScopedExternals = STORAGE.get() ?? {};
 
+  let _dirty = false;
+
   return {
     addExternal: function (remoteName: RemoteName, external: string, version: ScopedVersion) {
       if (!_cache[remoteName]) _cache[remoteName] = {};
       _cache[remoteName][external] = version;
+      _dirty = true;
       return this;
     },
     remove: function (remoteName: RemoteName) {
-      delete _cache[remoteName];
+      if (remoteName in _cache) {
+        delete _cache[remoteName];
+        _dirty = true;
+      }
       return this;
     },
     getAll: function () {
@@ -28,7 +34,9 @@ const createScopedExternalsRepository = (config: StorageConfig): ForScopedExtern
       return Optional.of(_cache[remoteName]);
     },
     commit: function () {
+      if (!_dirty) return this;
       STORAGE.set(_cache);
+      _dirty = false;
       return this;
     },
   };

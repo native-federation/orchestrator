@@ -11,8 +11,17 @@ describe('globalThisStorageEntry', () => {
     storageEntryHandler = globalThisStorageEntry('namespace');
   });
 
-  it('creates namespace if it does not exist', () => {
-    storageEntryHandler('remotes', { 'team/mfe1': mockRemoteInfo_MFE1() });
+  it('creates an empty namespace if it does not exist', () => {
+    const entry = storageEntryHandler('remotes', { 'team/mfe1': mockRemoteInfo_MFE1() });
+
+    expect((globalThis as any)['namespace']).toEqual({});
+    expect(entry.get()).toEqual({ 'team/mfe1': mockRemoteInfo_MFE1() });
+  });
+
+  it('only writes the key once a value is set', () => {
+    const entry = storageEntryHandler('remotes', { 'team/mfe1': mockRemoteInfo_MFE1() });
+
+    entry.set({ 'team/mfe1': mockRemoteInfo_MFE1() });
 
     expect((globalThis as any)['namespace']).toEqual({
       remotes: { 'team/mfe1': mockRemoteInfo_MFE1() },

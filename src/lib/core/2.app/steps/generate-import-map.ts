@@ -118,6 +118,7 @@ export function createGenerateImportMap(
     for (const [externalName, external] of Object.entries(sharedExternals)) {
       let override: SharedVersion | undefined | 'NOT_AVAILABLE' = undefined;
       let overrideScope: string | undefined = undefined;
+      const cachedBefore = cachedFingerprint(external);
 
       for (const version of external.versions) {
         if (version.action === 'scope') {
@@ -190,8 +191,14 @@ export function createGenerateImportMap(
           addIntegrity(importMap, m.url, m.name, m.file);
         }
       }
-      ports.sharedExternalsRepo.addOrUpdate(externalName, external, shareScope);
+      if (cachedFingerprint(external) !== cachedBefore) {
+        ports.sharedExternalsRepo.addOrUpdate(externalName, external, shareScope);
+      }
     }
+  }
+
+  function cachedFingerprint(external: SharedExternal): string {
+    return external.versions.map(v => v.remotes.map(r => (r.cached ? 1 : 0)).join('')).join('|');
   }
 
   function findOverride(
@@ -244,6 +251,8 @@ export function createGenerateImportMap(
     const sharedExternals = ports.sharedExternalsRepo.getFromScope();
 
     for (const [externalName, external] of Object.entries(sharedExternals)) {
+      const cachedBefore = cachedFingerprint(external);
+
       for (const version of external.versions) {
         if (version.action === 'skip') continue;
         if (version.action === 'scope') {
@@ -284,7 +293,9 @@ export function createGenerateImportMap(
         if (version.action !== 'skip') continue;
         selfFillUncovered(importMap, chunkBundles, externalName, version.remotes);
       }
-      ports.sharedExternalsRepo.addOrUpdate(externalName, external);
+      if (cachedFingerprint(external) !== cachedBefore) {
+        ports.sharedExternalsRepo.addOrUpdate(externalName, external);
+      }
     }
 
     return importMap;

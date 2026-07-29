@@ -14,13 +14,18 @@ describe('createChunkRepository', () => {
       clearStorage: false,
     };
     const chunksRepo = createChunkRepository(mockConfig);
-    return { mockStorage, chunksRepo };
+    const entry = mockStorageEntry.mock.results[0]!.value;
+    return { mockStorage, chunksRepo, entry };
   };
 
   describe('initialization', () => {
-    it('should initialize the entry with the first value', () => {
-      const { mockStorage } = setupWithCache(undefined);
-      expect(mockStorage['shared-chunks']).toEqual({});
+    it('should not write to storage before a mutation is committed', () => {
+      const { mockStorage, chunksRepo } = setupWithCache(undefined);
+
+      chunksRepo.commit();
+
+      expect(mockStorage['shared-chunks']).toBeUndefined();
+      expect(chunksRepo.tryGet('team/mfe1', 'shared-browser').isPresent()).toBe(false);
     });
 
     it('should reset cache when in config', () => {
@@ -132,6 +137,38 @@ describe('createChunkRepository', () => {
       const result = chunksRepo.addOrReplace('team/mfe1', 'shared-browser', ['chunk-DEF.js']);
 
       expect(result).toBe(chunksRepo);
+    });
+  });
+
+  describe('commit', () => {
+    it('should persist the cache after a mutation', () => {
+      const { entry, chunksRepo } = setupWithCache({});
+
+      chunksRepo.addOrReplace('team/mfe1', 'shared-browser', ['chunk-ABC.js']);
+      chunksRepo.commit();
+
+      expect(entry.set).toHaveBeenCalledTimes(1);
+    });
+
+    it('should not persist the cache when nothing changed', () => {
+      const { entry, chunksRepo } = setupWithCache({
+        'team/mfe1': { 'shared-browser': ['chunk-ABC.js'] },
+      });
+
+      chunksRepo.tryGet('team/mfe1', 'shared-browser');
+      chunksRepo.commit();
+
+      expect(entry.set).not.toHaveBeenCalled();
+    });
+
+    it('should not persist the cache twice without a new mutation', () => {
+      const { entry, chunksRepo } = setupWithCache({});
+
+      chunksRepo.addOrReplace('team/mfe1', 'shared-browser', ['chunk-ABC.js']);
+      chunksRepo.commit();
+      chunksRepo.commit();
+
+      expect(entry.set).toHaveBeenCalledTimes(1);
     });
   });
 

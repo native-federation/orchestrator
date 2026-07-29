@@ -16,10 +16,12 @@ const createSharedExternalsRepository = (config: StorageConfig): ForSharedExtern
 
   if (config.clearStorage) STORAGE.clear();
 
-  const _cache: SharedExternals = STORAGE.get()!;
+  const _cache: SharedExternals = STORAGE.get() ?? { [GLOBAL_SCOPE]: {} };
 
   // Not persisted: re-derived from the freshly processed entries on every init, before pooling runs.
   let _sawPoolTag = false;
+
+  let _dirty = false;
 
   return {
     markPoolTagPresent: function () {
@@ -34,6 +36,7 @@ const createSharedExternalsRepository = (config: StorageConfig): ForSharedExtern
     addOrUpdate: function (externalName: string, external: SharedExternal, shareScope?: string) {
       if (!_cache[shareScope ?? GLOBAL_SCOPE]) _cache[shareScope ?? GLOBAL_SCOPE] = {};
       _cache[shareScope ?? GLOBAL_SCOPE]![externalName] = external;
+      _dirty = true;
       return this;
     },
     getScopes: function (o = { includeGlobal: true }) {
@@ -50,6 +53,7 @@ const createSharedExternalsRepository = (config: StorageConfig): ForSharedExtern
             const versionRemoteIDX = version.remotes.findIndex(r => r.name === remoteName);
             if (~versionRemoteIDX) {
               version.remotes.splice(versionRemoteIDX, 1);
+              _dirty = true;
             }
 
             if (version.remotes.length === 0) removeVersionIdx.push(i);
@@ -83,7 +87,9 @@ const createSharedExternalsRepository = (config: StorageConfig): ForSharedExtern
       return Optional.of(_cache[shareScope ?? GLOBAL_SCOPE]?.[external]);
     },
     commit: function () {
+      if (!_dirty) return this;
       STORAGE.set(_cache);
+      _dirty = false;
       return this;
     },
   };
