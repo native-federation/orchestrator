@@ -159,12 +159,18 @@ describe('createDetermineSharedExternals', () => {
         );
       });
 
+      // Both versions carry two copies, so the two candidates cost the same two extra downloads and
+      // the newest wins the tie. That keeps 2.1.1 the redirected version, which is what this
+      // describe is about — with one copy on 2.2.2, 2.1.1 would simply be the cheaper winner and
+      // nothing would be redirected onto a tag a non-basis remote pinned.
+      const WIDE = ['team/mfe1', 'team/mfe4'];
+
       const withStrictSibling = (remotes: Record<string, { strictVersion: boolean }>) =>
         vi.fn(() => ({
           'dep-b': mockExternal_B({
             dirty: true,
             versions: [
-              mockVersion_B.v2_2_2({ remotes: ['team/mfe1'], action: 'skip' }),
+              mockVersion_B.v2_2_2({ remotes: WIDE, action: 'skip' }),
               mockVersion_B.v2_1_1({ remotes, action: 'skip' }),
             ],
           }),
@@ -188,7 +194,7 @@ describe('createDetermineSharedExternals', () => {
           mockExternal_B({
             dirty: false,
             versions: [
-              mockVersion_B.v2_2_2({ remotes: ['team/mfe1'], action: 'share' }),
+              mockVersion_B.v2_2_2({ remotes: WIDE, action: 'share' }),
               mockVersion_B.v2_1_1({ remotes, action: 'scope' }),
             ],
           }),

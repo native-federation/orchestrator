@@ -127,14 +127,23 @@ export function createDetermineSharedExternals(
       // find version with least extra downloads, sorted by SEMVER version (O^2 complexity)
       let leastExtraDownloads = Number.MAX_VALUE;
       let leastTears = Number.MAX_VALUE;
+      // A scoped version serves every remote from its own build, so it costs one download per
+      // uncached copy — not one per version. Precomputed: the selection loop is O(versions²).
+      const scopeCost = new Map<SharedVersion, number>(
+        external.versions.map(v => [v, v.remotes.reduce((n, r) => n + (r.cached ? 0 : 1), 0)])
+      );
       external.versions.forEach(vA => {
-        // A version costs an extra download when one of its remotes pinned a range that vA's
+        // A version costs extra downloads when one of its remotes pinned a range that vA's
         // tag does not satisfy and has not been downloaded yet.
-        const extraDownloads = external.versions.filter(vB =>
-          demands(vB).some(
-            d => !d.cached && d.strictVersion && !isCompatible(vA.tag, d.requiredVersion)
-          )
-        ).length;
+        const extraDownloads = external.versions.reduce(
+          (sum, vB) =>
+            demands(vB).some(
+              d => !d.cached && d.strictVersion && !isCompatible(vA.tag, d.requiredVersion)
+            )
+              ? sum + scopeCost.get(vB)!
+              : sum,
+          0
+        );
         // Tiebreak equal-download candidates toward the one that leaves fewest entrypoints
         // uncovered across the versions it would skip (fewest tears / scope-promotions).
         if (extraDownloads < leastExtraDownloads) {
