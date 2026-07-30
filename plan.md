@@ -13,9 +13,10 @@ verify commands, then tick its box and append a one-line result under it. Stop a
 - Commit per iteration (`fix(63): …` / `refactor(63): …`), no push unless asked.
 - `research.md` is the spec. If reality contradicts it, update `research.md` first, then continue.
 
-> **SPEC = `research.md` §15** (family-instance model, simplified 2026-07-29). §4–§5, §7 and §12.3 are
-> superseded reasoning trail — **do not implement from them**. All design questions are closed; the
-> decisions are listed under "Hard constraints" below.
+> **SPEC = `research.md`'s header box** (SPEC AS BUILT, 2026-07-30): no election, per-remote agreement
+> gate at **minor** granularity (§5.2 + §12.3 + §14's test B). §13–§15's *election* is superseded —
+> **do not implement from it**. §4's I1/I2/I3 describe what is built, with agreement read at minor
+> granularity rather than exactly.
 
 ## Status
 
@@ -23,8 +24,8 @@ verify commands, then tick its box and append a one-line result under it. Stop a
 - [x] 1 — Extract `applyWinner` (pure refactor)
 - [x] 2 — Family-instance primitives (pure, unit-tested)
 - [x] 3 — No-op-pool early-out (W1) + log levels
-- [ ] 4 — Election: host-pinned, remotes-served objective
-- [ ] 5 — Per-remote all-skip-or-all-scope + fixed point
+- [x] 4 — Election (BUILT, MEASURED, REVERTED — see below)
+- [x] 5 — Per-remote agreement gate (minor granularity) + fixed point
 - [ ] 6 — Dynamic-init mirror (additive only)
 - [ ] 7 — Warm-init dirty-gated skip (W2 — 45% of warm init)
 - [ ] 8 — Regression + fixture specs
@@ -38,22 +39,16 @@ build, i.e. its full set of `(member → tag)`, internally consistent *by constr
 remote's declared **`requiredVersion`** — never a tag granularity, and there is **no tag-distance concept
 anywhere** in the implementation.
 
-1. **Host wins, always** — priority #1, above pooling. Host tags are pinned *before* election and never
-   re-pointed by election or extension.
+1. **Host wins, always** — priority #1, above pooling. Nothing is ever re-pointed, so this holds by
+   construction: in Case 2 the host keeps its pin and the remote that would mix builds gives way.
 2. **Membership** unchanged: `pool` tag / npm scope → connected components (`pool-graph.ts`).
-3. **Election objective**: maximise **remotes that can dedup entirely onto the instance**. This is the only
-   scoring term — never raw instance size, which elects the Angular-21 instance on the real capture and
-   islands 3 remotes (46 downloads vs 17). Tiebreaks, in order: fewer chosen instances → instance size →
-   host → declaring remote → name.
-4. **Single-provider members are assigned directly**, never scored (mandatory: it is the difference between
-   4.4 ms and 262 ms at R=50/M=80).
-5. **Acceptance = `requiredVersion` only.** One test — `isCompatible(tag, requiredVersion) ||
-   !strictVersion` (§15.1 rule 4, qualified 2026-07-30). A loose remote accepts anything, because
-   `applyWinner` already only scopes a rejecting version when some remote objected **strictly**;
-   testing the range alone would make pooling stricter than the resolver it defers to. Binds in
-   iteration 5 (`canTakeAllFrom`) and iteration 6 (dynamic).
-6. **All-skip or all-scope** per remote: a remote that cannot take every member it consumes from the chosen
-   instances scopes its **whole** family from its own build. No partial mixing.
+3. **No election.** Winners are determine's; pooling only decides who may dedup onto them. Reverted
+   2026-07-30 after measurement — see §"SPEC AS BUILT" and the iteration 4+5 write-up.
+4. **Agreement is the test, at minor granularity.** Two builds agree when every member they both ship
+   sits on the same minor line. `22.0.6` beside `22.0.8` is fine; `22.0.5` beside `22.1.0` is not. No
+   `requiredVersion` acceptance test and no `versionCheck` dependency in pooling.
+5. **A remote may draw on several builds** as long as they agree — patch drift inside a family is normal
+   (`debug`). Disagreement islands it across the **whole** family. No partial mixing.
 7. **`determine`'s verdicts are unchanged** (§15.3): the strict-incompatibility gate (`islandedRemotes`,
    `action === 'scope'`) stays **outermost and first**, and candidate instances are restricted to
    `share`/`skip` versions — a `scope` version is never promoted.
@@ -304,187 +299,42 @@ Among them, the F4 test that asserted a scoped-only warning for a member whose p
 
 ---
 
-## 4 — Election: host-pinned, remotes-served objective
+## 4 + 5 — Agreement gate at minor granularity (election reverted)
 
-**Read:** `research.md` §13.2 steps 1–3, §13.4, §15.1 rules 1/3/4, §15.2, §15.3, §8.
+**Read:** `research.md` header box (SPEC AS BUILT, 2026-07-30), §5.2, §12.3, §14.
 
-**Files:** `pool-shared-externals.ts`, `for-pooling-shared-externals.port.ts` if the signature moves,
-`src/lib/core/5.di/init.factory.ts:27`, `src/lib/testing/adapters.mock.ts` if needed.
+**Decision (Auke, 2026-07-30): revert the election, fix Case 1 with tag distance.** Election was built,
+measured and reverted in three commits (`efc5e70`, `fbfe4c9`, `4a4a4b7`, reverted here). What it cost and
+what it bought is recorded in `research.md`'s header box; the short version is 3-4x the pooling step on
+every init for a change of outcome in exactly one synthetic fixture.
 
-**Steps**
-1. Add `versionCheck` to the step's `ports` and thread determine's **memoized** `isCompatible` through —
-   do not build a second memo (§8).
-2. **Early-out:** if every member's `share` version already resolves to one instance, skip election.
-3. Seed `hostPinnedTags` — those members are chosen and immovable before anything is scored.
-4. Assign **single-provider** members directly (§13.2 step 2).
-5. Elect the primary instance among candidates from `share`/`skip` versions only: maximise remotes that can
-   dedup **entirely** onto it (via the acceptance table), tiebreak fewer chosen instances → size → host →
-   declaring remote → name.
-6. **Extension pass** for contested members the primary does not ship, preferring the instance that unlocks
-   the most remotes.
-7. Re-point each chosen member's winner to the chosen instance's tag, with that build **first in `remotes`**
-   (the serving basis, per PR #62 — `remotes[0]` is a basis, never a demand), then re-derive verdicts via
-   `applyWinner` from iteration 1. `versionDemands` must keep seeing the whole version.
+**What ships:** `scopeRemotesThatMixBuilds` in `pool-shared-externals.ts` plus four helpers in
+`family-instance.ts` (`buildInstances`, `consumedMembers`, `servingBuilds`, `minorLine`,
+`findDisagreement`). Per remote: the builds it draws on are whoever serves each member it consumes, or
+itself where nobody does. One build - fine. Several - they must agree, i.e. every member two of them both
+ship sits on the same minor line. Disagreement islands the remote across the whole family. The gate
+iterates to a fixed point, since islanding removes a serving build and can leave a member unserved.
 
-**Verify:** repro **Case 1** flips — `core` + `router` both shared from mfe-a, mfe-b scoping `core` · repro
-**Case 2 unchanged and still mixed** (§15.6 — this is expected, not a failure) · the 6 existing integration
-tests unchanged · pooling + determine suites green · types clean · `npm run lint`.
-**Done when:** Case 1 coherent, capture down to 17 downloads, no existing expectation changed, DI/mocks
-updated.
+**Result (2026-07-30):**
+- **Both repro arms now assert the fix.** Case 1: `core` stays shared for mfe-b, mfe-a serves core+router
+  from its own build, `router` is no longer shared. Case 2: the **host keeps its pin** and mfe-a gives way
+  — so §15.6's documented limitation is gone, and host precedence never had to bend.
+- **`benchmark/` is byte-identical to pre-fix behaviour** on all five portfolios (36/45/64/36/36
+  downloads, same islanded remotes): `22.0.6` beside `22.0.8` is one minor line, and the cross-major
+  Angular-21 remotes were already islanded.
+- **Cost +0.05-0.12 ms** on the pooling step (captured 7 cold 0.465-0.540 ms vs 0.34-0.42 at iteration 3;
+  election was 1.43-1.91). No `versionCheck` port, no acceptance table, no scoring — the gate compares
+  tags only, and it early-outs before touching instances when a single build serves every member.
+- Dropped with election: `elect-instance.ts`, the acceptance table, `canTakeAllFrom`,
+  `singleProviderMembers`, `hostPinnedTags`, `packageOf`/`packageGroups`, `splitObjectors`, the shared
+  `isCompatible` memo plumbing in `init.factory.ts`, and pooling's third constructor argument. Iteration
+  1's `applyWinner` extraction stays (determine uses it; it is behaviour-preserving either way).
+- 8 new tests across `family-instance.spec.ts` (serving builds, `minorLine`, `findDisagreement`) and
+  `pool-shared-externals.spec.ts` (minor-line island with its warning, patch drift allowed and logged at
+  `debug`, two-round fixed point). **801/801**, coverage 96.17/90.36/95.53/96.8, types/lint/knip clean.
 
-### IN PROGRESS (2026-07-30) — implemented, one blocking measurement
-
-Landed: shared `createIsCompatibleMemo` (one memo for determine + pooling, wired in `init.factory.ts`);
-`versionCheck` on the step's ports; `elect-instance.ts` (`currentSharedTags`, `coveredBySingleInstance`,
-`electInstances`); re-pointing through `applyPooledWinner` (a `createApplyWinner` with
-`strictExternalCompatibility` forced off, so §11.5's "no throw for an acceptance-driven scope" holds and
-the pool-level gate keeps deciding); post-election re-run of `islandedRemotes`; W1 extended to
-"nothing elected **and** nobody islanded".
-
-**Case 1 flips as specified** (repro arm inverted), Case 2 unchanged, 6 integration tests untouched,
-**802/802**, types/lint clean.
-
-**Correction to the scoring, worth keeping in mind:** the objective must be *coverage plus acceptance* —
-"does this instance alone serve every member the remote consumes" — not "is some trial assignment
-acceptable to it". The first draft used the latter and **re-elected the split in Case 1** (mfe-b's
-instance scored 2 remotes served because mfe-a's ranges accept a mixed draw). `servesAlone` now models
-rule 3 literally; the mixed-tolerant count is used only by the extension pass, where F3 applies.
-
-**Also needed, and a keeper regardless of the decision below:** re-pointing must **split a version at
-remote granularity** before applying the winner. A verdict is per version but §15's acceptance test is
-per remote, and a version's remotes disagree (`requiredVersion`/`strictVersion` are per build). Without
-the split, one strict co-tenant scopes the whole version and islands every remote sharing its tag —
-measured on captured 7 + `eleven`: **5 remotes islanded and 70 downloads, versus 2 and 43 with it**.
-`splitObjectors` does it, reusing the same-tag `share`/`scope` shape the resolver already produces
-(`findVersionForTag`, `scopeTornRemotes`).
-
-**BLOCKER — election is neutral-to-worse on every real portfolio in `benchmark/`.** Measured with
-`<scratchpad>/election-probe.spec.ts.keep`, `@angular` pool, downloads = shared members + self-served
-copies. Baseline is **iteration 3 behaviour** (election short-circuited), not `determine`:
-
-| portfolio | today | with election |
-| --- | --- | --- |
-| captured 7 | 36 dl, islands `legacy-overview` | **36, same** |
-| 7 + `nine` (the Case 1 shape) | 36, 1 island | **36, same** |
-| 7 + `eight` (Ng21 sibling) | 64, 5 islands | **64, same** |
-| all 11 | 45, 2 islands | **52, 3 islands** (+`data-mutations`) |
-| 7 + `eleven` (older superset) | 36, 1 island | **43, 2 islands** (+`data-mutations`) |
-
-And the qualitative failure is worse than the arithmetic. On 7 + `eleven` election picks `team/shell`'s
-22.0.6 superset and re-points `core/common/forms/elements/platform-browser/router` 22.0.8 → 22.0.6 — but
-`shell` does not ship the sub-entrypoint members, so the extension pass leaves
-`@angular/core/primitives/*` and `@angular/common/http` at **22.0.8**. The elected shared set therefore
-holds `@angular/core@22.0.6` beside `@angular/core/primitives/signals@22.0.8`: two builds of *one
-package*. That is less coherent than what it replaced, and it islands the strictest consumer.
-
-Cause: with test B dropped (§15 vs §14), the only lever that fixes Case 1 is the "fewer chosen
-instances" tiebreak, and that lever cannot tell the two shapes apart — §14.1 recorded that only tag
-distance can (22.0.5 vs 22.1.0 crosses a minor line; 22.0.6 vs 22.0.8 does not).
-
-Also: **§13.3/§14.1/§15's "capture 29 → 17 downloads" is not reproducible** against the real pipeline.
-The capture's `@angular` pool is 24 members, and iteration 3 already yields `majors={22}` at 36
-downloads; election moves nothing there. Those tables came from a prototype outside `src`, so the
-measured-outcome rows in §13.3/§14.1/§15 should be treated as unverified until re-measured here.
-
-### RESOLVED — package-coherence guard (2026-07-30, Auke asked for it to be implemented)
-
-New rule in `elect-instance.ts`: **an instance takes a package whole or not at all.** `packageOf`
-(`@angular/core/primitives/di` → `@angular/core`) groups the live members; `takes()` requires the offer
-to ship every live member of a group at tags agreeing with anything already pinned; `servesAlone`,
-the trial fill, the commit and the extension's candidate filter all go through it. Package boundaries
-are not in `DenseSharedInfo`, so this is the naming convention — but it can only ever *restrict*
-election, so a mis-grouping costs a missed optimisation, never a broken import map.
-
-Measured (probe `<scratchpad>/election-probe.spec.ts.keep`, `@angular` pool; "split pkgs" = packages
-whose shared members sit at more than one tag):
-
-| portfolio | today (it. 3) | election, no guard | election + guard |
-| --- | --- | --- | --- |
-| captured 7 | 36 dl, 1 island | 36, 1 | **36, 1** |
-| all 11 | 45, 2 | 52, 3, split `@angular/core`+`common` | **45, 2** |
-| 7 + `eight` | 64, 5 | 64, 5 | **64, 5** |
-| 7 + `eleven` | 36, 1 | 43, 2, split `@angular/core`+`common` | **36, 1** |
-| 7 + `nine` | 36, 1 | 36, 1 | **36, 1** |
-| repro Case 1 | broken | fixed | **fixed** |
-
-With the guard, election **does not fire on any real portfolio** (`elected: no` everywhere) — the two
-where it did fire without it are exactly the two it damaged. So the shipped behaviour is: identical to
-iteration 3 on the whole benchmark set, plus Case 1 fixed. Note `determine` leaves cross-major package
-splits in every portfolio (`@angular/forms{21.2.18,22.0.8}`, `platform-browser{21.2.18,22.0.8}`), and
-pooling clears all of them — that is the islanding gate, not election.
-
-13 tests added in `elect-instance.spec.ts` (Case 1 preference, Case 5 containment, Point 4 collapse,
-host pin immovable, package guard, `packageOf`, `packageGroups`, the coherence early-out).
-**815/815**, coverage 94.8/88.19/95.08/95.98, types/lint clean.
-
-**Still open:** the distance question. The guard removes the observed over-reach but is not a
-discriminator — if an instance *did* cover every entrypoint, election would again prefer it and island
-the strict consumer. That is §14's test B, which §15 dropped.
-
----
-
-## 5 — Per-remote all-skip-or-all-scope + fixed point
-
-**Read:** `research.md` §13.1 F2, §13.2 steps 4–5, §15.1 rule 5, §15.4.
-
-**Files:** `pool-shared-externals.ts` (+ specs).
-
-**Steps**
-1. After election, for each remote **not** already islanded by gate 1: if it cannot take every member it
-   consumes from the chosen instances (`canTakeAllFrom`), scope its **whole** family from its own build.
-2. A member whose only remaining consumers are scoped is not shared at all (scope-only).
-   `rebuildMember`'s existing "winner islanded away" branch (`:132-136`) already handles the per-member
-   output.
-3. **Fixed point** (§15.4): repeat only while the previous round scoped someone.
-4. `debug` when a remote ends up drawing from >1 instance; `warn` when it is islanded.
-
-**Verify:** capture — `form-overview` islanded, shared set Angular-22 only, **17** downloads · Point 4 fixture
-2 downloads / 0 islands · patch+ragged shapes island nobody · the 6 integration tests unchanged · types clean.
-**Done when:** no remote ever mixes instances except the documented Case 2 shape, and the fixed point
-terminates.
-
-### IN PROGRESS (2026-07-30) — behaviour done, perf gate failing
-
-Landed in `pool-shared-externals.ts`: `scopeRemotesThatCannotFollow` (all-skip-or-all-scope, fixed point,
-re-entered only after a round that scoped someone), `servedTags` (a member whose share version lost every
-non-islanded copy counts as unserved), `IslandCause.kind` so the warning distinguishes
-"incompatible" (determine's `scope`) from "cannot follow" (§15 acceptance), and
-`traceMultiInstanceDraws` — **`debug`, never `warn`** (§15.1 rule 6), gated on `config.log.level` so the
-walk is not paid at default level.
-
-**Rigorous early-out, not a heuristic:** with nobody islanded and every member shared, no remote can fail
-the acceptance test — `applyWinner` only leaves a version `skip` when each of its remotes either accepts
-the tag or is not strict, which is exactly this test. So the healthy path builds no acceptance table.
-
-Outcome on `benchmark/` is **unchanged from iteration 4** on all five portfolios (nobody extra islanded);
-the pass fires only in the synthetic shapes. 4 new tests: family-wide scope when a consumed member has no
-shared build, the two-round fixed point, `debug`-not-`warn` for a multi-build draw, and the reworked
-"asks each compatibility question once" (replacing "never calls `isCompatible`", which §8 deliberately
-changes). **818/818**, coverage 94.73/88.2/95.32/95.98, types/lint clean.
-
-**BLOCKER — the pooling step is 3-4x slower and the cost buys nothing on real portfolios.** Three runs
-each, cold, `benchmark/`:
-
-| portfolio | iteration 3 | iteration 5 |
-| --- | --- | --- |
-| coherent 6 | 0.13–0.17 ms | **0.38–0.67 ms** |
-| captured 7 | 0.34–0.42 ms | **1.43–1.91 ms** |
-
-Attribution by disabling each part in place: **election ~0.4 ms (coherent) / ~0.5–0.7 ms (captured)**, the
-per-remote pass ~0.1 / ~0.35 ms. Against §9.1's baseline the whole init roughly doubles (2.06 ms cold, of
-which pooling was 0.51).
-
-Three optimisation rounds are already in: the shared `poolContext` (instances / consumed / acceptance built
-at most once per pool, invalidated only after a scoping round), `takeable` precomputed per instance instead
-of a package walk per consumed member per candidate, and two gates before scoring —
-`remotesServedByOneBuild === instances.size` (objective already maxed) and `bestPossibleServed <= servedNow`
-(a coverage-only upper bound on the objective, no compatibility calls). None of them skip election on the
-real portfolios: `bestPossibleServed` genuinely exceeds `servedNow` there, so election scores in full and
-then — correctly, thanks to the package guard — commits nothing.
-
-So the measured trade is: **election costs 3-4x the pooling step on every init and changes the outcome only
-in the synthetic Case 1 shape.** That is a live input to the still-open distance question — a narrower fix
-for Case 1 may be worth more than the whole election machinery. Not ticking this box until that is decided.
+**Note for iteration 6:** the dynamic path should mirror *this* gate (§7's original wording — committed
+serving builds plus the loaded remote's own build must agree pairwise), not §15.5's acceptance test.
 
 ---
 

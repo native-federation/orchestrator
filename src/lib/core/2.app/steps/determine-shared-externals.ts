@@ -5,18 +5,11 @@ import { NFError } from 'lib/core/native-federation.error';
 import type { DrivingContract } from '../driving-ports/driving.contract';
 import type { LoggingConfig } from '../config/log.contract';
 import type { ModeConfig } from '../config/mode.contract';
-import {
-  createApplyWinner,
-  createIsCompatibleMemo,
-  type IsCompatible,
-  versionAcceptance,
-} from './apply-winner';
+import { createApplyWinner, type IsCompatible, versionAcceptance } from './apply-winner';
 
 export function createDetermineSharedExternals(
   config: LoggingConfig & ModeConfig,
-  ports: Pick<DrivingContract, 'versionCheck' | 'sharedExternalsRepo'>,
-  // Shared with pooling when the DI factory wires both steps, so the same question is asked once.
-  isCompatible: IsCompatible = createIsCompatibleMemo(ports.versionCheck)
+  ports: Pick<DrivingContract, 'versionCheck' | 'sharedExternalsRepo'>
 ): ForDeterminingSharedExternals {
   const applyWinner = createApplyWinner(config);
 
@@ -40,6 +33,20 @@ export function createDetermineSharedExternals(
    * @returns
    */
   return () => {
+    // The selection loop asks this O(versions² × demands) times but has only
+    // (candidate tag × distinct requiredVersion) distinct questions to ask. Scoped to one resolve,
+    // so the map needs no bound.
+    const memo = new Map<string, boolean>();
+    const isCompatible: IsCompatible = (tag, requiredVersion) => {
+      const key = `${tag}|${requiredVersion}`;
+      let hit = memo.get(key);
+      if (hit === undefined) {
+        hit = ports.versionCheck.isCompatible(tag, requiredVersion);
+        memo.set(key, hit);
+      }
+      return hit;
+    };
+
     for (const shareScope of ports.sharedExternalsRepo.getScopes()) {
       const sharedExternals = ports.sharedExternalsRepo.getFromScope(shareScope);
 

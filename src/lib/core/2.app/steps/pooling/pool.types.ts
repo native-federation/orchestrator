@@ -12,9 +12,3 @@ export type PoolMember = {
 export type FamilyInstance = Map<ExternalName, VersionName>;
 
 export type FamilyInstances = Map<RemoteName, FamilyInstance>;
-
-/** remote -> member -> the offered tags that remote accepts. */
-export type AcceptanceTable = Map<RemoteName, Map<ExternalName, Set<VersionName>>>;
-
-/** member -> the tag the pool serves it at; absent when no chosen instance provides it. */
-export type ChosenTags = Map<ExternalName, VersionName>;

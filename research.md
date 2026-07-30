@@ -1,5 +1,33 @@
 # Pooling: split monorepo families (regression from #56)
 
+> ## SPEC AS BUILT (Auke, 2026-07-30): no election, agreement gate at minor granularity
+>
+> **§15's election is reverted.** Measured on `benchmark/` it changed the outcome of exactly one shape —
+> synthetic Case 1 — while costing **3–4x the pooling step on every init** (captured 7: 1.43–1.91 ms
+> against 0.34–0.42 ms), and on two portfolios it made things actively worse until a package-coherence
+> guard was added to hold it back. Its whole benefit was reachable far more cheaply.
+>
+> **What ships instead is §5.2's per-remote agreement gate with §12.3's minor-line granularity — i.e.
+> §14's test B, revived as the *only* coherence test.** A remote may draw on several builds (patch drift
+> inside a family is normal and safe), but not on builds that **disagree**: every member two of them both
+> ship must sit on the same minor line. A remote whose builds disagree serves its whole family from its
+> own build. Islanding is monotone, so the gate iterates to a fixed point.
+>
+> Consequences, all measured:
+> - **Case 1 is fixed**, and so is **Case 2** — §15.6's "accepted limitation" no longer applies, and
+>   **host precedence is untouched**: in Case 2 the host keeps its pin and `mfe-a` gives way.
+> - **Every portfolio in `benchmark/` is byte-identical to pre-fix behaviour** (36/45/64/36/36 downloads,
+>   same islanded remotes), because `22.0.6` beside `22.0.8` is the same minor line while the cross-major
+>   Angular-21 remotes were already islanded.
+> - Cost: **+0.05–0.12 ms** on the pooling step (captured 7 cold 0.465–0.540 ms), no `versionCheck`
+>   dependency, no acceptance table, no scoring — the gate compares tags only, as §5.2 said it would.
+>
+> So §13–§15's family-instance *election* is superseded reasoning; §13.1's F1/F2 survive in the form
+> "one build, or your own", and §4's I1/I2/I3 are the closest description of what is implemented, with
+> agreement read at minor granularity rather than exactly. §15.1 rule 4's `strictVersion` qualification
+> and §15.3's islanded-instance clause still apply to the primitives; rules 1 and 3 (host seeding,
+> election objective) are moot — nothing is ever re-pointed.
+
 Tracking issue: [#63 "bug: pooling should be on exact versions"](https://github.com/native-federation/orchestrator/issues/63) · branch `issues/63`
 Status: **designed, measured, not implemented** — see `plan.md`. **§15 is the spec**; §13 defines the
 model it uses, §14 records why the cross-instance guard was considered and rejected. §4–§5, §7 and §12.3

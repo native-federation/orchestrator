@@ -13,16 +13,16 @@ import { createPoolSharedExternals } from './pool-shared-externals';
 import { createGenerateImportMap } from '../generate-import-map';
 
 /**
- * KNOWN BUG (regression from the island-or-defer rework, PR #56): pooling only islands remotes the
- * resolver marked `scope`. It never aligns the per-member WINNERS, so a monorepo family whose members
- * are individually compatible can still be served from two different builds at two different
- * versions — `@angular/core` from one remote, `@angular/router` from another. A remote that consumes
- * both then runs a mismatched framework family.
+ * Regression guard for #63. Before the fix, pooling only islanded remotes the resolver had marked
+ * `scope`, so a monorepo family whose members are each individually compatible could still be served
+ * from two builds at two versions — `@angular/core` from one remote, `@angular/router` from another —
+ * and the remote consuming both ran a mismatched framework family.
  *
- * These specs assert the CURRENT (incorrect) behaviour so the regression is documented; they must be
- * inverted once pooling aligns a family onto one serving build.
+ * The agreement gate closes it: a remote may draw on several builds (patch drift inside a family is
+ * normal) but not on builds that disagree, i.e. that place a member they both ship on a different
+ * minor line. Such a remote serves its whole family from its own build instead.
  */
-describe('pooling: split monorepo family (known bug)', () => {
+describe('pooling: split monorepo family', () => {
   const SCOPE = {
     'team/host': 'http://host/',
     'team/mfe-a': 'http://mfe-a/',
@@ -78,10 +78,10 @@ describe('pooling: split monorepo family (known bug)', () => {
     return createGenerateImportMap(config, adapters)();
   };
 
-  it('serves the whole family from one build when a strict pin cannot follow it', async () => {
-    // determine resolves core DOWN to 22.0.5 (mfe-b's build, one fewer download) while router has no
-    // such pin and only mfe-a provides it — a split family. Election re-points core onto mfe-a's
-    // instance, the only one that serves a remote's whole consumption, and mfe-b then islands.
+  it('islands the remote that would mix builds when a strict pin drags one member down', async () => {
+    // mfe-b pins core to ~22.0.5, so core resolves DOWN to 22.0.5 (mfe-b's build). router carries no
+    // such pin and only mfe-a provides it, so it resolves to 22.1.0 (mfe-a's build) — leaving mfe-a
+    // drawing core from mfe-b and router from itself, across a minor line.
     seed('@angular/core', [
       version('22.1.0', '@angular/core', [{ remote: 'team/mfe-a', req: '^22.0.0' }]),
       version('22.0.5', '@angular/core', [{ remote: 'team/mfe-b', req: '~22.0.5', strict: true }]),
@@ -92,25 +92,29 @@ describe('pooling: split monorepo family (known bug)', () => {
 
     const importMap = await runInit();
 
-    // One build serves both members.
-    expect(importMap.imports['@angular/core']).toBe('http://mfe-a/@angular/core.js');
-    expect(importMap.imports['@angular/router']).toBe('http://mfe-a/@angular/router.js');
+    // core stays shared for mfe-b, which is the only remote that can still use it.
+    expect(importMap.imports['@angular/core']).toBe('http://mfe-b/@angular/core.js');
 
-    // mfe-b's ~22.0.5 rejects 22.1.0, so it self-serves its whole family instead of mixing builds.
-    expect(importMap.scopes?.[SCOPE['team/mfe-b']]?.['@angular/core']).toBe(
-      'http://mfe-b/@angular/core.js'
-    );
+    // mfe-a serves its whole family from its own build rather than mixing 22.0.5 with 22.1.0.
+    expect(importMap.scopes?.[SCOPE['team/mfe-a']]).toEqual({
+      '@angular/core': 'http://mfe-a/@angular/core.js',
+      '@angular/router': 'http://mfe-a/@angular/router.js',
+    });
+
+    // router had no other provider, so it is not shared at all any more.
+    expect(importMap.imports['@angular/router']).toBeUndefined();
 
     const core = adapters.sharedExternalsRepo.getFromScope(undefined)['@angular/core']!;
-    expect(core.versions.map(v => `${v.tag}:${v.action}`)).toEqual([
-      '22.1.0:share',
-      '22.0.5:scope',
+    expect(core.versions.map(v => `${v.tag}:${v.action}`).sort()).toEqual([
+      '22.0.5:share',
+      '22.1.0:scope',
     ]);
   });
 
-  it('splits the family when host precedence pins one member', async () => {
+  it('keeps the host tag and islands the remote that would mix builds', async () => {
     // The host ships core@22.0.5 → host precedence forces the shared core to 22.0.5. The host does
-    // not ship router, so router resolves freely to 22.1.0 from mfe-a.
+    // not ship router, so router resolves freely to 22.1.0 from mfe-a. Host precedence is untouched
+    // by the gate: it is mfe-a that gives way, not the host's pin.
     seed('@angular/core', [
       version('22.1.0', '@angular/core', [{ remote: 'team/mfe-a', req: '^22.0.0' }]),
       version('22.0.5', '@angular/core', [{ remote: 'team/host', req: '^22.0.0', host: true }]),
@@ -121,9 +125,11 @@ describe('pooling: split monorepo family (known bug)', () => {
 
     const importMap = await runInit();
 
-    // BUG: host's core@22.0.5 + mfe-a's router@22.1.0 are shared side by side.
     expect(importMap.imports['@angular/core']).toBe('http://host/@angular/core.js');
-    expect(importMap.imports['@angular/router']).toBe('http://mfe-a/@angular/router.js');
-    expect(importMap.scopes?.[SCOPE['team/mfe-a']]?.['@angular/core']).toBeUndefined();
+    expect(importMap.imports['@angular/router']).toBeUndefined();
+    expect(importMap.scopes?.[SCOPE['team/mfe-a']]).toEqual({
+      '@angular/core': 'http://mfe-a/@angular/core.js',
+      '@angular/router': 'http://mfe-a/@angular/router.js',
+    });
   });
 });

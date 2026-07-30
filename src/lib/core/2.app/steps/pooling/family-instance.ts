@@ -1,15 +1,8 @@
-import type { ExternalName, RemoteName } from 'lib/core/1.domain';
-import type { IsCompatible } from '../apply-winner';
-import type {
-  AcceptanceTable,
-  ChosenTags,
-  FamilyInstance,
-  FamilyInstances,
-  PoolMember,
-} from './pool.types';
+import type { ExternalName, RemoteName, VersionName } from 'lib/core/1.domain';
+import type { FamilyInstance, FamilyInstances, PoolMember } from './pool.types';
 
 // Per remote, every member it ships and the tag it ships it at. An islanded remote offers nothing at
-// all — not even members it solely provides, or the shared set itself stays incoherent (§15.3).
+// all — not even members it solely provides, or the shared set itself stays incoherent.
 export function buildInstances(
   members: PoolMember[],
   // A Set or the step's Map of islanded remotes with their cause.
@@ -62,112 +55,58 @@ export function consumedMembers(members: PoolMember[]): Map<RemoteName, External
 }
 
 /**
- * Which offered tags each remote accepts per member. `strictVersion: false` accepts every tag: the
- * remote declared it would rather dedup than hold its own copy, and `determine` reads the flag the
- * same way, so testing the range alone would island remotes that dedup today (§15.1 rule 4).
- *
- * Mandatory precomputation, not an optimisation: election and the per-remote rounds ask acceptance
- * 510k times at R=50/M=80 against 3-14 distinct questions — 262 ms without the table, 4.4 ms with it.
+ * The build serving each member, i.e. `remotes[0]` of its shared version — skipping copies islanding
+ * has taken, since those are about to self-serve. A member with no entry is served by nobody and every
+ * consumer falls back to its own build.
  */
-export function buildAcceptanceTable(
-  instances: FamilyInstances,
+export function servingBuilds(
   members: PoolMember[],
-  isCompatible: IsCompatible
-): AcceptanceTable {
-  // Only a tag some instance actually ships can ever be chosen, so nothing else is worth asking.
-  const offered = new Map<ExternalName, Set<string>>();
-  for (const instance of instances.values()) {
-    for (const [member, tag] of instance) {
-      const tags = offered.get(member);
-      if (tags) tags.add(tag);
-      else offered.set(member, new Set([tag]));
-    }
-  }
-
-  const table: AcceptanceTable = new Map();
+  islanded: { has: (remote: RemoteName) => boolean }
+): Map<ExternalName, RemoteName> {
+  const serving = new Map<ExternalName, RemoteName>();
 
   for (const member of members) {
-    const tags = offered.get(member.name);
-    if (!tags) continue; // no instance provides it: nothing to accept
+    const shared = member.external.versions.find(v => v.action === 'share');
+    const basis = shared?.remotes.find(r => !islanded.has(r.name));
+    if (basis) serving.set(member.name, basis.name);
+  }
 
-    const versions = member.external.versions;
-    for (let v = 0; v < versions.length; v++) {
-      const remotes = versions[v]!.remotes;
-      for (let r = 0; r < remotes.length; r++) {
-        const meta = remotes[r]!;
+  return serving;
+}
 
-        let byMember = table.get(meta.name);
-        if (!byMember) table.set(meta.name, (byMember = new Map()));
+// The minor line a tag sits on: `22.0.5` -> `22.0`. Prerelease suffixes ride along on the patch
+// segment, which this does not read.
+export function minorLine(tag: VersionName): string {
+  const first = tag.indexOf('.');
+  if (first === -1) return tag;
+  const second = tag.indexOf('.', first + 1);
+  return second === -1 ? tag : tag.slice(0, second);
+}
 
-        let accepted = byMember.get(member.name);
-        if (!accepted) byMember.set(member.name, (accepted = new Set()));
+export type Disagreement = { member: ExternalName; tag: VersionName; other: VersionName };
 
-        for (const tag of tags) {
-          if (accepted.has(tag)) continue;
-          if (!meta.strictVersion || isCompatible(tag, meta.requiredVersion)) accepted.add(tag);
-        }
+/**
+ * Do the builds a remote draws on agree? Two builds agree when every member they *both* ship sits on
+ * the same minor line, which is the one signal in the data that separates a genuine family split from
+ * benign patch drift (research.md §14): `22.0.5` beside `22.1.0` crosses a line, `22.0.6` beside
+ * `22.0.8` does not. Returns the first disagreement, or undefined when they are consistent.
+ */
+export function findDisagreement(
+  instances: FamilyInstances,
+  builds: readonly RemoteName[]
+): Disagreement | undefined {
+  for (let i = 0; i < builds.length; i++) {
+    const a = instances.get(builds[i]!);
+    if (!a) continue;
+    for (let j = i + 1; j < builds.length; j++) {
+      const b = instances.get(builds[j]!);
+      if (!b) continue;
+      for (const [member, tag] of a) {
+        const other = b.get(member);
+        if (other === undefined || minorLine(tag) === minorLine(other)) continue;
+        return { member, tag, other };
       }
     }
   }
-
-  return table;
-}
-
-// Members exactly one instance ships, mapped to it. No decision to make, so they are assigned
-// directly and never scored — otherwise the extension loop re-scores every instance every round.
-export function singleProviderMembers(instances: FamilyInstances): Map<ExternalName, RemoteName> {
-  const sole = new Map<ExternalName, RemoteName>();
-  const contested = new Set<ExternalName>();
-
-  for (const [remote, instance] of instances) {
-    for (const member of instance.keys()) {
-      if (contested.has(member)) continue;
-      if (sole.has(member)) {
-        sole.delete(member);
-        contested.add(member);
-      } else {
-        sole.set(member, remote);
-      }
-    }
-  }
-
-  return sole;
-}
-
-// All-skip-or-all-scope: can this remote take every member it consumes from the chosen instances? A
-// member nobody serves fails too — it would have to self-serve that one beside the chosen instances.
-export function canTakeAllFrom(
-  acceptance: AcceptanceTable,
-  chosen: ChosenTags,
-  remote: RemoteName,
-  consumed: readonly ExternalName[]
-): boolean {
-  const byMember = acceptance.get(remote);
-
-  for (let i = 0; i < consumed.length; i++) {
-    const member = consumed[i]!;
-    const tag = chosen.get(member);
-    if (tag === undefined) return false;
-    if (!byMember?.get(member)?.has(tag)) return false;
-  }
-
-  return true;
-}
-
-// Members the host declared, at its tag. Host precedence outranks pooling, so these are seeded
-// before election and never re-pointed by it.
-export function hostPinnedTags(members: PoolMember[]): ChosenTags {
-  const pinned: ChosenTags = new Map();
-
-  for (const member of members) {
-    const versions = member.external.versions;
-    for (let v = 0; v < versions.length; v++) {
-      const version = versions[v]!;
-      if (!version.host || version.action === 'scope') continue;
-      pinned.set(member.name, version.tag);
-      break;
-    }
-  }
-
-  return pinned;
+  return undefined;
 }
