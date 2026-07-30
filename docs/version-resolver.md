@@ -1167,27 +1167,37 @@ await initFederation(manifest, {
 
 **Why this is default**: Minimizes bundle size and download time by choosing the version that requires the fewest additional scoped downloads within each scope.
 
-The resolver calculates which version minimizes extra downloads per scope by examining how many versions would need to be individually scoped due to incompatibility:
+The resolver calculates which version minimizes extra downloads per scope by examining which versions would need to be individually scoped due to incompatibility, and how many copies each of those scopes costs.
+
+A scoped version is served to **every one of its remotes from that remote's own build**, so it costs one download per remote copy that is not already cached — not one per version. A version shipped by three remotes therefore costs three downloads when it is scoped, and a copy already in the cache costs nothing:
 
 ```
 // The resolver calculates which version minimizes extra downloads per scope:
 
 Global scope - if 18.2.0 is chosen:
-  18.1.0: compatible (SKIP) → 0 extra downloads
-  17.0.2: incompatible + strict (SCOPE) → 1 extra download
-  Total cost: 1 extra download
+  18.1.0 (2 remotes): compatible (SKIP)             → 0 extra downloads
+  17.0.2 (3 remotes): incompatible + strict (SCOPE) → 3 extra downloads
+  Total cost: 3 extra downloads
 
 Team-a scope - if 3.1.0 is chosen:
-  3.0.5: compatible (SKIP) → 0 extra downloads
+  3.0.5 (1 remote): compatible (SKIP) → 0 extra downloads
   Total cost: 0 extra downloads
 
 Result: Choose 18.2.0 globally, 3.1.0 for team-a scope
 ```
 
-> **Known limitation.** The cost is counted per **version**, not per remote. A member whose modern side
-> sits on one version shared by many remotes can therefore lose to two older versions shipped by one
-> remote each. On its own that costs one extra download; with pooling enabled it flips a member's winner
-> and islands whole families. See `F-A-islanding-cascade.md`.
+Because the shared version itself is one download whichever candidate wins, minimizing this sum is exactly minimizing total downloads for the external. Counting scoped *versions* instead — as earlier releases did — would have priced that `17.0.2` scope at 1 rather than 3, and a candidate scoping two single-remote versions would have looked twice as expensive as one scoping a version shipped by ten remotes.
+
+> **Consequence.** A large group of remotes sitting on an older tag can now win over a smaller group on
+> a newer one — that is what "fewest extra downloads" asks for. Ties still break toward the newest tag,
+> but they are rarer than when the cost was counted per version. Host precedence
+> (`remoteEntry` of the host) and `profile.latestSharedExternal` are decided before this objective runs
+> and are unaffected.
+
+> **Known limitation.** The objective is exact per external, but it is evaluated *per external*. With
+> `useAutoExternalPooling` enabled, two members of one pool whose remote-count majorities sit on
+> different version lines will elect opposite winners, and pooling amplifies that split into islanded
+> families. See `F-A-islanding-cascade.md`.
 
 ### 4. Caching Strategy
 
