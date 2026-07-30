@@ -20,7 +20,7 @@ verify commands, then tick its box and append a one-line result under it. Stop a
 ## Status
 
 - [x] 0 — Branch + baseline
-- [ ] 1 — Extract `applyWinner` (pure refactor)
+- [x] 1 — Extract `applyWinner` (pure refactor)
 - [ ] 2 — Family-instance primitives (pure, unit-tested)
 - [ ] 3 — No-op-pool early-out (W1) + log levels
 - [ ] 4 — Election: host-pinned, remotes-served objective
@@ -155,6 +155,28 @@ pool's choice.
 **Verify:** `npm test` green with **no spec edits** (this is the proof it's behaviour-preserving) ·
 types clean · `npm run lint`.
 **Done when:** determine has one election tail, callable from pooling, suite untouched.
+
+**Result (2026-07-30):** new `src/lib/core/2.app/steps/apply-winner.ts` (same layer as pooling, so
+`pool-shared-externals.ts` can import it directly — no layer violation, no `1.domain` move needed).
+Exports:
+- `versionAcceptance(external, isCompatible)` → `{ accepts, objector, demands }`, the demands map built
+  once per external. `demands` is exposed because determine's extra-download predicate
+  (`!cached && strictVersion && !isCompatible`) is a third question neither `accepts` nor `objector`
+  answers — `objector` finds the *first* strict rejector, which may be cached, so it cannot stand in.
+- `createApplyWinner(config)` → `applyWinner(externalName, external, winner, isCompatible, acceptance?)`,
+  closing over `applyEntrypointCoveragePolicy`/`findTears`/`scopeTornRemotes`/`Tear` (all moved out of
+  determine). `acceptance` is optional so pooling can call it with just determine's memoized
+  `isCompatible`; determine passes its prebuilt one so no second demands map is allocated.
+- `IsCompatible` type alias, now used for determine's memo too.
+
+The single-version short-circuit is preserved *inside* `applyWinner` as `if (versions.length > 1)`
+around the verdict loop: with one version the loop would set `skip` then overwrite with `share`, but it
+would also strict-check a lone version against its own tag, which today never happens. `determine`'s
+`setVersionActions` is now just "choose winner → `applyWinner`"; 134 lines deleted, 14 added.
+
+`npm test` **778/778 green with zero spec edits** (the behaviour-preservation proof) · coverage 96.06/90.54/95.43/96.64
+· `tsc -p tsconfig.build.json` clean · `npm run lint` 0 errors (7 pre-existing `no-explicit-any` warnings in
+untouched files) · `npm run knip` only the pre-existing `@angular/core` config hint · prettier clean.
 
 ---
 
