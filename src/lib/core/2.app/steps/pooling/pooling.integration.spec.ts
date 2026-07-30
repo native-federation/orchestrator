@@ -22,9 +22,14 @@ import { createPoolDynamicExternals } from './pool-dynamic-externals';
 import { createConvertToImportMap } from '../convert-to-import-map';
 
 /**
- * End-to-end coherence: pooling makes a whole `@framework/*` family resolve from one remote build,
- * even though the per-external resolver (determine-shared-externals) would otherwise anchor
- * different members on different remotes.
+ * End-to-end coherence through determine → pooling → import map. Pooling does not make a family resolve
+ * from one build — different members may legitimately be served from different remotes. What it
+ * guarantees is that no single remote ends up drawing on builds that disagree: an incompatible or
+ * disagreeing remote serves its whole `@framework/*` family from its own build, with no dedup, so a
+ * foreign runtime cannot leak in through a shared sibling.
+ *
+ * Family coherence proper (the two #63 cases, patch-drift tolerance, asymmetric coverage) is locked in
+ * `family-coherence.regression.spec.ts`.
  */
 describe('pooling (integration)', () => {
   const SCOPE = {

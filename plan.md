@@ -29,7 +29,7 @@ verify commands, then tick its box and append a one-line result under it. Stop a
 - [x] 6 — Dynamic-init mirror (additive only)
 - [x] 7 — Warm-init dirty-gated skip (W2 — 45% of warm init) → **warm pooling 0.218 → 0.002 ms**
 - [x] 8 — Regression + fixture specs (F-A's mechanism **corrected by measurement** — see below)
-- [ ] 9 — Docs
+- [x] 9 — Docs
 - [ ] 10 — Final gates + PR
 
 ## Hard constraints (re-read every pass)
@@ -548,6 +548,40 @@ files also pass prettier (23 files fail it repo-wide on a clean tree — pre-exi
 
 **Verify:** `npm run lint` · docs match the shipped behaviour (spot-check each claim against code).
 **Done when:** no doc statement contradicts the implementation.
+
+**Result (2026-07-30):** `docs/version-resolver.md` §"How pooling resolves" rewritten around the two
+gates — determine's winners stand, pooling only decides who may *take* the dedups already granted — with
+the **build** as the stated unit of decision, gate 2's minor-line rule (including the vacuous agreement of
+disjoint builds and the single-build short-circuit), the fixed-point note, and the mermaid flow now
+*islanded remotes → agreement gate (loop) → rebuild*.
+
+The false claim at the old line 599 is gone: coherence is **not** a property of versions alone — a split
+family contains no incompatibility, so islanding never fires on it, which is why gate 2 exists. Two more
+overclaims of the same kind were found and fixed while spot-checking: the section intro ("reconciles the
+whole group onto a single source") and `docs/config.md`'s `useAutoExternalPooling` row ("resolves to one
+mutually-compatible version from a single remote build").
+
+Added: the **download trade** as its own blockquote (coherence, never fewer downloads — measured on five
+portfolios); *why tag distance rather than `requiredVersion`* (the ranges are identical in the crash and
+the safe case); the **authoring rule** with its real routing (through determine's `scope` verdict, so
+patch-level coupling inside one minor line needs an exact pin); an **islanded remote contributes no build
+at all**, with the Case 3 rationale; **unscoped lockstep families** (react/react-dom recipe, plus the
+portfolio-wide property of one remote's tag); a **log-line table** with an explicit "do nothing" for the
+`debug` multi-build draw; the dynamic-init mirror; and a warm-init note in §"Understanding dirty Flag".
+
+Two corrections found by checking claims against code rather than against `research.md`:
+1. The serving basis is the first **non-islanded** remote of the `share` version (`servingBuilds`), not
+   literally `remotes[0]` — the doc says so now.
+2. The dynamic gate compares the **committed** serving builds only; the loaded remote's own build is not
+   in the set, because a member it could not dedup would already be `scope`. My first draft said "plus its
+   own build", which would have been wrong.
+
+Also fixed the stale docblock in `pooling.integration.spec.ts` ("resolve from one remote build") and
+pointed it at the new regression spec.
+
+**816/816**, types/lint/knip clean. `docs/version-resolver.md` and `docs/config.md` fail
+`prettier --check` — verified pre-existing by stashing (both fail on a clean tree), so they are left
+alone rather than reformatted into an unrelated diff.
 
 ---
 
