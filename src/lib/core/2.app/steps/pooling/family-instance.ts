@@ -12,7 +12,8 @@ import type {
 // all — not even members it solely provides, or the shared set itself stays incoherent (§15.3).
 export function buildInstances(
   members: PoolMember[],
-  islanded?: ReadonlySet<RemoteName>
+  // A Set or the step's Map of islanded remotes with their cause.
+  islanded?: { has: (remote: RemoteName) => boolean }
 ): FamilyInstances {
   const instances: FamilyInstances = new Map();
 

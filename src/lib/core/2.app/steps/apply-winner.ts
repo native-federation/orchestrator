@@ -1,10 +1,31 @@
 import type { SharedExternal, SharedVersion, SharedVersionMeta } from 'lib/core/1.domain';
 import { uncoveredEntrypoints, versionDemands } from 'lib/core/1.domain/externals/basis';
 import { NFError } from 'lib/core/native-federation.error';
+import type { ForVersionChecking } from '../driving-ports/for-version-checking.port';
 import type { LoggingConfig } from '../config/log.contract';
 import type { ModeConfig } from '../config/mode.contract';
 
 export type IsCompatible = (tag: string, requiredVersion: string) => boolean;
+
+/**
+ * The resolver's selection loop asks O(versions² × demands) questions but has only
+ * (candidate tag × distinct requiredVersion) distinct ones, and pooling then asks the same set again.
+ * One memo therefore serves both steps; `isCompatible` is pure, so entries never go stale.
+ */
+export function createIsCompatibleMemo(
+  versionCheck: Pick<ForVersionChecking, 'isCompatible'>
+): IsCompatible {
+  const memo = new Map<string, boolean>();
+  return (tag, requiredVersion) => {
+    const key = `${tag}|${requiredVersion}`;
+    let hit = memo.get(key);
+    if (hit === undefined) {
+      hit = versionCheck.isCompatible(tag, requiredVersion);
+      memo.set(key, hit);
+    }
+    return hit;
+  };
+}
 
 export type VersionAcceptance = {
   // A version can only be redirected to `tag` if none of its remotes rejects that tag.

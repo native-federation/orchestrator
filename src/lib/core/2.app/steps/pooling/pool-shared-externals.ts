@@ -10,9 +10,13 @@ import { NFError } from 'lib/core/native-federation.error';
 import type { DrivingContract } from '../../driving-ports/driving.contract';
 import type { LoggingConfig } from '../../config/log.contract';
 import type { ModeConfig } from '../../config/mode.contract';
+import { findVersionForTag } from 'lib/core/1.domain/externals/basis';
+import { createApplyWinner, createIsCompatibleMemo, type IsCompatible } from '../apply-winner';
 import { buildPools } from './pool-graph';
 import { remotesInPool } from './pool.util';
-import type { PoolMember, PoolName } from './pool.types';
+import { buildAcceptanceTable, buildInstances, consumedMembers } from './family-instance';
+import { coveredBySingleInstance, currentSharedTags, electInstances } from './elect-instance';
+import type { ChosenTags, PoolMember, PoolName } from './pool.types';
 
 type IslandCause = { member: ExternalName; tag: VersionName };
 
@@ -32,13 +36,22 @@ function islandedRemotes(members: PoolMember[]): Map<RemoteName, IslandCause> {
 
 export function createPoolSharedExternals(
   config: LoggingConfig & ModeConfig,
-  ports: Pick<DrivingContract, 'sharedExternalsRepo'>
+  ports: Pick<DrivingContract, 'sharedExternalsRepo' | 'versionCheck'>,
+  isCompatible: IsCompatible = createIsCompatibleMemo(ports.versionCheck)
 ): ForPoolingSharedExternals {
+  // A re-election that leaves a strict pin behind is not a hard error: the pin's own remote is
+  // islanded and self-serves. Only the pool-level gate below decides whether that throws (§11.5).
+  const applyPooledWinner = createApplyWinner({
+    ...config,
+    strict: { ...config.strict, strictExternalCompatibility: false },
+  });
+
   /**
-   * Runs after determine-shared-externals: for each pool, a remote that is version-incompatible on any
-   * member is islanded (its whole family scopes, no dedup) so a foreign build cannot leak in through a
-   * shared sibling; every other remote keeps the base per-external verdict. Emits nothing, only
-   * mutates `SharedExternal.versions`. See docs/version-resolver.md.
+   * Runs after determine-shared-externals: for each pool, elects the family instance the members are
+   * served from (§15.1 rule 3) and islands the remotes that cannot follow it — a remote that is
+   * version-incompatible on any member scopes its whole family, so a foreign build cannot leak in
+   * through a shared sibling. Emits nothing, only mutates `SharedExternal.versions`.
+   * See docs/version-resolver.md.
    *
    * Inert unless `useAutoExternalPooling` is on or an external carries a remote `pool` tag. The
    * `strict` scope is never pooled.
@@ -87,7 +100,7 @@ export function createPoolSharedExternals(
     const allRemotes = remotesInPool(members);
     if (allRemotes.length < 2) return;
 
-    const islanded = islandedRemotes(members);
+    let islanded = islandedRemotes(members);
 
     config.log.debug(
       3,
@@ -95,12 +108,18 @@ export function createPoolSharedExternals(
         members.map(m => `  - ${m.name}`).join('\n')
     );
 
-    // Nothing to island: determine's verdicts already stand for every member, so rebuilding them
-    // would write back what storage holds.
-    if (islanded.size === 0) return;
+    const elected = elect(poolName, members, islanded, scope);
+
+    // Election can make a strict pin reject the new winner, which determine then marks `scope` — so
+    // the island gate has to see the post-election verdicts. This is what fixes Case 1.
+    if (elected) islanded = islandedRemotes(members);
+
+    // Nothing elected and nobody islanded: determine's verdicts already stand for every member, so
+    // rebuilding them would write back what storage holds.
+    if (!elected && islanded.size === 0) return;
 
     // Defensive: determine already throws on real incompatibilities under strictExternalCompatibility.
-    if (config.strict.strictExternalCompatibility) {
+    if (islanded.size > 0 && config.strict.strictExternalCompatibility) {
       config.log.error(
         3,
         `[${scope}][pool:${poolName}] version-incompatible remotes cannot be pooled: {${[...islanded.keys()].join(', ')}}.`
@@ -120,6 +139,95 @@ export function createPoolSharedExternals(
       warnIfScopedOnly(poolName, member, rebuilt, islanded, scope);
       ports.sharedExternalsRepo.addOrUpdate(member.name, rebuilt, scope);
     }
+  }
+
+  // Serves every member from the elected family instances (§15.1 rule 3). Returns true when a
+  // winner actually moved, which is also what tells `poolFamily` that storage must be rewritten.
+  function elect(
+    poolName: PoolName,
+    members: PoolMember[],
+    islanded: Map<RemoteName, IslandCause>,
+    scope: string
+  ): boolean {
+    const instances = buildInstances(members, islanded);
+    if (instances.size < 2) return false;
+
+    const current = currentSharedTags(members);
+    if (coveredBySingleInstance(instances, current)) return false;
+
+    const consumed = consumedMembers(members);
+    const acceptance = buildAcceptanceTable(instances, members, isCompatible);
+    const chosen = electInstances(members, instances, acceptance, consumed);
+
+    let moved = false;
+    for (const member of members) {
+      const tag = chosen.get(member.name);
+      if (tag === undefined || current.get(member.name) === tag) continue;
+      if (repoint(member, tag, islanded)) moved = true;
+    }
+
+    if (moved) {
+      config.log.debug(
+        3,
+        `[${scope}][pool:${poolName}] elected ${describeTags(chosen)} (was ${describeTags(current)}).`
+      );
+    }
+    return moved;
+  }
+
+  function describeTags(tags: ChosenTags): string {
+    return (
+      [...tags]
+        .map(([member, tag]) => `${member}@${tag}`)
+        .sort()
+        .join(', ') || '∅'
+    );
+  }
+
+  // Moves a member's winner onto the elected tag and re-derives every verdict through the shared
+  // election tail, so entrypoint coverage and tear handling stay in one place (research.md §8).
+  function repoint(
+    member: PoolMember,
+    tag: VersionName,
+    islanded: Map<RemoteName, IslandCause>
+  ): boolean {
+    const version = findVersionForTag(member.external.versions, tag);
+    if (!version || version.action === 'scope') return false;
+
+    // The basis serves the version, so it must be a copy that survives islanding — coverage and tear
+    // analysis key off `remotes[0].entries`.
+    const alive = version.remotes.findIndex(r => !islanded.has(r.name));
+    if (alive > 0) version.remotes.unshift(...version.remotes.splice(alive, 1));
+
+    splitObjectors(member, version, tag);
+    applyPooledWinner(member.name, member.external, version, isCompatible);
+    return true;
+  }
+
+  /**
+   * A verdict is per version, but §15's acceptance test is per remote — and a version's remotes can
+   * disagree, since `requiredVersion`/`strictVersion` are per build. Left alone, one strict co-tenant
+   * would scope the whole version and island every remote that happens to ship the same tag: measured
+   * on `benchmark/` (captured 7 + `eleven`) that is 5 remotes islanded instead of 1, and 70 downloads
+   * instead of 36. So the objectors are split off into their own same-tag version first, which is a
+   * shape the resolver already produces (see `findVersionForTag`, `scopeTornRemotes`).
+   */
+  function splitObjectors(member: PoolMember, winner: SharedVersion, tag: VersionName): void {
+    const split: SharedVersion[] = [];
+
+    for (const version of member.external.versions) {
+      if (version === winner || version.action === 'scope' || version.remotes.length < 2) continue;
+
+      const objectors = version.remotes.filter(
+        r => r.strictVersion && !isCompatible(tag, r.requiredVersion)
+      );
+      if (objectors.length === 0 || objectors.length === version.remotes.length) continue;
+
+      version.remotes = version.remotes.filter(r => !objectors.includes(r));
+      split.push({ tag: version.tag, host: false, action: 'scope', remotes: objectors });
+    }
+
+    member.external.versions.push(...split);
   }
 
   // Warn only when sharing was genuinely possible and lost: a scoped-only member with >1 consumer. A

@@ -332,6 +332,60 @@ tests unchanged · pooling + determine suites green · types clean · `npm run l
 **Done when:** Case 1 coherent, capture down to 17 downloads, no existing expectation changed, DI/mocks
 updated.
 
+### IN PROGRESS (2026-07-30) — implemented, one blocking measurement
+
+Landed: shared `createIsCompatibleMemo` (one memo for determine + pooling, wired in `init.factory.ts`);
+`versionCheck` on the step's ports; `elect-instance.ts` (`currentSharedTags`, `coveredBySingleInstance`,
+`electInstances`); re-pointing through `applyPooledWinner` (a `createApplyWinner` with
+`strictExternalCompatibility` forced off, so §11.5's "no throw for an acceptance-driven scope" holds and
+the pool-level gate keeps deciding); post-election re-run of `islandedRemotes`; W1 extended to
+"nothing elected **and** nobody islanded".
+
+**Case 1 flips as specified** (repro arm inverted), Case 2 unchanged, 6 integration tests untouched,
+**802/802**, types/lint clean.
+
+**Correction to the scoring, worth keeping in mind:** the objective must be *coverage plus acceptance* —
+"does this instance alone serve every member the remote consumes" — not "is some trial assignment
+acceptable to it". The first draft used the latter and **re-elected the split in Case 1** (mfe-b's
+instance scored 2 remotes served because mfe-a's ranges accept a mixed draw). `servesAlone` now models
+rule 3 literally; the mixed-tolerant count is used only by the extension pass, where F3 applies.
+
+**Also needed, and a keeper regardless of the decision below:** re-pointing must **split a version at
+remote granularity** before applying the winner. A verdict is per version but §15's acceptance test is
+per remote, and a version's remotes disagree (`requiredVersion`/`strictVersion` are per build). Without
+the split, one strict co-tenant scopes the whole version and islands every remote sharing its tag —
+measured on captured 7 + `eleven`: **5 remotes islanded and 70 downloads, versus 2 and 43 with it**.
+`splitObjectors` does it, reusing the same-tag `share`/`scope` shape the resolver already produces
+(`findVersionForTag`, `scopeTornRemotes`).
+
+**BLOCKER — election is neutral-to-worse on every real portfolio in `benchmark/`.** Measured with
+`<scratchpad>/election-probe.spec.ts.keep`, `@angular` pool, downloads = shared members + self-served
+copies. Baseline is **iteration 3 behaviour** (election short-circuited), not `determine`:
+
+| portfolio | today | with election |
+| --- | --- | --- |
+| captured 7 | 36 dl, islands `legacy-overview` | **36, same** |
+| 7 + `nine` (the Case 1 shape) | 36, 1 island | **36, same** |
+| 7 + `eight` (Ng21 sibling) | 64, 5 islands | **64, same** |
+| all 11 | 45, 2 islands | **52, 3 islands** (+`data-mutations`) |
+| 7 + `eleven` (older superset) | 36, 1 island | **43, 2 islands** (+`data-mutations`) |
+
+And the qualitative failure is worse than the arithmetic. On 7 + `eleven` election picks `team/shell`'s
+22.0.6 superset and re-points `core/common/forms/elements/platform-browser/router` 22.0.8 → 22.0.6 — but
+`shell` does not ship the sub-entrypoint members, so the extension pass leaves
+`@angular/core/primitives/*` and `@angular/common/http` at **22.0.8**. The elected shared set therefore
+holds `@angular/core@22.0.6` beside `@angular/core/primitives/signals@22.0.8`: two builds of *one
+package*. That is less coherent than what it replaced, and it islands the strictest consumer.
+
+Cause: with test B dropped (§15 vs §14), the only lever that fixes Case 1 is the "fewer chosen
+instances" tiebreak, and that lever cannot tell the two shapes apart — §14.1 recorded that only tag
+distance can (22.0.5 vs 22.1.0 crosses a minor line; 22.0.6 vs 22.0.8 does not).
+
+Also: **§13.3/§14.1/§15's "capture 29 → 17 downloads" is not reproducible** against the real pipeline.
+The capture's `@angular` pool is 24 members, and iteration 3 already yields `majors={22}` at 36
+downloads; election moves nothing there. Those tables came from a prototype outside `src`, so the
+measured-outcome rows in §13.3/§14.1/§15 should be treated as unverified until re-measured here.
+
 ---
 
 ## 5 — Per-remote all-skip-or-all-scope + fixed point

@@ -78,9 +78,10 @@ describe('pooling: split monorepo family (known bug)', () => {
     return createGenerateImportMap(config, adapters)();
   };
 
-  it('splits the family when a strict pin drags one member down (no remote is islanded)', async () => {
-    // mfe-b pins core to ~22.0.5, so core resolves DOWN to 22.0.5 (mfe-b's build). router carries no
-    // such pin and only mfe-a provides it, so it resolves to 22.1.0 (mfe-a's build).
+  it('serves the whole family from one build when a strict pin cannot follow it', async () => {
+    // determine resolves core DOWN to 22.0.5 (mfe-b's build, one fewer download) while router has no
+    // such pin and only mfe-a provides it — a split family. Election re-points core onto mfe-a's
+    // instance, the only one that serves a remote's whole consumption, and mfe-b then islands.
     seed('@angular/core', [
       version('22.1.0', '@angular/core', [{ remote: 'team/mfe-a', req: '^22.0.0' }]),
       version('22.0.5', '@angular/core', [{ remote: 'team/mfe-b', req: '~22.0.5', strict: true }]),
@@ -91,17 +92,20 @@ describe('pooling: split monorepo family (known bug)', () => {
 
     const importMap = await runInit();
 
-    // BUG: two builds, two versions, for one monorepo family.
-    expect(importMap.imports['@angular/core']).toBe('http://mfe-b/@angular/core.js');
+    // One build serves both members.
+    expect(importMap.imports['@angular/core']).toBe('http://mfe-a/@angular/core.js');
     expect(importMap.imports['@angular/router']).toBe('http://mfe-a/@angular/router.js');
 
-    // mfe-a's own core@22.1.0 was deduped away, so mfe-a runs router@22.1.0 against core@22.0.5.
-    expect(importMap.scopes?.[SCOPE['team/mfe-a']]?.['@angular/core']).toBeUndefined();
+    // mfe-b's ~22.0.5 rejects 22.1.0, so it self-serves its whole family instead of mixing builds.
+    expect(importMap.scopes?.[SCOPE['team/mfe-b']]?.['@angular/core']).toBe(
+      'http://mfe-b/@angular/core.js'
+    );
 
-    // Pooling was a no-op here: nothing was marked `scope`, so no remote was islanded and pooling
-    // left storage untouched — the versions keep determine's own order (newest tag first).
     const core = adapters.sharedExternalsRepo.getFromScope(undefined)['@angular/core']!;
-    expect(core.versions.map(v => `${v.tag}:${v.action}`)).toEqual(['22.1.0:skip', '22.0.5:share']);
+    expect(core.versions.map(v => `${v.tag}:${v.action}`)).toEqual([
+      '22.1.0:share',
+      '22.0.5:scope',
+    ]);
   });
 
   it('splits the family when host precedence pins one member', async () => {
