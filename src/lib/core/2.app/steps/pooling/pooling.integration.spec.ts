@@ -314,7 +314,7 @@ describe('pooling (integration)', () => {
     } as RemoteEntry;
 
     const updated = await createUpdateCache(config, adapters)(entryC);
-    const pooled = await createPoolDynamicExternals(config)(updated);
+    const pooled = await createPoolDynamicExternals(config, adapters)(updated);
     const importMap = await createConvertToImportMap(config, adapters)(pooled);
 
     // The new remote serves its whole family from its own scope; nothing added to the global family.

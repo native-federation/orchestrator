@@ -132,7 +132,7 @@ describe('pooling: family coherence', () => {
     // The host ships core@22.0.5 → host precedence forces the shared core to 22.0.5. The host does
     // not ship router, so router resolves freely to 22.1.0 from mfe-a. Host precedence is untouched
     // by the gate: it is mfe-a that gives way, not the host's pin — so coherence and absolute host
-    // priority are not in tension, and research.md §15.6's "accepted limitation" is retired.
+    // priority are not in tension: coherence costs the mixing remote a dedup, never the host its pin.
     seed('@angular/core', [
       version('22.1.0', '@angular/core', [{ remote: 'team/mfe-a', req: '^22.0.0' }]),
       version('22.0.5', '@angular/core', [{ remote: 'team/host', req: '^22.0.0', host: true }]),
@@ -152,10 +152,10 @@ describe('pooling: family coherence', () => {
   });
 
   it('tolerates patch drift inside one minor line instead of islanding it', async () => {
-    // Auke's point 4: two remotes one patch apart, both declaring ~21.2.0. determine picks a different
+    // Two remotes one patch apart, both declaring ~21.2.0. determine picks a different
     // build per member, so each remote draws from two builds — but 21.2.2 and 21.2.3 sit on the same
     // minor line, so they agree and nobody is islanded. The family legitimately ends up on two patch
-    // tags: this is tolerated, NOT unified (research.md §12.3) — the guard is that benign drift is
+    // tags: this is tolerated, NOT unified — the guard is that benign drift is
     // never treated as a split family.
     seed('@angular/core', [
       version('21.2.2', '@angular/core', [{ remote: 'team/mfe-a', req: '~21.2.0' }]),
@@ -182,7 +182,7 @@ describe('pooling: family coherence', () => {
   });
 
   it('drops a previous-major member from the shared set when its only provider is islanded', async () => {
-    // The production capture's failure (research.md §1 Case 3). legacy pins ~21.2.0, which rejects the
+    // The production capture's failure. legacy pins ~21.2.0, which rejects the
     // 22 winner, so it is islanded on core — but it is also the SOLE provider of animations. Islanding
     // takes that copy with it, so animations leaves the shared set rather than staying globally shared
     // at 21.2.18 beside core@22.0.8. The mechanism is islanding plus rebuild stripping the last
@@ -212,7 +212,7 @@ describe('pooling: family coherence', () => {
   });
 
   it('never islands a clean subset consumer of an asymmetric family', async () => {
-    // research.md §15.2: mfe-a ships {core, common, material}, mfe-b only {core, common}, one patch
+    // Asymmetric coverage: mfe-a ships {core, common, material}, mfe-b only {core, common}, one patch
     // apart. determine splits the winners across both builds, so mfe-a self-serves material while
     // deduping core from mfe-b. Every build agrees at minor granularity, so neither remote is islanded
     // and material stays shared — the regression this locks is gratuitous scoping (I3), which the old

@@ -543,7 +543,7 @@ describe('createPoolSharedExternals', () => {
     it('stays silent when an island in the same pass took the last provider', async () => {
       config.feature.useAutoExternalPooling = true;
       // cdk's only shared build was c's, and c is islanded via core@18. The island warning already
-      // named that cause, so restating its effect would be a double warning (research.md §11.4).
+      // named that cause, so restating its effect would be a double warning.
       givenExternals({
         '@framework/core': external([
           sharedVersion('17', [meta('a', { req: '17' })], { action: 'share' }),

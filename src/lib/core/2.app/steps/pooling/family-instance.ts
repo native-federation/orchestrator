@@ -88,7 +88,7 @@ export type Disagreement = { member: ExternalName; tag: VersionName; other: Vers
 /**
  * Do the builds a remote draws on agree? Two builds agree when every member they *both* ship sits on
  * the same minor line, which is the one signal in the data that separates a genuine family split from
- * benign patch drift (research.md §14): `22.0.5` beside `22.1.0` crosses a line, `22.0.6` beside
+ * benign patch drift: `22.0.5` beside `22.1.0` crosses a line, `22.0.6` beside
  * `22.0.8` does not. Returns the first disagreement, or undefined when they are consistent.
  */
 export function findDisagreement(

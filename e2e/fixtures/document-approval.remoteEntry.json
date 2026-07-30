@@ -1,0 +1,222 @@
+{
+  "$version": "v4",
+  "name": "team/document-approval",
+  "shared": [
+    {
+      "packageName": "@angular/cdk/dialog",
+      "outFileName": "_angular_cdk_dialog.NsHUMhpD1E.js",
+      "requiredVersion": "22.0.6",
+      "singleton": true,
+      "strictVersion": true,
+      "version": "22.0.6",
+      "bundle": "browser-angular_cdk"
+    },
+    {
+      "packageName": "@angular/cdk/overlay",
+      "outFileName": "_angular_cdk_overlay._jUeKkCE_E.js",
+      "requiredVersion": "22.0.6",
+      "singleton": true,
+      "strictVersion": true,
+      "version": "22.0.6",
+      "bundle": "browser-angular_cdk"
+    },
+    {
+      "packageName": "@angular/cdk/portal",
+      "outFileName": "_angular_cdk_portal.4NWPVMatG4.js",
+      "requiredVersion": "22.0.6",
+      "singleton": true,
+      "strictVersion": true,
+      "version": "22.0.6",
+      "bundle": "browser-angular_cdk"
+    },
+    {
+      "packageName": "@angular/elements",
+      "outFileName": "_angular_elements.ktmx-SsBF0.js",
+      "requiredVersion": "~22.0.5",
+      "singleton": true,
+      "strictVersion": true,
+      "version": "22.0.8",
+      "bundle": "browser-angular_elements"
+    },
+    {
+      "packageName": "@angular/forms",
+      "outFileName": "_angular_forms.UAUsqxOWM3.js",
+      "requiredVersion": "~22.0.5",
+      "singleton": true,
+      "strictVersion": true,
+      "version": "22.0.8",
+      "bundle": "browser-angular_forms"
+    },
+    {
+      "packageName": "@angular/platform-browser",
+      "outFileName": "_angular_platform_browser.djzJcPG8PR.js",
+      "requiredVersion": "~22.0.5",
+      "singleton": true,
+      "strictVersion": true,
+      "version": "22.0.8",
+      "bundle": "browser-angular_platform_browser"
+    },
+    {
+      "packageName": "@acme/shell/navigation",
+      "outFileName": "_acme_shell_navigation.AIybZuSnB4.js",
+      "requiredVersion": "~0.8.7",
+      "singleton": true,
+      "strictVersion": true,
+      "version": "0.8.7",
+      "bundle": "browser-acme_shell"
+    },
+    {
+      "packageName": "@acme/shell/registry",
+      "outFileName": "_acme_shell_registry.9q14lPhdW-.js",
+      "requiredVersion": "~0.8.7",
+      "singleton": true,
+      "strictVersion": true,
+      "version": "0.8.7",
+      "bundle": "browser-acme_shell"
+    },
+    {
+      "packageName": "rxjs",
+      "outFileName": "rxjs._3LcsHIuu_.js",
+      "requiredVersion": "^7.8.0",
+      "singleton": true,
+      "strictVersion": true,
+      "version": "7.8.2",
+      "bundle": "browser-rxjs"
+    },
+    {
+      "packageName": "rxjs/operators",
+      "outFileName": "rxjs_operators.G4NPpguNIR.js",
+      "requiredVersion": "^7.8.0",
+      "singleton": true,
+      "strictVersion": true,
+      "version": "7.8.2",
+      "bundle": "browser-rxjs"
+    },
+    {
+      "packageName": "tslib",
+      "outFileName": "tslib.BX2MinpEcV.js",
+      "requiredVersion": "^2.3.0",
+      "singleton": true,
+      "strictVersion": true,
+      "version": "2.8.1",
+      "bundle": "browser-tslib"
+    },
+    {
+      "packageName": "@angular/core",
+      "outFileName": "_angular_core.pkREKDuptp.js",
+      "requiredVersion": "~22.0.5",
+      "singleton": true,
+      "strictVersion": true,
+      "version": "22.0.8",
+      "bundle": "browser-angular_core"
+    },
+    {
+      "packageName": "@angular/core/event-dispatch-contract.min.js",
+      "outFileName": "_angular_core_event_dispatch_contract_min_js.3axcNP9xmW.js",
+      "requiredVersion": "~22.0.5",
+      "singleton": true,
+      "strictVersion": true,
+      "version": "22.0.8",
+      "bundle": "browser-angular_core"
+    },
+    {
+      "packageName": "@angular/core/primitives/di",
+      "outFileName": "_angular_core_primitives_di.2P9ZqFTuth.js",
+      "requiredVersion": "~22.0.5",
+      "singleton": true,
+      "strictVersion": true,
+      "version": "22.0.8",
+      "bundle": "browser-angular_core"
+    },
+    {
+      "packageName": "@angular/core/primitives/event-dispatch",
+      "outFileName": "_angular_core_primitives_event_dispatch.0CDY6p5Sd2.js",
+      "requiredVersion": "~22.0.5",
+      "singleton": true,
+      "strictVersion": true,
+      "version": "22.0.8",
+      "bundle": "browser-angular_core"
+    },
+    {
+      "packageName": "@angular/core/primitives/signals",
+      "outFileName": "_angular_core_primitives_signals.yq9BsbbF7W.js",
+      "requiredVersion": "~22.0.5",
+      "singleton": true,
+      "strictVersion": true,
+      "version": "22.0.8",
+      "bundle": "browser-angular_core"
+    },
+    {
+      "packageName": "@angular/core/rxjs-interop",
+      "outFileName": "_angular_core_rxjs_interop.wu8iylgwTf.js",
+      "requiredVersion": "~22.0.5",
+      "singleton": true,
+      "strictVersion": true,
+      "version": "22.0.8",
+      "bundle": "browser-angular_core"
+    },
+    {
+      "packageName": "@angular/common",
+      "outFileName": "_angular_common.TU1u4Cdtw9.js",
+      "requiredVersion": "~22.0.5",
+      "singleton": true,
+      "strictVersion": true,
+      "version": "22.0.8",
+      "bundle": "browser-angular_common"
+    },
+    {
+      "packageName": "@angular/common/http",
+      "outFileName": "_angular_common_http.AMnMJTRqlR.js",
+      "requiredVersion": "~22.0.5",
+      "singleton": true,
+      "strictVersion": true,
+      "version": "22.0.8",
+      "bundle": "browser-angular_common"
+    },
+    {
+      "packageName": "@internal/events",
+      "outFileName": "_internal_events-GHWP4RLH.js",
+      "requiredVersion": "~2026.1.1",
+      "singleton": true,
+      "strictVersion": true,
+      "version": "2026.1.1"
+    }
+  ],
+  "exposes": [
+    {
+      "key": "approval-status",
+      "outFileName": "approval-status-AVLQIABR.js"
+    },
+    {
+      "key": "submit-for-approval",
+      "outFileName": "submit-for-approval-OH54GS2H.js"
+    },
+    {
+      "key": "nav-contribution",
+      "outFileName": "nav-contribution-WJJZDQ5I.js"
+    }
+  ],
+  "chunks": {
+    "browser-angular_cdk": [
+      "chunk-H5NEKDTB.js",
+      "chunk-HRXGVGZD.js"
+    ],
+    "browser-rxjs": [
+      "chunk-64WOUHHJ.js"
+    ],
+    "browser-angular_core": [
+      "chunk-EVJIYMQK.js",
+      "chunk-VY3YESYY.js",
+      "chunk-IVCCOELQ.js",
+      "chunk-FDI57VK3.js",
+      "chunk-PZNONLPT.js"
+    ],
+    "browser-angular_common": [
+      "chunk-72DWDBNG.js"
+    ],
+    "mapping-or-exposed": [
+      "chunk-RBGINIWH.js",
+      "chunk-2VMXMS7J.js"
+    ]
+  }
+}

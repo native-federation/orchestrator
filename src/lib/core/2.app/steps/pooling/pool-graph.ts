@@ -75,7 +75,7 @@ export function autoScope(name: string, useAutoExternalPooling: boolean): string
 /**
  * Group one shareScope's candidates into pools by shared membership: pool = connected component of a
  * graph with edges from auto-pooling (`external -> scope`, global) and declared tags
- * (`external -> tag@remote`, remote-local). See docs/version-resolver.md + plan.md. Returns only real
+ * (`external -> tag@remote`, remote-local). See docs/version-resolver.md. Returns only real
  * pools (>=2 members), keyed by and iterated in order of their canonical name (smallest member —
  * reload-stable). An explicit-tag member that pooled with nothing is warned (likely typo or missing
  * sibling); auto-scope singletons stay silent.

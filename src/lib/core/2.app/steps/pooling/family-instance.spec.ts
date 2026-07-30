@@ -31,7 +31,7 @@ const member = (name: string, versions: VersionShape[]): PoolMember => ({
   },
 });
 
-// research.md §1 Case 1: mfe-b pins core to ~22.0.5, so determine shares core from mfe-b's build
+// The strict-pin split: mfe-b pins core to ~22.0.5, so determine shares core from mfe-b's build
 // while router - which only mfe-a provides - stays on mfe-a's 22.1.0.
 const CASE_1: PoolMember[] = [
   member('@angular/core', [
@@ -41,7 +41,7 @@ const CASE_1: PoolMember[] = [
   member('@angular/router', [{ tag: '22.1.0', action: 'share', remotes: [{ remote: 'mfe-a' }] }]),
 ];
 
-// research.md §1 Case 3, reduced: the Angular-21 remote is islanded on core (determine marked it
+// The production capture's shape, reduced: the Angular-21 remote is islanded on core (determine marked it
 // `scope`) but is the SOLE provider of animations, which it still shares at 21.2.18.
 const CASE_3: PoolMember[] = [
   member('@angular/core', [
@@ -133,7 +133,7 @@ describe('findDisagreement', () => {
     new Map(Object.entries(shapes).map(([remote, i]) => [remote, new Map(Object.entries(i))]));
 
   it('accepts patch drift within one minor line', () => {
-    // The benign shape: two builds a remote may safely draw on (research.md §14).
+    // The benign shape: two builds a remote may safely draw on.
     const found = findDisagreement(
       instances({ a: { core: '22.0.8', cdk: '22.0.8' }, b: { core: '22.0.6' } }),
       ['a', 'b']
