@@ -356,7 +356,7 @@ O(V + R·M) **only** when the early-out misses; gate O(V) per iteration.
 ### 9.1 Measured baseline (production capture, `benchmark/*.remoteEntry.json`)
 
 Mean over 60 cold runs / 100 warm runs, jsdom, auto-pooling on. Probe kept at
-`<scratchpad>/perf-probe.spec.ts.keep`.
+`benchmark/probes/perf-probe.spec.ts` (git-ignored, local only).
 
 | step | cold ms | warm ms (all remotes cached ⇒ skipped) |
 | --- | --- | --- |

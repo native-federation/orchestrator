@@ -80,8 +80,9 @@ where they previously mixed builds.
 5. Fixed point re-entered only after an actual island.
 6. Allocation discipline (cf. `7bec314`, `3000f6c`): reuse maps, index loops in inner passes.
 
-**Measured baseline** (`research.md` §9.1, capture in the untracked `benchmark/`; probe at
-`<scratchpad>/perf-probe.spec.ts.keep`): cold init 2.06 ms total — process 0.82 / determine 0.38 /
+**Measured baseline** (`research.md` §9.1, capture and probes in `benchmark/`, **git-ignored — local
+testing only**; `benchmark/probes/{perf,outcome}-probe.spec.ts`, copy into `src` to run, then delete,
+since a spec under `src` counts against the coverage gates): cold init 2.06 ms total — process 0.82 / determine 0.38 /
 pool 0.51 / importMap 0.36. Warm init 0.48 ms total, of which **pooling is 45%** and determine is
 0.008 ms. `buildPools` alone 0.086 ms; `isCompatible` during determine 11 calls. Election is *not*
 the cost centre — the writes are (W1) and the warm recompute is (W2). Re-measure with the probe after
