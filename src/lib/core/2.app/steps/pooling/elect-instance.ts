@@ -34,6 +34,40 @@ export function coveredBySingleInstance(instances: FamilyInstances, tags: Chosen
   return false;
 }
 
+// `@angular/core/primitives/di` -> `@angular/core`, `rxjs/operators` -> `rxjs`. Package boundaries are
+// not in the remote entry, so this is the naming convention; it can only ever restrict election.
+export function packageOf(name: ExternalName): string {
+  const first = name.indexOf('/');
+  if (first === -1) return name;
+  if (!name.startsWith('@')) return name.slice(0, first);
+  const second = name.indexOf('/', first + 1);
+  return second === -1 ? name : name.slice(0, second);
+}
+
+/**
+ * Members grouped by package, restricted to those some live instance ships. Entrypoints of one package
+ * must be served from one build — election takes a package whole or not at all. Without this the
+ * extension pass fills the siblings an elected instance does not ship from another instance, which on
+ * `benchmark/` left `@angular/core@22.0.6` beside `@angular/core/primitives/signals@22.0.8`.
+ */
+export function packageGroups(
+  members: PoolMember[],
+  instances: FamilyInstances
+): Map<string, ExternalName[]> {
+  const live = new Set<ExternalName>();
+  for (const instance of instances.values()) for (const member of instance.keys()) live.add(member);
+
+  const groups = new Map<string, ExternalName[]>();
+  for (const member of members) {
+    if (!live.has(member.name)) continue;
+    const pkg = packageOf(member.name);
+    const group = groups.get(pkg);
+    if (group) group.push(member.name);
+    else groups.set(pkg, [member.name]);
+  }
+  return groups;
+}
+
 type Score = {
   remote: RemoteName;
   served: number;
@@ -87,11 +121,27 @@ export function electInstances(
     }
   }
 
+  const groups = packageGroups(members, instances);
+  const groupOf = new Map<ExternalName, ExternalName[]>();
+  for (const group of groups.values()) for (const member of group) groupOf.set(member, group);
+
+  // A package is taken whole: the instance must ship every live member of it, at tags that agree with
+  // anything already pinned (host precedence, single-provider).
+  const takes = (offer: FamilyInstance, group: ExternalName[]): boolean => {
+    for (let i = 0; i < group.length; i++) {
+      const tag = offer.get(group[i]!);
+      if (tag === undefined) return false;
+      const already = chosen.get(group[i]!);
+      if (already !== undefined && already !== tag) return false;
+    }
+    return true;
+  };
+
   // Can this instance serve `remote` on its own? Every member it consumes has to be in the offer, at
-  // a tag its range accepts and that no host pin contradicts. Coverage is the whole point: a remote
-  // served from one build is consistent by construction, which no tag comparison can establish
-  // (§14.2). Counting "some acceptable mix of instances" instead would re-elect the very split
-  // families this fixes.
+  // a tag its range accepts and in a package the instance can take whole. Coverage is the whole point:
+  // a remote served from one build is consistent by construction, which no tag comparison can
+  // establish (§14.2). Counting "some acceptable mix of instances" instead would re-elect the very
+  // split families this fixes.
   const servesAlone = (offer: FamilyInstance, remote: RemoteName): boolean => {
     const accepted = acceptance.get(remote);
     const wants = consumed.get(remote) ?? [];
@@ -102,16 +152,22 @@ export function electInstances(
       const pinned = chosen.get(member);
       if (pinned !== undefined && pinned !== tag && hostPinned.has(member)) return false;
       if (!accepted?.get(member)?.has(tag)) return false;
+      const group = groupOf.get(member);
+      if (!group || !takes(offer, group)) return false;
     }
     return true;
   };
 
-  // One scratch map for every trial assignment, refilled per candidate.
+  // One scratch map for every trial assignment, refilled per candidate. Only whole packages, so the
+  // score reflects what the commit below would actually assign.
   const trial: ChosenTags = new Map();
   const fill = (offer: FamilyInstance) => {
     trial.clear();
     for (const [member, tag] of chosen) trial.set(member, tag);
-    for (const [member, tag] of offer) if (!trial.has(member)) trial.set(member, tag);
+    for (const group of groups.values()) {
+      if (!takes(offer, group)) continue;
+      for (const member of group) if (!trial.has(member)) trial.set(member, offer.get(member)!);
+    }
   };
 
   const score = (remote: RemoteName, offer: FamilyInstance, alone: boolean): Score => {
@@ -150,7 +206,10 @@ export function electInstances(
   if (!primary) return chosen;
 
   const commit = (offer: FamilyInstance) => {
-    for (const [member, tag] of offer) if (!chosen.has(member)) chosen.set(member, tag);
+    for (const group of groups.values()) {
+      if (!takes(offer, group)) continue;
+      for (const member of group) if (!chosen.has(member)) chosen.set(member, offer.get(member)!);
+    }
   };
   commit(instances.get(primary.remote)!);
 
@@ -163,12 +222,13 @@ export function electInstances(
 
     let best: Score | undefined;
     for (const [remote, offer] of instances) {
+      // Only a candidate that can take a whole package containing an unchosen member moves the
+      // assignment forward; without that check the loop could pick one that commits nothing.
       let offers = false;
-      for (const member of offer.keys()) {
-        if (!chosen.has(member)) {
-          offers = true;
-          break;
-        }
+      for (const group of groups.values()) {
+        if (!group.some(member => !chosen.has(member)) || !takes(offer, group)) continue;
+        offers = true;
+        break;
       }
       if (!offers) continue;
 

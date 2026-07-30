@@ -386,6 +386,41 @@ The capture's `@angular` pool is 24 members, and iteration 3 already yields `maj
 downloads; election moves nothing there. Those tables came from a prototype outside `src`, so the
 measured-outcome rows in §13.3/§14.1/§15 should be treated as unverified until re-measured here.
 
+### RESOLVED — package-coherence guard (2026-07-30, Auke asked for it to be implemented)
+
+New rule in `elect-instance.ts`: **an instance takes a package whole or not at all.** `packageOf`
+(`@angular/core/primitives/di` → `@angular/core`) groups the live members; `takes()` requires the offer
+to ship every live member of a group at tags agreeing with anything already pinned; `servesAlone`,
+the trial fill, the commit and the extension's candidate filter all go through it. Package boundaries
+are not in `DenseSharedInfo`, so this is the naming convention — but it can only ever *restrict*
+election, so a mis-grouping costs a missed optimisation, never a broken import map.
+
+Measured (probe `<scratchpad>/election-probe.spec.ts.keep`, `@angular` pool; "split pkgs" = packages
+whose shared members sit at more than one tag):
+
+| portfolio | today (it. 3) | election, no guard | election + guard |
+| --- | --- | --- | --- |
+| captured 7 | 36 dl, 1 island | 36, 1 | **36, 1** |
+| all 11 | 45, 2 | 52, 3, split `@angular/core`+`common` | **45, 2** |
+| 7 + `eight` | 64, 5 | 64, 5 | **64, 5** |
+| 7 + `eleven` | 36, 1 | 43, 2, split `@angular/core`+`common` | **36, 1** |
+| 7 + `nine` | 36, 1 | 36, 1 | **36, 1** |
+| repro Case 1 | broken | fixed | **fixed** |
+
+With the guard, election **does not fire on any real portfolio** (`elected: no` everywhere) — the two
+where it did fire without it are exactly the two it damaged. So the shipped behaviour is: identical to
+iteration 3 on the whole benchmark set, plus Case 1 fixed. Note `determine` leaves cross-major package
+splits in every portfolio (`@angular/forms{21.2.18,22.0.8}`, `platform-browser{21.2.18,22.0.8}`), and
+pooling clears all of them — that is the islanding gate, not election.
+
+13 tests added in `elect-instance.spec.ts` (Case 1 preference, Case 5 containment, Point 4 collapse,
+host pin immovable, package guard, `packageOf`, `packageGroups`, the coherence early-out).
+**815/815**, coverage 94.8/88.19/95.08/95.98, types/lint clean.
+
+**Still open:** the distance question. The guard removes the observed over-reach but is not a
+discriminator — if an instance *did* cover every entrypoint, election would again prefer it and island
+the strict consumer. That is §14's test B, which §15 dropped.
+
 ---
 
 ## 5 — Per-remote all-skip-or-all-scope + fixed point
