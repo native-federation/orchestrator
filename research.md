@@ -731,6 +731,12 @@ gate. Two things stay exactly as they are today:
 2. **Candidate instances are restricted to versions marked `share`/`skip`.** A `scope` version is never
    promoted into an elected instance. This was I3's second clause and it survives the redesign for the
    same reason it existed: promoting a `scope` version cascades scoping and is self-defeating.
+   **An islanded remote contributes no instance at all** — not even for members it is the *sole*
+   provider of, whose own version is still marked `share`. This is not a detail: it is precisely the
+   capture's failure (§1 Case 3), where `form-overview` is correctly islanded on `core` yet keeps
+   `animations@21.2.18` globally shared beside `core@22.0.8`. Dropping the whole instance, rather than
+   the offending version, is what makes the shared set itself coherent and is what produces the
+   measured 17 downloads.
 
 Consequence for the defensive throw at `pool-shared-externals.ts:87-93`: it keys off `islanded.size` under
 `strictExternalCompatibility` and its meaning is unaffected, because the set it reads is still built from

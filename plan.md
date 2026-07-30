@@ -21,7 +21,7 @@ verify commands, then tick its box and append a one-line result under it. Stop a
 
 - [x] 0 — Branch + baseline
 - [x] 1 — Extract `applyWinner` (pure refactor)
-- [ ] 2 — Family-instance primitives (pure, unit-tested)
+- [x] 2 — Family-instance primitives (pure, unit-tested)
 - [ ] 3 — No-op-pool early-out (W1) + log levels
 - [ ] 4 — Election: host-pinned, remotes-served objective
 - [ ] 5 — Per-remote all-skip-or-all-scope + fixed point
@@ -209,6 +209,26 @@ new types.
 **Verify:** `npx vitest run --coverage.enabled=false src/lib/core/2.app/steps/pooling` green · types
 clean · `npm run knip` (nothing reported unused — wired in 4/5).
 **Done when:** primitives exist, tested, allocation-lean, unused by production code.
+
+**Result (2026-07-30):** new `pooling/family-instance.ts` + `.spec.ts` (18 tests), types in
+`pool.types.ts` (`FamilyInstance`, `FamilyInstances`, `AcceptanceTable`, `ChosenTags`). Full suite
+**796/796 green** (74 files), types clean, lint 0 errors, knip clean, prettier clean.
+
+Three signature deviations from the wording above, all deliberate:
+1. **`buildInstances(members, islanded?)` gained the islanded set** — and `research.md` §15.3 point 2
+   was extended to say so, because the spec only implied it. An islanded remote must contribute **no**
+   instance, not merely have its `scope` versions skipped: in the capture `form-overview` is islanded
+   on `core` while its `animations` version is still `share` and sole-provider, so skipping versions
+   alone leaves `animations@21.2.18` shared beside `core@22.0.8` — the exact Case 3 failure. Covered by
+   a dedicated test.
+2. **`consumedMembers(members)` returns `Map<RemoteName, ExternalName[]>` for all remotes in one pass**
+   instead of `(members, remote)` per remote, which would be O(R²·V) across the per-remote pass.
+3. **`singleProviderMembers(instances)` returns `Map<member, remote>`** rather than a `Set`, since the
+   caller needs the provider to do the direct assignment, and does not need `members`.
+
+Also: `hostPinnedTags` skips `scope` versions defensively (a host version is always determine's winner,
+so this cannot fire today), and `buildAcceptanceTable` unions over a remote's metas for one member —
+`process-remote-entries` keeps one meta per (remote, external), so union and intersection coincide.
 
 ---
 
