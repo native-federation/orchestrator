@@ -98,9 +98,10 @@ describe('pooling: split monorepo family (known bug)', () => {
     // mfe-a's own core@22.1.0 was deduped away, so mfe-a runs router@22.1.0 against core@22.0.5.
     expect(importMap.scopes?.[SCOPE['team/mfe-a']]?.['@angular/core']).toBeUndefined();
 
-    // Pooling was a no-op here: nothing was marked `scope`, so no remote was islanded.
+    // Pooling was a no-op here: nothing was marked `scope`, so no remote was islanded and pooling
+    // left storage untouched — the versions keep determine's own order (newest tag first).
     const core = adapters.sharedExternalsRepo.getFromScope(undefined)['@angular/core']!;
-    expect(core.versions.map(v => v.action)).toEqual(['share', 'skip']);
+    expect(core.versions.map(v => `${v.tag}:${v.action}`)).toEqual(['22.1.0:skip', '22.0.5:share']);
   });
 
   it('splits the family when host precedence pins one member', async () => {

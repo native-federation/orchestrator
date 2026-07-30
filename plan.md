@@ -22,7 +22,7 @@ verify commands, then tick its box and append a one-line result under it. Stop a
 - [x] 0 — Branch + baseline
 - [x] 1 — Extract `applyWinner` (pure refactor)
 - [x] 2 — Family-instance primitives (pure, unit-tested)
-- [ ] 3 — No-op-pool early-out (W1) + log levels
+- [x] 3 — No-op-pool early-out (W1) + log levels
 - [ ] 4 — Election: host-pinned, remotes-served objective
 - [ ] 5 — Per-remote all-skip-or-all-scope + fixed point
 - [ ] 6 — Dynamic-init mirror (additive only)
@@ -268,6 +268,39 @@ the observability contract in place before behaviour moves.
 still show the split (nothing is fixed yet) · pooling suite green · types clean · the probe shows the
 pooling step **down**, not up.
 **Done when:** no-op pools touch no storage, warnings behave per §15.1 rule 6, zero resolution changes.
+
+**Result (2026-07-30):** `pooling.integration.spec.ts` **untouched** (`git diff` empty) and green; both
+repro arms still split. Suite **802/802**, types/lint/prettier clean.
+
+Measured with a rebuilt probe (`<scratchpad>/w1-probe.spec.ts.keep`; the 2026-07-29 one died with its
+session). Two portfolios from `benchmark/`, W1 toggled off/on in place:
+
+| portfolio | writes off → on | cold ms off → on |
+| --- | --- | --- |
+| captured 7 (islands `legacy-overview`) | 24 → 24 | 0.34 → 0.42 (noise; identical path) |
+| coherent 6 (`two`–`seven`, islands nobody) | **16 → 0** | **0.336 → 0.13–0.165** |
+
+So on the healthy path W1 removes every write and ~55% of the step; where an island exists nothing
+changes, as designed. Warm is unaffected (0.12–0.18 either way) — the warm cost is the scope walk plus
+`buildPools`, which is W2's target in iteration 7. Note the capture itself is *not* the healthy path: it
+islands `legacy-overview`, so its 24 writes stay until election lands.
+
+`islandedRemotes` now returns `Map<RemoteName, {member, tag}>` (first offender per remote) to name the
+cause in the warning; `rebuildMember` takes the map and only ever calls `.has()`.
+
+**Spec fallout, worth knowing:** W1 also stops pooling from *reordering* versions in no-op pools —
+`rebuildMember` emits `[share, ...skips, ...scopes]` while `store-remote-entry.ts:201` stores them
+newest-tag-first. Nothing downstream reads `versions[0]` except determine's `profile.latestSharedExternal`
+(`determine-shared-externals.ts:112`), which wants exactly the newest-first order, so this is a small
+correctness gain. The repro spec's action-order assertion was updated to assert `tag:action` pairs
+instead, which is order-explicit.
+
+**8 unit tests in `pool-shared-externals.spec.ts` changed contract** (not behaviour): they asserted
+rebuild *output* for pools that island nobody, which is now never written. They assert the new contract —
+`addOrUpdate` not called, verdicts stand on the stored external, pool formation proven by the debug line.
+Among them, the F4 test that asserted a scoped-only warning for a member whose provider was islanded is
+**inverted** per §11.4 (double-warn suppression) and paired with a new test where sharing is lost
+*without* an island, which still warns.
 
 ---
 

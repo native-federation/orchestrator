@@ -64,6 +64,10 @@ describe('createPoolSharedExternals', () => {
       .flatMap(v => v.remotes.map(r => r.name))
       .sort();
 
+  // A pool that islands nobody writes nothing (W1), so the debug line is what proves it was formed.
+  const expectPooled = (poolName: string) =>
+    expect(config.log.debug).toHaveBeenCalledWith(3, expect.stringContaining(`pool:${poolName}`));
+
   describe('when inert', () => {
     it('does nothing when pooling is disabled and no pool tags are present', async () => {
       givenExternals({
@@ -145,7 +149,7 @@ describe('createPoolSharedExternals', () => {
       await poolSharedExternals();
 
       expect(adapters.sharedExternalsRepo.getFromScope).toHaveBeenCalled();
-      expect(namesOf(rebuiltFor('foo')!, 'share')).toEqual(['mfe1', 'mfe2']);
+      expectPooled('bar');
     });
 
     it('never early-outs when auto-pooling is on, regardless of the pool-tag memo', async () => {
@@ -163,7 +167,7 @@ describe('createPoolSharedExternals', () => {
       await poolSharedExternals();
 
       expect(adapters.sharedExternalsRepo.getFromScope).toHaveBeenCalled();
-      expect(rebuiltFor('@framework/core')).toBeDefined();
+      expectPooled('@framework/common');
     });
   });
 
@@ -184,52 +188,59 @@ describe('createPoolSharedExternals', () => {
 
       await poolSharedExternals();
 
-      expect(namesOf(rebuiltFor('foo')!, 'share')).toEqual(['mfe1', 'mfe2']);
-      expect(namesOf(rebuiltFor('bar')!, 'share')).toEqual(['mfe1', 'mfe2']);
+      expectPooled('bar');
+      expect(config.log.debug).toHaveBeenCalledWith(
+        3,
+        expect.stringContaining('2 members across 2 remotes')
+      );
     });
   });
 
+  // Islanding nobody means every member keeps the verdict determine gave it, so pooling writes
+  // nothing at all (W1) instead of rebuilding each member into an identical value.
   describe('defers to the base resolver for compatible families', () => {
     it('keeps every member shared, no scoping, when nothing is incompatible', async () => {
       config.feature.useAutoExternalPooling = true;
-      givenExternals({
+      const externals = {
         '@framework/core': external([
           sharedVersion('17', [meta('mfe1'), meta('mfe2')], { action: 'share' }),
         ]),
         '@framework/common': external([
           sharedVersion('17', [meta('mfe2'), meta('mfe1')], { action: 'share' }),
         ]),
-      });
+      };
+      givenExternals(externals);
 
       await poolSharedExternals();
 
-      const core = rebuiltFor('@framework/core')!;
-      const common = rebuiltFor('@framework/common')!;
-      expect(namesOf(core, 'share')).toEqual(['mfe1', 'mfe2']);
-      expect(namesOf(common, 'share')).toEqual(['mfe1', 'mfe2']);
-      expect(core.versions.some(v => v.action === 'scope')).toBe(false);
-      expect(common.versions.some(v => v.action === 'scope')).toBe(false);
+      expectPooled('@framework/common');
+      expect(adapters.sharedExternalsRepo.addOrUpdate).not.toHaveBeenCalled();
+      for (const stored of Object.values(externals)) {
+        expect(namesOf(stored, 'share')).toEqual(['mfe1', 'mfe2']);
+        expect(stored.versions.some(v => v.action === 'scope')).toBe(false);
+      }
     });
 
     it('leaves a single-provider member shared instead of scoping it (no anchor coverage penalty)', async () => {
       config.feature.useAutoExternalPooling = true;
       // m2 is provided by Q alone. Under the old anchor model an anchor that lacked m2 orphaned it;
       // now a compatible single-provider member simply stays shared.
-      givenExternals({
+      const externals = {
         '@pool/m1': external([
           sharedVersion('1', [meta('P', { req: '1' }), meta('Q', { req: '1' })], {
             action: 'share',
           }),
         ]),
         '@pool/m2': external([sharedVersion('1', [meta('Q', { req: '1' })], { action: 'share' })]),
-      });
+      };
+      givenExternals(externals);
 
       await poolSharedExternals();
 
-      expect(namesOf(rebuiltFor('@pool/m1')!, 'share')).toEqual(['P', 'Q']);
-      const m2 = rebuiltFor('@pool/m2')!;
-      expect(namesOf(m2, 'share')).toEqual(['Q']);
-      expect(m2.versions.some(v => v.action === 'scope')).toBe(false);
+      expect(adapters.sharedExternalsRepo.addOrUpdate).not.toHaveBeenCalled();
+      expect(namesOf(externals['@pool/m1'], 'share')).toEqual(['P', 'Q']);
+      expect(namesOf(externals['@pool/m2'], 'share')).toEqual(['Q']);
+      expect(externals['@pool/m2'].versions.some(v => v.action === 'scope')).toBe(false);
     });
 
     it('preserves the base resolver host winner', async () => {
@@ -239,11 +250,13 @@ describe('createPoolSharedExternals', () => {
           sharedVersion('17', [meta('host')], { host: true, action: 'share' }),
           sharedVersion('18', [meta('mfe1', { req: '18' })]),
         ]);
-      givenExternals({ '@framework/core': build(), '@framework/common': build() });
+      const externals = { '@framework/core': build(), '@framework/common': build() };
+      givenExternals(externals);
 
       await poolSharedExternals();
 
-      const share = rebuiltFor('@framework/core')!.versions.find(v => v.action === 'share')!;
+      expect(adapters.sharedExternalsRepo.addOrUpdate).not.toHaveBeenCalled();
+      const share = externals['@framework/core'].versions.find(v => v.action === 'share')!;
       expect(share.host).toBe(true);
       expect(share.remotes[0]!.name).toBe('host');
     });
@@ -297,6 +310,48 @@ describe('createPoolSharedExternals', () => {
       const common = rebuiltFor('@framework/common')!;
       expect(namesOf(common, 'share')).toEqual(['mfe1', 'mfe2']);
       expect(namesOf(common, 'scope')).toEqual(['mfe3']);
+    });
+
+    it('warns once per islanded remote, naming the member and tag that made it impossible', async () => {
+      config.feature.useAutoExternalPooling = true;
+      givenExternals({
+        '@framework/core': external([
+          sharedVersion('17', [meta('a', { req: '17' })], { action: 'share' }),
+          sharedVersion('18', [meta('c', { req: '18' })], { action: 'scope' }),
+        ]),
+        '@framework/common': external([
+          sharedVersion('17', [meta('a', { req: '17' })], { action: 'share' }),
+          sharedVersion('18', [meta('c', { req: '18' })], { action: 'scope' }),
+        ]),
+      });
+
+      await poolSharedExternals();
+
+      const warnings = vi
+        .mocked(config.log.warn)
+        .mock.calls.filter(c => String(c[1]).includes("'c' is islanded"));
+      expect(warnings).toHaveLength(1);
+      expect(warnings[0]![1]).toContain("'@framework/common@18' is incompatible");
+      expect(warnings[0]![1]).toContain('all 2 members of the pool are scoped');
+    });
+
+    it('writes every member once it has islanded someone', async () => {
+      config.feature.useAutoExternalPooling = true;
+      givenExternals({
+        '@framework/core': external([
+          sharedVersion('17', [meta('a', { req: '17' })], { action: 'share' }),
+          sharedVersion('18', [meta('c', { req: '18' })], { action: 'scope' }),
+        ]),
+        '@framework/common': external([
+          sharedVersion('17', [meta('a', { req: '17' }), meta('c', { req: '17' })], {
+            action: 'share',
+          }),
+        ]),
+      });
+
+      await poolSharedExternals();
+
+      expect(adapters.sharedExternalsRepo.addOrUpdate).toHaveBeenCalledTimes(2);
     });
 
     it('groups scope versions by each remote real tag (F3)', async () => {
@@ -354,8 +409,10 @@ describe('createPoolSharedExternals', () => {
   });
 
   describe('scoped-only warning (F4)', () => {
-    it('warns when a scoped-only member lost sharing across more than one consumer', async () => {
+    it('stays silent when an island in the same pass took the last provider', async () => {
       config.feature.useAutoExternalPooling = true;
+      // cdk's only shared build was c's, and c is islanded via core@18. The island warning already
+      // named that cause, so restating its effect would be a double warning (research.md §11.4).
       givenExternals({
         '@framework/core': external([
           sharedVersion('17', [meta('a', { req: '17' })], { action: 'share' }),
@@ -364,6 +421,34 @@ describe('createPoolSharedExternals', () => {
         '@framework/cdk': external([
           sharedVersion('18', [meta('c', { req: '18' })], { action: 'share' }),
           sharedVersion('18', [meta('b', { req: '18' })], { action: 'skip' }),
+        ]),
+      });
+
+      await poolSharedExternals();
+
+      expect(config.log.warn).not.toHaveBeenCalledWith(
+        3,
+        expect.stringContaining("'@framework/cdk' is scoped-only")
+      );
+      expect(config.log.warn).toHaveBeenCalledWith(
+        3,
+        expect.stringContaining("'c' is islanded: '@framework/core@18' is incompatible")
+      );
+    });
+
+    it('warns when sharing was lost without an island taking the provider', async () => {
+      config.feature.useAutoExternalPooling = true;
+      // cdk is shared from b, which survives; d is islanded on core, and cdk ends up scope-only
+      // because determine had already scoped b's copy for its own reasons.
+      givenExternals({
+        '@framework/core': external([
+          sharedVersion('17', [meta('a', { req: '17' })], { action: 'share' }),
+          sharedVersion('18', [meta('d', { req: '18', strict: true })], { action: 'scope' }),
+        ]),
+        '@framework/cdk': external([
+          sharedVersion('18', [meta('b', { req: '18' }), meta('e', { req: '18' })], {
+            action: 'scope',
+          }),
         ]),
       });
 
@@ -430,8 +515,7 @@ describe('createPoolSharedExternals', () => {
 
       await expect(poolSharedExternals()).resolves.toBeUndefined();
 
-      expect(namesOf(rebuiltFor('@framework/core')!, 'share')).toEqual(['a', 'b']);
-      expect(namesOf(rebuiltFor('@framework/cdk')!, 'share')).toEqual(['b']);
+      expect(adapters.sharedExternalsRepo.addOrUpdate).not.toHaveBeenCalled();
     });
 
     it('throws under strictExternalCompatibility when a remote is islanded', async () => {

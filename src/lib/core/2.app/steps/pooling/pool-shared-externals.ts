@@ -1,5 +1,11 @@
 import type { ForPoolingSharedExternals } from '../../driver-ports/init/for-pooling-shared-externals.port';
-import type { RemoteName, SharedExternal, SharedVersion } from 'lib/core/1.domain';
+import type {
+  ExternalName,
+  RemoteName,
+  SharedExternal,
+  SharedVersion,
+  VersionName,
+} from 'lib/core/1.domain';
 import { NFError } from 'lib/core/native-federation.error';
 import type { DrivingContract } from '../../driving-ports/driving.contract';
 import type { LoggingConfig } from '../../config/log.contract';
@@ -8,13 +14,19 @@ import { buildPools } from './pool-graph';
 import { remotesInPool } from './pool.util';
 import type { PoolMember, PoolName } from './pool.types';
 
+type IslandCause = { member: ExternalName; tag: VersionName };
+
 // Remotes that are strict-incompatible on any member (determine marked a version `scope`). Reads
 // stored actions only — pooling makes no compatibility call — and islands across the WHOLE family.
-function islandedRemotes(members: PoolMember[]): Set<RemoteName> {
-  const islanded = new Set<RemoteName>();
+// Keeps the first offending member+tag per remote, to name it in the warning.
+function islandedRemotes(members: PoolMember[]): Map<RemoteName, IslandCause> {
+  const islanded = new Map<RemoteName, IslandCause>();
   for (const member of members)
     for (const version of member.external.versions)
-      if (version.action === 'scope') for (const remote of version.remotes) islanded.add(remote.name);
+      if (version.action === 'scope')
+        for (const remote of version.remotes)
+          if (!islanded.has(remote.name))
+            islanded.set(remote.name, { member: member.name, tag: version.tag });
   return islanded;
 }
 
@@ -79,22 +91,33 @@ export function createPoolSharedExternals(
 
     config.log.debug(
       3,
-      `[${scope}][pool:${poolName}] ${members.length} members across ${allRemotes.length} remotes, islanded={${[...islanded].join(', ') || '∅'}}\n` +
+      `[${scope}][pool:${poolName}] ${members.length} members across ${allRemotes.length} remotes, islanded={${[...islanded.keys()].join(', ') || '∅'}}\n` +
         members.map(m => `  - ${m.name}`).join('\n')
     );
 
+    // Nothing to island: determine's verdicts already stand for every member, so rebuilding them
+    // would write back what storage holds.
+    if (islanded.size === 0) return;
+
     // Defensive: determine already throws on real incompatibilities under strictExternalCompatibility.
-    if (islanded.size > 0 && config.strict.strictExternalCompatibility) {
+    if (config.strict.strictExternalCompatibility) {
       config.log.error(
         3,
-        `[${scope}][pool:${poolName}] version-incompatible remotes cannot be pooled: {${[...islanded].join(', ')}}.`
+        `[${scope}][pool:${poolName}] version-incompatible remotes cannot be pooled: {${[...islanded.keys()].join(', ')}}.`
       );
       throw new NFError(`Could not pool '${poolName}' in scope ${scope}.`);
     }
 
+    for (const [remote, cause] of islanded) {
+      config.log.warn(
+        3,
+        `[${scope}][pool:${poolName}] '${remote}' is islanded: '${cause.member}@${cause.tag}' is incompatible with the shared version, so all ${members.length} members of the pool are scoped for it.`
+      );
+    }
+
     for (const member of members) {
       const rebuilt = rebuildMember(member, islanded);
-      warnIfScopedOnly(poolName, member.name, rebuilt, scope);
+      warnIfScopedOnly(poolName, member, rebuilt, islanded, scope);
       ports.sharedExternalsRepo.addOrUpdate(member.name, rebuilt, scope);
     }
   }
@@ -103,24 +126,40 @@ export function createPoolSharedExternals(
   // single-consumer member is one download either way, so pooling could not have improved it.
   function warnIfScopedOnly(
     poolName: PoolName,
-    memberName: string,
+    member: PoolMember,
     rebuilt: SharedExternal,
+    islanded: Map<RemoteName, IslandCause>,
     scope: string
   ): void {
     if (rebuilt.versions.some(v => v.action === 'share')) return;
     const consumers = new Set(rebuilt.versions.flatMap(v => v.remotes.map(r => r.name))).size;
     if (consumers < 2) return;
+
+    // An island took this member's last provider: its own warning already named the cause, and this
+    // one would only restate the effect.
+    const provider = member.external.versions.find(v => v.action === 'share');
+    if (provider?.remotes.some(r => islanded.has(r.name))) return;
+
     config.log.warn(
       3,
-      `[${scope}][pool:${poolName}] '${memberName}' is scoped-only — no coherent shared build provides it; ${consumers} remotes download their own copy.`
+      `[${scope}][pool:${poolName}] '${member.name}' is scoped-only — no coherent shared build provides it; ${consumers} remotes download their own copy.`
     );
   }
 
   // Island-or-defer at remote-copy granularity: islanded (or already-`scope`) copies self-serve;
   // every other copy keeps its base verdict. Scope versions group by each copy's real tag (F3).
-  function rebuildMember(member: PoolMember, islanded: Set<RemoteName>): SharedExternal {
+  function rebuildMember(
+    member: PoolMember,
+    islanded: Map<RemoteName, IslandCause>
+  ): SharedExternal {
     const entries = member.external.versions.flatMap(v =>
-      v.remotes.map(meta => ({ remote: meta.name, tag: v.tag, host: v.host, action: v.action, meta }))
+      v.remotes.map(meta => ({
+        remote: meta.name,
+        tag: v.tag,
+        host: v.host,
+        action: v.action,
+        meta,
+      }))
     );
 
     const isScoped = (e: (typeof entries)[number]) =>
