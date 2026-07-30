@@ -28,7 +28,7 @@ verify commands, then tick its box and append a one-line result under it. Stop a
 - [x] 5 — Per-remote agreement gate (minor granularity) + fixed point
 - [x] 6 — Dynamic-init mirror (additive only)
 - [x] 7 — Warm-init dirty-gated skip (W2 — 45% of warm init) → **warm pooling 0.218 → 0.002 ms**
-- [ ] 8 — Regression + fixture specs
+- [x] 8 — Regression + fixture specs (F-A's mechanism **corrected by measurement** — see below)
 - [ ] 9 — Docs
 - [ ] 10 — Final gates + PR
 
@@ -75,8 +75,10 @@ and both repro arms assert the fix. What remains:
 - **F-A, the islanding cascade** (`research.md` §16.2) — one extra previous-major remote takes 7+`eight` from
   36 to **64** downloads and islands **5 of 8**, three of them healthy Angular-22 remotes islanded by
   contagion. Pre-existing #56 behaviour, surfaced by measurement; **does not block #63**, but must be
-  recorded in the release notes and ideally filed as a follow-up issue. The shipped gate is structurally
-  subtractive and cannot address it — any fix has to re-point winners.
+  recorded in the release notes and ideally filed as a follow-up issue. Characterised in
+  `islanding-cascade.characterisation.spec.ts`. Mechanism corrected in iteration 8: the mis-election is
+  **`determine`'s** (its extra-download objective counts versions, not remotes), which pooling only
+  amplifies — so the fix belongs in the resolver's cost model, not in a pooling-side re-pointing.
 - **Point 4 patch drift is tolerated**, not unified (§12.3's known give-up, now unmitigated by election).
 - **Thin real-world validation**: the minor-line gate fires on no real portfolio (§16.1 finding 2).
 
@@ -483,6 +485,44 @@ a no-op). One existing assertion changed contract: `determineSharedExternals()` 
 
 **Verify:** `npm test` green **including coverage thresholds** · types clean.
 **Done when:** the regression is locked in and coverage gates pass.
+
+**Result (2026-07-30):** two files, split by intent.
+
+`split-family.repro.spec.ts` → **`family-coherence.regression.spec.ts`** (5 tests, end to end through
+determine → pooling → import map): both #63 arms assert the fix, the Case 2 arm's docblock recording that
+the host keeps its pin while the mixing remote gives way (§15.6 retired); **Point 4 as a tolerance test**
+(`21.2.2` beside `21.2.3`, both `~21.2.0` — split winners, 0 islands, the multi-build draw logged at
+`debug`, family legitimately on two patch tags); **Case 3** (the islanded remote is the sole provider of
+`animations` ⇒ it leaves the shared set, one major left, no split package); **Case 5** asymmetric coverage
+(`{core, common, material}` vs `{core, common}`, one patch apart ⇒ 0 islands, `material` stays shared, no
+gratuitous scoping). The Case 1 arm also asserts the island `warn` names the member and both tags and is
+the **only** warning — the integration-level no-double-warn guard.
+
+**`islanding-cascade.characterisation.spec.ts`** (2 tests) pins F-A: the same 5-remote portfolio with one
+previous-major remote (whole family shared, 4 downloads, 1 island) and with two (4 of 5 islanded, both
+members lose their shared version, **9 downloads**). Docblock says plainly that a failure here is probably
+good news.
+
+Step 5's remaining log assertions were **already covered** by iterations 3–5 in
+`pool-shared-externals.spec.ts`: island `warn` with both tags (`:430`), agreeing draw at `debug` and *not*
+`warn` (`:457`), double-warn suppression (`:543`).
+
+**F-A's mechanism was wrong in `research.md` §16.2 and is now corrected there** — writing the
+characterisation test required knowing the real cause, so I re-ran the outcome probe with the island lines
+printed. It is **not** "sole-provided members lose their provider, so consumers island"; all five islands
+in 7+`eight` are gate 1, and the three healthy Angular-22 remotes island on **`@angular/router@22.0.8`**,
+whose winner `determine` moved to the 21 line. Cause: the extra-download objective counts **versions, not
+remotes** (`determine-shared-externals.ts:122-126`), so `router`'s single 22 version (3 remotes) loses 2:1
+to two patch-drifted 21 versions, while `common` survives only because its 22 side happens to have two
+versions and wins the tie on newest-first order. Consequence for F-A: the mis-election is the resolver's,
+so the cheapest avenue is its cost model — **not** the pooling-side winner re-pointing §16.2 assumed. Out
+of scope for #63; the synthetic fixture reproduces it exactly (4 → 9 downloads).
+
+Also re-ran the outcome probe against the W2 code: **every §16.1 row still holds** (36/45/64/36/36, same
+islanded remotes, `majors={22}`, zero split packages). Both probes now thread determine's touched set.
+
+**816/816** (75 files), coverage 96.23/90.53/95.56/96.84, types/lint/knip clean; the two new/edited spec
+files also pass prettier (23 files fail it repo-wide on a clean tree — pre-existing, not a listed gate).
 
 ---
 

@@ -201,7 +201,10 @@ describe('createDetermineSharedExternals', () => {
         adapters.sharedExternalsRepo.getFromScope = withStrictSibling({ ...LOOSE, ...STRICT });
 
         await expect(determineSharedExternals()).rejects.toEqual(
-          new NFError('Could not determine shared externals in scope __GLOBAL__.', expect.any(Error))
+          new NFError(
+            'Could not determine shared externals in scope __GLOBAL__.',
+            expect.any(Error)
+          )
         );
       });
     });
@@ -559,7 +562,7 @@ describe('createDetermineSharedExternals', () => {
       );
       expect(config.log.error).toHaveBeenCalledWith(
         3,
-        "[dep-b@2.1.1][team/mfe2] Entrypoints not covered by the shared version: dep-b/sub."
+        '[dep-b@2.1.1][team/mfe2] Entrypoints not covered by the shared version: dep-b/sub.'
       );
     });
 

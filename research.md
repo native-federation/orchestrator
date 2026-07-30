@@ -897,16 +897,47 @@ at 21.2.18) takes the captured seven from 36 to **64** downloads and islands **5
 `settings-panel`, `settings-portal`, `data-mutations` — are healthy Angular-22 remotes islanded purely by
 contagion.
 
-**Mechanism** (monotone, §15.4): the two Ng21 remotes island on range incompatibility → members they were
-the sole providers of lose their only provider and go scope-only → remotes consuming those members can no
-longer take a coherent family → they island too.
+**Mechanism — corrected 2026-07-30 by measurement** (the island lines, not inference). The earlier
+wording ("the Ng21 remotes island → members they sole-provided go scope-only → their consumers can no
+longer take a coherent family → they island too") is **wrong**: it describes a consequence, not the
+cause. What the probe actually reports for 7 + `eight` is
+
+```
+! 'team/legacy-overview' is islanded: '@angular/common@21.2.18' is incompatible …
+! 'team/legacy-widget'   is islanded: '@angular/common@21.2.15' is incompatible …
+! 'team/settings-panel'  is islanded: '@angular/router@22.0.8' is incompatible …   ← healthy Ng22
+! 'team/settings-portal' is islanded: '@angular/router@22.0.8' is incompatible …   ← healthy Ng22
+! 'team/data-mutations'  is islanded: '@angular/router@22.0.8' is incompatible …   ← healthy Ng22
+```
+
+All five are gate 1, and the three contagion islands are islanded **on `@angular/router`, whose winner
+`determine` moved to the Angular-21 line.** The cause is `determine`'s extra-download objective, which
+counts **versions, not remotes** (`determine-shared-externals.ts:122-126`
+`external.versions.filter(…).length`):
+
+| member | Ng22 side | Ng21 side | extra downloads | winner |
+| --- | --- | --- | --- | --- |
+| `@angular/router` | **one** version `22.0.8` (3 remotes) | **two** versions `21.2.18`, `21.2.15` | 22.0.8 → 2 · each 21 → 1 | **21.2.18** |
+| `@angular/common` | **two** versions `22.0.8` (5 remotes), `22.0.7` | same two | all → 2 | `22.0.8`, on newest-first order |
+
+So two patch-drifted legacy remotes outvote three aligned modern ones the moment the modern side happens
+to sit on a single version. `router@22.0.8` then strict-rejects the winner, and pooling amplifies one
+member's flip into all 24: the three remotes scope their whole family. Both 21 remotes are islanded too,
+so the elected `21.2.18` loses every live provider and `router` ends up shared by nobody — that is where
+§16.2's "loses its shared version outright" comes from, as an *effect*.
+
+**Consequence for whoever picks F-A up.** The claim below that "any real fix must re-point winners" is
+correspondingly narrowed: the mis-election is `determine`'s, one external at a time, and the cheapest
+avenue is its objective (count remotes, or weight versions by remote count) — not a pooling-side
+re-pointing. That is a change to the resolver's documented cost model, so it is its own issue with its own
+measurement, and it is **not** in #63.
 
 **Why it has no owner.** Election was the only mechanism ever proposed for this regime (`benchmark/README.md`
 called it "the regime the §15 election is meant to improve on") and **it did not fix it either** — iteration
-4+5 measured election changing exactly one shape. But it was the only *avenue*, because the shipped gate is
-**structurally subtractive**: it can only withdraw dedups `determine` already granted, never restore one. So
-every download regression pooling causes is permanent by construction, and any real fix must re-point
-winners in some form.
+4+5 measured election changing exactly one shape. But it was the only *avenue known then*, because the
+shipped gate is **structurally subtractive**: it can only withdraw dedups `determine` already granted, never
+restore one. So every download regression pooling causes is permanent by construction, and no fix can live
+in pooling alone — see the corrected mechanism above for where it can live instead.
 
 **Caveat for whoever picks it up:** the 2026-07-30 measurement condemns *the election that was built* —
 objective "remotes fully served", held back by `fbfe4c9`'s package-coherence guard — **not winner
