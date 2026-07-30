@@ -407,6 +407,12 @@ Where the measured wins actually are, both available inside option 1:
 W1 alone roughly halves the pooling step in the healthy case, which is more than the rejected
 alternative could have saved anywhere.
 
+**Both shipped (2026-07-30).** W1 in iteration 3, W2 in iteration 7: `determine` now returns the
+externals it re-elected per scope (it clears `dirty`, so nothing else can tell pooling what changed) and
+pooling skips scopes and pools nothing touched. Measured warm pooling **0.218 → 0.002 ms**; cold
+unchanged within noise. The skip is sound because pooling re-reads the `scope` verdicts it wrote itself,
+so a re-run over unchanged storage can only reproduce its own output.
+
 ---
 
 ## 10. Cost

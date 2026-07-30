@@ -27,7 +27,7 @@ verify commands, then tick its box and append a one-line result under it. Stop a
 - [x] 4 — Election (BUILT, MEASURED, REVERTED — see below)
 - [x] 5 — Per-remote agreement gate (minor granularity) + fixed point
 - [x] 6 — Dynamic-init mirror (additive only)
-- [ ] 7 — Warm-init dirty-gated skip (W2 — 45% of warm init)
+- [x] 7 — Warm-init dirty-gated skip (W2 — 45% of warm init) → **warm pooling 0.218 → 0.002 ms**
 - [ ] 8 — Regression + fixture specs
 - [ ] 9 — Docs
 - [ ] 10 — Final gates + PR
@@ -418,6 +418,40 @@ types/lint/knip clean.
 **Verify:** full suite green · a spec proving a second `init` with unchanged entries performs no pooling
 mutation · probe shows warm pooling ≈ 0 · types clean.
 **Done when:** warm init with no new remotes does no pooling work.
+
+**Result (2026-07-30):** the signal is **determine's return value**, not a repo query: `determine` now
+resolves to `TouchedExternals = ReadonlyMap<shareScope, ReadonlySet<ExternalName>>` — the externals it
+re-elected, a scope with nothing dirty being *absent* rather than empty. `init.flow.ts` needed **no
+change**: `.then(flow.determineSharedExternals).then(flow.poolSharedExternals)` already threads it.
+
+Pooling takes it as an **optional** parameter (omitted ⇒ walk everything, as before), which is what kept
+the 30-odd existing pooling specs untouched, and gates two levels: skip a scope with no touched external
+**before `getFromScope`**, then skip any pool no member of which was touched. A touched member processes
+its **whole** pool — islanding one remote scopes its untouched siblings too.
+
+| portfolio | warm before | warm after | cold w/ signal → without |
+| --- | --- | --- | --- |
+| captured 7 | 0.218 ms | **0.002 ms** | 0.462–0.627 → 0.437–0.507 ms |
+| coherent 6 | 0.12–0.18 ms | **0.001–0.002 ms** | 0.173–0.260 → 0.172–0.266 ms |
+
+So the warm step is gone (it was 45% of a 0.48 ms warm init) and cold is unchanged within jsdom noise —
+the gate is one `Map.get` per scope plus one `.some()` per pool. `benchmark/probes/perf-probe.spec.ts`
+was updated to thread the signal and to report the warm touched-scope count (0, as expected).
+
+**Why skipping is sound, not merely cheap:** pooling reads `action === 'scope'` verdicts *it wrote
+itself*, so re-running it over unchanged storage is idempotent — it can only reproduce its own output.
+Proven end-to-end by a new integration test: a second `runInit` with unchanged entries performs **zero**
+`addOrUpdate` calls and yields a byte-identical import map, mfe-c still islanded.
+
+Noted while verifying, **not chased** (pre-existing, and determine behaves the same way): removing a
+remote sets `external.dirty` only when a whole version disappears
+(`shared-externals.repository.ts:76`), not when a version merely loses one of several remotes. Such a
+change already did not trigger re-election before this iteration.
+
+7 tests added (2 determine: per-scope report, absent-when-clean; 4 pooling: pool skipped, whole pool
+processed on one touched member, scope not even read, no-signal fallback; 1 integration: second init is
+a no-op). One existing assertion changed contract: `determineSharedExternals()` no longer resolves to
+`undefined`. **811/811**, coverage 96.23/90.53/95.56/96.84, types/lint/knip clean.
 
 ---
 

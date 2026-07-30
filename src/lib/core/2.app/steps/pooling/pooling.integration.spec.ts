@@ -74,9 +74,10 @@ describe('pooling (integration)', () => {
   const seed = (name: string, versions: SharedVersion[]) =>
     adapters.sharedExternalsRepo.addOrUpdate(name, { dirty: true, versions }, undefined);
 
+  // Threads determine's touched-externals signal into pooling exactly as init.flow does.
   const runInit = async () => {
-    await createDetermineSharedExternals(config, adapters)();
-    await createPoolSharedExternals(config, adapters)();
+    const touched = await createDetermineSharedExternals(config, adapters)();
+    await createPoolSharedExternals(config, adapters)(touched);
     return createGenerateImportMap(config, adapters)();
   };
 
@@ -237,6 +238,30 @@ describe('pooling (integration)', () => {
     // cdk: single-provider but compatible → shared from mfe-b (no orphan penalty).
     expect(importMap.imports['@framework/cdk']).toContain(SCOPE['team/mfe-b']);
     expect(importMap.scopes?.[SCOPE['team/mfe-b']]?.['@framework/cdk']).toBeUndefined();
+  });
+
+  it('does no work at all on a second init with unchanged entries (W2)', async () => {
+    // Nothing is dirty the second time, so determine re-elects nothing and pooling has no signal to
+    // act on. Its verdicts are already in storage — it wrote them itself — so recomputing them can
+    // only reproduce them.
+    seed('@framework/core', [
+      version('17.0.0', '@framework/core', [{ remote: 'team/mfe-a', req: '^17.0.0' }]),
+      version('18.0.0', '@framework/core', [{ remote: 'team/mfe-c', req: '^18.0.0' }]),
+    ]);
+    seed('@framework/common', [
+      version('17.0.0', '@framework/common', [{ remote: 'team/mfe-a', req: '^17.0.0' }]),
+      version('18.0.0', '@framework/common', [{ remote: 'team/mfe-c', req: '^18.0.0' }]),
+    ]);
+
+    const first = await runInit();
+    // The first pass really did island mfe-c, so there is a non-trivial result to preserve.
+    expect(first.scopes?.[SCOPE['team/mfe-c']]?.['@framework/core']).toContain(SCOPE['team/mfe-c']);
+
+    const writes = vi.spyOn(adapters.sharedExternalsRepo, 'addOrUpdate');
+    const second = await runInit();
+
+    expect(writes).not.toHaveBeenCalled();
+    expect(second).toEqual(first);
   });
 
   it('scopes a dynamically-added incompatible remote whole family (dynamic init path)', async () => {

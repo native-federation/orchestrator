@@ -1,5 +1,10 @@
 import type { ForDeterminingSharedExternals } from '../driver-ports/init/for-determining-shared-externals.port';
-import { GLOBAL_SCOPE, type SharedExternal, type SharedVersion } from 'lib/core/1.domain';
+import {
+  type ExternalName,
+  GLOBAL_SCOPE,
+  type SharedExternal,
+  type SharedVersion,
+} from 'lib/core/1.domain';
 import { countUncoveredEntrypoints } from 'lib/core/1.domain/externals/basis';
 import { NFError } from 'lib/core/native-federation.error';
 import type { DrivingContract } from '../driving-ports/driving.contract';
@@ -30,7 +35,8 @@ export function createDetermineSharedExternals(
    *
    * @param config
    * @param adapters
-   * @returns
+   * @returns the externals it re-elected, per scope — pooling's signal for what changed, since this
+   * step clears `dirty` on everything it touches.
    */
   return () => {
     // The selection loop asks this O(versions² × demands) times but has only
@@ -47,19 +53,24 @@ export function createDetermineSharedExternals(
       return hit;
     };
 
+    const touched = new Map<string, Set<ExternalName>>();
+
     for (const shareScope of ports.sharedExternalsRepo.getScopes()) {
       const sharedExternals = ports.sharedExternalsRepo.getFromScope(shareScope);
 
       try {
+        const elected = new Set<ExternalName>();
         Object.entries(sharedExternals)
           .filter(([_, e]) => e.dirty)
-          .forEach(([name, external]) =>
+          .forEach(([name, external]) => {
             ports.sharedExternalsRepo.addOrUpdate(
               name,
               setVersionActions(name, external, isCompatible),
               shareScope
-            )
-          );
+            );
+            elected.add(name);
+          });
+        if (elected.size > 0) touched.set(shareScope, elected);
       } catch (error) {
         config.log.error(
           3,
@@ -77,7 +88,7 @@ export function createDetermineSharedExternals(
         );
       }
     }
-    return Promise.resolve();
+    return Promise.resolve(touched);
   };
 
   // Entrypoints declared by the versions `winner` would skip that its basis can't serve.

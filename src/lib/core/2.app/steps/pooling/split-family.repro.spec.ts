@@ -73,8 +73,8 @@ describe('pooling: split monorepo family', () => {
     adapters.sharedExternalsRepo.addOrUpdate(name, { dirty: true, versions }, undefined);
 
   const runInit = async () => {
-    await createDetermineSharedExternals(config, adapters)();
-    await createPoolSharedExternals(config, adapters)();
+    const touched = await createDetermineSharedExternals(config, adapters)();
+    await createPoolSharedExternals(config, adapters)(touched);
     return createGenerateImportMap(config, adapters)();
   };
 

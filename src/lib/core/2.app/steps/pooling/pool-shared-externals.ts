@@ -1,4 +1,5 @@
 import type { ForPoolingSharedExternals } from '../../driver-ports/init/for-pooling-shared-externals.port';
+import type { TouchedExternals } from '../../driver-ports/init/for-determining-shared-externals.port';
 import type {
   ExternalName,
   RemoteName,
@@ -57,8 +58,12 @@ export function createPoolSharedExternals(
    *
    * Inert unless `useAutoExternalPooling` is on or an external carries a remote `pool` tag. The
    * `strict` scope is never pooled.
+   *
+   * `touched` (determine's re-elected externals per scope) gates the work: a pool no member of which
+   * was re-elected resolves to what storage already holds, since this step's own `scope` verdicts are
+   * what it reads back. A warm init therefore does no per-member work at all.
    */
-  return () => {
+  return (touched?: TouchedExternals) => {
     const { useAutoExternalPooling } = config.feature;
 
     // With auto-pooling off and no `pool` tag ever seen, nothing can be pooled — skip the scope
@@ -70,6 +75,9 @@ export function createPoolSharedExternals(
     for (const scope of ports.sharedExternalsRepo.getScopes()) {
       if (ports.sharedExternalsRepo.scopeType(scope) === 'strict') continue;
 
+      const touchedInScope = touched?.get(scope);
+      if (touched && !touchedInScope) continue;
+
       const sharedExternals = ports.sharedExternalsRepo.getFromScope(scope);
 
       try {
@@ -78,6 +86,7 @@ export function createPoolSharedExternals(
           useAutoExternalPooling,
           config.log
         )) {
+          if (touchedInScope && !members.some(m => touchedInScope.has(m.name))) continue;
           poolFamily(poolName, members, scope);
         }
       } catch (error) {

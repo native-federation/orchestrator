@@ -171,6 +171,63 @@ describe('createPoolSharedExternals', () => {
     });
   });
 
+  // W2: determine clears `dirty`, so its per-scope set of re-elected externals is the only signal
+  // for what changed. A pool nothing touched resolves to what storage already holds.
+  describe('touched-externals gate', () => {
+    // Would island `c` on every member, so any write at all proves the pool was processed.
+    const islandingPool = () =>
+      givenExternals({
+        '@framework/core': external([
+          sharedVersion('17', [meta('a', { req: '17' })], { action: 'share' }),
+          sharedVersion('18', [meta('c', { req: '18' })], { action: 'scope' }),
+        ]),
+        '@framework/common': external([
+          sharedVersion('17', [meta('a', { req: '17' }), meta('c', { req: '17' })], {
+            action: 'share',
+          }),
+        ]),
+      });
+
+    beforeEach(() => {
+      config.feature.useAutoExternalPooling = true;
+    });
+
+    it('skips a pool no member of which was re-elected', async () => {
+      islandingPool();
+
+      await poolSharedExternals(new Map([[GLOBAL_SCOPE, new Set(['unrelated-dep'])]]));
+
+      expect(adapters.sharedExternalsRepo.addOrUpdate).not.toHaveBeenCalled();
+      expect(config.log.debug).not.toHaveBeenCalledWith(3, expect.stringContaining('pool:'));
+    });
+
+    it('processes the whole pool when any single member was re-elected', async () => {
+      islandingPool();
+
+      await poolSharedExternals(new Map([[GLOBAL_SCOPE, new Set(['@framework/core'])]]));
+
+      // Both members, not just the re-elected one: islanding `c` scopes its whole family.
+      expect(adapters.sharedExternalsRepo.addOrUpdate).toHaveBeenCalledTimes(2);
+    });
+
+    it('does not even read a scope with nothing re-elected', async () => {
+      islandingPool();
+
+      await poolSharedExternals(new Map([['other-scope', new Set(['@framework/core'])]]));
+
+      expect(adapters.sharedExternalsRepo.getFromScope).not.toHaveBeenCalled();
+      expect(adapters.sharedExternalsRepo.addOrUpdate).not.toHaveBeenCalled();
+    });
+
+    it('processes every pool when called without a signal', async () => {
+      islandingPool();
+
+      await poolSharedExternals();
+
+      expect(adapters.sharedExternalsRepo.addOrUpdate).toHaveBeenCalledTimes(2);
+    });
+  });
+
   describe('membership', () => {
     it('pools via an explicit remote pool tag even when auto-pooling is off', async () => {
       givenExternals({

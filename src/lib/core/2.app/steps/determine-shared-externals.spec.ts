@@ -241,6 +241,51 @@ describe('createDetermineSharedExternals', () => {
     });
   });
 
+  // Pooling's W2 gate: this step clears `dirty`, so its return value is the only record of what it
+  // re-elected. A scope with nothing dirty must be absent, not present-and-empty.
+  describe('touched externals', () => {
+    it('should report the re-elected externals per scope', async () => {
+      adapters.sharedExternalsRepo.getScopes = vi.fn(() => ['__GLOBAL__', 'custom-scope']);
+      adapters.sharedExternalsRepo.getFromScope = vi.fn(scope =>
+        scope === '__GLOBAL__'
+          ? {
+              'dep-a': mockExternal_A({
+                dirty: true,
+                versions: [mockVersion_A.v2_1_1({ remotes: ['team/mfe1'], action: 'skip' })],
+              }),
+              'dep-b': mockExternal_B({
+                dirty: false,
+                versions: [mockVersion_B.v2_1_1({ remotes: ['team/mfe1'], action: 'share' })],
+              }),
+            }
+          : {
+              'dep-b': mockExternal_B({
+                dirty: true,
+                versions: [mockVersion_B.v2_1_1({ remotes: ['team/mfe2'], action: 'skip' })],
+              }),
+            }
+      );
+
+      await expect(determineSharedExternals()).resolves.toEqual(
+        new Map([
+          ['__GLOBAL__', new Set(['dep-a'])],
+          ['custom-scope', new Set(['dep-b'])],
+        ])
+      );
+    });
+
+    it('should report nothing when no external was dirty', async () => {
+      adapters.sharedExternalsRepo.getFromScope = vi.fn(() => ({
+        'dep-a': mockExternal_A({
+          dirty: false,
+          versions: [mockVersion_A.v2_1_1({ remotes: ['team/mfe1'], action: 'share' })],
+        }),
+      }));
+
+      await expect(determineSharedExternals()).resolves.toEqual(new Map());
+    });
+  });
+
   describe('version-compatibility memo', () => {
     it('should ask the version checker each distinct question once per resolve', async () => {
       adapters.versionCheck.isCompatible = vi.fn(() => true);
@@ -530,7 +575,9 @@ describe('createDetermineSharedExternals', () => {
         }),
       }));
 
-      await expect(determineSharedExternals()).resolves.toBeUndefined();
+      await expect(determineSharedExternals()).resolves.toEqual(
+        new Map([['__GLOBAL__', new Set(['dep-b'])]])
+      );
     });
 
     it('should keep a fully covered skip version as skip', async () => {
