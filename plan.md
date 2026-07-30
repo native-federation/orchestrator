@@ -34,10 +34,16 @@ verify commands, then tick its box and append a one-line result under it. Stop a
 
 ## Hard constraints (re-read every pass)
 
-**The model** (`research.md` §13, §15.1). Unit of decision = a **family instance**: one remote's whole
-build, i.e. its full set of `(member → tag)`, internally consistent *by construction*. Tolerance is the
-remote's declared **`requiredVersion`** — never a tag granularity, and there is **no tag-distance concept
-anywhere** in the implementation.
+**The model** (`research.md` header box + §16). A **build** (one remote's whole set of `(member → tag)`) is
+internally consistent *by construction*; pooling's only job is to stop a remote drawing on builds that
+**disagree**, judged at **minor granularity**. Determine's winners are never moved, so host precedence and
+`requiredVersion` acceptance are already settled before pooling runs — pooling grants no dedup that
+`determine` did not already grant (§16.1 finding 3).
+
+> Superseded wording, kept so a stale copy is recognisable: earlier passes of this file said the unit of
+> decision was a *family instance*, tolerance was the remote's declared `requiredVersion`, and there was
+> "no tag-distance concept anywhere". That was §13–§15's **election** design, reverted 2026-07-30. Minor
+> granularity *is* a tag-distance concept and it is now the only test.
 
 1. **Host wins, always** — priority #1, above pooling. Nothing is ever re-pointed, so this holds by
    construction: in Case 2 the host keeps its pin and the remote that would mix builds gives way.
@@ -63,20 +69,27 @@ anywhere** in the implementation.
 11. **Dynamic init is additive only** (§15.5): never re-point a committed version; the loaded remote is the
     only thing that can move.
 
-**Known limitation, by design** (§15.6): Case 2 (host pins a member + a remote with an over-loose `^` range
-solely provides a sibling) stays mixed. Accepted trade — host priority outranks pooling. Mitigation is the
-authoring rule "declare `~22.0.6`". Its repro arm is **not** inverted.
+**Known limitations.** §15.6's Case 2 limitation is **gone** — the gate fixes it with host precedence intact,
+and both repro arms assert the fix. What remains:
+
+- **F-A, the islanding cascade** (`research.md` §16.2) — one extra previous-major remote takes 7+`eight` from
+  36 to **64** downloads and islands **5 of 8**, three of them healthy Angular-22 remotes islanded by
+  contagion. Pre-existing #56 behaviour, surfaced by measurement; **does not block #63**, but must be
+  recorded in the release notes and ideally filed as a follow-up issue. The shipped gate is structurally
+  subtractive and cannot address it — any fix has to re-point winners.
+- **Point 4 patch drift is tolerated**, not unified (§12.3's known give-up, now unmitigated by election).
+- **Thin real-world validation**: the minor-line gate fires on no real portfolio (§16.1 finding 2).
 
 **Release**: **patch** (§11.7, Auke 2026-07-29). Note in the release notes that pooled families may island
 where they previously mixed builds.
 
 **Performance** (§9) — explicit user constraint, *no unnecessary calculations*:
 1. `!useAutoExternalPooling && !hasPoolTag()` stays the first statement in the step.
-2. Two precomputations are **mandatory, not optimisations** (§13.4): the **acceptance table**
-   (`remote → member → Set<accepted tag>`, built with determine's memoized `isCompatible`) and **direct
-   assignment of single-provider members**.
-3. Early-out before any scoring when the pool is already single-instance.
-4. Reuse determine's memoized `isCompatible`; never replicate its O(versions²) loop.
+2. ~~Acceptance table + single-provider assignment, mandatory~~ — **both dropped with election.** Pooling
+   holds no `versionCheck` dependency and makes no compatibility call at all; it compares tags only.
+3. Early-out before touching instances when a single build already serves every member
+   (`pool-shared-externals.ts:166`) — this is the healthy-portfolio path and must stay free.
+4. No-op pools write nothing (W1, iteration 3).
 5. Fixed point re-entered only after an actual island.
 6. Allocation discipline (cf. `7bec314`, `3000f6c`): reuse maps, index loops in inner passes.
 
@@ -88,9 +101,14 @@ pool 0.51 / importMap 0.36. Warm init 0.48 ms total, of which **pooling is 45%**
 the cost centre — the writes are (W1) and the warm recompute is (W2). Re-measure with the probe after
 iterations 3, 4 and 7; a regression in the pooling column is a blocker.
 
-**Expected outcomes** (§13.3/§14.1/§15 — assert these, don't re-derive them): capture 29 → **17** downloads;
-Case 1 fixed at 3; Point 4 4 → **2**, 0 islands; R=50 patch+ragged 140 → **80**, 0 islands; R=50 major+ragged
-459 → **429**, 16 islanded; M=145 381 → **145**, 0 islands.
+**Expected outcomes — measured as built** (`research.md` §16.1; assert these, and do **not** use §13.3/§14.1,
+which are prototype numbers that did not reproduce). Downloads after pooling: captured 7 **36** (determine
+36), all 11 **45** (42), 7+`eight` **64** (43), 7+`eleven` **36**, 7+`nine` **36**. Coherence is what the
+step buys: majors `{21,22}` → `{22}` and zero split packages on every portfolio. Islands are all range
+incompatibility — **zero** by build disagreement on real data, so the gate's measured effect lives entirely
+in the two synthetic repro arms. Point 4 (`21.2.2` vs `21.2.3`) is **tolerated, not unified**: same minor
+line ⇒ agree ⇒ no island, and the family may sit on two patch tags. Pooling never reduces downloads on a
+real portfolio; it trades downloads for coherence (§10).
 
 ## Verify commands
 
@@ -406,20 +424,28 @@ mutation · probe shows warm pooling ≈ 0 · types clean.
 ## 8 — Regression + fixture specs
 
 **Steps**
-1. Rename `split-family.repro.spec.ts` → a permanent regression spec. The **Case 1** arm asserts the fixed
-   behaviour (flipped in 4). The **Case 2** arm keeps asserting the mixed result, with a docblock stating it
-   is the documented consequence of absolute host priority (§15.6) and naming the authoring fix
-   (`~22.0.6`) — it is a specification, not a known-bug marker.
-2. Add the **Point 4** fixture: r1 `core+router@21.2.2`, r2 `@21.2.3`, both `~21.2.0`, winners split across
-   builds ⇒ assert both members served from one instance, 0 islands, 2 downloads.
-3. Add the **Case 3** guard (§1): a fixture where an islanded remote is the *sole provider* of a member
-   (Angular-21 `animations` beside Angular-22 `core`) ⇒ assert the shared set never spans instances that a
-   consumer's range would reject. This is the real capture's failure and no per-remote gate catches it.
-4. Add the **Case 5** nested/asymmetric fixture (§15.2): `remote1 = {core, common, material}`,
-   `remote2 = {core, common}` ⇒ remote1's instance elected, 3 downloads, 0 islands. This is the regression
-   test for "remotes-served, not size".
-5. Add a `warn` assertion for an island, a **`debug`-not-`warn`** assertion for a multi-instance draw, and a
-   no-double-warn assertion (§11.4).
+> **Rewritten 2026-07-30.** The earlier steps asserted *election* outcomes (Point 4 unified to one instance,
+> Case 5 electing remote1's instance, Case 2 staying mixed). None of those are the shipped behaviour — see
+> `research.md` §16.1.
+
+1. Rename `split-family.repro.spec.ts` → a permanent regression spec. **Both arms assert the fix.** The
+   Case 2 arm's docblock states what it proves: the host keeps its pin, the mixing remote gives way, so
+   coherence and absolute host priority are not in tension (retiring §15.6).
+2. **Point 4 as a *tolerance* test**, not a unification test: r1 `core+router@21.2.2`, r2 `@21.2.3`, both
+   `~21.2.0` ⇒ assert **0 islands** and that the gate logs the multi-build draw at `debug`. The family may
+   legitimately sit on two patch tags; the guard is that benign patch drift is never islanded.
+3. **Case 3 guard** (§1) — a fixture where an islanded remote is the *sole provider* of a member (Angular-21
+   `animations` beside Angular-22 `core`) ⇒ assert the Angular-21 members leave the shared set entirely
+   (`majors={22}`, zero split packages). Note the mechanism is islanding + `rebuildMember` stripping the
+   last provider, **not** election; measured on the capture at §16.1.
+4. **Case 5, asymmetric coverage** (§15.2) — `remote1 = {core, common, material}`, `remote2 = {core, common}`
+   ⇒ assert **0 islands and no gratuitous scoping** (I3). With no election there is no instance to elect;
+   the regression this locks is over-islanding of a clean subset consumer.
+5. Add a `warn` assertion for an island (naming member + both tags), a **`debug`-not-`warn`** assertion for an
+   agreeing multi-build draw, and a no-double-warn assertion (§11.4).
+6. **Characterisation test for F-A** (§16.2): the cross-major cascade shape ⇒ assert the current (expensive)
+   outcome with a docblock naming F-A, so a future fix surfaces as a deliberate change rather than a
+   surprise diff.
 
 **Verify:** `npm test` green **including coverage thresholds** · types clean.
 **Done when:** the regression is locked in and coverage gates pass.
@@ -429,17 +455,22 @@ mutation · probe shows warm pooling ≈ 0 · types clean.
 ## 9 — Docs
 
 **Steps**
-1. Rewrite `docs/version-resolver.md` §"How pooling resolves" around the **family-instance** model; fix the
-   false claim at **line 599** ("coherence is a property of _versions_ … not of a common source" — the repro
-   falsifies it: a split family contains no incompatibility, so islanding never fires); update the mermaid
-   flow to show election → per-remote acceptance.
-2. Document the **authoring rule** prominently: a remote whose real coupling is tighter than its declared
-   range must declare it (`~22.0.6`, not `^22.0.0`), and why (host priority + honest-range assumption,
-   §15.6).
-3. Add an "unscoped lockstep families" subsection: react/react-dom recipe, and state that **one** remote's
+1. Rewrite `docs/version-resolver.md` §"How pooling resolves" around the **agreement gate**: determine's
+   winners stand, and pooling decides only who may dedup onto them. Fix the false claim at **line 599**
+   ("coherence is a property of _versions_ … not of a common source" — the repro falsifies it: a split family
+   contains no incompatibility, so islanding never fires). Update the mermaid flow to show
+   *islanded-remotes → agreement gate (fixed point) → rebuild*, **not** election.
+2. State the **download trade** plainly (§10, §16.1): pooling buys coherence and can cost downloads — it
+   never reduced them on any measured portfolio. Do not repeat "strictly better everywhere".
+3. Document the **authoring rule** with its real scope: declaring tighter coupling (`~22.0.6`, not `^22.0.0`)
+   is still the right advice, but note it now routes only through `determine`'s `scope` verdict — pooling
+   itself never reads `requiredVersion` (§16.1 finding 3), and patch-level coupling inside one minor line
+   needs an exact pin to be enforced at all.
+4. Add an "unscoped lockstep families" subsection: react/react-dom recipe, and state that **one** remote's
    `pool` tag pools the family portfolio-wide (§11.6).
-4. Fix the stale docblock at `pooling.integration.spec.ts:24` ("resolve from one remote build").
-5. Document the new log lines so operators can act on them.
+5. Fix the stale docblock at `pooling.integration.spec.ts:24` ("resolve from one remote build").
+6. Document the new log lines so operators can act on them — including that an agreeing multi-build draw at
+   `debug` is normal and needs no action.
 
 **Verify:** `npm run lint` · docs match the shipped behaviour (spot-check each claim against code).
 **Done when:** no doc statement contradicts the implementation.
@@ -450,13 +481,17 @@ mutation · probe shows warm pooling ≈ 0 · types clean.
 
 **Steps**
 1. `npm test` · `npx tsc --noEmit -p tsconfig.build.json` · `npm run lint` · `npm run knip`.
-2. Re-read `research.md` §13.3/§14.1/§15 and confirm every measured row matches actual behaviour; correct
-   whichever is wrong.
-3. Release framing is **decided: patch** (§11.7). Release notes must say pooled families may island where
-   they previously mixed builds.
-4. PR against `main` closing #63: the two repro cases, the family-instance model, the regression from #56,
-   the measured download improvements (capture 29 → 17), the documented Case 2 limitation, and the perf
-   notes from §9.
+2. Re-run both probes and confirm every row of `research.md` **§16.1** still matches; correct whichever is
+   wrong. Do **not** validate against §13.3/§14.1 — they are prototype numbers, marked as not reproduced.
+3. Release framing is **decided: patch** (§11.7). Release notes must say: pooled families may island where
+   they previously mixed builds; the fix buys **coherence, not downloads** (§16.1 finding 1); and the
+   agreement gate fires on no portfolio in `benchmark/`, so real-world exposure is small and so is
+   real-world validation (finding 2).
+4. PR against `main` closing #63: the two repro cases (both fixed, host precedence intact), the agreement
+   gate at minor granularity, the regression from #56, the measured outcomes from §16.1 — **not** the
+   superseded 29 → 17 claim — and the perf notes from §9.
+5. File **F-A** (§16.2) as a follow-up issue and link it from the PR as a known limitation, so the cascade
+   does not disappear with the reverted election.
 
 **Verify:** all four gates green.
 **Done when:** PR open, #63 linked.

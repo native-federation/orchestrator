@@ -2,10 +2,14 @@
 
 > ## SPEC AS BUILT (Auke, 2026-07-30): no election, agreement gate at minor granularity
 >
-> **§15's election is reverted.** Measured on `benchmark/` it changed the outcome of exactly one shape —
-> synthetic Case 1 — while costing **3–4x the pooling step on every init** (captured 7: 1.43–1.91 ms
-> against 0.34–0.42 ms), and on two portfolios it made things actively worse until a package-coherence
-> guard was added to hold it back. Its whole benefit was reachable far more cheaply.
+> **§15's election is reverted.** The decisive fact is **not** cost: it is that election's whole
+> justification — §13.3/§14.1's download wins, prototyped outside `src` — **did not reproduce when it was
+> built for real**. Measured on `benchmark/` it changed the outcome of exactly one shape (synthetic
+> Case 1), was **actively worse on two portfolios** until a package-coherence guard was added to hold it
+> back, and cost **3–4x the pooling step on every init** (captured 7: 1.43–1.91 ms against 0.34–0.42 ms).
+> 1–1.5 ms per cold init would have been cheap for 29 → 17 downloads — each download is a network fetch.
+> It is only indefensible once the download win is zero. Read the two facts together, in that order;
+> see §16 for what was measured as built and what the revert left unfixed.
 >
 > **What ships instead is §5.2's per-remote agreement gate with §12.3's minor-line granularity — i.e.
 > §14's test B, revived as the *only* coherence test.** A remote may draw on several builds (patch drift
@@ -21,6 +25,9 @@
 >   Angular-21 remotes were already islanded.
 > - Cost: **+0.05–0.12 ms** on the pooling step (captured 7 cold 0.465–0.540 ms), no `versionCheck`
 >   dependency, no acceptance table, no scoring — the gate compares tags only, as §5.2 said it would.
+> - **Not fixed, and no longer on any roadmap: the islanding cascade** (§16.2). Election was the only
+>   mechanism the design ever proposed for it, and it did not fix it either — but it was the only
+>   *avenue*, because the gate is structurally subtractive. Recorded as follow-up **F-A**.
 >
 > So §13–§15's family-instance *election* is superseded reasoning; §13.1's F1/F2 survive in the form
 > "one build, or your own", and §4's I1/I2/I3 are the closest description of what is implemented, with
@@ -29,16 +36,19 @@
 > election objective) are moot — nothing is ever re-pointed.
 
 Tracking issue: [#63 "bug: pooling should be on exact versions"](https://github.com/native-federation/orchestrator/issues/63) · branch `issues/63`
-Status: **designed, measured, not implemented** — see `plan.md`. **§15 is the spec**; §13 defines the
-model it uses, §14 records why the cross-instance guard was considered and rejected. §4–§5, §7 and §12.3
-are superseded, kept only for the reasoning trail (§7 is restated in instance terms as §15.5).
-All open questions closed 2026-07-29 (Auke): release = **patch** (§11.7) · multi-instance draw logs at
-**`debug`**, islanding at **`warn`** (§15.1 rule 6) · election objective outranks every tiebreak, instance
-count above size (§15.1 rule 3) · determine's verdicts and the existing island gate are unchanged (§15.3) ·
-the per-remote pass iterates to a fixed point (§15.4) · dynamic init stays strictly additive (§15.5) ·
-Case 2 is an accepted consequence of absolute host priority (§15.6).
-Repro: `src/lib/core/2.app/steps/pooling/split-family.repro.spec.ts` (uncommitted; 2 tests, both
-green on `main` = both bugs live).
+Status: **implemented through `plan.md` iteration 6** (init gate + dynamic mirror); iterations 7–10
+(warm-init skip, fixture specs, docs, PR) remain. **The header box is the spec** — §13–§15 are the
+superseded *election* design and must not be implemented from; §16 records what the shipped gate
+actually measures. §4–§5, §7 and §12.3 are the earlier reasoning trail (§4's I1/I2/I3 are the closest
+description of what shipped, read at minor granularity).
+Decisions still binding: release = **patch** (§11.7) · multi-build draw logs at **`debug`**, islanding at
+**`warn`** (§15.1 rule 6) · determine's verdicts and the existing island gate are unchanged (§15.3) · the
+per-remote pass iterates to a fixed point (§15.4) · dynamic init stays strictly additive (§15.5).
+No longer binding: §15.1 rule 3 (election objective/tiebreaks) and rule 4 (`requiredVersion` acceptance)
+— nothing is elected and pooling never reads a range · §15.6 (Case 2 as accepted limitation) — the gate
+fixes Case 2 with host precedence intact.
+Repro: `src/lib/core/2.app/steps/pooling/split-family.repro.spec.ts` (committed, `36582bc`; **both arms
+now assert the fix**). Iteration 8 renames it to a permanent regression spec.
 
 > **Note on the issue title.** "exact versions" is loose shorthand. Cohesion here is *same serving
 > build*, not *same tag* (§4) — a pool may legitimately span version lines, and a whole family
@@ -557,7 +567,13 @@ is for. I want all members to be consistent."
 4. **Per remote: all-skip or all-scope** (F2), by testing its declared ranges against the chosen tags.
 5. A member whose only remaining consumers are islanded is not shared at all (scope-only).
 
-### 13.3 Measured outcome — strictly better than today, everywhere
+### 13.3 Measured outcome — **PROTOTYPE NUMBERS, DID NOT REPRODUCE** (see §16.1)
+
+> Every row below was produced by a prototype outside `src` (`family-probe.spec.ts.keep`). When election
+> was built against the real pipeline it delivered **none of it**: the captured seven measured 36 → 36
+> downloads, not 29 → 17. Treat this table as the claim that motivated the work, not as evidence. It is
+> also why the download baselines here (29) and in §16.1 (36) do not match — they were never the same
+> accounting.
 
 | fixture | today | family model | verdict |
 | --- | --- | --- | --- |
@@ -635,6 +651,9 @@ only signal in the data that does is **tag distance**: `22.1.0` vs `22.0.5` cros
 > host pin that does not cover the family). Fails ⇒ R scopes its whole family.
 
 ### 14.1 Measured — all four cases fixed, host pinned, still cheaper than today
+
+> **Same caveat as §13.3: prototype numbers, not reproduced.** See §16.1 for what the shipped gate
+> measures on the same fixtures.
 
 | fixture | today | final spec |
 | --- | --- | --- |
@@ -820,3 +839,79 @@ range must say so (`~22.0.6`). Then determine marks it `scope` and §15.3's gate
 **Test disposition:** the Case 2 arm of `split-family.repro.spec.ts` is therefore **not** inverted. It stays
 as a permanent specification of this limitation, with a docblock naming the authoring rule. Only the Case 1
 arm flips to asserting the fix.
+
+> **SUPERSEDED 2026-07-30.** The agreement gate fixes Case 2 with host precedence fully intact — the host
+> keeps its pin and the mixing remote gives way — so this limitation does not exist in the shipped
+> behaviour and **both** repro arms assert the fix. Kept for the reasoning trail: it records what absolute
+> host priority costs *under an election model*, which is the constraint any F-A attempt (§16.2) inherits.
+
+---
+
+## 16. Measured as built (2026-07-30) — and what is still open
+
+Probes: `benchmark/probes/{outcome,honesty}-probe.spec.ts` (git-ignored; copy into
+`src/lib/core/2.app/steps/pooling/`, run, delete). Auto-pooling on, global scope, `@angular` pool.
+
+### 16.1 The real outcome table
+
+| portfolio | determine dl | pooled dl | shared members | islands | of which by disagreement |
+| --- | --- | --- | --- | --- | --- |
+| captured 7 | 36 | 36 | 24 → 16 | 1 | 0 |
+| all 11 | 42 | 45 | 24 → 16 | 2 | 0 |
+| 7 + `eight` (Ng21 sibling) | 43 | **64** | 24 → **14** | **5 of 8** | 0 |
+| 7 + `eleven` (older superset) | 36 | 36 | 24 → 16 | 1 | 0 |
+| 7 + `nine` (Case 1 strict pin) | 36 | 36 | 24 → 16 | 1 | 0 |
+
+Three findings, all load-bearing for the release notes:
+
+1. **Pooling never *reduces* downloads on a real portfolio** — neutral on three, +3 on one, +21 on one.
+   What it buys is coherence, exactly §10's trade: majors `{21,22}` → `{22}`, and split packages
+   (`@angular/forms{21.2.18,22.0.8}`, `@angular/platform-browser{21.2.18,22.0.8}`) → **none**. That is the
+   crash being fixed. §13.3's "strictly better than today, everywhere" is **false as a download claim** and
+   must not be repeated; "coherent, at a download cost" is the honest framing.
+2. **The agreement gate never fires on real data.** Zero disagreement islands across all five portfolios;
+   every island is range incompatibility (gate 1, unchanged since #56). Six remotes draw from 2–3
+   *agreeing* builds and are correctly left alone (`debug`). The minor-line mechanism's entire measured
+   effect is on the two synthetic repro arms — a small blast radius, and correspondingly thin real-world
+   validation. Both facts belong in the release notes.
+3. **No remote dedups onto a tag its own `requiredVersion` rejects** — 0 violations, all portfolios
+   (`honesty-probe`). This is *why* dropping the acceptance table lost nothing: `determine` already applies
+   `requiredVersion` per external, so pooling's table was re-asking an answered question. It added value
+   only because election **moved** winners onto tags determine had never validated for every consumer. No
+   election → no new tags → the table is redundant by construction, not merely expensive. This also
+   retires §14.2's "safe only if the metadata is honest" worry for the shipped model: pooling now grants
+   no dedup that `determine` did not already grant.
+
+### 16.2 Follow-up F-A — the islanding cascade (not fixed, no owner)
+
+**Shape:** add **one** remote on the previous major to a healthy portfolio. 7 + `eight`
+(`team/legacy-widget`, Angular 21.2.15, honest `~21.2.0`, not even in conflict with the other Ng21 remote
+at 21.2.18) takes the captured seven from 36 to **64** downloads and islands **5 of 8** remotes.
+`@angular/material` and `@angular/router` lose their shared version outright. Three of the five —
+`settings-panel`, `settings-portal`, `data-mutations` — are healthy Angular-22 remotes islanded purely by
+contagion.
+
+**Mechanism** (monotone, §15.4): the two Ng21 remotes island on range incompatibility → members they were
+the sole providers of lose their only provider and go scope-only → remotes consuming those members can no
+longer take a coherent family → they island too.
+
+**Why it has no owner.** Election was the only mechanism ever proposed for this regime (`benchmark/README.md`
+called it "the regime the §15 election is meant to improve on") and **it did not fix it either** — iteration
+4+5 measured election changing exactly one shape. But it was the only *avenue*, because the shipped gate is
+**structurally subtractive**: it can only withdraw dedups `determine` already granted, never restore one. So
+every download regression pooling causes is permanent by construction, and any real fix must re-point
+winners in some form.
+
+**Caveat for whoever picks it up:** the 2026-07-30 measurement condemns *the election that was built* —
+objective "remotes fully served", held back by `fbfe4c9`'s package-coherence guard — **not winner
+re-pointing in principle**. Re-opening it means re-opening a measured question, not a settled one. Note
+also that the cascade is pre-existing #56 behaviour surfaced by measurement, not a regression introduced by
+this branch, so it does not block #63.
+
+### 16.3 Fixture-doc correction
+
+`benchmark/README.md` described `nine` as "a strict `~22.0.5` pin that rejects the 22.0.8 majority". It does
+not: `~22.0.5` allows `22.0.x >= 22.0.5`, so in any portfolio whose shared tags are `22.0.6`/`22.0.8`,
+`strict-pin` dedups (measured: draws 2 agreeing builds, not islanded). Case 1 needs the `22.1.0` **minor**
+bump to reproduce, which is why it shows up only in the synthetic repro and not in `7 + nine`. README
+corrected.
