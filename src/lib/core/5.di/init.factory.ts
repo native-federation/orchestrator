@@ -30,7 +30,7 @@ export const createInitDrivers = ({
   exposeModuleLoader: createExposeModuleLoader(config, adapters),
   getRemoteEntry: createGetRemoteEntry(config, adapters),
   updateCache: createUpdateCache(config, adapters),
-  poolDynamicExternals: createPoolDynamicExternals(config),
+  poolDynamicExternals: createPoolDynamicExternals(config, adapters),
   convertToImportMap: createConvertToImportMap(config, adapters),
 });
 

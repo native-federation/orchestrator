@@ -26,7 +26,7 @@ verify commands, then tick its box and append a one-line result under it. Stop a
 - [x] 3 — No-op-pool early-out (W1) + log levels
 - [x] 4 — Election (BUILT, MEASURED, REVERTED — see below)
 - [x] 5 — Per-remote agreement gate (minor granularity) + fixed point
-- [ ] 6 — Dynamic-init mirror (additive only)
+- [x] 6 — Dynamic-init mirror (additive only)
 - [ ] 7 — Warm-init dirty-gated skip (W2 — 45% of warm init)
 - [ ] 8 — Regression + fixture specs
 - [ ] 9 — Docs
@@ -357,6 +357,29 @@ serving builds plus the loaded remote's own build must agree pairwise), not §15
 loaded remote cannot take a committed member ⇒ whole family scoped · a new spec proving no committed version
 was mutated · types clean.
 **Done when:** the dynamic path enforces §15 without touching committed state.
+
+**Result (2026-07-30):** mirrors the *agreement* gate, not §15.5's acceptance test (per the iteration 4+5
+decision). `pool-dynamic-externals.ts` gains `sharedExternalsRepo` (DI updated) and, after the existing
+`memberActions.includes('scope')` gate, asks `disagreementAcrossCommittedBuilds`: build the committed
+instances for the pool's members, take the build serving each one, and require them to agree. A
+disagreement scopes the loaded remote's whole family and warns at step 8. Nothing committed is ever
+read-modify-written — the step still only mutates `actions`, proven by a spec that snapshots the
+committed externals and asserts `addOrUpdate` was never called.
+
+Why the extra check is needed even though init already enforces agreement: init guarantees no *remote*
+draws disagreeing builds, but the committed shared set can still hold two that disagree when no remote so
+far consumed both — the capture's `@framework/forms@22.0.8` beside `@framework/forms/signals@21.2.18`. A
+remote loaded later is exactly the consumer that would bridge them.
+
+**Worth recording:** builds that ship **disjoint** members agree vacuously — I2 compares only members two
+builds *both* ship. My first fixture missed this and asserted a scope that (correctly) did not happen. In
+the real capture the Angular-21 build ships `forms` *and* `forms/signals`, so the shared member `forms`
+is what makes the disagreement visible. Ragged coverage staying cheap is the same property (§4's I2
+rationale), so this is intended, not a hole.
+
+3 tests added (disagreeing committed builds ⇒ whole family scoped + warning; patch-drift-only committed
+builds ⇒ dedup preserved; no committed state mutated). **804/804**, coverage 96.21/90.43/95.55/96.82,
+types/lint/knip clean.
 
 ---
 

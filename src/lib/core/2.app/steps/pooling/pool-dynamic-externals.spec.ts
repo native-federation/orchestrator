@@ -2,8 +2,34 @@ import type { ForPoolingDynamicExternals } from '../../driver-ports/init/for-poo
 import { createPoolDynamicExternals } from './pool-dynamic-externals';
 import type { ConfigContract } from 'lib/core/2.app/config';
 import { mockConfig } from 'lib/testing/config.mock';
-import type { RemoteEntry, SharedInfo, SharedInfoActions } from 'lib/core/1.domain';
+import type {
+  RemoteEntry,
+  SharedExternal,
+  SharedInfo,
+  SharedInfoActions,
+  SharedVersion,
+} from 'lib/core/1.domain';
 import { mockSharedInfo } from 'lib/testing/domain/remote-entry/shared-info.mock';
+import { mockVersionRemote } from 'lib/testing/domain/externals/version.mock';
+import { mockAdapters } from 'lib/testing/adapters.mock';
+import type { DrivingContract } from '../../driving-ports/driving.contract';
+
+// A committed external: the first version is the `share` one, i.e. `remotes[0]` of it is the build
+// serving that member. Later versions are copies other builds hold.
+const committed = (
+  name: string,
+  ...versions: { tag: string; remote: string; action?: SharedVersion['action'] }[]
+): SharedExternal => ({
+  dirty: false,
+  versions: versions.map((v, i) => ({
+    tag: v.tag,
+    host: false,
+    action: v.action ?? (i === 0 ? 'share' : 'skip'),
+    remotes: [
+      mockVersionRemote(v.remote, name, { requiredVersion: `^${v.tag.split('.')[0]}.0.0` }),
+    ],
+  })),
+});
 
 const shared = (name: string, opt: { pool?: string; shareScope?: string } = {}): SharedInfo =>
   mockSharedInfo(name, {
@@ -24,11 +50,18 @@ const entryWith = (...externals: SharedInfo[]): RemoteEntry =>
 describe('createPoolDynamicExternals', () => {
   let poolDynamicExternals: ForPoolingDynamicExternals;
   let config: ConfigContract;
+  let adapters: DrivingContract;
+
+  const givenCommitted = (externals: Record<string, SharedExternal>) => {
+    adapters.sharedExternalsRepo.getFromScope = vi.fn(() => externals);
+  };
 
   beforeEach(() => {
     config = mockConfig();
     config.feature.useAutoExternalPooling = true;
-    poolDynamicExternals = createPoolDynamicExternals(config);
+    adapters = mockAdapters();
+    adapters.sharedExternalsRepo.getFromScope = vi.fn(() => ({}));
+    poolDynamicExternals = createPoolDynamicExternals(config, adapters);
   });
 
   it('leaves an all-compatible (all skip) family untouched', async () => {
@@ -95,6 +128,91 @@ describe('createPoolDynamicExternals', () => {
     expect(result.actions['@framework/core']).toEqual({ action: 'scope' });
     expect(result.actions['@framework/common']).toEqual({ action: 'scope' });
     expect(result.actions['@framework/cdk']).toEqual({ action: 'scope' });
+  });
+
+  it('scopes the family when the committed builds it would dedup onto disagree', async () => {
+    // The capture's shape: forms@22.0.8 and forms/signals@21.2.18 are both committed, from builds
+    // that disagree. Nobody so far consumed both; this remote would be the one to bridge them.
+    givenCommitted({
+      '@framework/forms': committed(
+        '@framework/forms',
+        { tag: '22.0.8', remote: 'team/a' },
+        { tag: '21.2.18', remote: 'team/legacy' }
+      ),
+      '@framework/forms/signals': committed('@framework/forms/signals', {
+        tag: '21.2.18',
+        remote: 'team/legacy',
+      }),
+    });
+    const entry = entryWith(shared('@framework/forms'), shared('@framework/forms/signals'));
+    const actions: SharedInfoActions = {
+      '@framework/forms': { action: 'skip', override: 'http://a/forms.js' },
+      '@framework/forms/signals': { action: 'skip', override: 'http://legacy/signals.js' },
+    };
+
+    const result = await poolDynamicExternals({ entry, actions });
+
+    expect(result.actions['@framework/forms']).toEqual({ action: 'scope' });
+    expect(result.actions['@framework/forms/signals']).toEqual({ action: 'scope' });
+    expect(config.log.warn).toHaveBeenCalledWith(
+      8,
+      expect.stringContaining("disagree on '@framework/forms' (22.0.8 vs 21.2.18)")
+    );
+  });
+
+  it('dedups onto committed builds that only drift by patch', async () => {
+    givenCommitted({
+      '@framework/core': committed(
+        '@framework/core',
+        { tag: '22.0.8', remote: 'team/a' },
+        { tag: '22.0.6', remote: 'team/b' }
+      ),
+      '@framework/cdk': committed('@framework/cdk', { tag: '22.0.6', remote: 'team/b' }),
+    });
+    const entry = entryWith(shared('@framework/core'), shared('@framework/cdk'));
+    const actions: SharedInfoActions = {
+      '@framework/core': { action: 'skip', override: 'http://a/core.js' },
+      '@framework/cdk': { action: 'skip', override: 'http://b/cdk.js' },
+    };
+
+    const result = await poolDynamicExternals({ entry, actions });
+
+    expect(result.actions['@framework/core']).toEqual({
+      action: 'skip',
+      override: 'http://a/core.js',
+    });
+    expect(result.actions['@framework/cdk']).toEqual({
+      action: 'skip',
+      override: 'http://b/cdk.js',
+    });
+  });
+
+  it('never mutates a committed version, whatever it decides', async () => {
+    const externals = {
+      '@framework/forms': committed(
+        '@framework/forms',
+        { tag: '22.0.8', remote: 'team/a' },
+        { tag: '21.2.18', remote: 'team/legacy' }
+      ),
+      '@framework/forms/signals': committed('@framework/forms/signals', {
+        tag: '21.2.18',
+        remote: 'team/legacy',
+      }),
+    };
+    givenCommitted(externals);
+    const snapshot = JSON.stringify(externals);
+    const entry = entryWith(shared('@framework/forms'), shared('@framework/forms/signals'));
+
+    await poolDynamicExternals({
+      entry,
+      actions: {
+        '@framework/forms': { action: 'skip' },
+        '@framework/forms/signals': { action: 'skip' },
+      },
+    });
+
+    expect(JSON.stringify(externals)).toBe(snapshot);
+    expect(adapters.sharedExternalsRepo.addOrUpdate).not.toHaveBeenCalled();
   });
 
   it('leaves a whole-pool-introducing remote (all share) untouched', async () => {
