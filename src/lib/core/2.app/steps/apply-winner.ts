@@ -12,16 +12,12 @@ export type VersionAcceptance = {
   // The remote that makes the redirect unsafe: it rejects `tag` and pinned `strictVersion`,
   // so it has to keep its own build instead of being deduped away.
   objector: (version: SharedVersion, tag: string) => SharedVersionMeta | undefined;
-  // The deduped per-build settings the two predicates above aggregate over, for callers asking
-  // a question of their own (the resolver's extra-download count).
+  // For callers asking a question of their own, e.g. the resolver's extra-download count.
   demands: (version: SharedVersion) => SharedVersionMeta[];
 };
 
-/**
- * Every compatibility question is asked of the whole version, not of its basis: see
- * `versionDemands`. Computed once per external, since the resolver's selection loop is
- * O(versions²) and pooling asks the same questions again when it re-points a winner.
- */
+// Every compatibility question is asked of the whole version, not of its basis: see `versionDemands`.
+// Computed once per external, since the selection loop is O(versions²).
 export function versionAcceptance(
   external: SharedExternal,
   isCompatible: IsCompatible
@@ -40,13 +36,12 @@ export function versionAcceptance(
 }
 
 /**
- * The tail of winner election: given a chosen version, derive every other version's verdict,
- * apply the entrypoint coverage policy and clear the dirty flag.
+ * The tail of winner election: derive every other version's verdict from the chosen one, apply the
+ * entrypoint coverage policy, clear `dirty`.
  *
- * Shared by `determine-shared-externals` and pooling: pooling re-points a member's winner to a
- * pooled family instance, which also moves its `remotes[0]` serving basis — the thing
- * `applyEntrypointCoveragePolicy`/`findTears` key off. Both must therefore run the same tail,
- * and pooling must pass in the resolver's memoized `isCompatible` rather than build a second memo.
+ * Shared with pooling, which re-points a winner onto a family instance and so also moves the
+ * `remotes[0]` serving basis that `findTears` keys off. Pooling passes in the resolver's memoized
+ * `isCompatible` rather than building a second memo.
  */
 export function createApplyWinner(config: LoggingConfig & ModeConfig) {
   return function applyWinner(
@@ -56,9 +51,8 @@ export function createApplyWinner(config: LoggingConfig & ModeConfig) {
     isCompatible: IsCompatible,
     acceptance?: VersionAcceptance
   ): SharedExternal {
-    // A lone version has nothing to redirect, so it is never asked a compatibility question —
-    // 12 of 18 externals on the production capture take this path. It is also the reason a lone
-    // version is never strict-checked against its own tag.
+    // A lone version has nothing to redirect, so it is never asked a compatibility question — which
+    // is also why it is never strict-checked against its own tag.
     if (external.versions.length > 1) {
       const { accepts, objector } = acceptance ?? versionAcceptance(external, isCompatible);
 

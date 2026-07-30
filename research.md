@@ -683,6 +683,17 @@ so it goes.
    → name (reload-stability). Single-provider members are assigned directly, never scored.
 4. **Acceptance**: a remote's declared **`requiredVersion`** decides whether it can take the chosen tags.
    One test, no tag-distance concept anywhere.
+   **Qualified 2026-07-30 (Auke): `strictVersion: false` accepts anything** — the test is
+   `isCompatible(tag, requiredVersion) || !strictVersion`. Rationale: `determine` already reads the flag
+   that way. When a version's range rejects the winner, `applyWinner` marks it `scope` **only if some
+   remote objected strictly**, otherwise `skip` — so a loose remote is deduped onto an incompatible tag
+   today, by its own declaration. Testing `requiredVersion` alone would make pooling *stricter than the
+   resolver it defers to*: a remote declaring `^21.0.0` with `strictVersion: false` is deduped onto
+   `22.0.8` today but would island its whole family, costing more downloads than the status quo and
+   falsifying §13.3's "strictly better than today, everywhere" for any portfolio with loose remotes.
+   This does not reintroduce tag distance — it honours a declared tolerance, which is what the flag is.
+   No pooling spec exercises a loose remote today (`determine-shared-externals.spec.ts:71,87,173` do),
+   so the suite would not have caught it.
 5. **All-skip or all-scope** (F2): a remote that cannot take every member it consumes from the chosen
    instances scopes its whole family from its own build.
 6. **Residual exposure is a documented authoring rule, not an algorithm.** A remote whose real coupling

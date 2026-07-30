@@ -17,7 +17,7 @@ type VersionShape = {
   tag: string;
   action?: SharedVersionAction;
   host?: boolean;
-  remotes: { remote: string; req?: string }[];
+  remotes: { remote: string; req?: string; strict?: boolean }[];
 };
 
 const member = (name: string, versions: VersionShape[]): PoolMember => ({
@@ -29,7 +29,10 @@ const member = (name: string, versions: VersionShape[]): PoolMember => ({
       host: v.host ?? false,
       action: v.action ?? 'skip',
       remotes: v.remotes.map(r =>
-        mockVersionRemote(r.remote, name, { requiredVersion: r.req ?? '^22.0.0' })
+        mockVersionRemote(r.remote, name, {
+          requiredVersion: r.req ?? '^22.0.0',
+          strictVersion: r.strict ?? true,
+        })
       ),
     })),
   },
@@ -87,6 +90,20 @@ const POINT_4: PoolMember[] = [
   member('@ng/router', [
     { tag: '21.2.3', action: 'share', remotes: [{ remote: 'r2', req: '~21.2.0' }] },
     { tag: '21.2.2', remotes: [{ remote: 'r1', req: '~21.2.0' }] },
+  ]),
+];
+
+// research.md §15.1 rule 4: `loose` declared `strictVersion: false`, i.e. it would rather be deduped
+// than hold its own copy. determine marks such a version `skip` even when its range rejects the
+// winner, so pooling must not island it either.
+const LOOSE = (strict: boolean): PoolMember[] => [
+  member('@ng/core', [
+    { tag: '22.0.8', action: 'share', remotes: [{ remote: 'up-to-date' }] },
+    { tag: '21.2.18', remotes: [{ remote: 'loose', req: '^21.0.0', strict }] },
+  ]),
+  member('@ng/router', [
+    { tag: '22.0.8', action: 'share', remotes: [{ remote: 'up-to-date' }] },
+    { tag: '21.2.18', remotes: [{ remote: 'loose', req: '^21.0.0', strict }] },
   ]),
 ];
 
@@ -169,6 +186,22 @@ describe('buildAcceptanceTable', () => {
     }
   });
 
+  it('lets a `strictVersion: false` remote accept every offered tag', () => {
+    const members = LOOSE(false);
+    const table = buildAcceptanceTable(buildInstances(members), members, isCompatible);
+
+    // Its ^21.0.0 rejects 22.0.8, but it declared it would rather dedup than hold its own copy.
+    expect([...table.get('loose')!.get('@ng/core')!].sort()).toEqual(['21.2.18', '22.0.8']);
+    expect(isCompatible('22.0.8', '^21.0.0')).toBe(false);
+  });
+
+  it('holds the same remote to its range once it declares `strictVersion: true`', () => {
+    const members = LOOSE(true);
+    const table = buildAcceptanceTable(buildInstances(members), members, isCompatible);
+
+    expect([...table.get('loose')!.get('@ng/core')!]).toEqual(['21.2.18']);
+  });
+
   it('asks only about offered tags, so repeats collapse onto the resolver memo', () => {
     const asked: string[] = [];
     const counting = (tag: string, requiredVersion: string) => {
@@ -230,6 +263,22 @@ describe('canTakeAllFrom', () => {
     expect(take('mfe-a', chosen)).toBe(false);
     // mfe-b does not consume router, so a missing router does not concern it.
     expect(take('mfe-b', new Map([['@angular/core', '22.0.5']]))).toBe(true);
+  });
+
+  it('lets a loose remote follow the family it cannot satisfy, but not a strict one', () => {
+    const chosen: ChosenTags = new Map([
+      ['@ng/core', '22.0.8'],
+      ['@ng/router', '22.0.8'],
+    ]);
+    const verdict = (strict: boolean) => {
+      const members = LOOSE(strict);
+      const consumed = consumedMembers(members).get('loose')!;
+      const acceptance = buildAcceptanceTable(buildInstances(members), members, isCompatible);
+      return canTakeAllFrom(acceptance, chosen, 'loose', consumed);
+    };
+
+    expect(verdict(false)).toBe(true);
+    expect(verdict(true)).toBe(false);
   });
 
   it('rejects the superset remote against the subset instance (Case 5)', () => {

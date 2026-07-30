@@ -47,7 +47,11 @@ anywhere** in the implementation.
    host → declaring remote → name.
 4. **Single-provider members are assigned directly**, never scored (mandatory: it is the difference between
    4.4 ms and 262 ms at R=50/M=80).
-5. **Acceptance = `requiredVersion` only.** One test.
+5. **Acceptance = `requiredVersion` only.** One test — `isCompatible(tag, requiredVersion) ||
+   !strictVersion` (§15.1 rule 4, qualified 2026-07-30). A loose remote accepts anything, because
+   `applyWinner` already only scopes a rejecting version when some remote objected **strictly**;
+   testing the range alone would make pooling stricter than the resolver it defers to. Binds in
+   iteration 5 (`canTakeAllFrom`) and iteration 6 (dynamic).
 6. **All-skip or all-scope** per remote: a remote that cannot take every member it consumes from the chosen
    instances scopes its **whole** family from its own build. No partial mixing.
 7. **`determine`'s verdicts are unchanged** (§15.3): the strict-incompatibility gate (`islandedRemotes`,
@@ -229,6 +233,13 @@ Three signature deviations from the wording above, all deliberate:
 Also: `hostPinnedTags` skips `scope` versions defensively (a host version is always determine's winner,
 so this cannot fire today), and `buildAcceptanceTable` unions over a remote's metas for one member —
 `process-remote-entries` keeps one meta per (remote, external), so union and intersection coincide.
+
+**Amendment (2026-07-30, Auke):** `buildAcceptanceTable` now accepts **every offered tag when
+`strictVersion: false`** — see the qualified §15.1 rule 4 and Hard constraint 5. Found by asking whether
+the pool-wide verdict story still holds: the range-only test would have made pooling stricter than the
+resolver, islanding loose remotes that dedup today (no pooling spec covers a loose remote, so the suite
+would not have caught it). 3 tests added, 799 total. Same pass also trimmed production comments to the
+necessary minimum per Auke's instruction; specs keep theirs.
 
 ---
 

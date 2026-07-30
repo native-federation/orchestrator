@@ -8,19 +8,8 @@ import type {
   PoolMember,
 } from './pool.types';
 
-/**
- * The family instances a pool can be served from: per remote, every member it ships and the tag it
- * ships it at.
- *
- * Two exclusions, both load-bearing:
- * - **`scope` versions never count.** Promoting one cascades scoping and is self-defeating; a
- *   `scope` verdict is determine's, and pooling does not overrule it.
- * - **An islanded remote offers nothing at all**, not even the members it is the *sole* provider of.
- *   That is exactly the production capture's failure: the Angular-21 remote is correctly islanded on
- *   `core`, yet stays the only provider of `animations`, so `animations@21.2.18` would remain shared
- *   beside `core@22.0.8`. Islanding governs whose copies get deduped; only dropping the whole
- *   instance keeps the shared set itself coherent.
- */
+// Per remote, every member it ships and the tag it ships it at. An islanded remote offers nothing at
+// all — not even members it solely provides, or the shared set itself stays incoherent (§15.3).
 export function buildInstances(
   members: PoolMember[],
   islanded?: ReadonlySet<RemoteName>
@@ -40,8 +29,7 @@ export function buildInstances(
 
         let instance = instances.get(name);
         if (!instance) instances.set(name, (instance = new Map() as FamilyInstance));
-        // A remote ships one copy per member; first tag wins so the result stays deterministic
-        // even if storage ever holds two.
+        // A remote ships one copy per member; first tag wins to stay deterministic regardless.
         if (!instance.has(member.name)) instance.set(member.name, version.tag);
       }
     }
@@ -50,11 +38,8 @@ export function buildInstances(
   return instances;
 }
 
-/**
- * Per remote, the members it consumes — what it must be served, whether or not that copy survived as
- * a shareable version. Wider than its instance: a remote whose copy of a member was marked `scope`
- * still needs that member at runtime.
- */
+// Per remote, what it must be served. Wider than its instance: a copy marked `scope` is excluded
+// there but still consumed.
 export function consumedMembers(members: PoolMember[]): Map<RemoteName, ExternalName[]> {
   const consumed = new Map<RemoteName, ExternalName[]>();
 
@@ -76,13 +61,12 @@ export function consumedMembers(members: PoolMember[]): Map<RemoteName, External
 }
 
 /**
- * For every remote and member, which of the offered tags its declared `requiredVersion` accepts.
+ * Which offered tags each remote accepts per member. `strictVersion: false` accepts every tag: the
+ * remote declared it would rather dedup than hold its own copy, and `determine` reads the flag the
+ * same way, so testing the range alone would island remotes that dedup today (§15.1 rule 4).
  *
- * **Mandatory precomputation, not an optimisation.** Acceptance is asked once per (remote, member,
- * candidate instance) during election and again per round of the per-remote pass; measured at
- * R=50/M=80 that is 510k calls against 3-14 distinct `(tag|range)` questions — 262 ms without the
- * table, 4.4 ms with it. Pass in the resolver's memoized `isCompatible` so those few questions are
- * answered once per init.
+ * Mandatory precomputation, not an optimisation: election and the per-remote rounds ask acceptance
+ * 510k times at R=50/M=80 against 3-14 distinct questions — 262 ms without the table, 4.4 ms with it.
  */
 export function buildAcceptanceTable(
   instances: FamilyInstances,
@@ -118,7 +102,8 @@ export function buildAcceptanceTable(
         if (!accepted) byMember.set(member.name, (accepted = new Set()));
 
         for (const tag of tags) {
-          if (!accepted.has(tag) && isCompatible(tag, meta.requiredVersion)) accepted.add(tag);
+          if (accepted.has(tag)) continue;
+          if (!meta.strictVersion || isCompatible(tag, meta.requiredVersion)) accepted.add(tag);
         }
       }
     }
@@ -127,11 +112,8 @@ export function buildAcceptanceTable(
   return table;
 }
 
-/**
- * Members exactly one instance ships, mapped to that instance. They carry no decision, so they are
- * assigned directly and never scored — without this the extension loop re-scores every instance
- * every round (O(rounds · R² · M), and the difference between 4.4 ms and 262 ms at R=50/M=80).
- */
+// Members exactly one instance ships, mapped to it. No decision to make, so they are assigned
+// directly and never scored — otherwise the extension loop re-scores every instance every round.
 export function singleProviderMembers(instances: FamilyInstances): Map<ExternalName, RemoteName> {
   const sole = new Map<ExternalName, RemoteName>();
   const contested = new Set<ExternalName>();
@@ -151,12 +133,8 @@ export function singleProviderMembers(instances: FamilyInstances): Map<ExternalN
   return sole;
 }
 
-/**
- * The acceptance test behind all-skip-or-all-scope: can this remote take *every* member it consumes
- * from the chosen instances? A member nobody serves fails the test as well — the remote would have to
- * self-serve it beside the chosen instances, which is the mixed family this whole feature exists to
- * prevent.
- */
+// All-skip-or-all-scope: can this remote take every member it consumes from the chosen instances? A
+// member nobody serves fails too — it would have to self-serve that one beside the chosen instances.
 export function canTakeAllFrom(
   acceptance: AcceptanceTable,
   chosen: ChosenTags,
@@ -175,11 +153,8 @@ export function canTakeAllFrom(
   return true;
 }
 
-/**
- * Members the host declared, at the host's tag. Host precedence is priority #1 — above pooling — so
- * these are seeded *before* election and are never re-pointed by it. Using the host `remoteEntry.json`
- * to lock a version is a deliberate act; see docs/version-resolver.md.
- */
+// Members the host declared, at its tag. Host precedence outranks pooling, so these are seeded
+// before election and never re-pointed by it.
 export function hostPinnedTags(members: PoolMember[]): ChosenTags {
   const pinned: ChosenTags = new Map();
 
