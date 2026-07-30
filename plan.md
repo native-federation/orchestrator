@@ -30,7 +30,7 @@ verify commands, then tick its box and append a one-line result under it. Stop a
 - [x] 7 — Warm-init dirty-gated skip (W2 — 45% of warm init) → **warm pooling 0.218 → 0.002 ms**
 - [x] 8 — Regression + fixture specs (F-A's mechanism **corrected by measurement** — see below)
 - [x] 9 — Docs
-- [ ] 10 — Final gates + PR
+- [x] 10 — Final gates + PR
 
 ## Hard constraints (re-read every pass)
 
@@ -603,3 +603,24 @@ alone rather than reformatted into an unrelated diff.
 
 **Verify:** all four gates green.
 **Done when:** PR open, #63 linked.
+
+**Result (2026-07-30):** gates green — **816/816** (75 files), coverage 96.23/90.53/95.56/96.84,
+`tsc -p tsconfig.build.json` clean, lint 0 errors (7 pre-existing warnings), knip clean.
+
+All three probes re-run against the final code; **every row of §16.1 reproduces exactly**: downloads
+36/45/64/36/36, shared 24→16 (14 on 7+`eight`), `majors={22}` and **zero** split packages on all five
+portfolios, islands 1/2/5/1/1 with **0 by build disagreement**, `honesty-probe` 0 range violations
+(5/15/11 cross-tag dedups), warm pooling 0.002 ms.
+
+F-A is filed as **`F-A-islanding-cascade.md`** (Auke's call: a tracked file rather than a GitHub issue),
+with the corrected mechanism, the measured tables, why pooling cannot fix it, three candidate avenues
+(recommending the cheapest: count remotes rather than versions in the resolver's objective) and acceptance
+criteria. `docs/version-resolver.md` §"Optimal Version Strategy" gained a matching known-limitation note,
+since that section claims the objective "minimizes download time" and in this shape it does not.
+
+Merged `main` (`85104f5`, release prep 4.5.3) into the branch — no conflicts, the branch never touched
+`package.json`. **Version left at main's 4.5.3**: this repo prepares releases in their own `chore:` commit,
+so bumping to 4.5.4 is the maintainer's step, not this PR's.
+
+Per Auke's call, `plan.md` and `research.md` are **removed in the final commit** — they stay readable in
+the branch history (and `F-A-islanding-cascade.md` says how to reach them) but do not land in `main`.

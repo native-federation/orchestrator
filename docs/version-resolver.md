@@ -1184,6 +1184,11 @@ Team-a scope - if 3.1.0 is chosen:
 Result: Choose 18.2.0 globally, 3.1.0 for team-a scope
 ```
 
+> **Known limitation.** The cost is counted per **version**, not per remote. A member whose modern side
+> sits on one version shared by many remotes can therefore lose to two older versions shipped by one
+> remote each. On its own that costs one extra download; with pooling enabled it flips a member's winner
+> and islands whole families. See `F-A-islanding-cascade.md`.
+
 ### 4. Caching Strategy
 
 The resolver optimizes for applications with page reloads. When storage like sessionStorage is chosen, shared dependencies are cached across page loads within their respective scopes:
