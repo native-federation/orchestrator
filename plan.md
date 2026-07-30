@@ -443,6 +443,49 @@ the strict consumer. That is §14's test B, which §15 dropped.
 **Done when:** no remote ever mixes instances except the documented Case 2 shape, and the fixed point
 terminates.
 
+### IN PROGRESS (2026-07-30) — behaviour done, perf gate failing
+
+Landed in `pool-shared-externals.ts`: `scopeRemotesThatCannotFollow` (all-skip-or-all-scope, fixed point,
+re-entered only after a round that scoped someone), `servedTags` (a member whose share version lost every
+non-islanded copy counts as unserved), `IslandCause.kind` so the warning distinguishes
+"incompatible" (determine's `scope`) from "cannot follow" (§15 acceptance), and
+`traceMultiInstanceDraws` — **`debug`, never `warn`** (§15.1 rule 6), gated on `config.log.level` so the
+walk is not paid at default level.
+
+**Rigorous early-out, not a heuristic:** with nobody islanded and every member shared, no remote can fail
+the acceptance test — `applyWinner` only leaves a version `skip` when each of its remotes either accepts
+the tag or is not strict, which is exactly this test. So the healthy path builds no acceptance table.
+
+Outcome on `benchmark/` is **unchanged from iteration 4** on all five portfolios (nobody extra islanded);
+the pass fires only in the synthetic shapes. 4 new tests: family-wide scope when a consumed member has no
+shared build, the two-round fixed point, `debug`-not-`warn` for a multi-build draw, and the reworked
+"asks each compatibility question once" (replacing "never calls `isCompatible`", which §8 deliberately
+changes). **818/818**, coverage 94.73/88.2/95.32/95.98, types/lint clean.
+
+**BLOCKER — the pooling step is 3-4x slower and the cost buys nothing on real portfolios.** Three runs
+each, cold, `benchmark/`:
+
+| portfolio | iteration 3 | iteration 5 |
+| --- | --- | --- |
+| coherent 6 | 0.13–0.17 ms | **0.38–0.67 ms** |
+| captured 7 | 0.34–0.42 ms | **1.43–1.91 ms** |
+
+Attribution by disabling each part in place: **election ~0.4 ms (coherent) / ~0.5–0.7 ms (captured)**, the
+per-remote pass ~0.1 / ~0.35 ms. Against §9.1's baseline the whole init roughly doubles (2.06 ms cold, of
+which pooling was 0.51).
+
+Three optimisation rounds are already in: the shared `poolContext` (instances / consumed / acceptance built
+at most once per pool, invalidated only after a scoping round), `takeable` precomputed per instance instead
+of a package walk per consumed member per candidate, and two gates before scoring —
+`remotesServedByOneBuild === instances.size` (objective already maxed) and `bestPossibleServed <= servedNow`
+(a coverage-only upper bound on the objective, no compatibility calls). None of them skip election on the
+real portfolios: `bestPossibleServed` genuinely exceeds `servedNow` there, so election scores in full and
+then — correctly, thanks to the package guard — commits nothing.
+
+So the measured trade is: **election costs 3-4x the pooling step on every init and changes the outcome only
+in the synthetic Case 1 shape.** That is a live input to the still-open distance question — a narrower fix
+for Case 1 may be worth more than the whole election machinery. Not ticking this box until that is decided.
+
 ---
 
 ## 6 — Dynamic-init mirror (additive only)

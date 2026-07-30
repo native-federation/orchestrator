@@ -14,11 +14,40 @@ import { findVersionForTag } from 'lib/core/1.domain/externals/basis';
 import { createApplyWinner, createIsCompatibleMemo, type IsCompatible } from '../apply-winner';
 import { buildPools } from './pool-graph';
 import { remotesInPool } from './pool.util';
-import { buildAcceptanceTable, buildInstances, consumedMembers } from './family-instance';
-import { coveredBySingleInstance, currentSharedTags, electInstances } from './elect-instance';
-import type { ChosenTags, PoolMember, PoolName } from './pool.types';
+import {
+  buildAcceptanceTable,
+  buildInstances,
+  canTakeAllFrom,
+  consumedMembers,
+} from './family-instance';
+import {
+  coveredBySingleInstance,
+  currentSharedTags,
+  electInstances,
+  remotesServedByOneBuild,
+  bestPossibleServed,
+} from './elect-instance';
+import type {
+  AcceptanceTable,
+  ChosenTags,
+  FamilyInstances,
+  PoolMember,
+  PoolName,
+} from './pool.types';
 
-type IslandCause = { member: ExternalName; tag: VersionName };
+type PoolContext = {
+  instances: () => FamilyInstances;
+  consumed: () => Map<RemoteName, ExternalName[]>;
+  acceptance: () => AcceptanceTable;
+  invalidate: () => void;
+};
+
+type IslandCause = {
+  // `incompatible`: determine marked a version `scope`. `cannot-follow`: §15 acceptance said no.
+  kind: 'incompatible' | 'cannot-follow';
+  member: ExternalName;
+  tag: VersionName;
+};
 
 // Remotes that are strict-incompatible on any member (determine marked a version `scope`). Reads
 // stored actions only — pooling makes no compatibility call — and islands across the WHOLE family.
@@ -30,7 +59,11 @@ function islandedRemotes(members: PoolMember[]): Map<RemoteName, IslandCause> {
       if (version.action === 'scope')
         for (const remote of version.remotes)
           if (!islanded.has(remote.name))
-            islanded.set(remote.name, { member: member.name, tag: version.tag });
+            islanded.set(remote.name, {
+              kind: 'incompatible',
+              member: member.name,
+              tag: version.tag,
+            });
   return islanded;
 }
 
@@ -92,6 +125,29 @@ export function createPoolSharedExternals(
     return Promise.resolve();
   };
 
+  /**
+   * The three derived structures a pool needs, built at most once each and shared by election and the
+   * per-remote pass. `consumed` never changes; instances and the acceptance table depend on who is
+   * islanded, so they are dropped after a round that scoped someone.
+   */
+  function poolContext(members: PoolMember[], islanded: Map<RemoteName, IslandCause>): PoolContext {
+    let instances: FamilyInstances | undefined;
+    let consumed: Map<RemoteName, ExternalName[]> | undefined;
+    let acceptance: AcceptanceTable | undefined;
+
+    const self: PoolContext = {
+      instances: () => (instances ??= buildInstances(members, islanded)),
+      consumed: () => (consumed ??= consumedMembers(members)),
+      acceptance: () =>
+        (acceptance ??= buildAcceptanceTable(self.instances(), members, isCompatible)),
+      invalidate: () => {
+        instances = undefined;
+        acceptance = undefined;
+      },
+    };
+    return self;
+  }
+
   function poolFamily(poolName: PoolName, members: PoolMember[], scope: string): void {
     // Below 2 members across 2 remotes there is nothing to coordinate; the per-external result is
     // already coherent.
@@ -108,11 +164,17 @@ export function createPoolSharedExternals(
         members.map(m => `  - ${m.name}`).join('\n')
     );
 
-    const elected = elect(poolName, members, islanded, scope);
+    let ctx = poolContext(members, islanded);
+    const elected = elect(poolName, members, islanded, ctx, scope);
 
     // Election can make a strict pin reject the new winner, which determine then marks `scope` — so
     // the island gate has to see the post-election verdicts. This is what fixes Case 1.
-    if (elected) islanded = islandedRemotes(members);
+    if (elected) {
+      islanded = islandedRemotes(members);
+      ctx = poolContext(members, islanded);
+    }
+
+    scopeRemotesThatCannotFollow(members, islanded, ctx, poolName, scope);
 
     // Nothing elected and nobody islanded: determine's verdicts already stand for every member, so
     // rebuilding them would write back what storage holds.
@@ -128,9 +190,13 @@ export function createPoolSharedExternals(
     }
 
     for (const [remote, cause] of islanded) {
+      const why =
+        cause.kind === 'incompatible'
+          ? `'${cause.member}@${cause.tag}' is incompatible with the shared version`
+          : `it cannot take '${cause.member}@${cause.tag}' from the pooled build`;
       config.log.warn(
         3,
-        `[${scope}][pool:${poolName}] '${remote}' is islanded: '${cause.member}@${cause.tag}' is incompatible with the shared version, so all ${members.length} members of the pool are scoped for it.`
+        `[${scope}][pool:${poolName}] '${remote}' is islanded: ${why}, so all ${members.length} members of the pool are scoped for it.`
       );
     }
 
@@ -141,23 +207,131 @@ export function createPoolSharedExternals(
     }
   }
 
+  /**
+   * All-skip or all-scope (§15.1 rule 5): a remote that cannot take every member it consumes from the
+   * pooled builds serves its whole family from its own build instead of mixing. A member nobody serves
+   * counts as unavailable, since the remote would have to self-serve that one beside the shared ones.
+   *
+   * Scoping is monotone — it can take a member's last provider, which can push another remote over the
+   * same line — so the pass repeats, and only after a round that scoped someone (§15.4).
+   */
+  function scopeRemotesThatCannotFollow(
+    members: PoolMember[],
+    islanded: Map<RemoteName, IslandCause>,
+    ctx: PoolContext,
+    poolName: PoolName,
+    scope: string
+  ): void {
+    // With nobody islanded and every member shared, no remote can fail: `applyWinner` only leaves a
+    // version `skip` when every one of its remotes either accepts the tag or is not strict, which is
+    // this very test. So the acceptance table is not built at all on the healthy path — only the
+    // draw trace, and only when someone is listening.
+    if (
+      islanded.size === 0 &&
+      members.every(m => m.external.versions.some(v => v.action === 'share'))
+    ) {
+      if (config.log.level === 'debug')
+        traceMultiInstanceDraws(members, islanded, ctx.consumed(), poolName, scope);
+      return;
+    }
+
+    for (;;) {
+      const instances = ctx.instances();
+      const served = servedTags(members, islanded);
+      const consumed = ctx.consumed();
+      const acceptance = ctx.acceptance();
+
+      let scoped = false;
+      for (const remote of instances.keys()) {
+        const wants = consumed.get(remote) ?? [];
+        if (canTakeAllFrom(acceptance, served, remote, wants)) continue;
+
+        const blocker = wants.find(
+          m =>
+            !acceptance
+              .get(remote)
+              ?.get(m)
+              ?.has(served.get(m) ?? '')
+        );
+        islanded.set(remote, {
+          kind: 'cannot-follow',
+          member: blocker ?? '?',
+          tag: (blocker && served.get(blocker)) ?? 'none',
+        });
+        scoped = true;
+      }
+
+      if (!scoped) {
+        traceMultiInstanceDraws(members, islanded, consumed, poolName, scope);
+        return;
+      }
+      ctx.invalidate();
+    }
+  }
+
+  // What each member is actually served at: its shared tag, unless islanding took every copy that
+  // could serve it.
+  function servedTags(members: PoolMember[], islanded: Map<RemoteName, IslandCause>): ChosenTags {
+    const served: ChosenTags = new Map();
+    for (const member of members) {
+      const shared = member.external.versions.find(v => v.action === 'share');
+      if (shared?.remotes.some(r => !islanded.has(r.name))) served.set(member.name, shared.tag);
+    }
+    return served;
+  }
+
+  // §15.1 rule 6: drawing from more than one build is the normal case and not actionable, so it is
+  // `debug`. `warn` stays reserved for islanding.
+  function traceMultiInstanceDraws(
+    members: PoolMember[],
+    islanded: Map<RemoteName, IslandCause>,
+    consumed: Map<RemoteName, ExternalName[]>,
+    poolName: PoolName,
+    scope: string
+  ): void {
+    if (config.log.level !== 'debug') return;
+
+    const basis = new Map<ExternalName, RemoteName>();
+    for (const member of members) {
+      const shared = member.external.versions.find(v => v.action === 'share');
+      const serving = shared?.remotes.find(r => !islanded.has(r.name));
+      if (serving) basis.set(member.name, serving.name);
+    }
+
+    for (const [remote, wants] of consumed) {
+      if (islanded.has(remote)) continue;
+      const drawn = new Set(wants.map(m => basis.get(m)).filter(Boolean));
+      if (drawn.size < 2) continue;
+      config.log.debug(
+        3,
+        `[${scope}][pool:${poolName}] '${remote}' draws from ${drawn.size} builds: ${[...drawn].join(', ')}.`
+      );
+    }
+  }
+
   // Serves every member from the elected family instances (§15.1 rule 3). Returns true when a
   // winner actually moved, which is also what tells `poolFamily` that storage must be rewritten.
   function elect(
     poolName: PoolName,
     members: PoolMember[],
     islanded: Map<RemoteName, IslandCause>,
+    ctx: PoolContext,
     scope: string
   ): boolean {
-    const instances = buildInstances(members, islanded);
+    const instances = ctx.instances();
     if (instances.size < 2) return false;
 
     const current = currentSharedTags(members);
     if (coveredBySingleInstance(instances, current)) return false;
+    // Everyone already takes their whole family from one build: election's objective is maxed out.
+    const servedNow = remotesServedByOneBuild(instances, ctx.consumed(), current);
+    if (servedNow === instances.size) return false;
 
-    const consumed = consumedMembers(members);
-    const acceptance = buildAcceptanceTable(instances, members, isCompatible);
-    const chosen = electInstances(members, instances, acceptance, consumed);
+    // No instance could beat that even ignoring acceptance, so scoring cannot find an improvement —
+    // and this is the check that keeps the acceptance table off ragged portfolios entirely.
+    if (bestPossibleServed(instances, ctx.consumed()) <= servedNow) return false;
+
+    const chosen = electInstances(members, instances, ctx.acceptance(), ctx.consumed());
 
     let moved = false;
     for (const member of members) {

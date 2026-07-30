@@ -261,7 +261,9 @@ describe('createPoolSharedExternals', () => {
       expect(share.remotes[0]!.name).toBe('host');
     });
 
-    it('reads determine actions without calling versionCheck.isCompatible', async () => {
+    it('asks each compatibility question once, and only about tags a build offers', async () => {
+      // Pooling now needs `versionCheck` for the acceptance test (research.md §8), so the contract is
+      // no longer "asks nothing" but "asks a bounded set, once each" — the memo carries the rest.
       config.feature.useAutoExternalPooling = true;
       const isCompatible = vi.fn(() => true);
       adapters.versionCheck.isCompatible = isCompatible;
@@ -276,7 +278,9 @@ describe('createPoolSharedExternals', () => {
 
       await poolSharedExternals();
 
-      expect(isCompatible).not.toHaveBeenCalled();
+      const asked = isCompatible.mock.calls as unknown as [string, string][];
+      expect(asked.every(([tag]) => tag === '17')).toBe(true);
+      expect(new Set(asked.map(q => q.join('|'))).size).toBe(asked.length);
     });
   });
 
@@ -352,6 +356,87 @@ describe('createPoolSharedExternals', () => {
       await poolSharedExternals();
 
       expect(adapters.sharedExternalsRepo.addOrUpdate).toHaveBeenCalledTimes(2);
+    });
+
+    it('scopes a remote whole family when one member it consumes has no shared build', async () => {
+      config.feature.useAutoExternalPooling = true;
+      // c is islanded on core@18, which strips cdk's only shared build. b consumes cdk and core, so it
+      // cannot take everything from the pooled builds — it must not keep deduping core either (F2).
+      givenExternals({
+        '@framework/core': external([
+          sharedVersion('17', [meta('a', { req: '17' }), meta('b', { req: '17' })], {
+            action: 'share',
+          }),
+          sharedVersion('18', [meta('c', { req: '18' })], { action: 'scope' }),
+        ]),
+        '@framework/cdk': external([
+          sharedVersion('18', [meta('c', { req: '18' })], { action: 'share' }),
+          sharedVersion('18', [meta('b', { req: '18' })], { action: 'skip' }),
+        ]),
+      });
+
+      await poolSharedExternals();
+
+      const core = rebuiltFor('@framework/core')!;
+      expect(namesOf(core, 'share')).toEqual(['a']);
+      expect(namesOf(core, 'scope')).toEqual(['b', 'c']);
+      expect(config.log.warn).toHaveBeenCalledWith(
+        3,
+        expect.stringContaining("'b' is islanded: it cannot take '@framework/cdk@")
+      );
+    });
+
+    it('iterates to a fixed point when scoping takes another member last provider', async () => {
+      config.feature.useAutoExternalPooling = true;
+      // Round 1: c is islanded, so cdk loses its provider and b scopes. Round 2: b was util's only
+      // provider, so d scopes too. One pass would have missed d.
+      givenExternals({
+        '@framework/core': external([
+          sharedVersion('17', [meta('a', { req: '17' }), meta('b'), meta('d')], {
+            action: 'share',
+          }),
+          sharedVersion('18', [meta('c', { req: '18' })], { action: 'scope' }),
+        ]),
+        '@framework/cdk': external([
+          sharedVersion('18', [meta('c', { req: '18' })], { action: 'share' }),
+          sharedVersion('18', [meta('b', { req: '18' })], { action: 'skip' }),
+        ]),
+        '@framework/util': external([
+          sharedVersion('19', [meta('b', { req: '19' })], { action: 'share' }),
+          sharedVersion('19', [meta('d', { req: '19' })], { action: 'skip' }),
+        ]),
+      });
+
+      await poolSharedExternals();
+
+      const core = rebuiltFor('@framework/core')!;
+      expect(namesOf(core, 'share')).toEqual(['a']);
+      expect(namesOf(core, 'scope')).toEqual(['b', 'c', 'd']);
+    });
+
+    it('logs a multi-build draw at debug, never at warn', async () => {
+      config.feature.useAutoExternalPooling = true;
+      // b takes core from a and cdk from itself: two builds, both accepted by its ranges. That is the
+      // normal case (§15.1 rule 6), so it is not actionable and must not warn.
+      givenExternals({
+        '@framework/core': external([
+          sharedVersion('17', [meta('a', { req: '17' }), meta('b', { req: '17' })], {
+            action: 'share',
+          }),
+        ]),
+        '@framework/cdk': external([
+          sharedVersion('18', [meta('b', { req: '18' })], { action: 'share' }),
+          sharedVersion('18', [meta('a', { req: '18' })], { action: 'skip' }),
+        ]),
+      });
+
+      await poolSharedExternals();
+
+      expect(config.log.debug).toHaveBeenCalledWith(
+        3,
+        expect.stringContaining('draws from 2 builds')
+      );
+      expect(config.log.warn).not.toHaveBeenCalledWith(3, expect.stringContaining('is islanded'));
     });
 
     it('groups scope versions by each remote real tag (F3)', async () => {
