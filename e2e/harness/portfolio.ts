@@ -58,7 +58,20 @@ export type DepOptions = {
   entrypoints?: string[];
   /** Chunk bundle this external's code lives in; chunks are mapped into the remote's scope. */
   bundle?: string;
+  /**
+   * Specifiers this external's own code imports, e.g. `router` declaring `['@angular/core']`. The
+   * compiled file really imports them, so what they bind to is decided by the *provider's* scope, not
+   * the consumer's — the second hop a torn anchor breaks. See `peersOf`.
+   */
+  peers?: string[];
 };
+
+/**
+ * Peer specifiers per shared external, kept under a symbol for the same reason `BUNDLES` is: a served
+ * `remoteEntry.json` never declares peer edges — they exist only in the compiled file — and
+ * `JSON.stringify` ignores symbol keys, so the harness knows them without the orchestrator seeing them.
+ */
+const PEERS = Symbol('peers');
 
 /**
  * One shared dependency of a remote. Singleton by default, which is what a framework package is and
@@ -68,7 +81,7 @@ export const dep = (pkg: string, version: string, o: DepOptions = {}): DenseShar
   const entries = Object.fromEntries(
     [pkg, ...(o.entrypoints ?? []).map(e => `${pkg}${e}`)].map(name => [name, `${name}.js`])
   );
-  return mockSharedInfo(pkg, {
+  const shared = mockSharedInfo(pkg, {
     singleton: o.singleton ?? true,
     strictVersion: o.strict ?? true,
     requiredVersion: o.req ?? `^${version}`,
@@ -78,6 +91,7 @@ export const dep = (pkg: string, version: string, o: DepOptions = {}): DenseShar
     bundle: o.bundle,
     entries,
   });
+  return o.peers?.length ? Object.assign(shared, { [PEERS]: o.peers }) : shared;
 };
 
 export const remote = (name: string, scopeUrl: string, shared: DenseSharedInfo[]): RemoteEntry =>
@@ -217,6 +231,10 @@ const POOLED = [pooled1, pooled2, pooled3] as const;
  */
 export const poolFixture = (n: 1 | 2 | 3): RemoteEntry =>
   ({ ...POOLED[n - 1], url: `http://mfe${n}/remoteEntry.json` }) as unknown as RemoteEntry;
+
+/** Specifiers a shared external's compiled code imports; empty unless `dep` declared `peers`. */
+export const peersOf = (shared: DenseSharedInfo): string[] =>
+  (shared as DenseSharedInfo & { [PEERS]?: string[] })[PEERS] ?? [];
 
 /** Every entrypoint a shared external declares, across both the dense and the sparse shape. */
 export const entrypointsOf = (shared: DenseSharedInfo): Record<string, string> => {

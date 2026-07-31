@@ -117,7 +117,7 @@ const api = {
   },
 
   /** Every external file the page evaluated, in order, with the build it came from. */
-  copies: () => (globalThis as { __nfCopies?: Array<Record<string, string>> }).__nfCopies ?? [],
+  copies: () => (globalThis as { __nfCopies?: Array<Record<string, unknown>> }).__nfCopies ?? [],
 
   storage: () => ({ ...sessionStorage }) as Record<string, string>,
 };

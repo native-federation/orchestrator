@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { toChunkImport, CHUNK_PREFIX } from '@softarc/native-federation/domain';
 import type { RemoteEntry } from 'lib/core/1.domain';
-import { bundlesOf, entrypointsOf } from './portfolio';
+import { bundlesOf, entrypointsOf, peersOf } from './portfolio';
 
 /**
  * The network. One HTTP server dispatches on the `Host` header, and Chromium is launched with
@@ -46,22 +46,35 @@ const js = (body: string): File => ({ type: 'text/javascript', body });
  * When the external declares a `bundle`, the file imports that bundle's chunks the way a real built
  * external does — so a deduped external drags its provider's chunk graph along, resolved against the
  * provider's scope rather than the consumer's.
+ *
+ * `peers` are the specifiers this external's own code imports, and they are the reason a leaf fixture
+ * cannot see a torn anchor: the importer is *this* file's origin, so the peer resolves in the
+ * provider's scope and can land on a build the consumer never asked for. What each one bound to is
+ * recorded as `boundTo`, beside `__id`.
  */
 const externalModule = (
   from: string,
   pkg: string,
   version: string,
   entrypoint: string,
-  chunks: string[]
-) =>
-  js(
+  chunks: string[],
+  peers: string[]
+) => {
+  const alias = (i: number) => `_p${i}`;
+  return js(
     chunks.map(chunk => `import ${JSON.stringify(toChunkImport(chunk))};`).join('\n') +
+      '\n' +
+      peers
+        .map((peer, i) => `import { __id as ${alias(i)} } from ${JSON.stringify(peer)};`)
+        .join('\n') +
       `\nconst id = ${JSON.stringify(`${from}|${pkg}@${version}`)};\n` +
+      `const boundTo = {${peers.map((peer, i) => ` ${JSON.stringify(peer)}: ${alias(i)},`).join('')} };\n` +
       `(globalThis.__nfCopies ??= []).push({ id, from: ${JSON.stringify(from)}, ` +
       `pkg: ${JSON.stringify(pkg)}, version: ${JSON.stringify(version)}, ` +
-      `entrypoint: ${JSON.stringify(entrypoint)}, url: import.meta.url });\n` +
-      `export const __id = id;\n`
+      `entrypoint: ${JSON.stringify(entrypoint)}, url: import.meta.url, boundTo });\n` +
+      `export const __id = id;\nexport const __boundTo = boundTo;\n`
   );
+};
 
 /**
  * A remote's exposed module. It *statically imports every entrypoint its own remoteEntry declares*,
@@ -119,7 +132,8 @@ export const compile = (entries: RemoteEntry[]): Portfolio => {
             shared.packageName,
             shared.version ?? '0.0.0',
             pkg,
-            shared.bundle ? (bundles[shared.bundle] ?? []) : []
+            shared.bundle ? (bundles[shared.bundle] ?? []) : [],
+            peersOf(shared)
           ),
         });
     }

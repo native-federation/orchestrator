@@ -44,6 +44,8 @@ export type Copy = {
   version: string;
   entrypoint: string;
   url: string;
+  /** Per peer specifier this copy imports, the build it bound to. Empty unless `dep` declared `peers`. */
+  boundTo: Record<string, string>;
 };
 
 export type Federation = {
@@ -68,6 +70,11 @@ export type Federation = {
   copies: () => Promise<Copy[]>;
   /** Distinct builds of `pkg` the page instantiated, e.g. `['mfe1|@angular/core@22.1.0']`. */
   buildsOf: (pkg: string) => Promise<string[]>;
+  /**
+   * Per copy that declared `peers`, what those imports really bound to — the hop below `load()`'s
+   * `seen`, which only reports a consumer's own top-level resolution.
+   */
+  bindings: () => Promise<Record<string, Record<string, string>>>;
   /** External files the browser really downloaded since the last init — the cost, measured. */
   downloads: () => string[];
   /** Remote entries the browser really fetched since the last init. */
@@ -185,6 +192,12 @@ export const test = base.extend<{ nf: Federation }, Worker>({
       buildsOf: async pkg => [
         ...new Set((await nf.copies()).filter(c => c.pkg === pkg).map(c => c.id)),
       ],
+      bindings: async () =>
+        Object.fromEntries(
+          (await nf.copies())
+            .filter(copy => Object.keys(copy.boundTo ?? {}).length > 0)
+            .map(copy => [copy.id, copy.boundTo])
+        ),
       downloads: () =>
         harness.requests
           .slice(mark)
