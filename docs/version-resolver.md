@@ -614,8 +614,11 @@ the same portfolio assembled in one go.
 inside a family is normal and safe — but not on builds that **disagree**. Two builds agree when every
 member **both** ship sits on the same minor line: `22.0.6` beside `22.0.8` is fine, `22.0.5` beside
 `22.1.0` is not. Builds that ship disjoint members agree vacuously, since there is nothing they could
-disagree about; that is what keeps ragged coverage cheap. A remote whose builds disagree serves its whole
-family from its own build, exactly as an islanded one does.
+disagree about; that is what keeps ragged coverage cheap — **but only while no single remote consumes
+members from both**. As soon as one does, that remote's own build is the witness relating the two tags,
+and the comparison never includes it, so the split passes silently. This is a known open hole and the
+reason for "The provenance promise" below. A remote whose builds disagree serves its whole family from
+its own build, exactly as an islanded one does.
 
 The builds a remote draws on are: for each member it consumes, whoever serves that member — the first
 remote of that member's `share` version which is not itself islanded, i.e. the serving basis — or its own
@@ -765,6 +768,74 @@ production capture. A remote loaded later is exactly the consumer that would bri
 
 Finally, pooling is gated on the resolver having actually re-elected something: it skips any pool no
 member of which was touched this pass, so a warm init that adds no remotes does no pooling work at all.
+
+### The provenance promise — decided 2026-07-31, not yet implemented
+
+Everything above describes what ships today. This section states the promise pooling is moving to, so
+that the gap between the two is written down rather than discovered.
+
+**The promise.** Within a pool, every member a remote runs comes from a build that shipped them
+**together**. A remote may `skip` onto a shared build only when that build serves a **superset** of what
+the remote consumes, at versions the remote's own `requiredVersion` accepts. Otherwise it serves its own
+family, which is one build by definition.
+
+**Why it is not what gates 1 and 2 deliver.** The opening of this chapter argues safety from provenance —
+"those files were compiled and tested together". Gate 2 does not test provenance; it tests whether two
+tags sit on the same minor line, which is version arithmetic over a convention each vendor chooses for
+itself. The two coincide often enough to look equivalent, and come apart in three measured ways:
+
+- Builds that ship **disjoint** members agree vacuously, so a consumer of both is served a pair no build
+  witnesses, with no island and no log — the hole noted under gate 2 above.
+- A pool whose members version **independently** — the bridge-tag pattern this chapter recommends — has
+  no minor line to compare at all, so the declared coupling constrains nothing.
+- The same arithmetic islands remotes that are perfectly fine when two unrelated packages happen to share
+  a minor line, which a non-lockstep scope does routinely.
+
+Under the promise none of those depend on version distance: the rule reads **coverage** and
+`versionCheck.isCompatible(tag, requiredVersion)` and nothing else. `minorLine` leaves the gate.
+
+**What has to change to deliver it.**
+
+- **Election picks a build, not a version per member.** This is the load-bearing change and the reason
+  the promise is affordable: measured on the seven-remote capture, enforcing it on top of today's
+  per-member election costs +128% downloads, and on a build-electing substrate +24% (46 → 57), with every
+  remote's family resolving to a single origin. On the eleven-remote portfolio the static model puts
+  multi-anchor election *below* today's cost.
+- **Consumers must be assignable to different anchors.** One build rarely covers a large portfolio, and
+  forcing a single anchor per pool both costs more and scopes members that nothing required to be scoped
+  — two remotes sharing no member already satisfy the promise, yet a single-anchor rule removes one of
+  them from the shared set. **`SharedVersionMeta`** — the per-remote record, not `SharedVersion` — needs to
+  carry which build serves that remote (`servedBy`): two consumers of the *same tag* can legitimately take
+  different anchors, so the assignment cannot live on the version. On the map side, only the named
+  shareScopes are ready, where a `skip` version already gets a per-consumer scope entry pointing at its
+  override provider. The **global** path emits nothing for a deduping copy — it skips `skip` versions, and
+  they inherit the one global mapping — so cross-build scope emission there is new work. The shape itself is
+  not the obstacle: measured in Chromium, a scope entry pointing at another origin's build beats the global
+  `imports` for importers under that prefix, and three consumer groups can run three builds of one
+  specifier, with no change to `ImportMap`.
+- **Coverage is per entrypoint.** `generate-import-map` serves an entrypoint the shared source lacks from
+  the consumer's own build — a second build. Package-granularity coverage therefore breaks the promise
+  silently; see "Entrypoint coverage and tearing".
+- **Host precedence needs no reconciliation** — resolved 2026-07-31. The worry was that an anchor chosen by
+  coverage may not be the host. It cannot arise: consumption is derived from **declarations**
+  (`consumedMembers`, `family-instance.ts`), so a remote consumes exactly the members it declares as shared,
+  and the host declares only what it ships. Its family is therefore its own build by construction —
+  trivially compliant, never assigned an anchor, and never the remote that self-serves for lack of coverage.
+  The two rules also answer different questions: host precedence decides which **version** wins, anchoring
+  decides which **build** a consumer draws from, and the host's own draw is never in question. The host
+  stays a candidate anchor for everybody else. (A bare specifier the host imports without declaring it
+  shared is outside pooling entirely — nothing maps it, then or now.) One consequence to keep true:
+  `pool-shared-externals.ts` drops the `host` bit when grouping `scope` versions, on the grounds that the
+  host is never islanded. That still holds under the promise, for the new reason that coverage cannot move
+  the host — so the comment there stays accurate rather than becoming accidentally true.
+- **The expectations that encode the old promise get rewritten deliberately**, not deleted: patch drift
+  across builds and ragged coverage are currently *tolerated by design*, and each such test records a
+  portfolio whose cost changes.
+
+Status: decided, unimplemented. The download figures are browser measurements over the recorded portfolios
+in `e2e/fixtures`, reproducible from `e2e/pooling/capture.e2e.spec.ts` — except the eleven-remote
+multi-anchor figure, which is a static model and has not been run. The import-map behaviour described above
+was measured separately, with handcrafted maps in Chromium against synthetic origins.
 
 ## Dynamic Init
 
