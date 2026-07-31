@@ -1,6 +1,6 @@
 {
   "$version": "v4",
-  "name": "team/design-system",
+  "name": "team/mfe10",
   "shared": [
     {
       "singleton": true,

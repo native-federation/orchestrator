@@ -1,6 +1,6 @@
 {
   "$version": "v4",
-  "name": "team/support-widget",
+  "name": "team/mfe6",
   "shared": [
     {
       "singleton": true,
@@ -8,10 +8,10 @@
       "requiredVersion": "~22.0.5",
       "packageName": "@angular/common",
       "entries": {
-        "@angular/common": "_angular_common.TU1u4Cdtw9.js",
-        "@angular/common/http": "_angular_common_http.AMnMJTRqlR.js"
+        "@angular/common": "_angular_common.Lu6og_S5-b.js",
+        "@angular/common/http": "_angular_common_http.QEha5Dit9J.js"
       },
-      "version": "22.0.8",
+      "version": "22.0.7",
       "bundle": "browser-angular_common",
       "pool": "ng-core"
     },
@@ -21,14 +21,14 @@
       "requiredVersion": "~22.0.5",
       "packageName": "@angular/core",
       "entries": {
-        "@angular/core": "_angular_core.pkREKDuptp.js",
+        "@angular/core": "_angular_core.UMMCyWUqaY.js",
         "@angular/core/event-dispatch-contract.min.js": "_angular_core_event_dispatch_contract_min_js.3axcNP9xmW.js",
-        "@angular/core/primitives/di": "_angular_core_primitives_di.2P9ZqFTuth.js",
-        "@angular/core/primitives/event-dispatch": "_angular_core_primitives_event_dispatch.0CDY6p5Sd2.js",
-        "@angular/core/primitives/signals": "_angular_core_primitives_signals.yq9BsbbF7W.js",
-        "@angular/core/rxjs-interop": "_angular_core_rxjs_interop.wu8iylgwTf.js"
+        "@angular/core/primitives/di": "_angular_core_primitives_di.3a1m1JbxuW.js",
+        "@angular/core/primitives/event-dispatch": "_angular_core_primitives_event_dispatch.4LXubbUqKr.js",
+        "@angular/core/primitives/signals": "_angular_core_primitives_signals.oh4bHH6sE5.js",
+        "@angular/core/rxjs-interop": "_angular_core_rxjs_interop.In6-dakyyE.js"
       },
-      "version": "22.0.8",
+      "version": "22.0.7",
       "bundle": "browser-angular_core",
       "pool": "ng-core"
     },
@@ -38,9 +38,9 @@
       "requiredVersion": "~22.0.5",
       "packageName": "@angular/elements",
       "entries": {
-        "@angular/elements": "_angular_elements.ktmx-SsBF0.js"
+        "@angular/elements": "_angular_elements.tffEdIFZat.js"
       },
-      "version": "22.0.8",
+      "version": "22.0.7",
       "bundle": "browser-angular_elements",
       "pool": "ng-core"
     },
@@ -50,9 +50,9 @@
       "requiredVersion": "~22.0.5",
       "packageName": "@angular/forms",
       "entries": {
-        "@angular/forms": "_angular_forms.UAUsqxOWM3.js"
+        "@angular/forms": "_angular_forms.t8ZCel-dsW.js"
       },
-      "version": "22.0.8",
+      "version": "22.0.7",
       "bundle": "browser-angular_forms",
       "pool": "ng-core"
     },
@@ -62,16 +62,16 @@
       "requiredVersion": "~22.0.5",
       "packageName": "@angular/platform-browser",
       "entries": {
-        "@angular/platform-browser": "_angular_platform_browser.djzJcPG8PR.js"
+        "@angular/platform-browser": "_angular_platform_browser.04AElcDjMF.js"
       },
-      "version": "22.0.8",
+      "version": "22.0.7",
       "bundle": "browser-angular_platform_browser",
       "pool": "ng-core"
     },
     {
       "singleton": true,
       "strictVersion": true,
-      "requiredVersion": "^7.8.0",
+      "requiredVersion": "~7.8.0",
       "packageName": "rxjs",
       "entries": {
         "rxjs": "rxjs._3LcsHIuu_.js",
@@ -94,27 +94,24 @@
   ],
   "exposes": [
     {
-      "key": "support-widget",
-      "outFileName": "support-widget-U7BLZHSK.js"
+      "key": "./tag-picker",
+      "outFileName": "tag-picker-ZN44DAGS.js"
     }
   ],
   "chunks": {
     "browser-angular_common": [
-      "chunk-72DWDBNG.js"
+      "chunk-VL5BWA7L.js"
     ],
     "browser-angular_core": [
-      "chunk-EVJIYMQK.js",
-      "chunk-VY3YESYY.js",
-      "chunk-IVCCOELQ.js",
-      "chunk-FDI57VK3.js",
+      "chunk-PF4UPZYJ.js",
+      "chunk-7RE2YQUI.js",
+      "chunk-QSAF4UWN.js",
+      "chunk-PCFXKM5P.js",
       "chunk-PZNONLPT.js"
     ],
     "browser-rxjs": [
       "chunk-64WOUHHJ.js"
     ],
-    "mapping-or-exposed": [
-      "ubuntu-v15-latin-regular.woff2",
-      "ubuntu-v15-latin-500.woff2"
-    ]
+    "mapping-or-exposed": []
   }
 }

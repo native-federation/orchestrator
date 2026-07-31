@@ -13,6 +13,11 @@ import type { NativeFederationResult } from 'lib/core/init-federation.contract';
 
 export type BootOptions = {
   pooling?: boolean;
+  /**
+   * `feature.convertFlatSharedInfo`: regroup a flat `shared` array back into one external per package
+   * (`densifyExternals`) instead of leaving one external per entrypoint. No effect on a dense entry.
+   */
+  flatSharedInfo?: boolean;
   namespace?: string;
   /** Serve this URL as the host remote entry (`hostRemoteEntry`). */
   host?: string;
@@ -50,7 +55,10 @@ const options = (o: BootOptions) => ({
     error: (_step: number, msg: string) => session.errors.push(msg),
   },
   logLevel: 'debug' as const,
-  feature: { useAutoExternalPooling: o.pooling ?? true },
+  feature: {
+    useAutoExternalPooling: o.pooling ?? true,
+    convertFlatSharedInfo: o.flatSharedInfo ?? false,
+  },
   ...(o.shim ? useShimImportMap({ shimMode: true }) : {}),
   ...(o.profile ? { profile: o.profile } : {}),
   ...(o.host ? { hostRemoteEntry: o.host } : {}),

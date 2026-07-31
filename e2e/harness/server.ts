@@ -1,14 +1,14 @@
 import { createServer, type Server } from 'node:http';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { toChunkImport } from '@softarc/native-federation/domain';
+import { toChunkImport, CHUNK_PREFIX } from '@softarc/native-federation/domain';
 import type { RemoteEntry } from 'lib/core/1.domain';
-import { entrypointsOf } from './portfolio';
+import { bundlesOf, entrypointsOf } from './portfolio';
 
 /**
  * The network. One HTTP server dispatches on the `Host` header, and Chromium is launched with
  * `--host-resolver-rules=MAP * 127.0.0.1:<port>` (see `federation.ts`), so a remote declared at
- * `http://mfe-a/remoteEntry.json` really is a separate origin to the browser: separate module map,
+ * `http://mfe1/remoteEntry.json` really is a separate origin to the browser: separate module map,
  * real CORS preflight-free simple requests, real `Referer` for import-map scope matching.
  *
  * Everything the browser fetches is generated from the portfolio a test declares, so a remote's
@@ -69,7 +69,9 @@ const externalModule = (
  * which build each specifier landed on — global for a dedup, its own for an island.
  */
 const exposedModule = (entry: RemoteEntry) => {
-  const specifiers = entry.shared.flatMap(shared => Object.keys(entrypointsOf(shared)));
+  const specifiers = entry.shared
+    .filter(shared => !shared.packageName.startsWith(`${CHUNK_PREFIX}/`))
+    .flatMap(shared => Object.keys(entrypointsOf(shared)));
   const alias = (i: number) => `_${i}`;
   return js(
     specifiers.map((s, i) => `import * as ${alias(i)} from ${JSON.stringify(s)};`).join('\n') +
@@ -94,7 +96,9 @@ export const compile = (entries: RemoteEntry[]): Portfolio => {
   for (const entry of entries) {
     const host = hostOf(entry.url);
     const files = site(host);
-    const bundles = (entry as RemoteEntry & { chunks?: Record<string, string[]> }).chunks ?? {};
+    // Known in both chunking shapes: dense declares a `chunks` property, flat declares the chunks as
+    // pseudo-externals and the harness keeps the bundle map on the side (see `bundlesOf`).
+    const bundles = bundlesOf(entry);
 
     // The served entry is the recorded document: no `url`, since the provider adds that on fetch.
     const { url: _url, ...document } = entry as RemoteEntry & Record<string, unknown>;
@@ -103,7 +107,10 @@ export const compile = (entries: RemoteEntry[]): Portfolio => {
       file: { type: 'application/json', body: JSON.stringify(document) },
     });
 
-    for (const shared of entry.shared)
+    for (const shared of entry.shared) {
+      // A chunk declared as a pseudo-external is still a chunk file: served below, with `kind: 'chunk'`,
+      // so `nf.downloads()` counts the same things whichever shape declared it.
+      if (shared.packageName.startsWith(`${CHUNK_PREFIX}/`)) continue;
       for (const [pkg, file] of Object.entries(entrypointsOf(shared)))
         files.set(`/${file}`, {
           kind: 'external',
@@ -115,13 +122,26 @@ export const compile = (entries: RemoteEntry[]): Portfolio => {
             shared.bundle ? (bundles[shared.bundle] ?? []) : []
           ),
         });
+    }
 
     for (const exposed of entry.exposes ?? [])
       files.set(`/${exposed.outFileName}`, { kind: 'module', file: exposedModule(entry) });
 
-    for (const chunks of Object.values(bundles))
-      for (const chunk of chunks)
-        files.set(`/${chunk}`, { kind: 'chunk', file: js(`export const __chunk = true;\n`) });
+    // A chunk carries `__id` like an external does, so `nf.resolve` can report which origin a chunk
+    // specifier resolved to — the question the per-origin chunk mapping exists to answer.
+    const chunkFiles = new Set([
+      ...Object.values(bundles).flat(),
+      ...entry.shared
+        .filter(shared => shared.packageName.startsWith(`${CHUNK_PREFIX}/`))
+        .flatMap(shared => Object.values(entrypointsOf(shared))),
+    ]);
+    for (const chunk of chunkFiles)
+      files.set(`/${chunk}`, {
+        kind: 'chunk',
+        file: js(
+          `export const __chunk = true;\nexport const __id = ${JSON.stringify(`${host}|${chunk}`)};\n`
+        ),
+      });
   }
 
   return {

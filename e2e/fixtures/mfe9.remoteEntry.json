@@ -1,6 +1,6 @@
 {
   "$version": "v4",
-  "name": "team/strict-pin",
+  "name": "team/mfe9",
   "shared": [
     {
       "singleton": true,

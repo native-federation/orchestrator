@@ -1,11 +1,11 @@
 {
   "$version": "v4",
-  "name": "team/data-mutations",
+  "name": "team/mfe3",
   "shared": [
     {
       "singleton": true,
       "strictVersion": true,
-      "requiredVersion": "~22.0.8",
+      "requiredVersion": "~22.0.3",
       "packageName": "@angular/common",
       "entries": {
         "@angular/common": "_angular_common.lKKKcPZtzG.js",
@@ -18,7 +18,7 @@
     {
       "singleton": true,
       "strictVersion": true,
-      "requiredVersion": "~22.0.8",
+      "requiredVersion": "~22.0.3",
       "packageName": "@angular/core",
       "entries": {
         "@angular/core": "_angular_core.Ld67ebMnAf.js",
@@ -35,7 +35,7 @@
     {
       "singleton": true,
       "strictVersion": true,
-      "requiredVersion": "~22.0.8",
+      "requiredVersion": "~22.0.3",
       "packageName": "@angular/elements",
       "entries": {
         "@angular/elements": "_angular_elements.ktmx-SsBF0.js"
@@ -47,7 +47,7 @@
     {
       "singleton": true,
       "strictVersion": true,
-      "requiredVersion": "~22.0.8",
+      "requiredVersion": "~22.0.3",
       "packageName": "@angular/forms",
       "entries": {
         "@angular/forms": "_angular_forms.UAUsqxOWM3.js"
@@ -59,11 +59,10 @@
     {
       "singleton": true,
       "strictVersion": true,
-      "requiredVersion": "~22.0.6",
+      "requiredVersion": "~22.0.3",
       "packageName": "@angular/material",
       "entries": {
-        "@angular/material/sort": "_angular_material_sort.yh_NF_2bGC.js",
-        "@angular/material/table": "_angular_material_table.5xPp8cNLw2.js"
+        "@angular/material/table": "_angular_material_table.DJ9y6AA7N_.js"
       },
       "version": "22.0.6",
       "bundle": "browser-angular_material",
@@ -72,7 +71,7 @@
     {
       "singleton": true,
       "strictVersion": true,
-      "requiredVersion": "~22.0.8",
+      "requiredVersion": "~22.0.3",
       "packageName": "@angular/platform-browser",
       "entries": {
         "@angular/platform-browser": "_angular_platform_browser.djzJcPG8PR.js"
@@ -84,13 +83,25 @@
     {
       "singleton": true,
       "strictVersion": true,
-      "requiredVersion": "~22.0.8",
+      "requiredVersion": "~22.0.3",
       "packageName": "@angular/router",
       "entries": {
         "@angular/router": "_angular_router.kRPE6gwl6L.js"
       },
       "version": "22.0.8",
-      "bundle": "browser-angular_router"
+      "bundle": "browser-angular_router",
+      "pool": "ng-core"
+    },
+    {
+      "singleton": true,
+      "strictVersion": true,
+      "requiredVersion": "^3.1.3",
+      "packageName": "fast-deep-equal",
+      "entries": {
+        "fast-deep-equal": "fast_deep_equal.rpWYZl_NWw.js"
+      },
+      "version": "3.1.3",
+      "bundle": "browser-fast_deep_equal"
     },
     {
       "singleton": true,
@@ -118,12 +129,12 @@
   ],
   "exposes": [
     {
-      "key": "./mutations",
-      "outFileName": "mutations-7NKMUZ5W.js"
+      "key": "./settings",
+      "outFileName": "settings-DE7ZHDAS.js"
     },
     {
       "key": "./actions",
-      "outFileName": "actions-LNTRUZZD.js"
+      "outFileName": "actions-5X22VHSJ.js"
     }
   ],
   "chunks": {
@@ -137,14 +148,11 @@
       "chunk-IOS6YAJA.js",
       "chunk-PZNONLPT.js"
     ],
-    "browser-angular_material": [
-      "chunk-CX3WPSHC.js"
-    ],
     "browser-rxjs": [
       "chunk-64WOUHHJ.js"
     ],
     "mapping-or-exposed": [
-      "chunk-WQJ2V4BP.js"
+      "chunk-ZZLCHZIO.js"
     ]
   }
 }

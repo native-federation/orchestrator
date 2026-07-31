@@ -1,6 +1,6 @@
 {
   "$version": "v4",
-  "name": "team/settings-portal",
+  "name": "team/mfe4",
   "shared": [
     {
       "singleton": true,

@@ -1,0 +1,45 @@
+{
+  "name": "team/mfe2",
+  "exposes": [
+    {
+      "key": "./Component",
+      "outFileName": "Component-Z3NF8KDR.js"
+    }
+  ],
+  "shared": [
+    {
+      "packageName": "@acme/platform",
+      "outFileName": "_acme_platform.Bq1vX8kd7P.js",
+      "requiredVersion": "^4.0.0",
+      "singleton": true,
+      "strictVersion": true,
+      "version": "4.3.2",
+      "pool": "acme-platform"
+    },
+    {
+      "packageName": "@acme/platform/forms",
+      "outFileName": "_acme_platform_forms.Dm4tR0zqYw.js",
+      "requiredVersion": "^4.0.0",
+      "singleton": true,
+      "strictVersion": true,
+      "version": "4.3.2",
+      "pool": "acme-platform"
+    },
+    {
+      "packageName": "rxjs",
+      "outFileName": "rxjs.Ht7cW1sQ3f.js",
+      "requiredVersion": "^7.8.0",
+      "singleton": true,
+      "strictVersion": true,
+      "version": "7.8.2"
+    },
+    {
+      "packageName": "@nf-internal/chunk-M2QW9VZC",
+      "outFileName": "chunk-M2QW9VZC.js",
+      "singleton": false,
+      "strictVersion": false,
+      "version": "0.0.0",
+      "requiredVersion": "0.0.0"
+    }
+  ]
+}

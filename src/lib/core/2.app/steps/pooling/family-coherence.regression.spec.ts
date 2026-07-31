@@ -165,7 +165,8 @@ describe('pooling: family coherence', () => {
     // benign drift is never treated as a split family.
     //
     // The drift has to come from coverage asymmetry, not tag order: with both members provided by both
-    // remotes, one build would simply win the whole family. Same shape as `e2e/pooling/ranges.e2e.spec.ts:35`.
+    // remotes, one build would simply win the whole family. Same shape as `tolerates patch drift when
+    // each remote solely provides a member` in `e2e/pooling/asymmetric.e2e.spec.ts`.
     seed('@angular/core', [
       version('21.2.2', '@angular/core', [{ remote: 'team/mfe-a', req: '~21.2.0' }]),
       version('21.2.3', '@angular/core', [{ remote: 'team/mfe-b', req: '~21.2.0' }]),

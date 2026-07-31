@@ -1,6 +1,6 @@
 {
   "$version": "v4",
-  "name": "team/shell",
+  "name": "team/mfe11",
   "shared": [
     {
       "singleton": true,

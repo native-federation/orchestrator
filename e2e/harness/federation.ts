@@ -66,7 +66,7 @@ export type Federation = {
 
   /** Externals the page actually evaluated: one entry per copy, in evaluation order. */
   copies: () => Promise<Copy[]>;
-  /** Distinct builds of `pkg` the page instantiated, e.g. `['mfe-a|@angular/core@22.1.0']`. */
+  /** Distinct builds of `pkg` the page instantiated, e.g. `['mfe1|@angular/core@22.1.0']`. */
   buildsOf: (pkg: string) => Promise<string[]>;
   /** External files the browser really downloaded since the last init — the cost, measured. */
   downloads: () => string[];
@@ -111,7 +111,7 @@ export const test = base.extend<{ nf: Federation }, Worker>({
     { scope: 'worker' },
   ],
 
-  // Every hostname resolves to the harness, so `http://mfe-a/` is a real origin that it serves.
+  // Every hostname resolves to the harness, so `http://mfe1/` is a real origin that it serves.
   browser: [
     async ({ playwright, harness }, use) => {
       const browser: Browser = await playwright.chromium.launch({

@@ -1,6 +1,6 @@
 {
   "$version": "v4",
-  "name": "team/document-approval",
+  "name": "team/mfe2",
   "shared": [
     {
       "packageName": "@angular/cdk/dialog",

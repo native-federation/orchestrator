@@ -1,6 +1,6 @@
 {
   "$version": "v4",
-  "name": "team/legacy-widget",
+  "name": "team/mfe8",
   "shared": [
     {
       "singleton": true,
