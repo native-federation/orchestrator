@@ -796,11 +796,16 @@ Under the promise none of those depend on version distance: the rule reads **cov
 
 **What has to change to deliver it.**
 
-- **Election picks a build, not a version per member.** This is the load-bearing change and the reason
-  the promise is affordable: measured on the seven-remote capture, enforcing it on top of today's
-  per-member election costs +128% downloads, and on a build-electing substrate +24% (46 → 57), with every
-  remote's family resolving to a single origin. On the eleven-remote portfolio the static model puts
-  multi-anchor election *below* today's cost.
+- **Election picks a build, not a version per member.** This is the load-bearing change: measured on the
+  seven-remote capture, enforcing the promise on top of today's per-member election costs +128%
+  downloads, and on a build-electing substrate +24% (46 → 57), with every remote's family resolving to a
+  single origin. **On the eleven-remote portfolio it costs +56% (72 → 112)** — measured multi-anchor in
+  the browser on 2026-07-31, and the reverse of the static model's prediction that multi-anchor would
+  come in *below* today's cost. The model scored `@acme` and `@angular` as separate pools and let two
+  gate-1 islanded remotes anchor each other; neither is true of the real graph, where `mfe10`'s
+  `pool: ng-core` tag fuses both npm scopes into one eleven-remote pool. See
+  `F-B-disjoint-serving-builds.md` §"Options measured". The affordability of the promise is therefore
+  **not settled**, and the bridge-tag pattern this chapter recommends is what makes coverage scarce.
 - **Consumers must be assignable to different anchors.** One build rarely covers a large portfolio, and
   forcing a single anchor per pool both costs more and scopes members that nothing required to be scoped
   — two remotes sharing no member already satisfy the promise, yet a single-anchor rule removes one of
@@ -832,10 +837,11 @@ Under the promise none of those depend on version distance: the rule reads **cov
   across builds and ragged coverage are currently *tolerated by design*, and each such test records a
   portfolio whose cost changes.
 
-Status: decided, unimplemented. The download figures are browser measurements over the recorded portfolios
-in `e2e/fixtures`, reproducible from `e2e/pooling/capture.e2e.spec.ts` — except the eleven-remote
-multi-anchor figure, which is a static model and has not been run. The import-map behaviour described above
-was measured separately, with handcrafted maps in Chromium against synthetic origins.
+Status: decided in principle, **cost not accepted**, unimplemented. Every download figure above is now a
+browser measurement over the recorded portfolios in `e2e/fixtures`, reproducible from
+`e2e/pooling/capture.e2e.spec.ts`; the eleven-remote multi-anchor figure was the last one still modelled
+and, when run, came out +56% rather than below cost. The import-map behaviour described above was measured
+separately, with handcrafted maps in Chromium against synthetic origins.
 
 ## Dynamic Init
 
