@@ -18,17 +18,17 @@ const createSharedExternalsRepository = (config: StorageConfig): ForSharedExtern
 
   const _cache: SharedExternals = STORAGE.get() ?? { [GLOBAL_SCOPE]: {} };
 
-  // Not persisted: re-derived from the freshly processed entries on every init, before pooling runs.
-  let _sawPoolTag = false;
-
   let _dirty = false;
 
   return {
-    markPoolTagPresent: function () {
-      _sawPoolTag = true;
-    },
+    // Read from the cache rather than remembered from this init's entries: a warm init may not refetch
+    // the tagged remote at all, and pooling has to coordinate its pool anyway. Exits on the first hit.
     hasPoolTag: function () {
-      return _sawPoolTag;
+      for (const scope of Object.values(_cache))
+        for (const external of Object.values(scope))
+          for (const version of external.versions)
+            for (const remote of version.remotes) if (remote.pool?.trim()) return true;
+      return false;
     },
     getFromScope: function (shareScope?: string) {
       return { ..._cache[shareScope ?? GLOBAL_SCOPE] };

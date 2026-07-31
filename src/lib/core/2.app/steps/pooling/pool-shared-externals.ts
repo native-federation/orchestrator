@@ -31,6 +31,10 @@ type IslandCause =
 // Remotes that are strict-incompatible on any member (determine marked a version `scope`). Reads
 // stored actions only — pooling makes no compatibility call — and islands across the WHOLE family.
 // Keeps the first offending member+tag per remote, to name it in the warning.
+//
+// Sound because `spread-pool-dirtiness` re-elects a pool as a unit: this step runs on a pool exactly
+// when every member of it was re-elected, so a `scope` here is always determine's and always describes
+// the current portfolio, never a verdict `rebuildMember` wrote for an earlier one.
 function islandedRemotes(members: PoolMember[]): Map<RemoteName, IslandCause> {
   const islanded = new Map<RemoteName, IslandCause>();
   for (const member of members)
@@ -48,7 +52,7 @@ function islandedRemotes(members: PoolMember[]): Map<RemoteName, IslandCause> {
 
 export function createPoolSharedExternals(
   config: LoggingConfig & ModeConfig,
-  ports: Pick<DrivingContract, 'sharedExternalsRepo'>
+  ports: Pick<DrivingContract, 'sharedExternalsRepo' | 'versionCheck'>
 ): ForPoolingSharedExternals {
   /**
    * Runs after determine-shared-externals: for each pool, a remote that is version-incompatible on any
@@ -60,8 +64,9 @@ export function createPoolSharedExternals(
    * `strict` scope is never pooled.
    *
    * `touched` (determine's re-elected externals per scope) gates the work: a pool no member of which
-   * was re-elected resolves to what storage already holds, since this step's own `scope` verdicts are
-   * what it reads back. A warm init therefore does no per-member work at all.
+   * was re-elected resolves to what storage already holds. Because `spread-pool-dirtiness` runs first,
+   * a touched pool is a *wholly* re-elected pool — which is what makes gate 1 sound. A warm init
+   * therefore does no per-member work at all.
    */
   return (touched?: TouchedExternals) => {
     const { useAutoExternalPooling } = config.feature;
@@ -286,6 +291,9 @@ export function createPoolSharedExternals(
     for (const e of scoped) {
       const version = scopeByTag.get(e.tag) ?? {
         tag: e.tag,
+        // Drops any `host` bit, which a later re-election would need. Unreachable: the host wins every
+        // external it ships, so it is never gate-1 islanded, and it is the serving basis for all of them,
+        // so gate 2 never fires on it either — it is never in `scoped`.
         host: false,
         action: 'scope' as const,
         remotes: [],
@@ -294,9 +302,14 @@ export function createPoolSharedExternals(
       scopeByTag.set(e.tag, version);
     }
 
+    // Descending by tag, the order `commit()` guarantees and `determine` reads as "the latest" — see
+    // store-remote-entry.version-order.spec.ts. Grouping by action would break it, and a later init
+    // re-elects this record without `commit()` ever passing over it again.
     return {
       dirty: false,
-      versions: [...shareVersion, ...skipByTag.values(), ...scopeByTag.values()],
+      versions: [...shareVersion, ...skipByTag.values(), ...scopeByTag.values()].sort((a, b) =>
+        ports.versionCheck.compare(b.tag, a.tag)
+      ),
     };
   }
 }

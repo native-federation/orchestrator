@@ -33,16 +33,64 @@ describe('createSharedExternalsRepository', () => {
     return { mockStorage, externalsRepo, entry };
   };
 
-  describe('pool-tag memo', () => {
-    it('has not seen a pool tag on a fresh repository', () => {
+  /**
+   * `hasPoolTag()` reads the cache, not a flag set while this init's entries were merged. That is the
+   * whole point: with auto-pooling off, a warm init whose tagged remotes are all cached merges nothing,
+   * and pooling still has to coordinate their pool — see docs/version-resolver.md §"How pooling resolves".
+   */
+  describe('pool tags', () => {
+    const taggedExternal = (pool?: string): SharedExternal => ({
+      dirty: false,
+      versions: [
+        {
+          tag: v2_1_1,
+          host: false,
+          action: 'share',
+          remotes: [
+            {
+              name: 'team/mfe1',
+              requiredVersion: '~2.1.0',
+              strictVersion: true,
+              cached: false,
+              entries: { 'dep-a': 'dep-a.js' },
+              ...(pool ? { pool } : {}),
+            },
+          ],
+        },
+      ],
+    });
+
+    it('reports none on a fresh repository', () => {
       const { externalsRepo } = setupWithCache();
       expect(externalsRepo.hasPoolTag()).toBe(false);
     });
 
-    it('reports a pool tag once marked', () => {
-      const { externalsRepo } = setupWithCache();
-      externalsRepo.markPoolTagPresent();
+    it('reports none when no stored remote carries a tag', () => {
+      const { externalsRepo } = setupWithCache({ [GLOBAL_SCOPE]: { 'dep-a': taggedExternal() } });
+      expect(externalsRepo.hasPoolTag()).toBe(false);
+    });
+
+    // The regression: nothing was merged this init, the tag exists only in storage.
+    it('reports a tag read from a warm cache, with nothing merged this init', () => {
+      const { externalsRepo } = setupWithCache({
+        [GLOBAL_SCOPE]: { 'dep-a': taggedExternal('grp') },
+      });
       expect(externalsRepo.hasPoolTag()).toBe(true);
+    });
+
+    it('finds a tag in a non-global share scope too', () => {
+      const { externalsRepo } = setupWithCache({
+        [GLOBAL_SCOPE]: { 'dep-a': taggedExternal() },
+        'team-a': { 'dep-b': taggedExternal('grp') },
+      });
+      expect(externalsRepo.hasPoolTag()).toBe(true);
+    });
+
+    it('ignores a blank tag', () => {
+      const { externalsRepo } = setupWithCache({
+        [GLOBAL_SCOPE]: { 'dep-a': taggedExternal('  ') },
+      });
+      expect(externalsRepo.hasPoolTag()).toBe(false);
     });
   });
 

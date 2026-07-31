@@ -600,6 +600,16 @@ the one thing the per-external resolver cannot do: deduping that matching siblin
 leak a foreign build in through a shared intermediary (the `@design-system/ui`-against-`core@15` hazard).
 One incompatibility anywhere in the family islands the remote everywhere.
 
+Gate 1 reads the `scope` verdicts out of storage, and an island is *also* persisted as `scope` — so the
+two are indistinguishable in the record. What keeps the reading honest is that a pool is re-elected as a
+**unit**: `spread-pool-dirtiness` marks every member of a pool dirty as soon as any one of them is, so the
+resolver re-elects the whole pool and pooling runs on a pool exactly when every member of it was
+re-elected. Every `scope` gate 1 sees therefore comes from this init's election and describes the current
+portfolio. Without that, a joiner shipping only part of a pool leaves the untouched members carrying the
+previous run's island, gate 1 reads it back as a fresh incompatibility, and the island never expires.
+That also fixes the cost: a partially re-elected pool resolved differently — and more expensively — than
+the same portfolio assembled in one go.
+
 **Gate 2 — agreement, at minor granularity.** A remote may draw on **several** builds — patch drift
 inside a family is normal and safe — but not on builds that **disagree**. Two builds agree when every
 member **both** ship sits on the same minor line: `22.0.6` beside `22.0.8` is fine, `22.0.5` beside
@@ -625,6 +635,9 @@ only after a round that scoped someone.
 
 Every _other_ remote keeps the resolver's per-member verdict untouched — the winner stays `share`, its
 compatible dedups stay `skip`. A pool that islands nobody is a true no-op: pooling writes nothing at all.
+When it does rebuild a member, it re-emits the versions in descending tag order, the order `commit()`
+guarantees and the resolver reads as "the latest" — grouping them by action instead would silently change
+what a later re-election elects.
 It does **not** re-point members onto a single "anchor" remote, so different members may legitimately be
 served from different remotes, provided every build a given remote draws on agrees with the others on
 what they have in common. Coherence is therefore **not** a property of versions alone: a split family
