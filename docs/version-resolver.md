@@ -799,13 +799,14 @@ Under the promise none of those depend on version distance: the rule reads **cov
 - **Election picks a build, not a version per member.** This is the load-bearing change: measured on the
   seven-remote capture, enforcing the promise on top of today's per-member election costs +128%
   downloads, and on a build-electing substrate +24% (46 → 57), with every remote's family resolving to a
-  single origin. **On the eleven-remote portfolio it costs +56% (72 → 112)** — measured multi-anchor in
-  the browser on 2026-07-31, and the reverse of the static model's prediction that multi-anchor would
-  come in *below* today's cost. The model scored `@acme` and `@angular` as separate pools and let two
-  gate-1 islanded remotes anchor each other; neither is true of the real graph, where `mfe10`'s
-  `pool: ng-core` tag fuses both npm scopes into one eleven-remote pool. See
-  `F-B-disjoint-serving-builds.md` §"Options measured". The affordability of the promise is therefore
-  **not settled**, and the bridge-tag pattern this chapter recommends is what makes coverage scarce.
+  single origin. Measured multi-anchor in the browser on 2026-07-31 it costs **+13% at seven remotes
+  (46 → 52) and +32% at eleven (72 → 95)** — the reverse of the static model's prediction that
+  multi-anchor would come in *below* today's cost. Two thirds of the first figure measured was an
+  artefact rather than the promise: coverage keyed by external name makes a flat remote and a dense one
+  mutually uncoverable for a build-tool reason, and keying it by entrypoint specifier alone takes eleven
+  remotes from 112 to 96. See `F-B-disjoint-serving-builds.md` §"Options measured" for the lever-by-lever
+  table and §"Decision — reopened" for what is still open. The affordability of the promise is **not
+  settled**, and the bridge-tag pattern this chapter recommends is part of what makes coverage scarce.
 - **Consumers must be assignable to different anchors.** One build rarely covers a large portfolio, and
   forcing a single anchor per pool both costs more and scopes members that nothing required to be scoped
   — two remotes sharing no member already satisfy the promise, yet a single-anchor rule removes one of
