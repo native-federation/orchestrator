@@ -2,7 +2,7 @@ import type { DrivingContract } from '../../driving-ports/driving.contract';
 import type { ConfigContract } from 'lib/core/2.app/config';
 import { mockConfig } from 'lib/testing/config.mock';
 import { mockAdapters } from 'lib/testing/adapters.mock';
-import { mockVersionRemote } from 'lib/testing/domain/externals/version.mock';
+import { mockVersionRemote, newestFirst } from 'lib/testing/domain/externals/version.mock';
 import { Optional } from 'lib/utils/optional';
 import type { RemoteInfo, SharedVersion } from 'lib/core/1.domain';
 import { createSharedExternalsRepository } from 'lib/core/3.adapters/storage/shared-externals.repository';
@@ -71,8 +71,14 @@ describe('pooling: islanding cascade (F-A)', () => {
     ),
   });
 
+  // Sorts like commit() does, so the fixtures below read in whatever order is clearest without
+  // seeding an order production could never hand to determine.
   const seed = (name: string, versions: SharedVersion[]) =>
-    adapters.sharedExternalsRepo.addOrUpdate(name, { dirty: true, versions }, undefined);
+    adapters.sharedExternalsRepo.addOrUpdate(
+      name,
+      { dirty: true, versions: newestFirst(versions, adapters.versionCheck.compare) },
+      undefined
+    );
 
   const runInit = async () => {
     const touched = await createDetermineSharedExternals(config, adapters)();

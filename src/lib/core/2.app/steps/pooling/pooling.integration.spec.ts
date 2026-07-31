@@ -3,7 +3,7 @@ import type { ConfigContract } from 'lib/core/2.app/config';
 import { mockConfig } from 'lib/testing/config.mock';
 import { mockAdapters } from 'lib/testing/adapters.mock';
 import { mockSharedInfo } from 'lib/testing/domain/remote-entry/shared-info.mock';
-import { mockVersionRemote } from 'lib/testing/domain/externals/version.mock';
+import { mockVersionRemote, newestFirst } from 'lib/testing/domain/externals/version.mock';
 import { Optional } from 'lib/utils/optional';
 import {
   type RemoteEntry,
@@ -76,8 +76,14 @@ describe('pooling (integration)', () => {
     remotes: remotes.map(r => meta(r.remote, external, r.req)),
   });
 
+  // Sorts like commit() does, so the fixtures below read in whatever order is clearest without
+  // seeding an order production could never hand to determine.
   const seed = (name: string, versions: SharedVersion[]) =>
-    adapters.sharedExternalsRepo.addOrUpdate(name, { dirty: true, versions }, undefined);
+    adapters.sharedExternalsRepo.addOrUpdate(
+      name,
+      { dirty: true, versions: newestFirst(versions, adapters.versionCheck.compare) },
+      undefined
+    );
 
   // Threads determine's touched-externals signal into pooling exactly as init.flow does.
   const runInit = async () => {
@@ -87,8 +93,9 @@ describe('pooling (integration)', () => {
   };
 
   it('keeps an entire compatible @framework family on a single remote build', async () => {
-    // mfe-a provides the winning build (17.0.0) for the whole family; mfe-b ships a newer compatible
-    // tag that dedups onto it, so the family stays single-source rather than splitting.
+    // Both remotes accept either tag, so both candidates cost one download and the tie breaks toward
+    // the newest: mfe-b's 17.1.0 wins the whole family and mfe-a's older tag dedups onto it, so the
+    // family stays single-source rather than splitting.
     seed('@framework/core', [
       version('17.0.0', '@framework/core', [{ remote: 'team/mfe-a', req: '^17.0.0' }]),
       version('17.1.0', '@framework/core', [{ remote: 'team/mfe-b', req: '^17.0.0' }]),
@@ -100,9 +107,11 @@ describe('pooling (integration)', () => {
 
     const importMap = await runInit();
 
-    expect(importMap.imports['@framework/core']).toContain(SCOPE['team/mfe-a']);
-    expect(importMap.imports['@framework/common']).toContain(SCOPE['team/mfe-a']);
-    expect(importMap.imports['@framework/common']).not.toContain(SCOPE['team/mfe-b']);
+    expect(importMap.imports['@framework/core']).toContain(SCOPE['team/mfe-b']);
+    expect(importMap.imports['@framework/common']).toContain(SCOPE['team/mfe-b']);
+    expect(importMap.imports['@framework/common']).not.toContain(SCOPE['team/mfe-a']);
+    // mfe-a dedups the whole family — no scoped copy of either member.
+    expect(importMap.scopes?.[SCOPE['team/mfe-a']]).toBeUndefined();
   });
 
   it('scopes an incompatible remote whole family, keeping the global family single-source', async () => {
@@ -119,9 +128,10 @@ describe('pooling (integration)', () => {
 
     const importMap = await runInit();
 
-    // Global family stays single-source (mfe-a), none of it served from the incompatible mfe-c.
-    expect(importMap.imports['@framework/core']).toContain(SCOPE['team/mfe-a']);
-    expect(importMap.imports['@framework/common']).toContain(SCOPE['team/mfe-a']);
+    // Global family stays single-source (mfe-b, the newest of the two 17 builds), none of it served
+    // from the incompatible mfe-c.
+    expect(importMap.imports['@framework/core']).toContain(SCOPE['team/mfe-b']);
+    expect(importMap.imports['@framework/common']).toContain(SCOPE['team/mfe-b']);
     expect(importMap.imports['@framework/core']).not.toContain(SCOPE['team/mfe-c']);
 
     // mfe-c serves its own incompatible family from its own scope.
@@ -158,9 +168,10 @@ describe('pooling (integration)', () => {
 
   it('a tagged design system scopes its whole family for an incompatible consumer (no foreign framework runtime)', async () => {
     // ui joins the framework family via the co-tagged bridge member @framework/core (membership is by
-    // shared member, not by name). mfe-b runs framework 18, incompatible with the mfe-a@17 anchor, so
-    // it scopes its ENTIRE family — ui included, with NO dedup — so no second framework runtime leaks
-    // in through the shared design system.
+    // shared member, not by name). Neither core build can serve the other remote, so the tie breaks
+    // toward the newest and mfe-a@18 anchors the family. mfe-b runs framework 17, incompatible with
+    // that anchor, so it scopes its ENTIRE family — ui included, with NO dedup — so no second
+    // framework runtime leaks in through the shared design system.
     const tagged = (remote: string, external: string, req: string) =>
       mockVersionRemote(remote, external, {
         requiredVersion: req,
@@ -169,16 +180,16 @@ describe('pooling (integration)', () => {
       });
     seed('@framework/core', [
       {
-        tag: '17.0.0',
-        host: false,
-        action: 'skip',
-        remotes: [tagged('team/mfe-a', '@framework/core', '^17.0.0')],
-      },
-      {
         tag: '18.0.0',
         host: false,
         action: 'skip',
-        remotes: [tagged('team/mfe-b', '@framework/core', '^18.0.0')],
+        remotes: [tagged('team/mfe-a', '@framework/core', '^18.0.0')],
+      },
+      {
+        tag: '17.0.0',
+        host: false,
+        action: 'skip',
+        remotes: [tagged('team/mfe-b', '@framework/core', '^17.0.0')],
       },
     ]);
     seed('@design-system/ui', [
@@ -259,8 +270,9 @@ describe('pooling (integration)', () => {
     ]);
 
     const first = await runInit();
-    // The first pass really did island mfe-c, so there is a non-trivial result to preserve.
-    expect(first.scopes?.[SCOPE['team/mfe-c']]?.['@framework/core']).toContain(SCOPE['team/mfe-c']);
+    // The first pass really did island a remote — mfe-c@18 wins the equal-cost tie on the newest tag,
+    // so it is mfe-a that gives way — leaving a non-trivial result to preserve.
+    expect(first.scopes?.[SCOPE['team/mfe-a']]?.['@framework/core']).toContain(SCOPE['team/mfe-a']);
 
     const writes = vi.spyOn(adapters.sharedExternalsRepo, 'addOrUpdate');
     const second = await runInit();

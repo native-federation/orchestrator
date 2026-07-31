@@ -2,7 +2,7 @@ import type { DrivingContract } from '../../driving-ports/driving.contract';
 import type { ConfigContract } from 'lib/core/2.app/config';
 import { mockConfig } from 'lib/testing/config.mock';
 import { mockAdapters } from 'lib/testing/adapters.mock';
-import { mockVersionRemote } from 'lib/testing/domain/externals/version.mock';
+import { mockVersionRemote, newestFirst } from 'lib/testing/domain/externals/version.mock';
 import { Optional } from 'lib/utils/optional';
 import type { RemoteInfo, SharedVersion } from 'lib/core/1.domain';
 import { createSharedExternalsRepository } from 'lib/core/3.adapters/storage/shared-externals.repository';
@@ -76,8 +76,14 @@ describe('pooling: family coherence', () => {
     ),
   });
 
+  // Sorts like commit() does, so the fixtures below read in whatever order is clearest without
+  // seeding an order production could never hand to determine.
   const seed = (name: string, versions: SharedVersion[]) =>
-    adapters.sharedExternalsRepo.addOrUpdate(name, { dirty: true, versions }, undefined);
+    adapters.sharedExternalsRepo.addOrUpdate(
+      name,
+      { dirty: true, versions: newestFirst(versions, adapters.versionCheck.compare) },
+      undefined
+    );
 
   const runInit = async () => {
     const touched = await createDetermineSharedExternals(config, adapters)();
@@ -152,24 +158,26 @@ describe('pooling: family coherence', () => {
   });
 
   it('tolerates patch drift inside one minor line instead of islanding it', async () => {
-    // Two remotes one patch apart, both declaring ~21.2.0. determine picks a different
-    // build per member, so each remote draws from two builds — but 21.2.2 and 21.2.3 sit on the same
-    // minor line, so they agree and nobody is islanded. The family legitimately ends up on two patch
-    // tags: this is tolerated, NOT unified — the guard is that benign drift is
-    // never treated as a split family.
+    // Two remotes one patch apart, both declaring ~21.2.0. core goes to mfe-b's newer patch, while
+    // forms has no provider but mfe-a and stays on its build — so mfe-a draws from two builds. 21.2.2
+    // and 21.2.3 sit on the same minor line, so those builds agree and nobody is islanded. The family
+    // legitimately ends up on two patch tags: this is tolerated, NOT unified — the guard is that
+    // benign drift is never treated as a split family.
+    //
+    // The drift has to come from coverage asymmetry, not tag order: with both members provided by both
+    // remotes, one build would simply win the whole family. Same shape as `e2e/pooling/ranges.e2e.spec.ts:35`.
     seed('@angular/core', [
       version('21.2.2', '@angular/core', [{ remote: 'team/mfe-a', req: '~21.2.0' }]),
       version('21.2.3', '@angular/core', [{ remote: 'team/mfe-b', req: '~21.2.0' }]),
     ]);
-    seed('@angular/router', [
-      version('21.2.3', '@angular/router', [{ remote: 'team/mfe-b', req: '~21.2.0' }]),
-      version('21.2.2', '@angular/router', [{ remote: 'team/mfe-a', req: '~21.2.0' }]),
+    seed('@angular/forms', [
+      version('21.2.2', '@angular/forms', [{ remote: 'team/mfe-a', req: '~21.2.0' }]),
     ]);
 
     const importMap = await runInit();
 
-    expect(importMap.imports['@angular/core']).toBe('http://mfe-a/@angular/core.js');
-    expect(importMap.imports['@angular/router']).toBe('http://mfe-b/@angular/router.js');
+    expect(importMap.imports['@angular/core']).toBe('http://mfe-b/@angular/core.js');
+    expect(importMap.imports['@angular/forms']).toBe('http://mfe-a/@angular/forms.js');
     // Nothing scoped at all, so the import map has no `scopes` key.
     expect(importMap.scopes).toBeUndefined();
 
@@ -213,13 +221,14 @@ describe('pooling: family coherence', () => {
 
   it('never islands a clean subset consumer of an asymmetric family', async () => {
     // Asymmetric coverage: mfe-a ships {core, common, material}, mfe-b only {core, common}, one patch
-    // apart. determine splits the winners across both builds, so mfe-a self-serves material while
-    // deduping core from mfe-b. Every build agrees at minor granularity, so neither remote is islanded
-    // and material stays shared — the regression this locks is gratuitous scoping (I3), which the old
-    // single-build-per-remote rule would have caused for mfe-a.
+    // apart — and they hold the newer patch on different members, which is what splits the winners
+    // across both builds: mfe-a self-serves common and material while deduping core from mfe-b. Every
+    // build agrees at minor granularity, so neither remote is islanded and material stays shared — the
+    // regression this locks is gratuitous scoping (I3), which the old single-build-per-remote rule
+    // would have caused for mfe-a.
     seed('@angular/core', [
-      version('17.0.0', '@angular/core', [{ remote: 'team/mfe-b', req: '^17.0.0' }]),
-      version('17.0.1', '@angular/core', [{ remote: 'team/mfe-a', req: '^17.0.0' }]),
+      version('17.0.1', '@angular/core', [{ remote: 'team/mfe-b', req: '^17.0.0' }]),
+      version('17.0.0', '@angular/core', [{ remote: 'team/mfe-a', req: '^17.0.0' }]),
     ]);
     seed('@angular/common', [
       version('17.0.1', '@angular/common', [{ remote: 'team/mfe-a', req: '^17.0.0' }]),
