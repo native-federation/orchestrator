@@ -136,10 +136,13 @@ test.describe('provenance: the init path splits a family silently', () => {
 });
 
 test.describe('provenance: the dynamic path mirrors it', () => {
-  test('hands a late-loaded remote the same split, with an empty delta', async ({ nf }) => {
-    // Case 4. `disagreementAcrossCommittedBuilds` passes the *committed* serving builds and, like
-    // the init path, never compares the loaded remote's own build against them — so case 1 reproduces
-    // through `initRemoteEntry` unchanged.
+  test('makes a late-loaded remote serve the family no committed build ships', async ({ nf }) => {
+    // Case 4, inverted. The old dynamic gate compared the *committed* serving builds with each other and,
+    // like the init path, never asked what the loaded remote's own build shipped — so case 1 reproduced
+    // through `initRemoteEntry` unchanged, with an empty delta hiding it. The dynamic gate now asks the
+    // same question as the init one: is the combination the committed map would hand this remote one that
+    // some build shipped? Two disjoint builds ship no such combination, so mfe3 serves its own family and
+    // the delta says so.
     const late = consumesBoth();
     await nf.init(
       [
@@ -151,15 +154,21 @@ test.describe('provenance: the dynamic path mirrors it', () => {
 
     await nf.initRemoteEntry(late.url);
 
-    // The delta carries the exposed module and nothing else — no scope, so the late remote takes both
-    // global winners.
-    expect(await nf.map()).toEqual({ imports: { 'team/mfe3/./comp': 'http://mfe3/comp.js' } });
-    expect(await nf.warns()).toEqual([]);
+    // The delta is additive: the exposed module, plus a scope naming mfe3's own two files.
+    expect(await nf.map()).toEqual({
+      imports: { 'team/mfe3/./comp': 'http://mfe3/comp.js' },
+      scopes: {
+        [SCOPE.mfe3]: {
+          '@angular/core': 'http://mfe3/@angular/core.js',
+          '@angular/router': 'http://mfe3/@angular/router.js',
+        },
+      },
+    });
 
-    // BROKEN — same two builds as case 1, decided by the dynamic gate this time.
+    // FIXED — one build, its own, where it used to run one member from each of two.
     expect((await nf.load('team/mfe3')).seen).toEqual({
-      '@angular/core': 'mfe1|@angular/core@22.0.5',
-      '@angular/router': 'mfe2|@angular/router@22.1.0',
+      '@angular/core': 'mfe3|@angular/core@22.0.5',
+      '@angular/router': 'mfe3|@angular/router@22.0.5',
     });
   });
 });

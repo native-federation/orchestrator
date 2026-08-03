@@ -1,4 +1,4 @@
-import type { ExternalName, RemoteName, VersionName } from 'lib/core/1.domain';
+import type { ExternalName, RemoteName } from 'lib/core/1.domain';
 import type { FamilyInstance, FamilyInstances, PoolMember } from './pool.types';
 
 // Per remote, every member it ships and the tag it ships it at. An islanded remote offers nothing at
@@ -72,41 +72,4 @@ export function servingBuilds(
   }
 
   return serving;
-}
-
-// The minor line a tag sits on: `22.0.5` -> `22.0`. Prerelease suffixes ride along on the patch
-// segment, which this does not read.
-export function minorLine(tag: VersionName): string {
-  const first = tag.indexOf('.');
-  if (first === -1) return tag;
-  const second = tag.indexOf('.', first + 1);
-  return second === -1 ? tag : tag.slice(0, second);
-}
-
-export type Disagreement = { member: ExternalName; tag: VersionName; other: VersionName };
-
-/**
- * Do the builds a remote draws on agree? Two builds agree when every member they *both* ship sits on
- * the same minor line, which is the one signal in the data that separates a genuine family split from
- * benign patch drift: `22.0.5` beside `22.1.0` crosses a line, `22.0.6` beside
- * `22.0.8` does not. Returns the first disagreement, or undefined when they are consistent.
- */
-export function findDisagreement(
-  instances: FamilyInstances,
-  builds: readonly RemoteName[]
-): Disagreement | undefined {
-  for (let i = 0; i < builds.length; i++) {
-    const a = instances.get(builds[i]!);
-    if (!a) continue;
-    for (let j = i + 1; j < builds.length; j++) {
-      const b = instances.get(builds[j]!);
-      if (!b) continue;
-      for (const [member, tag] of a) {
-        const other = b.get(member);
-        if (other === undefined || minorLine(tag) === minorLine(other)) continue;
-        return { member, tag, other };
-      }
-    }
-  }
-  return undefined;
 }

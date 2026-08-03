@@ -1,12 +1,6 @@
 import type { SharedVersionAction } from 'lib/core/1.domain';
 import { mockVersionRemote } from 'lib/testing/domain/externals/version.mock';
-import {
-  buildInstances,
-  consumedMembers,
-  findDisagreement,
-  minorLine,
-  servingBuilds,
-} from './family-instance';
+import { buildInstances, consumedMembers, servingBuilds } from './family-instance';
 import type { PoolMember } from './pool.types';
 
 type VersionShape = {
@@ -113,65 +107,5 @@ describe('servingBuilds', () => {
 
     expect(serving.get('@angular/core')).toBe('mfe-b');
     expect(serving.has('@angular/router')).toBe(false);
-  });
-});
-
-describe('minorLine', () => {
-  it.each([
-    ['22.0.5', '22.0'],
-    ['22.1.0', '22.1'],
-    ['21.2.18', '21.2'],
-    ['1.2.3-beta.1', '1.2'],
-    ['17', '17'],
-  ])('%s -> %s', (tag, line) => {
-    expect(minorLine(tag)).toBe(line);
-  });
-});
-
-describe('findDisagreement', () => {
-  const instances = (shapes: Record<string, Record<string, string>>) =>
-    new Map(Object.entries(shapes).map(([remote, i]) => [remote, new Map(Object.entries(i))]));
-
-  it('accepts patch drift within one minor line', () => {
-    // The benign shape: two builds a remote may safely draw on.
-    const found = findDisagreement(
-      instances({ a: { core: '22.0.8', cdk: '22.0.8' }, b: { core: '22.0.6' } }),
-      ['a', 'b']
-    );
-
-    expect(found).toBeUndefined();
-  });
-
-  it('reports a member the builds place on different minor lines', () => {
-    expect(
-      findDisagreement(
-        instances({ 'mfe-a': { core: '22.1.0', router: '22.1.0' }, 'mfe-b': { core: '22.0.5' } }),
-        ['mfe-a', 'mfe-b']
-      )
-    ).toEqual({ member: 'core', tag: '22.1.0', other: '22.0.5' });
-  });
-
-  it('reports a cross-major split', () => {
-    expect(
-      findDisagreement(instances({ ng21: { core: '21.2.18' }, ng22: { core: '22.0.8' } }), [
-        'ng21',
-        'ng22',
-      ])
-    ).toEqual({ member: 'core', tag: '21.2.18', other: '22.0.8' });
-  });
-
-  it('ignores members the two builds do not share', () => {
-    expect(
-      findDisagreement(instances({ a: { core: '22.0.8' }, b: { material: '21.0.0' } }), ['a', 'b'])
-    ).toBeUndefined();
-  });
-
-  it('compares every pair, not just neighbours', () => {
-    expect(
-      findDisagreement(
-        instances({ a: { core: '22.0.8' }, b: { material: '3.0.0' }, c: { core: '21.2.0' } }),
-        ['a', 'b', 'c']
-      )
-    ).toEqual({ member: 'core', tag: '22.0.8', other: '21.2.0' });
   });
 });

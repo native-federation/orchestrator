@@ -12,22 +12,28 @@ import type {
 import { mockSharedInfo } from 'lib/testing/domain/remote-entry/shared-info.mock';
 import { mockVersionRemote } from 'lib/testing/domain/externals/version.mock';
 import { mockAdapters } from 'lib/testing/adapters.mock';
+import { Optional } from 'lib/utils/optional';
+import type { RemoteInfo } from 'lib/core/1.domain';
 import type { DrivingContract } from '../../driving-ports/driving.contract';
 
 // A committed external: the first version is the `share` one, i.e. `remotes[0]` of it is the build
 // serving that member. Later versions are copies other builds hold.
+//
+// `update-cache` runs before this step and commits the loaded remote's own copies too, so a fixture that
+// leaves `mfe` out of the record models a state production cannot reach — and the gate reads what the
+// remote imports off exactly those copies. Every portfolio below that expects a verdict lists `mfe`.
 const committed = (
   name: string,
-  ...versions: { tag: string; remote: string; action?: SharedVersion['action'] }[]
+  ...versions: { tag: string; remotes: string[]; action?: SharedVersion['action'] }[]
 ): SharedExternal => ({
   dirty: false,
   versions: versions.map((v, i) => ({
     tag: v.tag,
     host: false,
     action: v.action ?? (i === 0 ? 'share' : 'skip'),
-    remotes: [
-      mockVersionRemote(v.remote, name, { requiredVersion: `^${v.tag.split('.')[0]}.0.0` }),
-    ],
+    remotes: v.remotes.map(remote =>
+      mockVersionRemote(remote, name, { requiredVersion: `^${v.tag.split('.')[0]}.0.0` })
+    ),
   })),
 });
 
@@ -51,6 +57,14 @@ describe('createPoolDynamicExternals', () => {
   let poolDynamicExternals: ForPoolingDynamicExternals;
   let config: ConfigContract;
   let adapters: DrivingContract;
+
+  // The `committed` helper derives every range from its own version tag, so "same major" is exactly the
+  // acceptance a real portfolio has here — and the coverage gate needs it to be real, since an anchor that
+  // offers a version the loaded remote rejects has to fail on versions rather than on coverage.
+  const acceptsSameMajor = () =>
+    vi.fn(
+      (tag: string, range: string) => tag.split('.')[0] === range.replace(/^\^/, '').split('.')[0]
+    );
 
   const givenCommitted = (externals: Record<string, SharedExternal>) => {
     adapters.sharedExternalsRepo.getFromScope = vi.fn(() => externals);
@@ -130,74 +144,195 @@ describe('createPoolDynamicExternals', () => {
     expect(result.actions['@framework/cdk']).toEqual({ action: 'scope' });
   });
 
-  it('scopes the family when the committed builds it would dedup onto disagree', async () => {
-    // The capture's shape: forms@22.0.8 and forms/signals@21.2.18 are both committed, from builds
-    // that disagree. Nobody so far consumed both; this remote would be the one to bridge them.
+  it('scopes the family when no committed build ships the combination it would be handed', async () => {
+    // The capture's shape: forms@22.0.8 and forms/signals@21.2.18 are both committed, from two builds
+    // that ship neither of the other's members. Nobody so far consumed both; this remote would be the one
+    // to bridge them, running forms from one build and signals from another. The old gate compared the two
+    // committed builds with each other, which is version arithmetic; the promise asks whether *any* build
+    // shipped the pair, and none did.
+    adapters.versionCheck.isCompatible = acceptsSameMajor();
     givenCommitted({
       '@framework/forms': committed(
         '@framework/forms',
-        { tag: '22.0.8', remote: 'team/a' },
-        { tag: '21.2.18', remote: 'team/legacy' }
+        { tag: '22.0.8', remotes: ['team/a', 'mfe'] },
+        { tag: '21.2.18', remotes: ['team/legacy'] }
       ),
-      '@framework/forms/signals': committed('@framework/forms/signals', {
-        tag: '21.2.18',
-        remote: 'team/legacy',
-      }),
+      '@framework/forms/signals': committed(
+        '@framework/forms/signals',
+        { tag: '21.2.18', remotes: ['team/legacy'] },
+        { tag: '22.0.8', remotes: ['mfe'] }
+      ),
     });
     const entry = entryWith(shared('@framework/forms'), shared('@framework/forms/signals'));
     const actions: SharedInfoActions = {
-      '@framework/forms': { action: 'skip', override: 'http://a/forms.js' },
-      '@framework/forms/signals': { action: 'skip', override: 'http://legacy/signals.js' },
+      '@framework/forms': { action: 'skip' },
+      '@framework/forms/signals': { action: 'skip' },
     };
 
     const result = await poolDynamicExternals({ entry, actions });
 
     expect(result.actions['@framework/forms']).toEqual({ action: 'scope' });
     expect(result.actions['@framework/forms/signals']).toEqual({ action: 'scope' });
+    // team/legacy comes closest — it is the one build carrying both members — and the reason it cannot
+    // serve mfe is the version, not the coverage. Saying "an entrypoint is missing" here would send the
+    // owner looking for the wrong thing.
     expect(config.log.warn).toHaveBeenCalledWith(
       8,
-      expect.stringContaining("disagree on '@framework/forms' (22.0.8 vs 21.2.18)")
+      expect.stringContaining(
+        "'mfe' serves its own family: no committed build offers every entrypoint it imports at a version it accepts — '@framework/forms@21.2.18' is the gap, closest is 'team/legacy'."
+      )
     );
   });
 
-  it('dedups onto committed builds that only drift by patch', async () => {
+  it('dedups when a committed build did ship the whole combination', async () => {
+    // The same shape with the bridge present: team/a ships both members at the tags the committed map
+    // serves them at, so the combination mfe is handed is one a build compiled — provider identity is
+    // irrelevant at equal versions — and mfe keeps both dedups, adding nothing to the map.
+    givenCommitted({
+      '@framework/forms': committed('@framework/forms', {
+        tag: '22.0.8',
+        remotes: ['team/a', 'mfe'],
+      }),
+      '@framework/forms/signals': committed('@framework/forms/signals', {
+        tag: '22.0.8',
+        remotes: ['team/a', 'mfe'],
+      }),
+    });
+    const entry = entryWith(shared('@framework/forms'), shared('@framework/forms/signals'));
+    const actions: SharedInfoActions = {
+      '@framework/forms': { action: 'skip' },
+      '@framework/forms/signals': { action: 'skip' },
+    };
+
+    const result = await poolDynamicExternals({ entry, actions });
+
+    expect(result.actions).toEqual({
+      '@framework/forms': { action: 'skip' },
+      '@framework/forms/signals': { action: 'skip' },
+    });
+  });
+
+  it('anchors onto a committed island and maps its files per consumer', async () => {
+    // What lifting the override guard onto the global path buys. team/legacy is a committed island: every
+    // copy it holds is scoped, so it demonstrably runs its own build and its files sit in the map under
+    // its own scope. mfe ships the same previous-major family, which the committed 22 winner cannot serve,
+    // so instead of downloading its own it takes legacy's — through a per-consumer override, because the
+    // global `imports` names the 22 build.
+    adapters.versionCheck.isCompatible = acceptsSameMajor();
+    adapters.remoteInfoRepo.tryGet = vi.fn(name =>
+      name === 'team/legacy'
+        ? Optional.of({ scopeUrl: 'http://legacy/', exposes: [] } as RemoteInfo)
+        : Optional.empty<RemoteInfo>()
+    );
+    // The committed map serves core from team/a and cdk from team/b, so nothing witnesses the pair mfe
+    // would be handed — the only build carrying both is the island.
     givenCommitted({
       '@framework/core': committed(
         '@framework/core',
-        { tag: '22.0.8', remote: 'team/a' },
-        { tag: '22.0.6', remote: 'team/b' }
+        { tag: '22.0.8', remotes: ['team/a'] },
+        { tag: '21.2.18', remotes: ['team/legacy'], action: 'scope' },
+        { tag: '21.2.18', remotes: ['mfe'] }
       ),
-      '@framework/cdk': committed('@framework/cdk', { tag: '22.0.6', remote: 'team/b' }),
+      '@framework/cdk': committed(
+        '@framework/cdk',
+        { tag: '22.0.6', remotes: ['team/b'] },
+        { tag: '21.2.18', remotes: ['team/legacy'], action: 'scope' },
+        { tag: '21.2.18', remotes: ['mfe'] }
+      ),
     });
     const entry = entryWith(shared('@framework/core'), shared('@framework/cdk'));
     const actions: SharedInfoActions = {
-      '@framework/core': { action: 'skip', override: 'http://a/core.js' },
-      '@framework/cdk': { action: 'skip', override: 'http://b/cdk.js' },
+      '@framework/core': { action: 'skip' },
+      '@framework/cdk': { action: 'skip' },
     };
 
     const result = await poolDynamicExternals({ entry, actions });
 
     expect(result.actions['@framework/core']).toEqual({
       action: 'skip',
-      override: 'http://a/core.js',
+      covered: ['@framework/core'],
+      override: { '@framework/core': 'http://legacy/@framework/core.js' },
     });
     expect(result.actions['@framework/cdk']).toEqual({
       action: 'skip',
-      override: 'http://b/cdk.js',
+      covered: ['@framework/cdk'],
+      override: { '@framework/cdk': 'http://legacy/@framework/cdk.js' },
     });
+    expect(config.log.warn).not.toHaveBeenCalled();
+  });
+
+  it('refuses to anchor onto a build that is itself deduping', async () => {
+    // Constraint 9. team/b covers mfe and its versions fit, but it does not win `@framework/core`: its own
+    // family resolves through the committed 22.0.8 winner, so its modules are already bound to that copy.
+    // A consumer deduping onto it would inherit the tear one hop in, and no additive map can repair it —
+    // so mfe serves its own family instead.
+    adapters.versionCheck.isCompatible = vi.fn(() => true);
+    givenCommitted({
+      '@framework/core': committed(
+        '@framework/core',
+        { tag: '22.0.8', remotes: ['team/a'] },
+        { tag: '22.0.6', remotes: ['team/b', 'mfe'] }
+      ),
+      '@framework/cdk': committed('@framework/cdk', {
+        tag: '22.0.6',
+        remotes: ['team/b', 'mfe'],
+      }),
+    });
+    const entry = entryWith(shared('@framework/core'), shared('@framework/cdk'));
+    const actions: SharedInfoActions = {
+      '@framework/core': { action: 'skip' },
+      '@framework/cdk': { action: 'skip' },
+    };
+
+    const result = await poolDynamicExternals({ entry, actions });
+
+    expect(result.actions['@framework/core']).toEqual({ action: 'scope' });
+    expect(result.actions['@framework/cdk']).toEqual({ action: 'scope' });
+  });
+
+  it('scopes patch drift across two committed builds, which the old gate deduped', async () => {
+    // Rewritten for the promise. The committed map serves core@22.0.8 from team/a and cdk@22.0.6 from
+    // team/b; mfe imports both. The old gate deduped it because 22.0.8 and 22.0.6 sit on one minor line —
+    // benign drift by construction. No build shipped that pair, so mfe serves its own family and pays the
+    // download. team/b is not an anchor either: it does not win core (constraint 9).
+    adapters.versionCheck.isCompatible = vi.fn(() => true);
+    givenCommitted({
+      '@framework/core': committed(
+        '@framework/core',
+        { tag: '22.0.8', remotes: ['team/a'] },
+        { tag: '22.0.6', remotes: ['team/b'] },
+        { tag: '22.0.5', remotes: ['mfe'] }
+      ),
+      '@framework/cdk': committed(
+        '@framework/cdk',
+        { tag: '22.0.6', remotes: ['team/b'] },
+        { tag: '22.0.5', remotes: ['mfe'] }
+      ),
+    });
+    const entry = entryWith(shared('@framework/core'), shared('@framework/cdk'));
+    const actions: SharedInfoActions = {
+      '@framework/core': { action: 'skip' },
+      '@framework/cdk': { action: 'skip' },
+    };
+
+    const result = await poolDynamicExternals({ entry, actions });
+
+    expect(result.actions['@framework/core']).toEqual({ action: 'scope' });
+    expect(result.actions['@framework/cdk']).toEqual({ action: 'scope' });
   });
 
   it('never mutates a committed version, whatever it decides', async () => {
     const externals = {
       '@framework/forms': committed(
         '@framework/forms',
-        { tag: '22.0.8', remote: 'team/a' },
-        { tag: '21.2.18', remote: 'team/legacy' }
+        { tag: '22.0.8', remotes: ['team/a', 'mfe'] },
+        { tag: '21.2.18', remotes: ['team/legacy'] }
       ),
-      '@framework/forms/signals': committed('@framework/forms/signals', {
-        tag: '21.2.18',
-        remote: 'team/legacy',
-      }),
+      '@framework/forms/signals': committed(
+        '@framework/forms/signals',
+        { tag: '21.2.18', remotes: ['team/legacy'] },
+        { tag: '22.0.8', remotes: ['mfe'] }
+      ),
     };
     givenCommitted(externals);
     const snapshot = JSON.stringify(externals);

@@ -777,7 +777,7 @@ remote can fix a portfolio it does not own), but worth knowing before adding a t
 | `warn` | `'<remote>' serves its own family: no shared build offers every entrypoint it imports at a version it accepts — '<gap>' is the gap, closest is '<build>'. All N members of the pool are scoped for it.` | Gate 2, and **the promise's main cost**. Nothing shipped the combination the shared set would have handed it, so it downloads its own family. `<gap>` is the one thing the closest build fell short on: an entrypoint it does not carry, or `<member>@<tag>` where the version is outside this remote's range. Closing that gap in either build recovers the dedup. When no other build serves any of it the clause reads `no other build in the pool serves any of it` instead. |
 | `warn` | `'<member>' is scoped-only — no coherent shared build provides it; N remotes download their own copy.` | Sharing was possible and was lost. Counts only the copies that really self-serve: a copy pooling anchored elsewhere still dedups. Suppressed when an island in the same pass took the member's last provider — that island's own warning already named the cause. |
 | `debug` | `[pool:<name>] N members across M remotes, incompatible={…}` | Pool formation, for confirming membership came out as intended. The set is gate 1's, listed before the coverage gate runs — a remote that ends up serving its own family for lack of coverage appears in its own `warn`, not here. |
-| `warn` | `[<remote>] the committed builds serving this family disagree on '<member>' (<tag> vs <tag>), so all N pooled members are scoped for it.` | Dynamic init only (step 8): the remote just loaded would have bridged two committed builds that disagree, so it serves its family itself. |
+| `warn` | `'<remote>' serves its own family: no committed build offers every entrypoint it imports at a version it accepts — '<gap>' is the gap, closest is '<build>'. All N pooled members are scoped for it.` | Dynamic init only (step 8), and the same sentence as the init line above read off the committed record: the remote just loaded would have bridged builds that shipped none of each other's members, so it serves its family itself. |
 
 ### Scope and dynamic init
 
@@ -787,14 +787,40 @@ runs in both the initial pipeline and dynamic init (`initRemoteEntry`).
 Because the import map is immutable once committed, the dynamic pass is **additive** — it adjusts only
 the newly loaded remote and never retro-corrects committed remotes, and it coordinates each shareScope
 independently. Both gates are mirrored on the loaded remote: if any member of its family is `scope` the
-whole family scopes with no dedup, and otherwise it may dedup only if the **committed** builds serving the
-members it consumes agree at minor granularity. (There is no own-build case to consider here: a member it
-could not dedup would have been `scope`, which the first gate already caught.) A `share`+`skip` mix is a
-coverage gap, not a conflict, so it alone does not force a scope.
+whole family scopes with no dedup, and otherwise the same question the init gate asks is asked of the
+committed record. A `share`+`skip` mix is a coverage gap, not a conflict, so it alone does not force a
+scope.
 
-Gate 2 is not redundant here even though init already enforced it. Init guarantees no _remote_ draws on
-disagreeing builds, but the committed shared set can still hold two builds that disagree when no remote
-so far consumed both members — `@framework/forms@22.0.8` beside `@framework/forms/signals@21.2.18` in the
+The gate reads the record *after* `update-cache` stored the loaded remote's own copies, which is what lets
+both paths share one implementation. In order:
+
+1. **The witness.** May the remote resolve through the committed `imports` as they stand — did some build
+   ship every specifier it imports at exactly the tags the map serves them at? Its own build counts, and so
+   does a committed island's. Witnessed ⇒ nothing changes and the delta stays empty.
+2. **One committed build, whole.** Otherwise the remote may take a single committed build that covers every
+   entrypoint it imports at versions it accepts, mapped per consumer through the override below.
+3. **Otherwise it serves its own family**, and says so.
+
+The candidate in (2) has to **already serve its own whole family**: either it wins every member it ships,
+so the map already names its own files for all of them, or every copy it holds is scoped, so it is an
+island and runs its own build by construction. Anything in between resolved part of its family through the
+global winner — its modules are already bound to that copy, a consumer deduping onto it inherits the tear
+one hop in, and no additive map can repair it. A copy carrying a `servedBy` is deduping onto somebody else
+and is disqualified outright.
+
+Two consequences of "committed" not meaning "being decided". A `scope` copy is a **stable island** here,
+not a remote about to self-serve, so its files — already in the map under its own scope — can serve a
+remote loaded later; the init path excludes a `scope` copy from what a build may offer, and this path must
+not. And the per-consumer **override** that a shareScope `skip` has always carried is now available on the
+global path too: a committed island's files live nowhere but its own scope, so a global dedup onto one has
+to be spelled out per consumer. Pooling writes an override only for the specifiers the committed map does
+not already serve from the chosen build, so a dedup onto the global provider still adds nothing — which is
+also why `update-cache` still computes the default override for a named shareScope only: on the global path
+that default would name the very files `imports` already carries.
+
+This gate is not redundant even though init enforced its own. Init guarantees no _remote_ runs a
+combination nothing shipped, but the committed shared set can still hold members from builds that ship
+none of each other's — `@framework/forms@22.0.8` beside `@framework/forms/signals@21.2.18` in the
 production capture. A remote loaded later is exactly the consumer that would bridge them.
 
 Finally, pooling is gated on the resolver having actually re-elected something: it skips any pool no
@@ -875,7 +901,8 @@ itself. The two coincide often enough to look equivalent, and come apart in thre
   a minor line, which a non-lockstep scope does routinely.
 
 Under the promise none of those depend on version distance: the rule reads **coverage** and
-`versionCheck.isCompatible(tag, requiredVersion)` and nothing else. `minorLine` leaves the gate.
+`versionCheck.isCompatible(tag, requiredVersion)` and nothing else. `minorLine` and `findDisagreement` are
+gone from the codebase.
 
 **What has to change to deliver it.**
 
@@ -1070,12 +1097,13 @@ defect they exist for closed:
   `splitPackages` — with `e2e/pooling/flag.e2e.spec.ts` as the regression guard, and any change in
   downloads or shared members is recorded in this document.
 
-Status: **shipped on the init path; the dynamic path still runs the old gate.** The coverage gate, the
-witness, multi-anchor assignment, `servedBy` and cross-build scope emission are in `pool-shared-externals.ts`
-and `generate-import-map.ts`; every reproduction on the init path now ends with each remote running one
-build, transitive peer bindings included. Still open: the dynamic mirror, the log line a coverage-driven
-self-serve needs, and the expectations elsewhere in the suite that still assert the old promise —
-`minorLine` and `findDisagreement` therefore stay, called only from the dynamic path.
+Status: **shipped on both paths.** The coverage gate, the witness, multi-anchor assignment, `servedBy` and
+cross-build scope emission are in `pool-shared-externals.ts` and `generate-import-map.ts`; the dynamic
+mirror is in `pool-dynamic-externals.ts`, deciding on the same primitives over the committed record, with
+the per-consumer override lifted onto the global path to carry it. Every reproduction now ends with each
+remote running one build, transitive peer bindings included, on both paths, and a coverage-driven
+self-serve says so at `warn`. `minorLine` and `findDisagreement` are deleted. Still open: the expectations
+elsewhere in the suite that assert the old promise, and the cost re-measure.
 
 ## Dynamic Init
 

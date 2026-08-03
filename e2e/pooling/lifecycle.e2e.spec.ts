@@ -226,7 +226,7 @@ test.describe('lifecycle: the dynamic path', () => {
     expect(delta.imports['@angular/forms']).toBeUndefined();
     expect(await nf.warns()).toContainEqual(
       expect.stringContaining(
-        "the committed builds serving this family disagree on '@angular/router' (22.0.5 vs 22.1.0), so all 2 pooled members are scoped for it."
+        "'team/mfe4' serves its own family: no committed build offers every entrypoint it imports at a version it accepts — '@angular/forms' is the gap, closest is 'team/mfe1'. All 2 pooled members are scoped for it."
       )
     );
     expect((await nf.load('team/mfe4')).seen).toEqual({
@@ -261,9 +261,12 @@ test.describe('lifecycle: the dynamic path', () => {
     expect(await nf.copies()).toEqual(before);
   });
 
-  test('tolerates patch drift on the dynamic path too', async ({ nf }) => {
-    // The gate is the same predicate as on the init path: a build one patch away agrees, so the late
-    // remote dedups rather than islanding.
+  test('islands patch drift on the dynamic path too', async ({ nf }) => {
+    // Rewritten deliberately, and the point is that the gate is *still* the same predicate as on the init
+    // path. What the old promise allowed: a committed build one patch away "agreed", so the late remote
+    // deduped router@22.0.8 and served its own forms@22.0.5. What the new one requires: no build shipped
+    // that pair, so mfe4 takes its own router too. Cost: one download more, and forms — which only mfe4
+    // provides — no longer enters the global map off a build nothing witnesses.
     const late = remote('team/mfe4', SCOPE.mfe4, [
       dep('@angular/router', '22.0.5', { req: '^22.0.0' }),
       dep('@angular/forms', '22.0.5', { req: '^22.0.0' }),
@@ -281,11 +284,13 @@ test.describe('lifecycle: the dynamic path', () => {
     await nf.initRemoteEntry(late.url);
 
     const delta = await nf.map();
-    expect(delta.scopes).toBeUndefined();
-    expect(delta.imports['@angular/forms']).toBe('http://mfe4/@angular/forms.js');
-    expect(await nf.warns()).toEqual([]);
+    expect(delta.scopes?.[SCOPE.mfe4]).toEqual({
+      '@angular/router': 'http://mfe4/@angular/router.js',
+      '@angular/forms': 'http://mfe4/@angular/forms.js',
+    });
+    expect(delta.imports['@angular/forms']).toBeUndefined();
     expect((await nf.load('team/mfe4')).seen).toEqual({
-      '@angular/router': 'mfe1|@angular/router@22.0.8',
+      '@angular/router': 'mfe4|@angular/router@22.0.5',
       '@angular/forms': 'mfe4|@angular/forms@22.0.5',
     });
   });

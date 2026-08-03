@@ -13,20 +13,21 @@ import type { LoggingConfig } from '../../config/log.contract';
 import type { ModeConfig } from '../../config/mode.contract';
 import { buildInstances, consumedMembers, servingBuilds } from './family-instance';
 import {
-  type Acceptance,
   acceptanceTable,
   arrivalOrder,
   assignAnchors,
   basisPerMember,
   consumedSpecifiers,
   coveragePerBuild,
+  explainSelfServe,
   hostRemotes,
+  isWitnessed,
   sharedTagPerSpecifier,
   tagsPerBuild,
 } from './anchoring';
 import { buildPools } from './pool-graph';
 import { remotesInPool } from './pool.util';
-import type { FamilyInstances, PoolMember, PoolName } from './pool.types';
+import type { PoolMember, PoolName } from './pool.types';
 
 type IslandCause =
   // determine marked one of its versions `scope`: a genuine range violation.
@@ -235,40 +236,11 @@ export function createPoolSharedExternals(
       const consumedSpec = consumedSpecifiers(members);
       const consumed = consumedMembers(members);
 
-      /**
-       * The witness, and it is **all-or-nothing across the family**: a remote may keep resolving through
-       * the global `imports` when *some* live build ships every specifier it consumes at exactly the tags
-       * `imports` serves them at. Its own build is the case the promise names — every member at the
-       * remote's own declared tag — and the general form is sound for the same reason (§"Why the witness
-       * is sound"): at equal versions provider identity is irrelevant, so a set of tags some build
-       * compiled together is that build's combination whichever origin each file arrives from. Taken per
-       * specifier instead it reintroduces the defect, a combination nothing compiled.
-       *
-       * Checked before coverage, because a witnessed remote needs no anchor at all: asking coverage
-       * first pins remotes already sitting at the shared tags onto one build for no gain in provenance.
-       */
-      const isWitnessed = (remote: RemoteName): boolean => {
-        const specifiers = consumedSpec.get(remote);
-        if (!specifiers) return false;
-        for (const specifier of specifiers) if (!shared.has(specifier)) return false;
-
-        for (const [, tags] of ownTags) {
-          let matches = true;
-          for (const specifier of specifiers) {
-            if (tags.get(specifier) !== shared.get(specifier)) {
-              matches = false;
-              break;
-            }
-          }
-          if (matches) return true;
-        }
-        return false;
-      };
-
       const needAnchor = new Map<RemoteName, ExternalName[]>();
       const needSpecifiers = new Map<RemoteName, Set<string>>();
       for (const [remote, wants] of consumed) {
-        if (islanded.has(remote) || isWitnessed(remote)) continue;
+        if (islanded.has(remote)) continue;
+        if (isWitnessed(consumedSpec.get(remote) ?? [], shared, ownTags)) continue;
         needAnchor.set(remote, wants);
         needSpecifiers.set(remote, consumedSpec.get(remote) ?? new Set());
       }
@@ -302,14 +274,14 @@ export function createPoolSharedExternals(
         const build = assigned ?? (anchors.has(remote) || hosts.has(remote) ? remote : undefined);
 
         if (build === undefined) {
-          islanded.set(
-            remote,
-            explainSelfServe(remote, wants, needSpecifiers.get(remote)!, {
+          islanded.set(remote, {
+            kind: 'uncovered',
+            ...explainSelfServe(remote, wants, needSpecifiers.get(remote)!, {
               coverage,
               instances,
               acceptance,
-            })
-          );
+            }),
+          });
           scoped = true;
           continue;
         }
@@ -319,68 +291,6 @@ export function createPoolSharedExternals(
 
       if (!scoped) return serving;
     }
-  }
-
-  /**
-   * Why no build could serve this remote, in the terms a portfolio owner can act on: the build that came
-   * closest, and the one thing it fell short on. Runs only for a remote that is actually self-serving, so
-   * it costs nothing on a healthy portfolio.
-   *
-   * "Closest" is fewest missing entrypoints; a build that misses none failed on versions instead, and the
-   * gap is then the member whose offered tag this remote's own range rejects.
-   */
-  function explainSelfServe(
-    remote: RemoteName,
-    wants: readonly ExternalName[],
-    specifiers: Set<string>,
-    pool: {
-      coverage: Map<RemoteName, Map<string, string>>;
-      instances: FamilyInstances;
-      acceptance: Acceptance;
-    }
-  ): IslandCause {
-    let closest: RemoteName | undefined;
-    let fewest = Number.MAX_SAFE_INTEGER;
-    let gap: string = wants[0]!;
-
-    for (const [build, served] of pool.coverage) {
-      if (build === remote) continue;
-
-      let missing: string | undefined;
-      let count = 0;
-      for (const specifier of specifiers) {
-        if (served.has(specifier)) continue;
-        count++;
-        missing ??= specifier;
-      }
-      if (count >= fewest) continue;
-
-      fewest = count;
-      closest = build;
-      gap = missing ?? rejectedMember(build, remote, wants, pool) ?? wants[0]!;
-    }
-
-    return { kind: 'uncovered', gap, closest };
-  }
-
-  // The first member a covering build offers at a tag the consumer's own range rejects — the other way a
-  // build fails the gate once coverage is satisfied.
-  function rejectedMember(
-    build: RemoteName,
-    consumer: RemoteName,
-    wants: readonly ExternalName[],
-    pool: { instances: FamilyInstances; acceptance: Acceptance }
-  ): string | undefined {
-    const offered = pool.instances.get(build);
-    const accepts = pool.acceptance.get(consumer);
-    if (!offered || !accepts) return undefined;
-
-    for (const member of wants) {
-      const tag = offered.get(member);
-      if (tag === undefined) return member;
-      if (!accepts.get(member)?.has(tag)) return `${member}@${tag}`;
-    }
-    return undefined;
   }
 
   // Warn only when sharing was genuinely possible and lost: a scoped-only member with >1 consumer. A

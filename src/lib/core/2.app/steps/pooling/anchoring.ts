@@ -257,6 +257,172 @@ export function electedTags(members: PoolMember[]): Map<ExternalName, VersionNam
   return elected;
 }
 
+export type CommittedBuild = {
+  coverage: Coverage;
+  tags: Map<Specifier, VersionName>;
+  instance: FamilyInstance;
+};
+
+export type CommittedView = {
+  builds: Map<RemoteName, CommittedBuild>;
+  /** Per specifier, what the committed `imports` serves and from where. */
+  global: Map<Specifier, { tag: VersionName; remote: RemoteName; file: string }>;
+};
+
+/**
+ * The committed record as the dynamic path has to read it, in one walk.
+ *
+ * Two things differ from the init primitives above, both because "committed" is not "being decided".
+ * A `scope` copy here is a **stable island**: its files are already in the map under its own scope and
+ * it demonstrably runs its own build, so it can serve a remote loaded later — where on the init path a
+ * `scope` copy is a remote about to self-serve and offers nothing. And the claim order for `global`
+ * mirrors what `generate-import-map` emitted: each member's `share` basis, then its siblings, then the
+ * `skip` copies, each filling only what nobody claimed yet.
+ */
+export function committedView(members: PoolMember[]): CommittedView {
+  const builds = new Map<RemoteName, CommittedBuild>();
+  const global: CommittedView['global'] = new Map();
+
+  const record = (meta: PoolMember['external']['versions'][number]['remotes'][number]) => {
+    let own = builds.get(meta.name);
+    if (!own) {
+      builds.set(
+        meta.name,
+        (own = { coverage: new Map(), tags: new Map(), instance: new Map() as FamilyInstance })
+      );
+    }
+    return own;
+  };
+
+  for (const member of members) {
+    const versions = member.external.versions;
+
+    for (const version of versions) {
+      for (const meta of version.remotes) {
+        const own = record(meta);
+        if (!own.instance.has(member.name)) own.instance.set(member.name, version.tag);
+        for (const [specifier, file] of Object.entries(meta.entries)) {
+          own.coverage.set(specifier, file);
+          if (!own.tags.has(specifier)) own.tags.set(specifier, version.tag);
+        }
+      }
+    }
+
+    const claim = (version: PoolMember['external']['versions'][number]) => {
+      for (const meta of version.remotes) {
+        for (const [specifier, file] of Object.entries(meta.entries)) {
+          if (!global.has(specifier)) {
+            global.set(specifier, { tag: version.tag, remote: meta.name, file });
+          }
+        }
+      }
+    };
+    const winner = versions.find(v => v.action === 'share');
+    if (winner) claim(winner);
+    for (const version of versions) if (version.action === 'skip') claim(version);
+  }
+
+  return { builds, global };
+}
+
+/**
+ * Is the combination the global mapping would hand this remote one that some live build shipped?
+ *
+ * All-or-nothing across the family: **every** specifier it imports has to be published at the tag that
+ * one single build ships it at. The remote's own build is the case the promise names — every member at
+ * its own declared tag — and the general form is sound for the same reason (§"Why the witness is sound"):
+ * at equal versions provider identity is irrelevant, so a set of tags some build compiled together is
+ * that build's combination whichever origin each file arrives from. Taken per specifier instead it
+ * reintroduces the defect, a combination nothing compiled.
+ *
+ * Asked before coverage on both paths, because a witnessed remote needs no anchor at all: asking
+ * coverage first pins remotes already sitting at the shared tags onto one build for no gain.
+ */
+export function isWitnessed(
+  specifiers: Iterable<Specifier>,
+  shared: Map<Specifier, VersionName>,
+  perBuild: Map<RemoteName, Map<Specifier, VersionName>>
+): boolean {
+  const wanted = [...specifiers];
+  for (const specifier of wanted) if (!shared.has(specifier)) return false;
+
+  for (const [, tags] of perBuild) {
+    let matches = true;
+    for (let i = 0; i < wanted.length; i++) {
+      if (tags.get(wanted[i]!) !== shared.get(wanted[i]!)) {
+        matches = false;
+        break;
+      }
+    }
+    if (matches) return true;
+  }
+  return false;
+}
+
+export type SelfServeReason = { gap: string; closest?: RemoteName };
+
+/**
+ * Why no build could serve this remote, in the terms a portfolio owner can act on: the build that came
+ * closest, and the one thing it fell short on. Runs only for a remote that is actually self-serving, so
+ * it costs nothing on a healthy portfolio.
+ *
+ * "Closest" is fewest missing entrypoints; a build that misses none failed on versions instead, and the
+ * gap is then the member whose offered tag this remote's own range rejects.
+ */
+export function explainSelfServe(
+  remote: RemoteName,
+  wants: readonly ExternalName[],
+  specifiers: Set<Specifier>,
+  pool: {
+    coverage: Map<RemoteName, Coverage>;
+    instances: FamilyInstances;
+    acceptance: Acceptance;
+  }
+): SelfServeReason {
+  let closest: RemoteName | undefined;
+  let fewest = Number.MAX_SAFE_INTEGER;
+  let gap: string = wants[0] ?? '';
+
+  for (const [build, served] of pool.coverage) {
+    if (build === remote) continue;
+
+    let missing: string | undefined;
+    let count = 0;
+    for (const specifier of specifiers) {
+      if (served.has(specifier)) continue;
+      count++;
+      missing ??= specifier;
+    }
+    if (count >= fewest) continue;
+
+    fewest = count;
+    closest = build;
+    gap = missing ?? rejectedMember(build, remote, wants, pool) ?? gap;
+  }
+
+  return { gap, closest };
+}
+
+// The first member a covering build offers at a tag the consumer's own range rejects — the other way a
+// build fails the gate once coverage is satisfied.
+function rejectedMember(
+  build: RemoteName,
+  consumer: RemoteName,
+  wants: readonly ExternalName[],
+  pool: { instances: FamilyInstances; acceptance: Acceptance }
+): string | undefined {
+  const offered = pool.instances.get(build);
+  const accepts = pool.acceptance.get(consumer);
+  if (!offered || !accepts) return undefined;
+
+  for (const member of wants) {
+    const tag = offered.get(member);
+    if (tag === undefined) return member;
+    if (!accepts.get(member)?.has(tag)) return `${member}@${tag}`;
+  }
+  return undefined;
+}
+
 /**
  * The copy whose file the global mapping publishes, per member: the first copy of the member's `share`
  * version that still runs its own build. A remote deduping onto a foreign build is skipped, because
