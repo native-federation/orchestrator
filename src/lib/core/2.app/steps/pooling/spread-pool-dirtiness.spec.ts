@@ -72,6 +72,28 @@ describe('createSpreadPoolDirtiness', () => {
     expect(dirt(externals)).toEqual({ '@scope/a': false, '@scope/b': false });
   });
 
+  it('does not even read a clean scope versions — no pool graph on a warm init', async () => {
+    // Performance §8, and it was measured: building the graph and then discovering nothing was dirty
+    // was the entire pooling cost of a warm init. `buildPools` has to walk every external's versions to
+    // find its remotes and tags, so counting reads of `versions` is exactly "was the graph built".
+    let reads = 0;
+    const watched = (name: string): SharedExternal => {
+      const external = ext(name, false);
+      const { versions } = external;
+      return Object.defineProperty(external, 'versions', {
+        get: () => {
+          reads++;
+          return versions;
+        },
+      }) as SharedExternal;
+    };
+    given({ '@scope/a': watched('@scope/a'), '@scope/b': watched('@scope/b') });
+
+    await spreadPoolDirtiness();
+
+    expect(reads).toBe(0);
+  });
+
   it('does not cross pool boundaries', async () => {
     // Two npm scopes are two pools, so the dirty one must not drag the other in.
     const externals = given({

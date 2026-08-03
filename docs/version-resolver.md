@@ -1033,36 +1033,88 @@ row above it, and in every row `splitPackages` is empty and no remote runs a tor
 | + the same-tag witness | 52 (+13.0%) | 96 |
 | + per-remote auto-pooling, tag replaces auto-pool | 52 | 95 (+31.9%) |
 | + the same-tag witness keyed by specifier too | 46 (+0%) | 95 (+31.9%) |
-| **as built, witness generalised past the consumer's own build** | **equal (+0%)** | **equal (+0%)** |
+| **as built, witness generalised past the consumer's own build** | **46 (+0%)** | **89 (+23.6%)** |
 
-The last row is the shipped gate rather than a prototype: measured with the flag on and off in the same
-run, on both recorded portfolios, downloads are **equal** — `splitPackages` empty, no remote holding two
-Angular minor lines, the same 25 and 30 shared tags as before. Iteration 9 re-measures it through
-`capture.e2e.spec.ts` and records the absolute figures beside these; the seven-remote arm reads 46 either
-way, matching the row above, and the eleven-remote arm was read off a throwaway probe whose absolute count
-is not comparable file-for-file with the 72 recorded for the shipped rule. What moved the eleven-remote
-figure from the accepted +31.9% to zero is the generalised witness alone.
+**The shipped figures, measured against the tree that preceded them.** The last row is the gate as built,
+not a prototype. It was re-measured by running the same portfolios in two worktrees on one machine — the
+shipped branch and `7126b5d`, the last commit before election read coverage — so every column below is a
+before-and-after on identical fixtures rather than a comparison between a flag being on and off:
 
-So the promise is **free on the production capture** — `e2e/pooling/flag.e2e.spec.ts`'s
-`costs nothing at all on the production capture`, which asserts pooled and unpooled downloads are *equal*,
-stays green unchanged — and costs **+31.9% on the eleven-remote portfolio**. That figure is an upper
-bound: the anchor-disqualification rule above was measured only on a synthetic five-remote shape (5
-downloads → 4) and can only widen deduping on the captures.
+| | 7 remotes | 11 remotes |
+| --- | --- | --- |
+| downloads | 46 → **46** | 72 → **89** (+23.6%) |
+| chunk loads | 10 → 10 | 19 → 22 |
+| shared tags | 25 → 25 | 30 → 30 |
+| `splitPackages` | `{}` → `{}` | `{}` → `{}` |
+| remotes on two Angular minor lines | 0 → 0 | 0 → 0 |
+| specifiers present at two or more **versions** | 6 → 6 | 9 → 9 |
+| specifiers present at one version from two **origins** | 0 → 0 | 1 → 4 |
 
-What the eleven-remote residue is made of, attributed per origin and per specifier: one remote sitting on
-`22.0.6` against a shared `22.0.8` accounts for +17 of the +23 — a single file before, a whole family
-after — with +8 on a remote alone in its pool shape, +3 for an anchor swap, and −5 elsewhere. Two remotes
-holding 41 of the 95 downloads do not move at all, being gate-1 islands on the previous major already. Two
-properties make the residue defensible: the count of specifiers existing in more than one copy is
-**identical** before and after (18 at eleven, 12 at seven), so the promise never splits a package that is
-single-copy today — it only adds copies to families already split — and the extra copies are **not**
-byte-identical duplicates, so they cannot be dismissed as waste. Each exists because provenance genuinely
-differs. The cost measures how incoherent a portfolio is, not how wasteful the rule is.
+The production capture is **identical in every column**, which is a stronger claim than the flag equality
+`e2e/pooling/flag.e2e.spec.ts` asserts — and worth stating separately, because on these fixtures the flag
+is *not* a no-pooling control: nine of the eleven recorded entries carry `pool` tags, and a tag opts its
+pool in whatever the flag says. Turning auto-pooling off leaves tag pools running, which is why the
+eleven-remote portfolio reads 89 either way. The honest control is the pre-promise tree, and that is the
+table above.
 
-The +17 remote is the one place where a cheaper answer exists and was rejected: a *same-minor* witness
+The eleven-remote cost came in **6 downloads below the 95 the gate was accepted on**, and the difference is
+the generalised witness, which landed after that measurement: a remote may keep resolving through the
+global `imports` when *some* live build shipped every specifier it consumes at exactly the tags the map
+serves them at.
+
+**The residue is one remote.** Attributed per remote, by how many `@angular/*` specifiers each one runs
+from its own build: `mfe11` goes from **1 own copy to 18**, and every other remote in the portfolio is
+unchanged to the copy (`mfe1` 20, `mfe2` 5, `mfe3` 9, `mfe5` 2, `mfe8` 18, `mfe10` 3, the rest 0). 18 − 1
+is the whole of the +17. `mfe11` ships the widest Angular set of any remote, entirely from one `22.0.6`
+build against a shared `22.0.8`, which makes it precisely the remote no other build can cover — so it
+serves its own family, and what it used to take from the shared set it now downloads. `mfe9`, which the
+same change moved off the shared set, costs **nothing**: it dedups onto `mfe11`'s build, whose files the
+page is already loading. Two remotes holding 38 of the 89 downloads do not move at all, being gate-1
+islands on the previous major already.
+
+Two properties make that residue defensible, both re-measured above rather than modelled. The count of
+specifiers existing at **two or more versions** is unchanged — 9 at eleven, 6 at seven — so the promise
+never splits a package across versions that was not already split; it only decides *which* build serves a
+family. And the copies it does add are same-version copies from another remote's build (1 → 4 at eleven):
+semantically redundant by the witness's own argument, but distinct files, and dragged in by
+all-or-nothing rather than by any version disagreement. That is the price of the guarantee — a remote that
+must serve one member itself serves the whole family itself — and it is what makes the witness worth trying
+first.
+
+The `mfe11` residue is the one place where a cheaper answer exists and was rejected: a *same-minor* witness
 instead of a same-tag one would recover it. That is exactly the version-distance reasoning this section
 removes, and the authoring rule above already tells owners that pooling does not enforce coupling inside a
 minor line. Holding the line keeps the promise unconditional.
+
+**What it costs at init.** Timed per pipeline step over the same fixtures, in Node with the network ports
+served from memory, median of 25 runs (ms):
+
+| | getEntries | process | spread | determine | pool | importMap | commit | total |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 7 remotes, cold | 0.45 | 0.46 | 0.29 | 0.30 | 0.67 | 0.37 | 0.58 | **3.32** |
+| 7 remotes, cold, no pooling at all | 0.42 | 0.37 | 0.01 | 0.19 | 0.01 | 0.26 | 0.51 | **1.80** |
+| 7 remotes, **warm** | 0.03 | 0.01 | 0.01 | 0.02 | 0.004 | 0.33 | 0.01 | **0.42** |
+| 11 remotes, cold | 0.71 | 0.85 | 0.46 | 0.50 | 2.40 | 0.68 | 0.89 | **6.54** |
+| 11 remotes, cold, no pooling at all | 0.61 | 0.59 | 0.01 | 0.38 | 0.01 | 0.36 | 0.68 | **2.69** |
+| 11 remotes, **warm** | 0.03 | 0.01 | 0.01 | 0.01 | 0.004 | 0.53 | 0.01 | **0.61** |
+
+A **warm init pays nothing for pooling**: step 4 writes nothing and does no work, and its warm total is
+the same with pooling on as with no pooling at all — the remaining cost is `generateImportMap`, which
+rebuilds the map either way. A cold init pays 1.5 ms at seven remotes and 3.9 ms at eleven, of which the
+pooling step itself is 0.67 and 2.40; the rest is the other steps having more scope entries to carry. Both
+are set against fetching eleven remote entries over the network, which dominates a cold init by orders of
+magnitude.
+
+That warm figure took a fix. `spread-pool-dirtiness` built the pool graph for every scope and *then*
+discovered nothing was dirty, which cost 0.41 ms of a 1.03 ms warm init — the entire pooling cost of a
+plain reload, and it had grown with the per-remote scope nodes of the auto-pooling rule above. It now
+checks the scope for a dirty external before building anything, which is equivalent (a scope with nothing
+dirty has no pool with a dirty member) and drops it to 0.006 ms.
+
+**Import-map size** grows with the scope blocks the promise emits: at eleven remotes 9.4 kB → 12.1 kB
+(+29%), 51 → 50 global imports and 77 → 110 scope entries; at seven remotes the map is byte-identical,
+because pooling there only *moves* four entries out of `imports` into a scope block that already exists.
+No scope entry repeats the global mapping in any measured configuration, as Performance §9 requires.
 
 **What it has to log.** A remote that downloads its whole family because no anchor covers it is the
 promise's main cost, and under the prototype it was invisible — coverage rather than a verdict moves the

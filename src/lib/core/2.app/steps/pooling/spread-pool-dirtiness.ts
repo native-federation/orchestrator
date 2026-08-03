@@ -17,8 +17,9 @@ export function createSpreadPoolDirtiness(
    * exactly when every member of that pool was re-elected, so every `scope` it reads is `determine`'s and
    * describes the current portfolio. See docs/version-resolver.md §"How pooling resolves".
    *
-   * Costs nothing when nothing changed: a plain reload has no dirty external, so no pool is expanded and
-   * no external is re-elected. Bounded above by one cold election of the pools something changed in.
+   * Costs nothing when nothing changed: a plain reload has no dirty external, so the graph is never
+   * built, no pool is expanded and no external is re-elected. Bounded above by one cold election of the
+   * pools something changed in.
    */
   return () => {
     const { useAutoExternalPooling } = config.feature;
@@ -31,6 +32,17 @@ export function createSpreadPoolDirtiness(
       if (ports.sharedExternalsRepo.scopeType(scope) === 'strict') continue;
 
       const sharedExternals = ports.sharedExternalsRepo.getFromScope(scope);
+
+      // Nothing dirty in the scope ⇒ no pool has a dirty member ⇒ nothing to spread, so skip before
+      // building the graph. Measured, this was the whole pooling cost of a warm init (Performance §8).
+      let dirtyInScope = false;
+      for (const name in sharedExternals)
+        if (sharedExternals[name]!.dirty) {
+          dirtyInScope = true;
+          break;
+        }
+      if (!dirtyInScope) continue;
+
       let spread = 0;
 
       // Mutates the stored records in place; nothing is written, so a scope with nothing dirty stays
