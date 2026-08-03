@@ -25,6 +25,8 @@ export type Assignment = Map<RemoteName, RemoteName | undefined>;
 
 type Islanded = { has: (remote: RemoteName) => boolean };
 
+type VersionMeta = PoolMember['external']['versions'][number]['remotes'][number];
+
 /**
  * Coverage per candidate build, in one pass — Performance §4: built once per build and reused across
  * consumers, so a coverage question is a subset test rather than a walk of `entries`. Mirrors
@@ -170,39 +172,17 @@ export function tagsPerBuild(
 }
 
 /**
- * The tag the global `imports` publishes per specifier — mirroring `generate-import-map`'s two passes,
- * because a rule about what a consumer lands on through `imports` has to read the same thing the map
- * emits: the `share` version's basis first, then its siblings and the `skip` copies, each filling only
- * the specifiers nobody claimed yet (`selfFillUncovered`). Reading the basis alone understates it —
- * a package's secondary entrypoints are routinely published from a sibling copy of the same tag.
+ * The tag the global `imports` publishes per specifier, in `forEachGlobalClaim`'s order. Reading the
+ * winning version's basis alone understates it, which islands remotes that were never at risk.
  */
 export function sharedTagPerSpecifier(
   members: PoolMember[],
   islanded: Islanded
 ): Map<Specifier, VersionName> {
   const shared = new Map<Specifier, VersionName>();
-
-  const claim = (version: {
-    tag: VersionName;
-    remotes: PoolMember['external']['versions'][number]['remotes'];
-  }): void => {
-    for (const meta of version.remotes) {
-      if (islanded.has(meta.name)) continue;
-      for (const specifier in meta.entries) {
-        if (!shared.has(specifier)) shared.set(specifier, version.tag);
-      }
-    }
-  };
-
-  for (const member of members) {
-    const versions = member.external.versions;
-    const winner = versions.find(v => v.action === 'share');
-    if (winner) claim(winner);
-    for (let v = 0; v < versions.length; v++) {
-      if (versions[v]!.action === 'skip') claim(versions[v]!);
-    }
-  }
-
+  forEachGlobalClaim(members, islanded, (specifier, tag) => {
+    if (!shared.has(specifier)) shared.set(specifier, tag);
+  });
   return shared;
 }
 
@@ -257,6 +237,40 @@ export function electedTags(members: PoolMember[]): Map<ExternalName, VersionNam
   return elected;
 }
 
+/**
+ * The order `generate-import-map` fills the global `imports` in, and the single place it is encoded on
+ * this side: per member the `share` version's basis first, then its siblings, then the `skip` copies —
+ * each filling only what nobody claimed yet (`selfFillUncovered`). Both the init gate and the dynamic one
+ * decide on what a consumer would *land on*, so both read this rather than the winning version alone: a
+ * package's secondary entrypoints are routinely published from a sibling copy of the same tag.
+ *
+ * `visit` is called in claim order for every candidate; first claim per specifier wins, which the callers
+ * apply themselves so the walk stays allocation-free.
+ */
+function forEachGlobalClaim(
+  members: PoolMember[],
+  islanded: Islanded | undefined,
+  visit: (specifier: Specifier, tag: VersionName, meta: VersionMeta) => void
+): void {
+  const claim = (version: PoolMember['external']['versions'][number]) => {
+    const remotes = version.remotes;
+    for (let r = 0; r < remotes.length; r++) {
+      const meta = remotes[r]!;
+      if (islanded?.has(meta.name)) continue;
+      for (const specifier in meta.entries) visit(specifier, version.tag, meta);
+    }
+  };
+
+  for (const member of members) {
+    const versions = member.external.versions;
+    const winner = versions.find(v => v.action === 'share');
+    if (winner) claim(winner);
+    for (let v = 0; v < versions.length; v++) {
+      if (versions[v]!.action === 'skip') claim(versions[v]!);
+    }
+  }
+}
+
 export type CommittedBuild = {
   coverage: Coverage;
   tags: Map<Specifier, VersionName>;
@@ -307,20 +321,12 @@ export function committedView(members: PoolMember[]): CommittedView {
         }
       }
     }
-
-    const claim = (version: PoolMember['external']['versions'][number]) => {
-      for (const meta of version.remotes) {
-        for (const [specifier, file] of Object.entries(meta.entries)) {
-          if (!global.has(specifier)) {
-            global.set(specifier, { tag: version.tag, remote: meta.name, file });
-          }
-        }
-      }
-    };
-    const winner = versions.find(v => v.action === 'share');
-    if (winner) claim(winner);
-    for (const version of versions) if (version.action === 'skip') claim(version);
   }
+
+  forEachGlobalClaim(members, undefined, (specifier, tag, meta) => {
+    if (global.has(specifier)) return;
+    global.set(specifier, { tag, remote: meta.name, file: meta.entries[specifier]! });
+  });
 
   return { builds, global };
 }

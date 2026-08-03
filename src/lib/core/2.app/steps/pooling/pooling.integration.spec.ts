@@ -20,6 +20,7 @@ import { createGenerateImportMap } from '../generate-import-map';
 import { createUpdateCache } from '../update-cache';
 import { createPoolDynamicExternals } from './pool-dynamic-externals';
 import { createConvertToImportMap } from '../convert-to-import-map';
+import { committedView } from './anchoring';
 
 /**
  * End-to-end coherence through determine → pooling → import map. Pooling does not make a family resolve
@@ -36,6 +37,7 @@ describe('pooling (integration)', () => {
     'team/mfe-a': 'http://mfe-a/',
     'team/mfe-b': 'http://mfe-b/',
     'team/mfe-c': 'http://mfe-c/',
+    'team/mfe-d': 'http://mfe-d/',
   } as const;
 
   let config: ConfigContract;
@@ -335,5 +337,116 @@ describe('pooling (integration)', () => {
     expect(cScope?.['@framework/common']).toContain(SCOPE['team/mfe-c']);
     expect(importMap.imports['@framework/core']).toBeUndefined();
     expect(importMap.imports['@framework/common']).toBeUndefined();
+  });
+
+  it('dedups a dynamically-added remote onto a committed island (dynamic init path)', async () => {
+    // The case a committed `scope` copy exists for, and the only reason the global path had to learn to
+    // carry a per-consumer override: mfe-b is an island on the previous major, so its files sit in the map
+    // under its own scope and nothing global names them. A remote loaded later that ships exactly that
+    // family cannot use the 18 winner — but it can use mfe-b's build, and taking it costs no download at
+    // all. Without the override it would have downloaded its own copy of both members.
+    //
+    // The two winners come from two remotes on purpose: mfe-a wins core@18.0.0 and mfe-d wins
+    // common@18.1.0, so no build shipped the pair the map would hand mfe-c and the witness cannot clear
+    // it. `strictVersion: false` is what makes it a `skip` rather than a gate-1 island — it would accept
+    // whatever is shared, and the promise is the only thing stopping it from mixing the two.
+    const withIsland = (external: string, winner: string, tag: string): SharedExternal => ({
+      dirty: false,
+      versions: [
+        {
+          tag,
+          host: false,
+          action: 'share',
+          remotes: [meta(winner, external, '^18.0.0')],
+        },
+        {
+          tag: '17.0.0',
+          host: false,
+          action: 'scope',
+          remotes: [meta('team/mfe-b', external, '^17.0.0')],
+        },
+      ],
+    });
+    adapters.sharedExternalsRepo.addOrUpdate(
+      '@framework/core',
+      withIsland('@framework/core', 'team/mfe-a', '18.0.0'),
+      undefined
+    );
+    adapters.sharedExternalsRepo.addOrUpdate(
+      '@framework/common',
+      withIsland('@framework/common', 'team/mfe-d', '18.1.0'),
+      undefined
+    );
+
+    const entryC: RemoteEntry = {
+      name: 'team/mfe-c',
+      url: 'http://mfe-c/remoteEntry.json',
+      exposes: [],
+      shared: [
+        mockSharedInfo('@framework/core', {
+          requiredVersion: '^17.0.0',
+          version: '17.0.0',
+          singleton: true,
+          strictVersion: false,
+        }),
+        mockSharedInfo('@framework/common', {
+          requiredVersion: '^17.0.0',
+          version: '17.0.0',
+          singleton: true,
+          strictVersion: false,
+        }),
+      ],
+    } as RemoteEntry;
+
+    const updated = await createUpdateCache(config, adapters)(entryC);
+    const pooled = await createPoolDynamicExternals(config, adapters)(updated);
+    const importMap = await createConvertToImportMap(config, adapters)(pooled);
+
+    // Every entrypoint it imports resolves to the island's files, not its own and not the 18 winner's.
+    expect(importMap.scopes?.[SCOPE['team/mfe-c']]).toEqual({
+      '@framework/core': `${SCOPE['team/mfe-b']}@framework/core.js`,
+      '@framework/common': `${SCOPE['team/mfe-b']}@framework/common.js`,
+    });
+    expect(importMap.imports['@framework/core']).toBeUndefined();
+  });
+
+  it('reads the global mapping exactly as the import map emits it', async () => {
+    // The gate decides on what a consumer would land on through `imports`, and `forEachGlobalClaim` is
+    // that model. If the two ever drift the gate mis-decides silently, so this pins them against each
+    // other on the shape that makes them differ: `@framework/core`'s winner is mfe-b, which does not carry
+    // the `/testing` entrypoint, so the map publishes that one from a sibling copy of the same tag.
+    seed('@framework/core', [
+      {
+        tag: '17.1.0',
+        host: false,
+        action: 'skip',
+        remotes: [
+          mockVersionRemote('team/mfe-b', '@framework/core', { requiredVersion: '^17.0.0' }),
+          {
+            ...mockVersionRemote('team/mfe-c', '@framework/core', { requiredVersion: '^17.0.0' }),
+            entries: {
+              '@framework/core': '@framework/core.js',
+              '@framework/core/testing': '@framework/core_testing.js',
+            },
+          },
+        ],
+      },
+    ]);
+    seed('@framework/common', [
+      version('17.1.0', '@framework/common', [{ remote: 'team/mfe-b', req: '^17.0.0' }]),
+    ]);
+
+    const importMap = await runInit();
+    const stored = adapters.sharedExternalsRepo.getFromScope(undefined);
+    const { global } = committedView(
+      Object.entries(stored).map(([name, external]) => ({ name, external }))
+    );
+
+    // Same specifiers, and each attributed to the remote whose scope URL the map really used.
+    expect([...global.keys()].sort()).toEqual(Object.keys(importMap.imports).sort());
+    for (const [specifier, url] of Object.entries(importMap.imports)) {
+      expect(url).toContain(SCOPE[global.get(specifier)!.remote as keyof typeof SCOPE]);
+    }
+    expect(global.get('@framework/core/testing')!.remote).toBe('team/mfe-c');
   });
 });
