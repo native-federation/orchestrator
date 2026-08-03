@@ -716,6 +716,25 @@ granularity — the agreement gate treats one minor line as agreement, so coupli
 (`22.0.6` vs `22.0.8`) is not enforced by pooling at all. If a member genuinely requires an exact patch,
 an exact pin is the only thing that expresses it.
 
+**A tag is all-or-nothing per npm scope: tag the whole family, or none of it.** Tagging any member of a
+scope switches that remote's auto-pooling off for the *whole* scope (see "Enabling pooling"), while the
+tag itself only groups what you actually tagged — plus each tagged member's own package, since
+entrypoints follow their package. Tag one member of `@framework/*` and the rest of your `@framework`
+externals therefore contribute nothing to the graph from your remote: they pool only if some *other*
+remote declares two of them untagged and holds the scope open. Partial tagging can consequently make
+coverage **worse** than not tagging at all, which is the opposite of what a tag is usually reached for.
+
+The failure is quiet, because the members that fall out are still shared — just no longer coordinated
+with the family. Two habits avoid it:
+
+- If you tag, tag **every** member of that scope you declare, secondary entrypoints included. A build
+  that emits flat entries makes this easy to get wrong: `@framework/core` and
+  `@framework/core/primitives/di` are two externals, and tagging only the first leaves the second
+  relying on the package edge rather than on your tag.
+- Reach for a tag to express a coupling auto-pooling **cannot see** — a cross-scope sibling, or an
+  unscoped lockstep pair. For a coupling inside one npm scope, auto-pooling already has it, and a tag can
+  only narrow what it covers.
+
 #### Unscoped lockstep families (react/react-dom)
 
 Auto-pooling groups by npm scope, so it only ever matches `@scope/…` names. A lockstep pair with no
