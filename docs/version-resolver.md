@@ -1108,8 +1108,8 @@ is the whole of the +17. `mfe11` ships the widest Angular set of any remote, ent
 build against a shared `22.0.8`, which makes it precisely the remote no other build can cover — so it
 serves its own family, and what it used to take from the shared set it now downloads. `mfe9`, which the
 same change moved off the shared set, costs **nothing**: it dedups onto `mfe11`'s build, whose files the
-page is already loading. Two remotes holding 38 of the 89 downloads do not move at all, being gate-1
-islands on the previous major already.
+page is already loading. The two gate-1 islands on the previous major do not move at all — 20 and 18
+`@angular/*` specifiers from their own builds, before and after.
 
 Two properties make that residue defensible, both re-measured above rather than modelled. The count of
 specifiers existing at **two or more versions** is unchanged — 9 at eleven, 6 at seven — so the promise
