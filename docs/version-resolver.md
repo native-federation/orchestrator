@@ -821,6 +821,31 @@ tags are compared for **identity against the consumer's own**, never for distanc
 a corner case: on the seven-remote production capture one remote runs two origins and is perfectly
 witnessed, and the widening is what brings that capture's cost to zero.
 
+**Why the witness is sound: at equal versions, provider identity is irrelevant.** `@framework/core@22.0.5`
+from one remote and `@framework/core@22.0.5` from another are the same published artefact, so *which*
+remote's copy is elected as the shared one cannot change what any remote runs. That is what licences the
+second branch of the criterion, and it is a rule about versions rather than about builds — the reason it
+does not need a build to witness it is that there is nothing for a build to disagree about. (Two copies of
+one version can still carry different **entrypoint** subsets. That is a separate question, already handled
+where it arises: basis precedence ranks candidates by how many entrypoints they carry, and the witness
+never *moves* a basis — it only declines to force a move — so it adds no exposure of its own.)
+
+**The witness is all-or-nothing across the family.** It is *not* a per-member test, and reading it as one
+reintroduces the very defect: a remote taking one member at its own tag while another comes from a foreign
+build at a different tag runs a combination nothing compiled. A remote is witnessed only when **every**
+member it consumes is published at exactly the tag it ships itself — then everything it runs matches its
+own build, and its own build really is the witness. Fail on one member and the whole family must come from
+a single covering build instead, or from its own.
+
+**A range-accepted `skip` does not survive the gate.** The resolver marks a remote `skip` on a member
+whenever its declared range accepts the shared version, and pooling's job is precisely to decide whether
+the remote may *take* that dedup. Where no build shipped the resulting combination, it may not — the whole
+premise of this chapter is that declared ranges under-state real coupling (Angular publishes `^22.0.0`
+while `router@22.1.0` needs `core@22.1.0`), so "the range accepts it" is the signal that cannot be trusted.
+Were a range-accepted `skip` left to stand, the promise would be conditional on exactly the metadata it
+exists to compensate for, and the disjoint-provider, host-half-serves and lockstep-pair cases would all
+pass again.
+
 **Why it is not what gates 1 and 2 deliver.** The opening of this chapter argues safety from provenance —
 "those files were compiled and tested together". Gate 2 does not test provenance; it tests whether two
 tags sit on the same minor line, which is version arithmetic over a convention each vendor chooses for
@@ -881,6 +906,17 @@ Under the promise none of those depend on version distance: the rule reads **cov
   need is an **explicit exemption in the same-tag witness**: measured, the witness happily rewrites the
   host's own `@framework/core` to another remote's build of the same tag. Version-safe, but the host is
   never reassigned, so the witness has to skip it.
+
+  **The consumer gives way, never the host** — confirmed as a hard rule 2026-08-03. Host precedence is
+  absolute on the *version*: the host ships `core@22.0.5`, so the shared `core` is `22.0.5`, and no
+  coverage question can move it. It does **not** follow that a remote shipping `core@22.1.0` beside
+  `router@22.1.0` must accept that copy. It may not: taking the host's `22.0.5` beside its own
+  `router@22.1.0` is a combination no build shipped, and `router@22.1.0` is precisely the package whose
+  real requirement is `core@22.1.0`. Such a remote **islands** — it serves its own family and pays the
+  extra download, while the host keeps its pin untouched. So absolute host priority and family coherence
+  are not in tension: coherence costs the mixing remote a dedup, never the host its version. This is the
+  shape of the "host half-serves the family" case among the reproductions, and it is a defect precisely
+  because the shipped gate lets the consumer tear instead of islanding.
 - **Auto-pooling is per remote, and a `pool` tag replaces it rather than adding to it** — decided and
   **landed** 2026-08-03; described as shipped under "Enabling pooling" above. The auto-scope edge used to
   be a single global node per npm scope, so `@framework/*` pooled by name alone whether or not any remote
