@@ -1120,6 +1120,19 @@ all-or-nothing rather than by any version disagreement. That is the price of the
 must serve one member itself serves the whole family itself — and it is what makes the witness worth trying
 first.
 
+**One slice of that residue is recoverable and was deliberately left.** Those same-version copies could keep
+deduping without weakening the promise: if every specifier a remote runs ends at the tag *its own* build
+shipped, the set is one its own build compiled, whoever serves each file — the witness's own argument, applied
+to a remote that self-serves only the members where it actually differs. The gate does not reach it because
+the witness is asked once, of the map as it stands, before any self-serve has moved a member; a remote whose
+only mismatch is a member it is about to serve itself anyway is never re-asked. On a synthetic five-remote
+lockstep shape (`{core, material}`, `{core, cdk@22.1.0}`, `{material, cdk@22.0.5}` plus two more consumers of
+the 22.1.0 cdk) it is one download of five: the third remote must serve its own `cdk`, and all-or-nothing then
+makes it download its own `material@22.0.5` beside the shared copy of that same tag. On the eleven-remote
+portfolio it is bounded above by the three same-version-two-origin copies in the table, so at most 3 of 89.
+Not taken because it adds a second fixed point to a gate whose termination argument is currently one line,
+while the residue it addresses is a fraction of one remote that no refinement can cover.
+
 The `mfe11` residue is the one place where a cheaper answer exists and was rejected: a *same-minor* witness
 instead of a same-tag one would recover it. That is exactly the version-distance reasoning this section
 removes, and the authoring rule above already tells owners that pooling does not enforce coupling inside a
