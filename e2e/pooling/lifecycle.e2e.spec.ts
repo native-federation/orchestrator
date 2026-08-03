@@ -226,7 +226,7 @@ test.describe('lifecycle: the dynamic path', () => {
     expect(delta.imports['@angular/forms']).toBeUndefined();
     expect(await nf.warns()).toContainEqual(
       expect.stringContaining(
-        "'team/mfe4' serves its own family: no committed build offers every entrypoint it imports at a version it accepts — '@angular/forms' is the gap, closest is 'team/mfe1'. All 2 pooled members are scoped for it."
+        "'team/mfe4' serves its own family: no committed build offers every entrypoint it imports at a version it accepts — '@angular/forms' is the gap, closest is 'team/mfe1'. All 2 members it imports are scoped for it."
       )
     );
     expect((await nf.load('team/mfe4')).seen).toEqual({

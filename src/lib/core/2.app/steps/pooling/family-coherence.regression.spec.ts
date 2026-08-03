@@ -20,12 +20,14 @@ import { createGenerateImportMap } from '../generate-import-map';
  * — `@angular/core` from one remote, `@angular/router` from another — and the remote consuming both ran
  * a mismatched framework family.
  *
- * The agreement gate closes it: a remote may draw on several builds (patch drift inside a family is
- * normal) but not on builds that disagree, i.e. that place a member they both ship on a different minor
- * line. Such a remote serves its whole family from its own build instead.
+ * The coverage rule closes it, and reads no tag distance at all: a remote may dedup only onto a build
+ * that offers **every** entrypoint it imports, at versions its own `requiredVersion` accepts — or, the
+ * witness, when the map already serves all of them at exactly the tags some build shipped together.
+ * Failing both it serves its whole family from its own build.
  *
- * The four things this file locks, in order: the two #63 repro cases are fixed; benign patch drift is
- * *tolerated*, not unified; a previous-major member leaves the shared set when its only provider is
+ * The five things this file locks, in order: the two #63 repro cases are fixed, the second of them with
+ * the host keeping its pin; patch drift across two builds is islanded, where the agreement gate this
+ * replaced tolerated it as benign; a previous-major member leaves the shared set when its only provider is
  * islanded; and a clean subset consumer of an asymmetric family is never islanded.
  */
 describe('pooling: family coherence', () => {

@@ -1,4 +1,4 @@
-import { test, expect, type Federation } from '../harness/federation';
+import { test, expect, type Federation, type Loaded } from '../harness/federation';
 import { fixture, CAPTURED_SEVEN, type FixtureName } from '../harness/portfolio';
 import {
   angularLinesPerRemote,
@@ -38,6 +38,18 @@ const run = (nf: Federation, names: FixtureName[], opts: { namespace?: string } 
 const sharedTags = (nf: Federation, namespace = 'capture') => sharedTagsIn(nf, namespace);
 const angularTags = (nf: Federation, namespace = 'capture') => angularTagsIn(nf, namespace);
 const splitPackages = (nf: Federation, namespace = 'capture') => splitPackagesIn(nf, namespace);
+
+/**
+ * Which origins served a remote's `@angular/*` imports. Scoped to that pool deliberately: `rxjs` and
+ * `tslib` are unscoped names in pools of their own, and a remote serving its own Angular family goes on
+ * deduping them.
+ */
+const angularOrigins = (loaded: Loaded) =>
+  new Set(
+    Object.entries(loaded.seen)
+      .filter(([specifier]) => specifier.startsWith('@angular/'))
+      .map(([, id]) => id.split('|')[0])
+  );
 
 test.describe('capture: the captured seven', () => {
   test('serves the whole Angular family from one major, on two patch tags', async ({ nf }) => {
@@ -159,51 +171,73 @@ test.describe('capture: one more previous-major remote joins', () => {
 });
 
 test.describe('capture: the synthetic siblings', () => {
-  test('keeps a consistent older superset remote fully deduped', async ({ nf }) => {
+  test('self-serves the superset remote no build can cover', async ({ nf }) => {
+    // **Rewritten for the provenance promise** (#63); it read `keeps a consistent older superset remote
+    // fully deduped`, and this is the largest single cost the promise carries on a recorded portfolio.
+    //
     // `mfe11` ships the widest Angular set of any remote, entirely from one 22.0.6 build, with loose
-    // `^22.0.0` ranges. It can take the shared 22.0.8/22.0.6 build wholesale, so it must not island —
-    // a family deduping down to one older-but-consistent build is exactly what sharing is for.
+    // `^22.0.0` ranges — so the old promise deduped it wholesale, at 46 downloads. It kept two things of
+    // its own: `@angular/material`, which it solely provides, and `@angular/platform-browser`'s
+    // `/animations` entrypoints, which the elected 22.0.8 build does not declare and which were therefore
+    // self-filled from mfe11's own build. That second one is the tear constraint 2 exists for: one package
+    // resolving from two builds, tolerated because both sat on the 22.0 line.
+    //
+    // Being the widest set makes mfe11 exactly the remote nothing can cover, so it serves its whole family
+    // and no package straddles two builds any more. **Delta: +18 downloads** (46 → 64). The shared set is
+    // untouched — mfe11 was never its basis for anything but the entrypoints it alone carries.
     await run(nf, [...CAPTURED_SEVEN, 'mfe11']);
 
-    expect(await nf.islands()).toEqual(['team/mfe1 on @angular/common@21.2.18']);
+    expect(await nf.islands()).toEqual([
+      'team/mfe1 on @angular/common@21.2.18',
+      'team/mfe11 self-serves, no build covers @angular/material',
+    ]);
     expect(await splitPackages(nf)).toEqual({});
 
-    // What it keeps of its own build is only what nobody else can serve, and it stays on one line.
+    // Its whole family from its own build, on one line — where it used to be one member and two
+    // entrypoints of its own beside nine deduped ones.
     const loaded = await nf.loadAll();
     expect(angularLinesPerRemote(loaded)['team/mfe11']).toEqual(['22.0']);
-    expect(
-      [
-        ...new Set(Object.values(loaded['team/mfe11']!.seen).filter(id => id.startsWith('mfe11|'))),
-      ].sort()
-    ).toEqual([
-      // material, which mfe11 solely provides...
-      'mfe11|@angular/material@22.0.6',
-      // ...and platform-browser's `/animations` entrypoints. The elected platform-browser build is
-      // mfe2's 22.0.8, which declares only the root entrypoint, so the two it does not
-      // cover are self-filled from mfe11 — see `entrypoints.e2e.spec.ts`. That splits
-      // one package across two builds, which is tolerable here for the same reason patch drift between
-      // members is: both sit on the 22.0 line.
-      'mfe11|@angular/platform-browser@22.0.6',
-    ]);
+    expect(angularOrigins(loaded['team/mfe11']!)).toEqual(new Set(['mfe11']));
 
     const map = await nf.map();
+    // The seven's shared platform-browser is unchanged, and its `/animations` entrypoints leave the global
+    // map with mfe11: the only build that carried them is now serving only itself.
     expect(map.imports['@angular/platform-browser']).toBe(
       'http://mfe2/_angular_platform_browser.djzJcPG8PR.js'
     );
-    expect(map.imports['@angular/platform-browser/animations']).toContain('http://mfe11/');
+    expect(map.imports['@angular/platform-browser/animations']).toBeUndefined();
+    expect(map.scopes?.['http://mfe11/']?.['@angular/platform-browser/animations']).toContain(
+      'http://mfe11/'
+    );
   });
 
-  test('keeps a strictly pinned remote deduped when the pin actually fits', async ({ nf }) => {
-    // `mfe9` declares `~22.0.5` and ships no router at all, which looks like the split-family
-    // trigger — but `~22.0.5` accepts every 22.0.x from 22.0.5 up, so the shared 22.0.6/22.0.8 build
-    // satisfies it and the builds it draws on sit on one minor line. It dedups, and the portfolio is
-    // byte-identical to the captured seven. The trigger needs a *minor* gap, not a strict pin.
+  test('islands a strictly pinned remote on the entrypoint no build carries', async ({ nf }) => {
+    // **Rewritten for the provenance promise** (#63); it read `keeps a strictly pinned remote deduped when
+    // the pin actually fits`, and it passed while `mfe9` was in fact being handed a split family — the
+    // old rule could not see a coverage self-serve at all.
+    //
+    // The pin still fits, and that half of the argument stands: `~22.0.5` accepts every 22.0.x from 22.0.5
+    // up, so the shared 22.0.6/22.0.8 build satisfies every version mfe9 requires. What decides is
+    // coverage, not the range: no build in the portfolio carries
+    // `@angular/platform-browser/animations`, so the shared set would have handed mfe9 that entrypoint
+    // off its own 22.0.5 build beside a deduped 22.0.8 core. It serves its own family instead.
+    // **Delta: +12 downloads** (46 → 58), and the trigger is an entrypoint gap rather than a minor gap.
     await run(nf, [...CAPTURED_SEVEN, 'mfe9'], { namespace: 'pin' });
     const withPin = await sharedTags(nf, 'pin');
-    expect(await nf.islands()).toEqual(['team/mfe1 on @angular/common@21.2.18']);
+    expect(await nf.islands()).toEqual([
+      'team/mfe1 on @angular/common@21.2.18',
+      'team/mfe9 self-serves, no build covers @angular/platform-browser/animations',
+    ]);
+
+    // Its own build throughout, one line, and every specifier it imports scoped to it.
+    const loaded = await nf.loadAll();
+    expect(angularLinesPerRemote(loaded)['team/mfe9']).toEqual(['22.0']);
+    expect(angularOrigins(loaded['team/mfe9']!)).toEqual(new Set(['mfe9']));
 
     await run(nf, CAPTURED_SEVEN, { namespace: 'base' });
 
+    // The claim the test was written for survives verbatim: mfe9 changes nothing about what the other
+    // seven share. It pays for its own coherence alone.
     expect(withPin).toEqual(await sharedTags(nf, 'base'));
   });
 

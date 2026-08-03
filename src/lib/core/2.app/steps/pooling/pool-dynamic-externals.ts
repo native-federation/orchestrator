@@ -98,7 +98,7 @@ export function createPoolDynamicExternals(
             : 'no committed build serves any of it';
           config.log.warn(
             8,
-            `[${shareScope}] '${entry.name}' serves its own family: no committed build offers every entrypoint it imports at a version it accepts — '${reason.gap}' is the gap, ${closest}. All ${members.length} pooled members are scoped for it.`
+            `[${shareScope}] '${entry.name}' serves its own family: no committed build offers every entrypoint it imports at a version it accepts — '${reason.gap}' is the gap, ${closest}. All ${members.length} members it imports are scoped for it.`
           );
           members.forEach(scope);
           continue;

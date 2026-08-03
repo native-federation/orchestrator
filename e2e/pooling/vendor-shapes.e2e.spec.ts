@@ -63,8 +63,8 @@ const splitFamily = () => [
 ];
 
 /**
- * A ragged family nothing islands: three remotes on three patch tags of one minor line, each the sole
- * provider of one member.
+ * A ragged family: three remotes on three patch tags of one minor line, each the sole provider of one
+ * member. Under the provenance promise two of the three self-serve — see the test below.
  */
 const raggedFamily = () => [
   remote('team/mfe1', SCOPE.mfe1, [
@@ -146,23 +146,46 @@ test.describe('shapes: the same verdict, whatever the build emitted', () => {
       expect(nf.downloads()).toHaveLength(4);
     });
 
-    test(`shares a ragged family the same way — ${shapeName(s)}`, async ({ nf }) => {
+    test(`splits a ragged family the same way — ${shapeName(s)}`, async ({ nf }) => {
+      // **Rewritten for the provenance promise** (#63); it read `shares a ragged family the same way`,
+      // asserting no islands, no scopes and 4 downloads, with mfe1 running mfe3's 22.0.7 core beside its
+      // own 22.0.5 only-1. That pair no build shipped, so mfe1 and mfe2 now serve their own families and
+      // only mfe3 — whose own tags are the ones the shared set already publishes — keeps deduping.
+      // **Delta: +2 downloads** (4 → 6). The claim under test is unchanged: whatever the verdict, all four
+      // shapes reach it identically. `asymmetric.e2e.spec.ts` owns the rule itself.
       await nf.init(raggedFamily().map(entry => shape(entry, s)));
 
-      expect(await nf.islands()).toEqual([]);
+      expect(await nf.islands()).toEqual([
+        'team/mfe1 self-serves, no build covers @angular/only-1',
+        'team/mfe2 self-serves, no build covers @angular/only-2',
+      ]);
+
       const map = await nf.map();
-      expect(map.scopes).toBeUndefined();
       expect(map.imports['@angular/core']).toBe('http://mfe3/@angular/core.js');
-      expect(map.imports['@angular/only-1']).toBe('http://mfe1/@angular/only-1.js');
-      expect(map.imports['@angular/only-2']).toBe('http://mfe2/@angular/only-2.js');
       expect(map.imports['@angular/only-3']).toBe('http://mfe3/@angular/only-3.js');
+      expect(map.imports['@angular/only-1']).toBeUndefined();
+      expect(map.imports['@angular/only-2']).toBeUndefined();
+      expect(map.scopes).toEqual({
+        [SCOPE.mfe1]: {
+          '@angular/core': 'http://mfe1/@angular/core.js',
+          '@angular/only-1': 'http://mfe1/@angular/only-1.js',
+        },
+        [SCOPE.mfe2]: {
+          '@angular/core': 'http://mfe2/@angular/core.js',
+          '@angular/only-2': 'http://mfe2/@angular/only-2.js',
+        },
+      });
 
       const loaded = await nf.loadAll();
       expect(builds(loaded['team/mfe1']!)).toEqual({
-        '@angular/core': 'mfe3@22.0.7',
+        '@angular/core': 'mfe1@22.0.5',
         '@angular/only-1': 'mfe1@22.0.5',
       });
-      expect(nf.downloads()).toHaveLength(4);
+      expect(builds(loaded['team/mfe3']!)).toEqual({
+        '@angular/core': 'mfe3@22.0.7',
+        '@angular/only-3': 'mfe3@22.0.7',
+      });
+      expect(nf.downloads()).toHaveLength(6);
     });
   }
 });

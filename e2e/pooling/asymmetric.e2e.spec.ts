@@ -59,10 +59,16 @@ test.describe('asymmetric: containment and ragged coverage', () => {
     expect(await nf.islands()).toEqual([]);
   });
 
-  test('tolerates patch drift when each remote solely provides a member', async ({ nf }) => {
+  test('self-serves the sole provider whose own tag lost the election', async ({ nf }) => {
+    // **Rewritten for the provenance promise** (#63); it read `tolerates patch drift when each remote
+    // solely provides a member`.
+    //
     // Both remotes declare ~21.2.0 and sit one patch apart, and each solely provides one member. core is a
-    // tie the newest tag wins, so mfe2 draws core from mfe1 (21.2.3) and forms from itself (21.2.2): two
-    // builds on the same minor line, so they agree and nobody is islanded.
+    // tie the newest tag wins. What the old promise allowed: mfe2 drew core from mfe1 (21.2.3) and ran it
+    // beside its own forms (21.2.2) — two builds on one minor line, so they were held to agree, nothing
+    // was scoped and the family cost 3 downloads. What the new promise requires: no build ever shipped
+    // core@21.2.3 beside forms@21.2.2, so mfe2 takes its whole family from its own build.
+    // **Delta: +1 download** (3 → 4), and mfe2's forms leaves the shared set with it.
     await nf.init([
       remote('team/mfe1', SCOPE.mfe1, [
         dep('@angular/core', '21.2.3', { req: '~21.2.0' }),
@@ -74,30 +80,50 @@ test.describe('asymmetric: containment and ragged coverage', () => {
       ]),
     ]);
 
+    expect(await nf.islands()).toEqual(['team/mfe2 self-serves, no build covers @angular/forms']);
+
     const map = await nf.map();
     expect(map.imports['@angular/core']).toBe('http://mfe1/@angular/core.js');
     expect(map.imports['@angular/router']).toBe('http://mfe1/@angular/router.js');
-    expect(map.imports['@angular/forms']).toBe('http://mfe2/@angular/forms.js');
-
-    // Nothing scoped at all, so the map carries no `scopes` key, and the family costs 3 downloads.
-    expect(map.scopes).toBeUndefined();
-    await nf.loadAll();
-    expect(nf.downloads()).toHaveLength(3);
-
-    // What "tolerated, not repaired" means concretely: mfe2's code runs 21.2.3 core beside its own 21.2.2
-    // forms.
-    expect((await nf.loadAll())['team/mfe2']!.seen).toEqual({
-      '@angular/core': 'mfe1|@angular/core@21.2.3',
-      '@angular/forms': 'mfe2|@angular/forms@21.2.2',
+    // forms had mfe2 as its only provider, and mfe2 now runs its own copy: nothing is left to publish
+    // globally, so the member leaves the shared set rather than being served off a build that lost.
+    expect(map.imports['@angular/forms']).toBeUndefined();
+    expect(map.scopes?.[SCOPE.mfe2]).toEqual({
+      '@angular/core': 'http://mfe2/@angular/core.js',
+      '@angular/forms': 'http://mfe2/@angular/forms.js',
     });
 
-    expect(await nf.warns()).toEqual([]);
+    // The report names forms, not core: the gap is what the closest build fell short on, and mfe1 does
+    // not carry forms at all. Two members, not the pool's three — mfe2 ships no router.
+    expect(await nf.warns()).toEqual([
+      expect.stringContaining(
+        "'team/mfe2' serves its own family: no shared build offers every entrypoint it imports at a version it accepts — '@angular/forms' is the gap, closest is 'team/mfe1'. All 2 members it imports are scoped for it."
+      ),
+    ]);
+
+    const loaded = await nf.loadAll();
+    expect(loaded['team/mfe2']!.seen).toEqual({
+      '@angular/core': 'mfe2|@angular/core@21.2.2',
+      '@angular/forms': 'mfe2|@angular/forms@21.2.2',
+    });
+    // mfe1 is untouched — it wins both its members and pays nothing for mfe2's coherence.
+    expect(loaded['team/mfe1']!.seen).toEqual({
+      '@angular/core': 'mfe1|@angular/core@21.2.3',
+      '@angular/router': 'mfe1|@angular/router@21.2.3',
+    });
+    expect(nf.downloads()).toHaveLength(4);
   });
 
-  test('islands nobody on ragged coverage with patch drift', async ({ nf }) => {
-    // The regime exact-tag agreement broke: every remote is the sole provider of one member, and the
-    // family carries three patch tags. Exact-tag agreement islanded two thirds of remotes here; minor-line
-    // agreement islands nobody and the family costs one download per member.
+  test('self-serves every sole provider but the one whose build won', async ({ nf }) => {
+    // **Rewritten for the provenance promise** (#63); it read `islands nobody on ragged coverage with
+    // patch drift`.
+    //
+    // Every remote is the sole provider of one member and the family carries three patch tags. The old
+    // promise read minor-line agreement and islanded nobody, at one download per member — mfe1 running
+    // 22.0.7 core beside its own 22.0.5 only-1, a pair nothing compiled. Under the new promise only mfe3
+    // keeps deduping, because the shared set already serves both members it imports at exactly its own
+    // tags: its own build is the witness. mfe1 and mfe2 each self-serve.
+    // **Delta: +2 downloads** (4 → 6), one per remote that lost the core election.
     await nf.init([
       remote('team/mfe1', SCOPE.mfe1, [
         dep('@angular/core', '22.0.5', { req: '^22.0.0' }),
@@ -113,16 +139,39 @@ test.describe('asymmetric: containment and ragged coverage', () => {
       ]),
     ]);
 
-    const map = await nf.map();
-    expect(map.scopes).toBeUndefined();
-    expect(await nf.islands()).toEqual([]);
-    expect(map.imports['@angular/core']).toBe('http://mfe3/@angular/core.js');
-    expect(map.imports['@angular/only-1']).toBe('http://mfe1/@angular/only-1.js');
-    expect(map.imports['@angular/only-2']).toBe('http://mfe2/@angular/only-2.js');
-    expect(map.imports['@angular/only-3']).toBe('http://mfe3/@angular/only-3.js');
+    expect(await nf.islands()).toEqual([
+      'team/mfe1 self-serves, no build covers @angular/only-1',
+      'team/mfe2 self-serves, no build covers @angular/only-2',
+    ]);
 
-    await nf.loadAll();
-    expect(nf.downloads()).toHaveLength(4);
+    const map = await nf.map();
+    expect(map.imports['@angular/core']).toBe('http://mfe3/@angular/core.js');
+    expect(map.imports['@angular/only-3']).toBe('http://mfe3/@angular/only-3.js');
+    // Their sole-provided members go with them; only the winning build's pair stays global.
+    expect(map.imports['@angular/only-1']).toBeUndefined();
+    expect(map.imports['@angular/only-2']).toBeUndefined();
+    expect(map.scopes).toEqual({
+      [SCOPE.mfe1]: {
+        '@angular/core': 'http://mfe1/@angular/core.js',
+        '@angular/only-1': 'http://mfe1/@angular/only-1.js',
+      },
+      [SCOPE.mfe2]: {
+        '@angular/core': 'http://mfe2/@angular/core.js',
+        '@angular/only-2': 'http://mfe2/@angular/only-2.js',
+      },
+    });
+
+    // Every remote now runs one build, its own or the winner's, and nothing straddles two.
+    const loaded = await nf.loadAll();
+    expect(loaded['team/mfe1']!.seen).toEqual({
+      '@angular/core': 'mfe1|@angular/core@22.0.5',
+      '@angular/only-1': 'mfe1|@angular/only-1@22.0.5',
+    });
+    expect(loaded['team/mfe3']!.seen).toEqual({
+      '@angular/core': 'mfe3|@angular/core@22.0.7',
+      '@angular/only-3': 'mfe3|@angular/only-3@22.0.7',
+    });
+    expect(nf.downloads()).toHaveLength(6);
   });
 
   test('lets disjoint builds of one pool agree vacuously', async ({ nf }) => {
@@ -198,7 +247,7 @@ test.describe('asymmetric: the split family', () => {
     // not restate that effect.
     expect(await nf.warns()).toEqual([
       expect.stringContaining(
-        "'team/mfe1' serves its own family: no shared build offers every entrypoint it imports at a version it accepts — '@angular/router' is the gap, closest is 'team/mfe2'. All 2 members of the pool are scoped for it."
+        "'team/mfe1' serves its own family: no shared build offers every entrypoint it imports at a version it accepts — '@angular/router' is the gap, closest is 'team/mfe2'. All 2 members it imports are scoped for it."
       ),
     ]);
   });

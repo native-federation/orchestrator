@@ -409,7 +409,8 @@ describe('createPoolSharedExternals', () => {
         .mock.calls.filter(c => String(c[1]).includes("'c' is islanded"));
       expect(warnings).toHaveLength(1);
       expect(warnings[0]![1]).toContain("'@framework/common@18' is incompatible");
-      expect(warnings[0]![1]).toContain('all 2 members of the pool are scoped');
+      // c declares both members of this pool, so what it imports and the pool coincide here.
+      expect(warnings[0]![1]).toContain('all 2 members it imports are scoped');
     });
 
     it('writes every member once it has islanded someone', async () => {

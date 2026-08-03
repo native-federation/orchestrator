@@ -7,11 +7,15 @@ import { dep, remote, SCOPE, HOST_NAME } from '../harness/portfolio';
  * one build can always cover the whole family for everybody — which isolates the version fields
  * (`version`, `requiredVersion`, `strictVersion`) and the election that reads them.
  *
- * The agreement gate asks one question of a remote's draw: do the builds it would draw on place a member
- * they both ship on the same **minor line**? Exact-tag agreement was measured and rejected — on ragged
- * portfolios it islanded 66–68% of remotes and cost 3–6× the downloads. Minor-line agreement islands
- * nothing on patch drift and still catches every real split. What it deliberately gives up is unifying
- * `21.2.2` with `21.2.3`: benign patch drift inside a family is tolerated, not repaired.
+ * That makes the coverage rule cheap here by construction: when every remote declares the same members,
+ * whichever build wins covers all of them, so nobody has to serve its own family and patch drift
+ * disappears into the election rather than being tolerated beside it — the losing tag is simply never
+ * downloaded. (Under the minor-line agreement gate this replaced, `21.2.2` and `21.2.3` were instead held
+ * to agree and a remote could genuinely run one member from each build; `asymmetric.e2e.spec.ts` is where
+ * that showed, because there no single build covers everybody.)
+ *
+ * One thing does still split a symmetric family: the host, whose tag wins outright whether or not any
+ * remote's build shipped it beside the rest of the family — see the host-precedence block below.
  *
  * Asymmetric member sets — subsets, sole providers, disjoint builds — are `asymmetric.e2e.spec.ts`.
  */
@@ -328,10 +332,19 @@ test.describe('symmetric: host precedence', () => {
     });
   });
 
-  test('keeps the host tag even when the host is the minority', async ({ nf }) => {
-    // Two remotes on 22.1.0 against one host on 22.0.5: the resolver would prefer the tag with the fewest
-    // extra copies, but host precedence short-circuits the objective entirely. Both remotes island; the
-    // host is never re-pointed.
+  test('keeps the host tag even when the host is the minority, on one build for both', async ({
+    nf,
+  }) => {
+    // **Rewritten for the provenance promise** (#63), and one of the few places it is *cheaper* than the
+    // rule it replaces. Two remotes on 22.1.0 against one host on 22.0.5: host precedence short-circuits
+    // the download objective entirely, so core stays on the host's tag and neither remote may take it
+    // beside a 22.1.0 router.
+    //
+    // What the old promise did: island both, each running its own core and router — 4 downloads. What the
+    // new one does: mfe1 serves its own family and mfe2, whose ranges accept 22.1.0, *dedups onto mfe1's
+    // build* rather than downloading a second copy of the same two files. Multi-anchor assignment is what
+    // makes that possible (constraint 3); a single-anchor rule has no build to offer mfe2 but the host's.
+    // **Delta: −2 downloads** (4 → 2), and nothing is islanded, so nothing is logged.
     await nf.init(
       [
         remote('team/mfe1', SCOPE.mfe1, [
@@ -346,16 +359,36 @@ test.describe('symmetric: host precedence', () => {
       { hostEntry: hostPin('22.0.5') }
     );
 
+    expect(await nf.islands()).toEqual([]);
+    expect(await nf.warns()).toEqual([]);
+
     const map = await nf.map();
     expect(map.imports['@angular/core']).toBe('http://host.service/@angular/core.js');
+    // Router's global mapping is already mfe1's file, so neither scope repeats it (Performance §9): the
+    // only thing either remote has to be told is where its core comes from.
+    expect(map.imports['@angular/router']).toBe('http://mfe1/@angular/router.js');
     expect(map.scopes?.[SCOPE.mfe1]).toEqual({
       '@angular/core': 'http://mfe1/@angular/core.js',
-      '@angular/router': 'http://mfe1/@angular/router.js',
     });
     expect(map.scopes?.[SCOPE.mfe2]).toEqual({
-      '@angular/core': 'http://mfe2/@angular/core.js',
-      '@angular/router': 'http://mfe2/@angular/router.js',
+      '@angular/core': 'http://mfe1/@angular/core.js',
     });
+
+    // Both remotes run mfe1's build, the host keeps its own, and the page holds two Angular copies.
+    const loaded = await nf.loadAll();
+    for (const name of ['team/mfe1', 'team/mfe2'])
+      expect(loaded[name]!.seen).toEqual({
+        '@angular/core': 'mfe1|@angular/core@22.1.0',
+        '@angular/router': 'mfe1|@angular/router@22.1.0',
+      });
+    expect(nf.downloads()).toEqual([
+      'http://mfe1/@angular/core.js',
+      'http://mfe1/@angular/router.js',
+    ]);
+
+    // Last, because resolving in the host's scope is what fetches the host's own copy: the pin stands and
+    // the host is never re-pointed at the majority build.
+    expect(await nf.resolve('@angular/core', SCOPE.host)).toBe('host.service|@angular/core@22.0.5');
   });
 });
 

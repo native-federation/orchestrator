@@ -184,10 +184,12 @@ export function createPoolSharedExternals(
     // cannot honour, a coverage self-serve is a family nothing shipped together. The second is the
     // promise's main cost and used to be invisible, because coverage moves a remote without a verdict.
     for (const [remote, cause] of islanded) {
+      // What scopes is what this remote has a copy of, which in a ragged pool is fewer than the pool.
+      const scoped = consumed.get(remote)?.length ?? 0;
       if (cause.kind === 'incompatible') {
         config.log.warn(
           3,
-          `[${scope}][pool:${poolName}] '${remote}' is islanded: '${cause.member}@${cause.tag}' is incompatible with the shared version, so all ${members.length} members of the pool are scoped for it.`
+          `[${scope}][pool:${poolName}] '${remote}' is islanded: '${cause.member}@${cause.tag}' is incompatible with the shared version, so all ${scoped} members it imports are scoped for it.`
         );
         continue;
       }
@@ -196,7 +198,7 @@ export function createPoolSharedExternals(
         : 'no other build in the pool serves any of it';
       config.log.warn(
         3,
-        `[${scope}][pool:${poolName}] '${remote}' serves its own family: no shared build offers every entrypoint it imports at a version it accepts — '${cause.gap}' is the gap, ${closest}. All ${members.length} members of the pool are scoped for it.`
+        `[${scope}][pool:${poolName}] '${remote}' serves its own family: no shared build offers every entrypoint it imports at a version it accepts — '${cause.gap}' is the gap, ${closest}. All ${scoped} members it imports are scoped for it.`
       );
     }
 

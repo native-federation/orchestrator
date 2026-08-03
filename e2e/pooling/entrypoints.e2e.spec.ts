@@ -106,8 +106,10 @@ test.describe('entrypoint coverage: electing the basis', () => {
       [`${M}/paginator`]: build(3),
     });
     expect(await nf.buildsOf(M)).toEqual([build(1), build(3)]);
-    // Drawing one package from two builds does not island mfe3: the disagreement gate compares
-    // *members of a family*, and a one-member pool has no member to disagree about.
+    // Drawing one package from two builds does not island mfe3, for two independent reasons: both builds
+    // ship the same tag, so the map serves mfe3 every specifier at exactly the version its own build
+    // shipped — the witness of the provenance promise — and a one-member pool has nothing to coordinate
+    // in any case. What the promise rules out is a *tag* mismatch across builds, not two origins of one.
     expect(await nf.islands()).toEqual([]);
   });
 });
