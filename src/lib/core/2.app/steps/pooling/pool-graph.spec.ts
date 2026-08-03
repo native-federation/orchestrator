@@ -24,12 +24,43 @@ const shape = (pools: Map<PoolName, PoolMember[]>): [PoolName, string[]][] =>
   [...pools.entries()].map(([name, members]) => [name, members.map(m => m.name)]);
 
 describe('buildPools', () => {
-  describe('auto-pooling (by npm scope, global)', () => {
-    it('groups scoped packages by scope without needing a shared member', () => {
+  describe('auto-pooling (by npm scope, per declaring remote)', () => {
+    // REWRITTEN. This used to assert the opposite — one global node per npm scope pooled `@ng/*`
+    // whether or not any remote shipped two of them. The auto-scope node is now per `(remote, scope)`,
+    // exactly as a tag node is per `(remote, tag)`, so a pool forms only when some remote declares
+    // members from both sides. Two remotes that share no member already satisfy the provenance
+    // promise — neither can run an incoherent pair — so pooling them bought nothing and cost the
+    // agreement gate a vacuous comparison it was unsound to treat as safe. See
+    // docs/version-resolver.md §"The provenance promise", the auto-pooling bullet.
+    it('does NOT pool one scope across remotes that share no member', () => {
       const pools = buildPools(
         scope({ '@ng/core': [{ remote: 'a' }], '@ng/common': [{ remote: 'b' }] }),
         true
       );
+      expect(pools.size).toBe(0);
+    });
+
+    it('pools a scope as soon as one remote declares two of its members', () => {
+      const pools = buildPools(
+        scope({ '@ng/core': [{ remote: 'a' }], '@ng/common': [{ remote: 'a' }] }),
+        true
+      );
+      expect(shape(pools)).toEqual([['@ng/common', ['@ng/common', '@ng/core']]]);
+    });
+
+    // The witness need not consume the whole pool: one remote bridging a pair is enough to pull in
+    // every other remote's copies of those members, which is what keeps a tag on one remote able to
+    // fix a portfolio it does not own.
+    it('pulls other remotes in through the member a witness shares with them', () => {
+      const pools = buildPools(
+        scope({
+          '@ng/core': [{ remote: 'a' }, { remote: 'b' }],
+          '@ng/common': [{ remote: 'b' }],
+          '@ng/forms': [{ remote: 'c' }],
+        }),
+        true
+      );
+      // b declares core+common, so those pool; c's forms is alone in its own scope node.
       expect(shape(pools)).toEqual([['@ng/common', ['@ng/common', '@ng/core']]]);
     });
 
@@ -82,9 +113,14 @@ describe('buildPools', () => {
     });
   });
 
-  describe('tag/scope interaction (strict — no merge by name)', () => {
-    it('joins a tag group into a scope pool only via a co-tagged bridge member', () => {
-      // core is auto-scoped AND co-tagged "ng"; that co-tag bridges @design/ui into the framework family.
+  describe('tag/scope interaction (a tag replaces auto-pooling for its remote)', () => {
+    // REWRITTEN. The bridge still works — the co-tag joins @design/ui to @ng/core — but @ng/common no
+    // longer comes with it. mfe1 tagged inside both scopes, so mfe1 contributes no auto edge for
+    // either, and mfe2's @ng/common sits on its own `(mfe2, ng)` node with no member shared with
+    // mfe1. That is the point of the rule: one tag on a design-system package must not drag every
+    // unrelated package of the scope in behind it, which is what made coverage scarce enough to
+    // double the self-serving population.
+    it('bridges a co-tagged member into the tag group without dragging in the whole scope', () => {
       const pools = buildPools(
         scope({
           '@ng/core': [{ remote: 'mfe1', pool: 'ng' }],
@@ -93,13 +129,30 @@ describe('buildPools', () => {
         }),
         true
       );
+      expect(shape(pools)).toEqual([['@design/ui', ['@design/ui', '@ng/core']]]);
+    });
+
+    // The scope still reaches the tag group when a remote genuinely witnesses the pair.
+    it('reaches the rest of the scope through a remote that declares both', () => {
+      const pools = buildPools(
+        scope({
+          '@ng/core': [{ remote: 'mfe1', pool: 'ng' }, { remote: 'mfe2' }],
+          '@ng/common': [{ remote: 'mfe2' }],
+          '@design/ui': [{ remote: 'mfe1', pool: 'ng' }],
+        }),
+        true
+      );
+      // mfe2 declares core+common untagged, so its auto edges hold the scope open and the co-tag
+      // still carries @design/ui in.
       expect(shape(pools)).toEqual([
         ['@design/ui', ['@design/ui', '@ng/common', '@ng/core']],
       ]);
     });
 
+    // REWRITTEN. Unchanged in its point — a tag never merges into a same-named scope by string — but
+    // @ng/core and @ng/common no longer pool with each other either, for the reason above: mfe1 and
+    // mfe2 share no member. @design/ui is still the tagged singleton that gets warned.
     it('does NOT merge a tag into a same-named scope without a bridge', () => {
-      // @design/ui tags "ng" but no framework member is co-tagged: the string match must not merge it.
       const log = createMockLogHandler('debug');
       const pools = buildPools(
         scope({
@@ -110,8 +163,46 @@ describe('buildPools', () => {
         true,
         log
       );
-      expect(shape(pools)).toEqual([['@ng/common', ['@ng/common', '@ng/core']]]);
+      expect(pools.size).toBe(0);
       expect(log.warn).toHaveBeenCalledOnce(); // @design/ui pooled with nothing
+    });
+  });
+
+  describe('secondary entrypoints follow their package', () => {
+    // An entrypoint contributes no edge of its own once its remote has tagged inside the scope, so
+    // without the package edge it would leave pooling entirely — measured as a torn @ng/core, with
+    // the capture looking cheaper only because the guarantee had shrunk.
+    it('keeps a flat entrypoint with its package when a tag suppresses the auto edge', () => {
+      const pools = buildPools(
+        scope({
+          '@ng/core': [{ remote: 'mfe1', pool: 'ng' }],
+          '@ng/core/primitives/di': [{ remote: 'mfe1' }],
+          '@design/ui': [{ remote: 'mfe1', pool: 'ng' }],
+        }),
+        true
+      );
+      expect(shape(pools)).toEqual([
+        ['@design/ui', ['@design/ui', '@ng/core', '@ng/core/primitives/di']],
+      ]);
+    });
+
+    // The package and its own entrypoints are a pool even across remotes: they are exactly the pair
+    // that tears when one remote's `@ng/forms` is served beside another's `@ng/forms/signals`.
+    it('pools an entrypoint with its package across remotes, unscoped names included', () => {
+      const pools = buildPools(
+        scope({ rxjs: [{ remote: 'mfe1' }], 'rxjs/operators': [{ remote: 'mfe2', pool: 'rx' }] }),
+        true
+      );
+      expect(shape(pools)).toEqual([['rxjs', ['rxjs', 'rxjs/operators']]]);
+    });
+
+    // Pooling stays inert: an entrypoint edge is not itself a reason to pool.
+    it('forms no pool from a package and its entrypoint when nothing joined', () => {
+      const pools = buildPools(
+        scope({ utils: [{ remote: 'a' }], 'utils/deep': [{ remote: 'a' }] }),
+        true
+      );
+      expect(pools.size).toBe(0);
     });
   });
 
@@ -132,13 +223,22 @@ describe('buildPools', () => {
   });
 
   describe('determinism', () => {
+    // REWRITTEN on shape, not on naming: the three members used to come from three different remotes,
+    // which forms no pool at all now. One remote declaring all three is the portfolio that still
+    // exercises what this test is about — the canonical name and the input-order stability.
     it('keys each pool by its smallest member and is stable across input order', () => {
-      const forward = buildPools(
-        scope({ '@ng/core': [{ remote: 'a' }], '@ng/common': [{ remote: 'b' }], '@ng/forms': [{ remote: 'c' }] }),
-        true
-      );
+      const members = {
+        '@ng/core': [{ remote: 'a' }],
+        '@ng/common': [{ remote: 'a' }],
+        '@ng/forms': [{ remote: 'a' }],
+      };
+      const forward = buildPools(scope(members), true);
       const shuffled = buildPools(
-        scope({ '@ng/forms': [{ remote: 'c' }], '@ng/core': [{ remote: 'a' }], '@ng/common': [{ remote: 'b' }] }),
+        scope({
+          '@ng/forms': members['@ng/forms'],
+          '@ng/core': members['@ng/core'],
+          '@ng/common': members['@ng/common'],
+        }),
         true
       );
       expect(shape(forward)).toEqual([['@ng/common', ['@ng/common', '@ng/core', '@ng/forms']]]);

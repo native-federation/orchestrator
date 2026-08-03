@@ -549,10 +549,13 @@ Pooling is opt-in and inert by default. An external joins a pool in one of two w
 
 - **Auto (by npm scope).** Set `useAutoExternalPooling: true` in the mode `feature` block. Scoped packages
   are grouped by their scope — `@framework/core`, `@framework/common` → pool `framework`. Unscoped
-  packages (`utils`, `tslib`) are never auto-pooled. The scope is derived from the package name, so
-  this grouping is global and cannot drift. (Global grouping is the part that changes under "The
-  provenance promise" below: an auto-pool becomes per remote, and a `pool` tag on any of its members
-  replaces it for that remote.)
+  packages (`utils`, `tslib`) are never auto-pooled. An auto-pool is **per remote**: the scope edge is
+  contributed by each remote that declares the external, so a pool forms only once some remote declares
+  members from both sides. Two remotes that share no member do not pool, and need not — neither is in a
+  position to run an incoherent pair. A remote that has **tagged** any member of a scope contributes no
+  auto edge for that scope at all, so one tag on a design-system package does not drag every unrelated
+  package of the same scope in behind it; the suppression is per `(remote, scope)`, so tagging inside
+  `@acme` leaves that remote's `@framework` auto-pool alone.
 - **Remote-declared tag.** A remote adds an optional `pool` field to a shared external in its
   `remoteEntry.json` (mirrors `shareScope`). A tag is **remote-local**: it groups only the externals
   that _one_ remote tags together. This is how a transitive coupling is expressed — auto-pooling groups
@@ -567,20 +570,28 @@ initFederation(manifest, {
 
 **Membership is by shared members, not by name.** Pool identity is not a string that remotes must
 agree on — it is the **connected component** of a graph. Each external is a node, joined by an edge to
-its npm scope (auto-pooling, global) and to each `(remote, tag)` that declares it (remote-local). Two
-remotes' groups merge only when they **share a member**, never because they chose the same tag string.
-Drift is therefore harmless: mfe-A calling a group `"angular"` and mfe-B calling it `"design-system"`
-still pool together when they overlap on one external, while two unrelated groups that happen to reuse
-a label stay separate.
+each `(remote, scope)` that declares it (auto-pooling) and to each `(remote, tag)` that declares it
+(explicit tags). **Every edge is remote-local**, so two remotes' groups merge only when they **share a
+member**, never because they chose the same tag string or happen to publish under one npm scope. Drift
+is therefore harmless: mfe-A calling a group `"angular"` and mfe-B calling it `"design-system"` still
+pool together when they overlap on one external, while two unrelated groups that happen to reuse a
+label stay separate.
+
+One edge is **not** remote-local: a secondary entrypoint is always joined to its package
+(`@framework/core/testing` → `@framework/core`), whoever declares either. A package and its entrypoints
+are one artefact, so they must not be separable — and they genuinely tear when they are, with one
+remote's `@framework/forms` served beside another's `@framework/forms/signals`. This edge is not itself
+a reason to pool: with pooling inert, a package and its entrypoints form no pool.
 
 Because a tag is remote-local, it does **not** merge with a same-named auto scope by string. To pull a
 cross-scope sibling into a family, co-tag a **bridge member**: tagging both `@design-system/ui` and
-`@framework/core` with the same label connects the tag group to `@framework/core`'s auto scope through
-the shared `@framework/core` node. (A coupling that no single remote witnesses — where no remote ships
-both members — cannot be expressed; this is rare and by design.) A member that carries an explicit tag
-yet pools with nothing is almost always a typo or a missing sibling, so it is logged; auto-scope
-singletons are normal and stay silent. Each pool is named by its smallest member, for stable,
-reload-safe logging.
+`@framework/core` with the same label joins them through the shared `@framework/core` node. Note that
+tagging suppresses that remote's auto edges for both scopes, so the rest of `@framework/*` comes along
+only through a remote that declares two of its members untagged. (A coupling that no single remote
+witnesses — where no remote ships both members — cannot be expressed; this is rare and by design.) A
+member that carries an explicit tag yet pools with nothing is almost always a typo or a missing sibling,
+so it is logged; auto-scope singletons are normal and stay silent. Each pool is named by its smallest
+member, for stable, reload-safe logging.
 
 ### How pooling resolves
 
@@ -851,23 +862,19 @@ Under the promise none of those depend on version distance: the rule reads **cov
   need is an **explicit exemption in the same-tag witness**: measured, the witness happily rewrites the
   host's own `@framework/core` to another remote's build of the same tag. Version-safe, but the host is
   never reassigned, so the witness has to skip it.
-- **Auto-pooling becomes per remote, and a `pool` tag replaces it rather than adding to it** — decided
-  2026-08-03. Today an external's auto-scope edge is a single global node per npm scope, so `@framework/*`
-  pools by name alone whether or not any remote ships two of its members; a tag edge, by contrast, is
-  per `(remote, label)` and merges only through a shared member. That asymmetry goes away. An auto-pool
-  becomes a **per-remote** collection of one npm scope's externals, so a pool forms exactly when some
-  remote declares members from both sides — which is this chapter's own argument that the consumer is the
-  witness, and it makes "two disjoint builds of one pool agree vacuously" true by construction instead of
-  by an argument the promise has just shown to be unsound. In addition, for a given remote an auto-pool is
-  **skipped entirely when any of its members carries a `pool` property**: one tag on
-  `@acme/design-system` then stops dragging `@acme/shell/*`, which nobody coupled to anything, into the
-  framework pool. The skip is per `(remote, scope)` — tagging inside `@acme` does not disturb that
-  remote's `@framework` auto-pool. **Entrypoints must follow their package** into whatever pool it joins,
-  or a flat remote that tags anything in a scope also drops the edge for `@framework/core/primitives/*`
-  and `@framework/common/http`, those leave pooling entirely, and a remote runs a torn `@framework/core`.
-  Consequence to accept deliberately: two remotes in one npm scope that **share no member stop forming a
-  pool at all**, which rewrites the paragraph under "Enabling pooling" above and the four `pool-graph`
-  specs that lock the global reading.
+- **Auto-pooling is per remote, and a `pool` tag replaces it rather than adding to it** — decided and
+  **landed** 2026-08-03; described as shipped under "Enabling pooling" above. The auto-scope edge used to
+  be a single global node per npm scope, so `@framework/*` pooled by name alone whether or not any remote
+  shipped two of its members, while a tag edge was already per `(remote, label)`. That asymmetry is gone,
+  which makes "two disjoint builds of one pool agree vacuously" true by construction rather than by an
+  argument the promise has just shown to be unsound. Consequences accepted deliberately: two remotes in
+  one npm scope that **share no member no longer pool at all**, and a tag suppresses its remote's auto
+  edges for that scope — which is what stops one tag on `@acme/design-system` dragging `@acme/shell/*`,
+  coupled to nothing, into the framework pool. Entrypoints follow their package so that suppression
+  cannot strand `@framework/core/primitives/*` or `@framework/common/http` outside pooling; measured
+  without it, a remote ran a torn `@framework/core` and the capture only looked cheaper because the
+  guarantee had shrunk. Measured effect on the hand-tagged production capture: no package is published at
+  two tags any more, where two were before.
 - **A member no anchor wins must stay shared with the remotes that are at its version.** Electing a build
   brings a second way to lose a winner, unrelated to the first: an anchor may contribute to the shared set
   only if it wins *every* member it ships, so a provider disqualified there takes its member out of the

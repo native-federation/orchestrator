@@ -38,6 +38,7 @@ export function createPoolDynamicExternals(
         name,
         scope: autoScope(name, useAutoExternalPooling),
         tags: tag ? [{ remote: entry.name, tag }] : [],
+        remotes: [entry.name],
         value: name,
       });
       byScope.set(shareScope, candidates);

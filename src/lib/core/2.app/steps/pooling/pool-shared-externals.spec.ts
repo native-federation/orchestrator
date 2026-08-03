@@ -569,11 +569,15 @@ describe('createPoolSharedExternals', () => {
 
     it('warns when sharing was lost without an island taking the provider', async () => {
       config.feature.useAutoExternalPooling = true;
-      // cdk is shared from b, which survives; d is islanded on core, and cdk ends up scope-only
-      // because determine had already scoped b's copy for its own reasons.
+      // d is islanded on core, and cdk ends up scope-only because determine had already scoped its
+      // only version. b declares both members, which is what forms the pool at all: auto-pooling is
+      // per remote now, so a scope with no remote shipping two of its members is not a pool and
+      // pooling would never look at this portfolio.
       givenExternals({
         '@framework/core': external([
-          sharedVersion('17', [meta('a', { req: '17' })], { action: 'share' }),
+          sharedVersion('17', [meta('a', { req: '17' }), meta('b', { req: '17' })], {
+            action: 'share',
+          }),
           sharedVersion('18', [meta('d', { req: '18', strict: true })], { action: 'scope' }),
         ]),
         '@framework/cdk': external([

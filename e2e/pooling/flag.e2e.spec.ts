@@ -288,21 +288,33 @@ test.describe('the flag: what it does not change', () => {
   test('leaves a hand-tagged portfolio with the gaps auto-pooling closes', async ({ nf }) => {
     // The argument for auto-pooling, on the production capture. Three of the seven remotes tag their
     // Angular packages `pool: ng-core`; the cross-major remote tags nothing. With auto-pooling off the
-    // family is therefore whatever those tags happen to cover — so the members only the cross-major
-    // remote provides stay outside it and stay globally shared at 21.2.18, beside a shared 22.0.8 half
-    // of the same packages.
+    // family is therefore whatever those tags happen to cover.
     //
-    // Partial tagging silently leaves gaps; grouping on the npm scope covers the family whether or not
-    // every team remembered to tag it.
+    // REWRITTEN for the per-remote auto-pool rule. This used to assert that partial tagging left
+    // `@angular/forms` and `@angular/platform-browser` each published at *two* tags. It no longer does,
+    // and the reason is the entrypoint rule: the tagging remotes tag every Angular external they
+    // declare, flat secondary entrypoints included, and an entrypoint now carries its package into
+    // whatever pool it joined. `@angular/forms/signals` therefore pulls `@angular/forms` in even though
+    // nobody tagged the package itself. A single package split across two tags is exactly the tear that
+    // rule exists to prevent, so closing it here is the rule working, not the argument weakening.
+    //
+    // What partial tagging still leaves is the gap below: the shared set straddles two majors, with
+    // four members published on the previous line beside the rest on the current one. Any consumer that
+    // binds a 21 member against a 22 one gets a mixed runtime, which is what auto-pooling closes.
     await nf.init(CAPTURED_SEVEN.map(fixture), { pooling: false, namespace: 'partial' });
 
-    expect(await splitPackages(nf, 'partial')).toEqual({
-      '@angular/forms': ['21.2.18', '22.0.8'],
-      '@angular/platform-browser': ['21.2.18', '22.0.8'],
-    });
-    expect(
-      new Set(Object.values(await angularTags(nf, 'partial')).map(tag => tag.split('.')[0]))
-    ).toEqual(new Set(['21', '22']));
+    expect(await splitPackages(nf, 'partial')).toEqual({});
+
+    const partialTags = await angularTags(nf, 'partial');
+    expect(new Set(Object.values(partialTags).map(tag => tag.split('.')[0]))).toEqual(
+      new Set(['21', '22'])
+    );
+    expect(Object.keys(partialTags).filter(name => partialTags[name]!.startsWith('21.'))).toEqual([
+      '@angular/animations',
+      '@angular/animations/browser',
+      '@angular/compiler',
+      '@angular/platform-browser-dynamic',
+    ]);
 
     // Where the damage is, precisely. On *this* portfolio every remote still resolves consistently: both
     // shared tags exist, but each remote declared the family itself, so each gets the tag its own range
@@ -317,12 +329,14 @@ test.describe('the flag: what it does not change', () => {
     // for one of them — host code, or a remote that does not declare the whole family — gets the mix.
     // The reachable version of that crash is the fourth test in the block above.
     //
-    // With auto-pooling on, the same portfolio publishes one major and nothing is split.
+    // With auto-pooling on, the same portfolio publishes one major: the four 21-line members leave the
+    // shared set with the islanded remote that solely provided them, rather than staying shareable
+    // beside a 22 family.
     await nf.init(CAPTURED_SEVEN.map(fixture), { namespace: 'auto' });
 
     expect(await splitPackages(nf, 'auto')).toEqual({});
-    expect(
-      new Set(Object.values(await angularTags(nf, 'auto')).map(tag => tag.split('.')[0]))
-    ).toEqual(new Set(['22']));
+    const autoTags = await angularTags(nf, 'auto');
+    expect(new Set(Object.values(autoTags).map(tag => tag.split('.')[0]))).toEqual(new Set(['22']));
+    expect(Object.keys(autoTags)).not.toContain('@angular/compiler');
   });
 });
