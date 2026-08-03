@@ -128,7 +128,7 @@ describe('pooling: family coherence', () => {
     expect(config.log.warn).toHaveBeenCalledWith(
       3,
       expect.stringContaining(
-        "'team/mfe-a' is islanded: no shared build provides '@angular/router' together with the rest of its family"
+        "'team/mfe-a' serves its own family: no shared build offers every entrypoint it imports at a version it accepts — '@angular/router' is the gap"
       )
     );
     expect(vi.mocked(config.log.warn).mock.calls).toHaveLength(1);
@@ -190,7 +190,7 @@ describe('pooling: family coherence', () => {
 
     expect(config.log.warn).toHaveBeenCalledWith(
       3,
-      expect.stringContaining("'team/mfe-a' is islanded")
+      expect.stringContaining("'team/mfe-a' serves its own family")
     );
   });
 

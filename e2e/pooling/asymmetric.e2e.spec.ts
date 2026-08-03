@@ -91,11 +91,6 @@ test.describe('asymmetric: containment and ragged coverage', () => {
       '@angular/forms': 'mfe2|@angular/forms@21.2.2',
     });
 
-    // Multi-build draws are the normal case for an asymmetric family, so they stay `debug`; `warn` is
-    // reserved for islands.
-    expect(await nf.debugs()).toContainEqual(
-      expect.stringContaining("'team/mfe2' draws from 2 agreeing builds")
-    );
     expect(await nf.warns()).toEqual([]);
   });
 
@@ -179,7 +174,7 @@ test.describe('asymmetric: the split family', () => {
     });
     // router had no second provider, so it leaves the shared set with mfe1's copy.
     expect(map.imports['@angular/router']).toBeUndefined();
-    expect(await nf.islands()).toEqual(['team/mfe1 mixes @angular/core 22.0.5 vs 22.1.0']);
+    expect(await nf.islands()).toEqual(['team/mfe1 self-serves, no build covers @angular/router']);
 
     // The fix, at runtime: neither remote runs a mixed family.
     const loaded = await nf.loadAll();
@@ -190,7 +185,7 @@ test.describe('asymmetric: the split family', () => {
     expect(loaded['team/mfe2']!.seen).toEqual({ '@angular/core': 'mfe2|@angular/core@22.0.5' });
   });
 
-  test('names the member and both tags in a single warning', async ({ nf }) => {
+  test('names the gap and the closest build in a single warning', async ({ nf }) => {
     await nf.init([
       remote('team/mfe1', SCOPE.mfe1, [
         dep('@angular/core', '22.1.0', { req: '^22.0.0' }),
@@ -203,7 +198,7 @@ test.describe('asymmetric: the split family', () => {
     // not restate that effect.
     expect(await nf.warns()).toEqual([
       expect.stringContaining(
-        "'team/mfe1' is islanded: the builds it draws on disagree on '@angular/core' (22.0.5 vs 22.1.0), so all 2 members of the pool are scoped for it."
+        "'team/mfe1' serves its own family: no shared build offers every entrypoint it imports at a version it accepts — '@angular/router' is the gap, closest is 'team/mfe2'. All 2 members of the pool are scoped for it."
       ),
     ]);
   });
@@ -227,7 +222,9 @@ test.describe('asymmetric: the split family', () => {
     ]);
 
     const map = await nf.map();
-    expect(await nf.islands()).toEqual(['team/mfe2 mixes @angular/core 21.2.18 vs 22.1.0']);
+    expect(await nf.islands()).toEqual([
+      'team/mfe2 self-serves, no build covers @angular/animations',
+    ]);
     expect(map.imports['@angular/animations']).toBeUndefined();
     expect(map.scopes?.[SCOPE.mfe2]).toEqual({
       '@angular/core': 'http://mfe2/@angular/core.js',
@@ -341,7 +338,7 @@ test.describe('asymmetric: the shared set stays coherent', () => {
     ]);
 
     expect(await nf.islands()).toEqual([
-      'team/mfe2 mixes @angular/core 22.0.8 vs 22.1.0',
+      'team/mfe2 self-serves, no build covers @angular/forms',
       'team/mfe3 on @angular/core@21.2.18',
     ]);
 

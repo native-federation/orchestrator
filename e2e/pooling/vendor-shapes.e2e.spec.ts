@@ -119,7 +119,9 @@ test.describe('shapes: the same verdict, whatever the build emitted', () => {
     test(`islands the same remote on a split family — ${shapeName(s)}`, async ({ nf }) => {
       await nf.init(splitFamily().map(entry => shape(entry, s)));
 
-      expect(await nf.islands()).toEqual(['team/mfe1 mixes @angular/core 22.0.5 vs 22.1.0']);
+      expect(await nf.islands()).toEqual([
+        'team/mfe1 self-serves, no build covers @angular/core/testing',
+      ]);
 
       const map = await nf.map();
       expect(map.imports['@angular/core']).toBe('http://mfe2/@angular/core.js');

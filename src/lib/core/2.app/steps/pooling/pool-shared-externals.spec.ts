@@ -455,7 +455,7 @@ describe('createPoolSharedExternals', () => {
       expect(config.log.warn).toHaveBeenCalledWith(
         3,
         expect.stringContaining(
-          "'b' is islanded: no shared build provides '@framework/cdk' together with the rest of its family"
+          "'b' serves its own family: no shared build offers every entrypoint it imports at a version it accepts — '@framework/cdk' is the gap"
         )
       );
     });
@@ -481,7 +481,47 @@ describe('createPoolSharedExternals', () => {
       const core = rebuiltFor('@framework/core')!;
       expect(namesOf(core, 'share')).toEqual(['a']);
       expect(namesOf(core, 'scope')).toEqual(['b']);
-      expect(config.log.warn).toHaveBeenCalledWith(3, expect.stringContaining("'b' is islanded"));
+      expect(config.log.warn).toHaveBeenCalledWith(
+        3,
+        expect.stringContaining("'b' serves its own family")
+      );
+    });
+
+    it('names the version a covering build offers when that is what the consumer refuses', async () => {
+      config.feature.useAutoExternalPooling = true;
+      // The other way a build fails the gate: b's build covers every entrypoint c imports, so the gap is
+      // not coverage at all — it is that c pins `~17.0.0` and b offers core@17.1.0. The warning has to say
+      // so, or the owner of the portfolio goes looking for a missing entrypoint that is not missing.
+      // b itself self-serves for the ordinary reason: only b ships `only-b`, so nothing covers it.
+      adapters.versionCheck.isCompatible = vi.fn(
+        (tag, range) => range !== '~17.0.0' || tag.startsWith('17.0.')
+      );
+      givenExternals({
+        '@framework/core': external([
+          sharedVersion(
+            '17.0.0',
+            [meta('a', { req: '^17.0.0' }), meta('c', { req: '~17.0.0' })],
+            { action: 'share' }
+          ),
+          sharedVersion('17.1.0', [meta('b', { req: '^17.0.0' })]),
+        ]),
+        '@framework/util': external([
+          sharedVersion('17.2.0', [meta('b', { req: '^17.0.0' })], { action: 'share' }),
+          sharedVersion('17.1.0', [meta('c', { req: '^17.0.0' })]),
+        ]),
+        '@framework/only-b': external([
+          sharedVersion('17.2.0', [meta('b', { req: '^17.0.0' })], { action: 'share' }),
+        ]),
+      });
+
+      await poolSharedExternals();
+
+      expect(config.log.warn).toHaveBeenCalledWith(
+        3,
+        expect.stringContaining(
+          "'c' serves its own family: no shared build offers every entrypoint it imports at a version it accepts — '@framework/core@17.1.0' is the gap, closest is 'b'."
+        )
+      );
     });
 
     it('islands a remote nothing covers, without dragging its co-consumers down with it', async () => {

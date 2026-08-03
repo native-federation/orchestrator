@@ -84,7 +84,11 @@ export type Federation = {
 
   warns: () => Promise<string[]>;
   debugs: () => Promise<string[]>;
-  /** `<remote> on <member>@<tag>` per incompatibility island, `<remote> mixes …` per disagreement. */
+  /**
+   * One entry per remote that ended up serving its whole family: `<remote> on <member>@<tag>` where a
+   * version was incompatible (gate 1), `<remote> self-serves, no build covers <gap>` where no build
+   * shipped the combination the shared set offered it (gate 2).
+   */
   islands: () => Promise<string[]>;
   /** Storage keys written during the last init — empty means the init decided nothing new. */
   writes: () => Promise<string[]>;
@@ -223,11 +227,8 @@ export const test = base.extend<{ nf: Federation }, Worker>({
           .map(msg => {
             const gate1 = /'([^']+)' is islanded: '([^']+)' is incompatible/.exec(msg);
             if (gate1) return `${gate1[1]} on ${gate1[2]}`;
-            const gate2 =
-              /'([^']+)' is islanded: the builds it draws on disagree on '([^']+)' \(([^)]+)\)/.exec(
-                msg
-              );
-            return gate2 ? `${gate2[1]} mixes ${gate2[2]} ${gate2[3]}` : undefined;
+            const gate2 = /'([^']+)' serves its own family: .* '([^']+)' is the gap/.exec(msg);
+            return gate2 ? `${gate2[1]} self-serves, no build covers ${gate2[2]}` : undefined;
           })
           .filter((entry): entry is string => entry !== undefined)
           .sort(),

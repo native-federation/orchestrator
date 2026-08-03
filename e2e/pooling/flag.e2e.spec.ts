@@ -57,7 +57,7 @@ test.describe('the flag: what switching it on changes', () => {
       '@angular/core': 'http://mfe1/@angular/core.js',
       '@angular/router': 'http://mfe1/@angular/router.js',
     });
-    expect(await nf.islands()).toEqual(['team/mfe1 mixes @angular/core 22.0.5 vs 22.1.0']);
+    expect(await nf.islands()).toEqual(['team/mfe1 self-serves, no build covers @angular/router']);
     expect((await nf.loadAll())['team/mfe1']!.seen).toEqual({
       '@angular/core': 'mfe1|@angular/core@22.1.0',
       '@angular/router': 'mfe1|@angular/router@22.1.0',
@@ -257,7 +257,7 @@ test.describe('the flag: what it does not change', () => {
       '@angular/core': 'http://mfe1/@angular/core.js',
       '@angular/router': 'http://mfe1/@angular/router.js',
     });
-    expect(await nf.islands()).toEqual(['team/mfe1 mixes @angular/core 22.0.5 vs 22.1.0']);
+    expect(await nf.islands()).toEqual(['team/mfe1 self-serves, no build covers @angular/router']);
   });
 
   test('decides entrypoint coverage the same way either way', async ({ nf }) => {

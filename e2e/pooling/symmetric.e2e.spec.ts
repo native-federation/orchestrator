@@ -318,7 +318,7 @@ test.describe('symmetric: host precedence', () => {
       '@angular/core': 'http://mfe1/@angular/core.js',
       '@angular/router': 'http://mfe1/@angular/router.js',
     });
-    expect(await nf.islands()).toEqual(['team/mfe1 mixes @angular/core 22.0.5 vs 22.1.0']);
+    expect(await nf.islands()).toEqual(['team/mfe1 self-serves, no build covers @angular/router']);
 
     // The host's own page code gets the host build; mfe1's code gets mfe1's, consistently.
     expect(await nf.resolve('@angular/core', SCOPE.host)).toBe('host.service|@angular/core@22.0.5');

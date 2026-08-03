@@ -74,10 +74,8 @@ test.describe('capture: the captured seven', () => {
     // Nothing else islands: several remotes legitimately draw from two or three builds that agree at
     // minor granularity, and those are left alone.
     expect(await nf.islands()).toEqual(['team/mfe1 on @angular/common@21.2.18']);
-    expect((await nf.warns()).filter(msg => msg.includes('disagree on'))).toEqual([]);
-    expect(
-      (await nf.debugs()).filter(msg => msg.includes('agreeing builds')).length
-    ).toBeGreaterThan(0);
+    // Nothing else self-serves either: every other remote is witnessed, so no coverage warning fires.
+    expect((await nf.warns()).filter(msg => msg.includes('serves its own family'))).toEqual([]);
   });
 
   test('gives every remote a runnable, single-line Angular family', async ({ nf }) => {

@@ -13,6 +13,7 @@ import type { LoggingConfig } from '../../config/log.contract';
 import type { ModeConfig } from '../../config/mode.contract';
 import { buildInstances, consumedMembers, servingBuilds } from './family-instance';
 import {
+  type Acceptance,
   acceptanceTable,
   arrivalOrder,
   assignAnchors,
@@ -25,13 +26,14 @@ import {
 } from './anchoring';
 import { buildPools } from './pool-graph';
 import { remotesInPool } from './pool.util';
-import type { PoolMember, PoolName } from './pool.types';
+import type { FamilyInstances, PoolMember, PoolName } from './pool.types';
 
 type IslandCause =
   // determine marked one of its versions `scope`: a genuine range violation.
   | { kind: 'incompatible'; member: ExternalName; tag: VersionName }
-  // no build in the pool serves everything it consumes, and its own tags are not witnessed either.
-  | { kind: 'uncovered'; member: ExternalName };
+  // No build in the pool serves everything it consumes at versions it accepts, and no build witnesses
+  // the combination the global mapping offers it either. `gap` is what the closest build fell short on.
+  | { kind: 'uncovered'; gap: string; closest?: RemoteName };
 
 /**
  * Per remote, the members it must be served from a build other than that member's own basis — an
@@ -136,7 +138,7 @@ export function createPoolSharedExternals(
 
     config.log.debug(
       3,
-      `[${scope}][pool:${poolName}] ${members.length} members across ${allRemotes.length} remotes, islanded={${[...islanded.keys()].join(', ') || '∅'}}\n` +
+      `[${scope}][pool:${poolName}] ${members.length} members across ${allRemotes.length} remotes, incompatible={${[...islanded.keys()].join(', ') || '∅'}}\n` +
         members.map(m => `  - ${m.name}`).join('\n')
     );
 
@@ -177,14 +179,23 @@ export function createPoolSharedExternals(
       throw new NFError(`Could not pool '${poolName}' in scope ${scope}.`);
     }
 
+    // Two different things, deliberately worded apart: an incompatibility is a version the portfolio
+    // cannot honour, a coverage self-serve is a family nothing shipped together. The second is the
+    // promise's main cost and used to be invisible, because coverage moves a remote without a verdict.
     for (const [remote, cause] of islanded) {
-      const why =
-        cause.kind === 'incompatible'
-          ? `'${cause.member}@${cause.tag}' is incompatible with the shared version`
-          : `no shared build provides '${cause.member}' together with the rest of its family`;
+      if (cause.kind === 'incompatible') {
+        config.log.warn(
+          3,
+          `[${scope}][pool:${poolName}] '${remote}' is islanded: '${cause.member}@${cause.tag}' is incompatible with the shared version, so all ${members.length} members of the pool are scoped for it.`
+        );
+        continue;
+      }
+      const closest = cause.closest
+        ? `closest is '${cause.closest}'`
+        : 'no other build in the pool serves any of it';
       config.log.warn(
         3,
-        `[${scope}][pool:${poolName}] '${remote}' is islanded: ${why}, so all ${members.length} members of the pool are scoped for it.`
+        `[${scope}][pool:${poolName}] '${remote}' serves its own family: no shared build offers every entrypoint it imports at a version it accepts — '${cause.gap}' is the gap, ${closest}. All ${members.length} members of the pool are scoped for it.`
       );
     }
 
@@ -266,10 +277,12 @@ export function createPoolSharedExternals(
 
       const coverage = coveragePerBuild(members, islanded);
       const hosts = hostRemotes(members);
+      const instances = buildInstances(members, islanded);
+      const acceptance = acceptanceTable(members, ports.versionCheck.isCompatible);
       const assignment = assignAnchors({
-        instances: buildInstances(members, islanded),
+        instances,
         coverage,
-        acceptance: acceptanceTable(members, ports.versionCheck.isCompatible),
+        acceptance,
         consumedSpecifiers: needSpecifiers,
         consumedMembers: needAnchor,
         hosts,
@@ -289,10 +302,14 @@ export function createPoolSharedExternals(
         const build = assigned ?? (anchors.has(remote) || hosts.has(remote) ? remote : undefined);
 
         if (build === undefined) {
-          islanded.set(remote, {
-            kind: 'uncovered',
-            member: firstUncovered(wants, coverage, remote),
-          });
+          islanded.set(
+            remote,
+            explainSelfServe(remote, wants, needSpecifiers.get(remote)!, {
+              coverage,
+              instances,
+              acceptance,
+            })
+          );
           scoped = true;
           continue;
         }
@@ -304,25 +321,66 @@ export function createPoolSharedExternals(
     }
   }
 
-  // Something to name in the warning: a member of the remote's family that no *other* build serves, so
-  // the reason no anchor covered it is concrete. Falls back to the first member it consumes when every
-  // one of them is available somewhere but never all from one build.
-  function firstUncovered(
+  /**
+   * Why no build could serve this remote, in the terms a portfolio owner can act on: the build that came
+   * closest, and the one thing it fell short on. Runs only for a remote that is actually self-serving, so
+   * it costs nothing on a healthy portfolio.
+   *
+   * "Closest" is fewest missing entrypoints; a build that misses none failed on versions instead, and the
+   * gap is then the member whose offered tag this remote's own range rejects.
+   */
+  function explainSelfServe(
+    remote: RemoteName,
     wants: readonly ExternalName[],
-    coverage: Map<RemoteName, Map<string, string>>,
-    remote: RemoteName
-  ): ExternalName {
-    for (const member of wants) {
-      let served = false;
-      for (const [build, specifiers] of coverage) {
-        if (build !== remote && specifiers.has(member)) {
-          served = true;
-          break;
-        }
-      }
-      if (!served) return member;
+    specifiers: Set<string>,
+    pool: {
+      coverage: Map<RemoteName, Map<string, string>>;
+      instances: FamilyInstances;
+      acceptance: Acceptance;
     }
-    return wants[0]!;
+  ): IslandCause {
+    let closest: RemoteName | undefined;
+    let fewest = Number.MAX_SAFE_INTEGER;
+    let gap: string = wants[0]!;
+
+    for (const [build, served] of pool.coverage) {
+      if (build === remote) continue;
+
+      let missing: string | undefined;
+      let count = 0;
+      for (const specifier of specifiers) {
+        if (served.has(specifier)) continue;
+        count++;
+        missing ??= specifier;
+      }
+      if (count >= fewest) continue;
+
+      fewest = count;
+      closest = build;
+      gap = missing ?? rejectedMember(build, remote, wants, pool) ?? wants[0]!;
+    }
+
+    return { kind: 'uncovered', gap, closest };
+  }
+
+  // The first member a covering build offers at a tag the consumer's own range rejects — the other way a
+  // build fails the gate once coverage is satisfied.
+  function rejectedMember(
+    build: RemoteName,
+    consumer: RemoteName,
+    wants: readonly ExternalName[],
+    pool: { instances: FamilyInstances; acceptance: Acceptance }
+  ): string | undefined {
+    const offered = pool.instances.get(build);
+    const accepts = pool.acceptance.get(consumer);
+    if (!offered || !accepts) return undefined;
+
+    for (const member of wants) {
+      const tag = offered.get(member);
+      if (tag === undefined) return member;
+      if (!accepts.get(member)?.has(tag)) return `${member}@${tag}`;
+    }
+    return undefined;
   }
 
   // Warn only when sharing was genuinely possible and lost: a scoped-only member with >1 consumer. A
