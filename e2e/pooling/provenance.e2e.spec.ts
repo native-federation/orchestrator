@@ -265,35 +265,48 @@ test.describe('provenance: the second hop', () => {
     ]),
   ];
 
-  test('gives a consumer a coherent top-level family bound to a foreign peer', async ({ nf }) => {
+  test('binds the router it serves to the core of the same build, one hop in', async ({ nf }) => {
+    // Inverted by the promise, and this is the assertion that made the fix falsifiable. Before it, mfe1
+    // was not islanded — 22.0.6 and 22.0.9 are one minor line — so it had no scope of its own and its
+    // router's `import '@angular/core'` fell through to the global winner: every consumer of that router
+    // ran it against core@22.0.9, a pair nothing compiled, invisible in `seen`.
+    //
+    // Now no build ships the combination the global mapping offers mfe1, so mfe1 serves its own family
+    // and its scope names both members. Its router therefore binds its own core, whoever imports it.
     await nf.init(torn());
     await nf.loadAll();
 
-    // Read at the top level the portfolio looks perfect: mfe3 consumes exactly one member and gets it
-    // from one build. Every criterion stated over `seen` is satisfied.
-    expect(await nf.islands()).toEqual([]);
-    expect((await nf.load('team/mfe3')).seen).toEqual({
-      '@angular/router': 'mfe1|@angular/router@22.0.6',
+    expect((await nf.map()).scopes?.[SCOPE.mfe1]).toEqual({
+      '@angular/core': 'http://mfe1/@angular/core.js',
+      '@angular/router': 'http://mfe1/@angular/router.js',
+    });
+    expect((await nf.bindings())['mfe1|@angular/router@22.0.6']).toEqual({
+      '@angular/core': 'mfe1|@angular/core@22.0.6',
     });
 
-    // BROKEN, one hop in — the router mfe3 runs is bound to a core from a different build. mfe1 has no
-    // scope of its own (it is not islanded), so its router's `import '@angular/core'` falls through to
-    // the global winner. mfe3 therefore runs router@22.0.6 against core@22.0.9: a pair no build in the
-    // portfolio compiled, invisible to every assertion above.
-    expect(await nf.bindings()).toEqual({
-      'mfe1|@angular/router@22.0.6': { '@angular/core': 'mfe2|@angular/core@22.0.9' },
+    // mfe3 declares router alone, so router's basis moves to mfe3 when mfe1 leaves the shared set and
+    // mfe3 runs its own copy — the same version, one download more than before.
+    expect((await nf.load('team/mfe3')).seen).toEqual({
+      '@angular/router': 'mfe3|@angular/router@22.0.6',
+    });
+    expect(nf.downloads()).toHaveLength(4);
+
+    // The one binding still crossing builds is mfe3's, and it is the fixture's own doing: mfe3 imports a
+    // peer it declares nowhere, so nothing in the shared record models it and pooling cannot reach it.
+    // See docs/version-resolver.md §"The provenance promise", the "Done when" bullet on peer edges
+    // staying inside what a remote declares.
+    expect((await nf.bindings())['mfe3|@angular/router@22.0.6']).toEqual({
+      '@angular/core': 'mfe2|@angular/core@22.0.9',
     });
   });
 
-  test('tears mfe1 the same way on its own account', async ({ nf }) => {
-    // The provider is not a bystander here: it is torn too, and this half *is* visible in `seen` —
-    // today's rule tolerates it as patch drift on one minor line. Under the promise mfe1's family comes
-    // from mfe1's build, which is also what repairs the consumer above: constraint 4's anchor
-    // self-scope is the same map entry seen from the other side.
+  test('keeps the provider own family on its own build', async ({ nf }) => {
+    // The other half of the same repair, and the one visible in `seen`: mfe1 drew core@22.0.9 from mfe2
+    // while running its own router@22.0.6, which the old rule tolerated as patch drift on one minor line.
     await nf.init(torn());
 
     expect((await nf.load('team/mfe1')).seen).toEqual({
-      '@angular/core': 'mfe2|@angular/core@22.0.9',
+      '@angular/core': 'mfe1|@angular/core@22.0.6',
       '@angular/router': 'mfe1|@angular/router@22.0.6',
     });
   });

@@ -11,13 +11,18 @@ import { NFError } from 'lib/core/native-federation.error';
 import type { DrivingContract } from '../../driving-ports/driving.contract';
 import type { LoggingConfig } from '../../config/log.contract';
 import type { ModeConfig } from '../../config/mode.contract';
+import { buildInstances, consumedMembers, servingBuilds } from './family-instance';
 import {
-  buildInstances,
-  consumedMembers,
-  type Disagreement,
-  findDisagreement,
-  servingBuilds,
-} from './family-instance';
+  acceptanceTable,
+  arrivalOrder,
+  assignAnchors,
+  basisPerMember,
+  consumedSpecifiers,
+  coveragePerBuild,
+  hostRemotes,
+  sharedTagPerSpecifier,
+  tagsPerBuild,
+} from './anchoring';
 import { buildPools } from './pool-graph';
 import { remotesInPool } from './pool.util';
 import type { PoolMember, PoolName } from './pool.types';
@@ -25,8 +30,19 @@ import type { PoolMember, PoolName } from './pool.types';
 type IslandCause =
   // determine marked one of its versions `scope`: a genuine range violation.
   | { kind: 'incompatible'; member: ExternalName; tag: VersionName }
-  // the builds it would draw on disagree across a minor line.
-  | ({ kind: 'mixed-builds' } & Disagreement);
+  // no build in the pool serves everything it consumes, and its own tags are not witnessed either.
+  | { kind: 'uncovered'; member: ExternalName };
+
+/**
+ * Per remote, the members it must be served from a build other than that member's own basis — an
+ * anchor's, or its own where it is an anchor for somebody else. Absent means the default: the copy
+ * resolves through the global mapping, which is right whenever the shared tag is already the remote's
+ * own. See docs/version-resolver.md §"The provenance promise".
+ */
+type Served = Map<RemoteName, Map<ExternalName, RemoteName>>;
+
+/** The build serving each remote the gate moved, itself where it serves its own family. */
+type ServingBuild = Map<RemoteName, RemoteName>;
 
 // Remotes that are strict-incompatible on any member (determine marked a version `scope`). Reads
 // stored actions only — pooling makes no compatibility call — and islands across the WHOLE family.
@@ -124,17 +140,39 @@ export function createPoolSharedExternals(
         members.map(m => `  - ${m.name}`).join('\n')
     );
 
-    scopeRemotesThatMixBuilds(members, islanded, poolName, scope);
+    const serving = assignServingBuilds(members, islanded);
 
-    // Nothing to island: determine's verdicts already stand for every member, so rebuilding them
-    // would write back what storage holds.
-    if (islanded.size === 0) return;
+    // Nothing to island and nothing reassigned: determine's verdicts already stand for every member, so
+    // rebuilding them would write back what storage holds.
+    if (islanded.size === 0 && serving.size === 0) return;
 
-    // Defensive: determine already throws on real incompatibilities under strictExternalCompatibility.
-    if (config.strict.strictExternalCompatibility) {
+    const basis = basisPerMember(members, islanded, remote => {
+      const build = serving.get(remote);
+      return build !== undefined && build !== remote;
+    });
+
+    // Only where the serving build differs from what the global mapping already publishes: a remote whose
+    // anchor *is* the basis resolves through `imports` and needs no scope entry at all (Performance §9).
+    const served: Served = new Map();
+    const consumed = consumedMembers(members);
+    for (const [remote, build] of serving) {
+      const byMember = new Map<ExternalName, RemoteName>();
+      for (const name of consumed.get(remote) ?? []) {
+        if (basis.get(name) !== build) byMember.set(name, build);
+      }
+      if (byMember.size > 0) served.set(remote, byMember);
+    }
+
+    // Defensive: determine already throws on real incompatibilities under strictExternalCompatibility. A
+    // remote serving its own family for lack of coverage is not one of them (constraint 10) — nothing about
+    // its versions is wrong, so it must not turn a strict portfolio into a failure.
+    const incompatible = [...islanded]
+      .filter(([, cause]) => cause.kind === 'incompatible')
+      .map(([remote]) => remote);
+    if (config.strict.strictExternalCompatibility && incompatible.length > 0) {
       config.log.error(
         3,
-        `[${scope}][pool:${poolName}] version-incompatible remotes cannot be pooled: {${[...islanded.keys()].join(', ')}}.`
+        `[${scope}][pool:${poolName}] version-incompatible remotes cannot be pooled: {${incompatible.join(', ')}}.`
       );
       throw new NFError(`Could not pool '${poolName}' in scope ${scope}.`);
     }
@@ -143,7 +181,7 @@ export function createPoolSharedExternals(
       const why =
         cause.kind === 'incompatible'
           ? `'${cause.member}@${cause.tag}' is incompatible with the shared version`
-          : `the builds it draws on disagree on '${cause.member}' (${cause.tag} vs ${cause.other})`;
+          : `no shared build provides '${cause.member}' together with the rest of its family`;
       config.log.warn(
         3,
         `[${scope}][pool:${poolName}] '${remote}' is islanded: ${why}, so all ${members.length} members of the pool are scoped for it.`
@@ -151,62 +189,140 @@ export function createPoolSharedExternals(
     }
 
     for (const member of members) {
-      const rebuilt = rebuildMember(member, islanded);
+      const rebuilt = rebuildMember(member, islanded, served, basis.get(member.name));
       warnIfScopedOnly(poolName, member, rebuilt, islanded, scope);
       ports.sharedExternalsRepo.addOrUpdate(member.name, rebuilt, scope);
     }
   }
 
   /**
-   * The agreement gate: a remote may draw on more than one build (patch drift across a family is
-   * normal), but not on builds that disagree — every member two of them both ship has to sit on the
-   * same minor line. Otherwise the remote serves its whole family from its own build.
+   * The coverage gate. A remote may dedup onto a build only when that build serves a **superset** of
+   * what it consumes, at versions its own `requiredVersion` accepts — no tag distance is read anywhere,
+   * so a family split no build witnesses can no longer pass as benign patch drift. A remote that no
+   * build covers falls back to the same-tag witness: every member already published at exactly its own
+   * tag is one its own build compiled beside the rest of the family, so its own build is the witness.
+   * Failing both, it serves its whole family itself.
    *
-   * Islanding is monotone: scoping a remote removes it as a serving build, which can leave a member
-   * unserved and push another remote onto its own build. So the gate repeats, and only after a round
-   * that scoped someone.
+   * Monotone, exactly as islanding was: scoping a remote removes it as a serving build, which can leave
+   * a member unserved and push another remote onto its own build. So the gate repeats, and only after a
+   * round that scoped someone.
    */
-  function scopeRemotesThatMixBuilds(
+  function assignServingBuilds(
     members: PoolMember[],
-    islanded: Map<RemoteName, IslandCause>,
-    poolName: PoolName,
-    scope: string
-  ): void {
+    islanded: Map<RemoteName, IslandCause>
+  ): ServingBuild {
     for (;;) {
-      const serving = servingBuilds(members, islanded);
+      const bases = servingBuilds(members, islanded);
 
-      // One build serves everything, so nobody can draw two. The healthy-portfolio path: no
-      // instances, no consumption walk, no comparisons.
-      if (new Set(serving.values()).size < 2 && serving.size === members.length) return;
+      // One build serves every member, so it covers everyone by construction and every copy already
+      // resolves to it. The healthy-portfolio path: no coverage sets, no acceptance table, no
+      // assignment, nothing written (Performance §2).
+      if (new Set(bases.values()).size < 2 && bases.size === members.length) return new Map();
 
-      const instances = buildInstances(members, islanded);
+      const shared = sharedTagPerSpecifier(members, islanded);
+      const ownTags = tagsPerBuild(members, islanded);
+      const consumedSpec = consumedSpecifiers(members);
       const consumed = consumedMembers(members);
 
+      /**
+       * The witness, and it is **all-or-nothing across the family**: a remote may keep resolving through
+       * the global `imports` when *some* live build ships every specifier it consumes at exactly the tags
+       * `imports` serves them at. Its own build is the case the promise names — every member at the
+       * remote's own declared tag — and the general form is sound for the same reason (§"Why the witness
+       * is sound"): at equal versions provider identity is irrelevant, so a set of tags some build
+       * compiled together is that build's combination whichever origin each file arrives from. Taken per
+       * specifier instead it reintroduces the defect, a combination nothing compiled.
+       *
+       * Checked before coverage, because a witnessed remote needs no anchor at all: asking coverage
+       * first pins remotes already sitting at the shared tags onto one build for no gain in provenance.
+       */
+      const isWitnessed = (remote: RemoteName): boolean => {
+        const specifiers = consumedSpec.get(remote);
+        if (!specifiers) return false;
+        for (const specifier of specifiers) if (!shared.has(specifier)) return false;
+
+        for (const [, tags] of ownTags) {
+          let matches = true;
+          for (const specifier of specifiers) {
+            if (tags.get(specifier) !== shared.get(specifier)) {
+              matches = false;
+              break;
+            }
+          }
+          if (matches) return true;
+        }
+        return false;
+      };
+
+      const needAnchor = new Map<RemoteName, ExternalName[]>();
+      const needSpecifiers = new Map<RemoteName, Set<string>>();
+      for (const [remote, wants] of consumed) {
+        if (islanded.has(remote) || isWitnessed(remote)) continue;
+        needAnchor.set(remote, wants);
+        needSpecifiers.set(remote, consumedSpec.get(remote) ?? new Set());
+      }
+
+      if (needAnchor.size === 0) return new Map();
+
+      const coverage = coveragePerBuild(members, islanded);
+      const hosts = hostRemotes(members);
+      const assignment = assignAnchors({
+        instances: buildInstances(members, islanded),
+        coverage,
+        acceptance: acceptanceTable(members, ports.versionCheck.isCompatible),
+        consumedSpecifiers: needSpecifiers,
+        consumedMembers: needAnchor,
+        hosts,
+        arrival: arrivalOrder(members),
+      });
+
+      // A build somebody else dedups onto has to run its own copies of what it hands out, or the files
+      // it serves would bind their peers against a different build one hop in (constraint 4).
+      const anchors = new Set<RemoteName>();
+      for (const build of assignment.values()) if (build !== undefined) anchors.add(build);
+
+      const serving: ServingBuild = new Map();
       let scoped = false;
-      for (const remote of instances.keys()) {
-        const wants = consumed.get(remote) ?? [];
 
-        // The builds it ends up drawing on: whoever serves each member, itself where nobody does.
-        const draws = new Set<RemoteName>();
-        for (let i = 0; i < wants.length; i++) draws.add(serving.get(wants[i]!) ?? remote);
-        if (draws.size < 2) continue;
+      for (const [remote, wants] of needAnchor) {
+        const assigned = assignment.get(remote);
+        const build = assigned ?? (anchors.has(remote) || hosts.has(remote) ? remote : undefined);
 
-        const clash = findDisagreement(instances, [...draws]);
-        if (!clash) {
-          // Normal and not actionable, so `debug` — `warn` stays reserved for islanding.
-          config.log.debug(
-            3,
-            `[${scope}][pool:${poolName}] '${remote}' draws from ${draws.size} agreeing builds: ${[...draws].join(', ')}.`
-          );
+        if (build === undefined) {
+          islanded.set(remote, {
+            kind: 'uncovered',
+            member: firstUncovered(wants, coverage, remote),
+          });
+          scoped = true;
           continue;
         }
 
-        islanded.set(remote, { kind: 'mixed-builds', ...clash });
-        scoped = true;
+        serving.set(remote, build);
       }
 
-      if (!scoped) return;
+      if (!scoped) return serving;
     }
+  }
+
+  // Something to name in the warning: a member of the remote's family that no *other* build serves, so
+  // the reason no anchor covered it is concrete. Falls back to the first member it consumes when every
+  // one of them is available somewhere but never all from one build.
+  function firstUncovered(
+    wants: readonly ExternalName[],
+    coverage: Map<RemoteName, Map<string, string>>,
+    remote: RemoteName
+  ): ExternalName {
+    for (const member of wants) {
+      let served = false;
+      for (const [build, specifiers] of coverage) {
+        if (build !== remote && specifiers.has(member)) {
+          served = true;
+          break;
+        }
+      }
+      if (!served) return member;
+    }
+    return wants[0]!;
   }
 
   // Warn only when sharing was genuinely possible and lost: a scoped-only member with >1 consumer. A
@@ -219,7 +335,11 @@ export function createPoolSharedExternals(
     scope: string
   ): void {
     if (rebuilt.versions.some(v => v.action === 'share')) return;
-    const consumers = new Set(rebuilt.versions.flatMap(v => v.remotes.map(r => r.name))).size;
+    // Only the scoped copies really download their own file: a copy that lost the global mapping but
+    // carries a `servedBy` still dedups, onto its anchor's build, and saying otherwise would be false.
+    const consumers = new Set(
+      rebuilt.versions.filter(v => v.action === 'scope').flatMap(v => v.remotes.map(r => r.name))
+    ).size;
     if (consumers < 2) return;
 
     // An island took this member's last provider: its own warning already named the cause, and this
@@ -235,9 +355,16 @@ export function createPoolSharedExternals(
 
   // Island-or-defer at remote-copy granularity: islanded (or already-`scope`) copies self-serve;
   // every other copy keeps its base verdict. Scope versions group by each copy's real tag (F3).
+  // A surviving copy also records the build serving it whenever that is not the member's own basis, so
+  // the map can point it at another origin's files — emission reads it, and only the global path needs it.
+  //
+  // `basis` is the copy the global mapping publishes; `undefined` means none is left and the member
+  // leaves the shared set (constraint 15).
   function rebuildMember(
     member: PoolMember,
-    islanded: Map<RemoteName, IslandCause>
+    islanded: Map<RemoteName, IslandCause>,
+    served: Served,
+    basis: RemoteName | undefined
   ): SharedExternal {
     const entries = member.external.versions.flatMap(v =>
       v.remotes.map(meta => ({
@@ -255,13 +382,27 @@ export function createPoolSharedExternals(
     let scoped = entries.filter(isScoped);
     let clean = entries.filter(e => !isScoped(e));
 
-    // Winner islanded away: no shared build survives, so the orphaned `skip` copies self-serve too.
-    if (!clean.some(e => e.action === 'share')) {
-      scoped = [...scoped, ...clean];
-      clean = [];
+    for (const entry of clean) {
+      const build = served.get(entry.remote)?.get(member.name);
+      if (build !== undefined) entry.meta.servedBy = build;
+      else delete entry.meta.servedBy;
     }
 
-    const shareEntries = clean.filter(e => e.action === 'share');
+    // No basis left: nothing publishes this member, so a copy that was resolving through the global
+    // mapping has nowhere to go and self-serves. A copy with a `servedBy` is mapped explicitly and keeps
+    // its dedup — sweeping it too is what made N providers of one tag download N copies (constraint 15).
+    if (basis === undefined) {
+      scoped = [...scoped, ...clean.filter(e => e.meta.servedBy === undefined)];
+      clean = clean
+        .filter(e => e.meta.servedBy !== undefined)
+        .map(e => ({ ...e, action: 'skip' as const }));
+    }
+
+    // Basis first: `remotes[0]` is what the global mapping and a later re-election read as the serving
+    // copy, and only a copy that runs its own build may be it.
+    const shareEntries = clean
+      .filter(e => e.action === 'share')
+      .sort((a, b) => Number(b.remote === basis) - Number(a.remote === basis));
     const shareVersion: SharedVersion[] =
       shareEntries.length > 0
         ? [

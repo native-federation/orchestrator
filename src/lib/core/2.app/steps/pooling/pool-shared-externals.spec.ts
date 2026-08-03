@@ -51,7 +51,19 @@ describe('createPoolSharedExternals', () => {
     poolSharedExternals = createPoolSharedExternals(config, adapters);
   });
 
+  // `meta()` cannot know which member it is being seeded under, so it keys every entrypoint on the same
+  // placeholder specifier. Coverage is keyed by specifier, so left alone every member of every fixture
+  // would cover every other one — vacuously. Re-keying here is what gives each member its own specifier,
+  // exactly as a real remote entry does. A fixture that seeded entries deliberately keeps them.
   const givenExternals = (externals: Record<string, SharedExternal>) => {
+    for (const [name, external] of Object.entries(externals)) {
+      for (const version of external.versions) {
+        for (const remote of version.remotes) {
+          if (!('ext' in remote.entries)) continue;
+          remote.entries = { [name]: remote.entries['ext']! };
+        }
+      }
+    }
     adapters.sharedExternalsRepo.getFromScope = vi.fn(() => externals);
   };
 
@@ -63,6 +75,14 @@ describe('createPoolSharedExternals', () => {
       .filter(v => v.action === action)
       .flatMap(v => v.remotes.map(r => r.name))
       .sort();
+
+  const servedByOf = (external: SharedExternal): Record<string, string> =>
+    Object.fromEntries(
+      external.versions
+        .flatMap(v => v.remotes)
+        .filter(r => r.servedBy !== undefined)
+        .map(r => [r.name, r.servedBy!])
+    );
 
   // A pool that islands nobody writes nothing (W1), so the debug line is what proves it was formed.
   const expectPooled = (poolName: string) =>
@@ -411,10 +431,12 @@ describe('createPoolSharedExternals', () => {
       expect(adapters.sharedExternalsRepo.addOrUpdate).toHaveBeenCalledTimes(2);
     });
 
-    it('islands a remote whose builds disagree across a minor line', async () => {
+    it('islands a remote no shared build serves its whole family', async () => {
       config.feature.useAutoExternalPooling = true;
-      // b draws core from a (17.0.0) and cdk from itself (17.1.0): a and b both ship core, at
-      // 17.0.0 and 17.1.0, so the builds disagree and b serves its whole family itself.
+      // b draws core from a (17.0.0) and cdk from itself (17.1.0). The old gate read that as a minor-line
+      // disagreement; the coverage gate reaches the same verdict for a stronger reason — no build ships
+      // both members, and b's own tags are not the shared ones, so nothing witnesses the pair it would
+      // run. The message therefore names the member coverage broke on, not two tags.
       givenExternals({
         '@framework/core': external([
           sharedVersion('17.0.0', [meta('a', { req: '^17.0.0' })], { action: 'share' }),
@@ -433,14 +455,17 @@ describe('createPoolSharedExternals', () => {
       expect(config.log.warn).toHaveBeenCalledWith(
         3,
         expect.stringContaining(
-          "'b' is islanded: the builds it draws on disagree on '@framework/core' (17.1.0 vs 17.0.0)"
+          "'b' is islanded: no shared build provides '@framework/cdk' together with the rest of its family"
         )
       );
     });
 
-    it('allows patch drift inside one minor line and only logs it at debug', async () => {
+    it('islands patch drift across two builds, which no build witnesses', async () => {
       config.feature.useAutoExternalPooling = true;
-      // Same topology, but the two builds sit on the same minor line: benign, so b keeps deduping.
+      // Same topology one minor line down. The old gate tolerated this by design: 17.0.6 beside 17.0.8 is
+      // benign patch drift, so b kept deduping core from a while running its own cdk. Under the promise
+      // that is a pair no build shipped, and minor lines are not read at all — so b serves its own family
+      // and pays one extra download. The portfolio whose cost this records: 2 downloads before, 3 after.
       givenExternals({
         '@framework/core': external([
           sharedVersion('17.0.6', [meta('a', { req: '^17.0.0' })], { action: 'share' }),
@@ -453,18 +478,19 @@ describe('createPoolSharedExternals', () => {
 
       await poolSharedExternals();
 
-      expect(adapters.sharedExternalsRepo.addOrUpdate).not.toHaveBeenCalled();
-      expect(config.log.debug).toHaveBeenCalledWith(
-        3,
-        expect.stringContaining("'b' draws from 2 agreeing builds")
-      );
-      expect(config.log.warn).not.toHaveBeenCalledWith(3, expect.stringContaining('is islanded'));
+      const core = rebuiltFor('@framework/core')!;
+      expect(namesOf(core, 'share')).toEqual(['a']);
+      expect(namesOf(core, 'scope')).toEqual(['b']);
+      expect(config.log.warn).toHaveBeenCalledWith(3, expect.stringContaining("'b' is islanded"));
     });
 
-    it('iterates to a fixed point when islanding takes another member last provider', async () => {
+    it('islands a remote nothing covers, without dragging its co-consumers down with it', async () => {
       config.feature.useAutoExternalPooling = true;
-      // Round 1: b's builds disagree with a's, so b is islanded. Round 2: b was util's only
-      // provider, so d - which drew util from b and core from a - has nowhere left to take util.
+      // Nothing covers b — only b ships `only-b` — and no build ships the combination the global mapping
+      // would hand it, so b serves its own family. d is untouched: it takes core@17.0.0 from a and util
+      // from its own copy, which is exactly what its own build compiled, so it stays witnessed even after
+      // b's islanding takes util's `share` version with it. The old gate islanded d here too, because it
+      // read util as having left the shared set — but d's own copy still maps it, at d's own tag.
       givenExternals({
         '@framework/core': external([
           sharedVersion('17.0.0', [meta('a', { req: '^17.0.0' }), meta('d', { req: '^17.0.0' })], {
@@ -476,13 +502,52 @@ describe('createPoolSharedExternals', () => {
           sharedVersion('17.1.0', [meta('b', { req: '^17.0.0' })], { action: 'share' }),
           sharedVersion('17.1.0', [meta('d', { req: '^17.0.0' })], { action: 'skip' }),
         ]),
+        '@framework/only-b': external([
+          sharedVersion('17.1.0', [meta('b', { req: '^17.0.0' })], { action: 'share' }),
+        ]),
       });
 
       await poolSharedExternals();
 
       const core = rebuiltFor('@framework/core')!;
-      expect(namesOf(core, 'share')).toEqual(['a']);
-      expect(namesOf(core, 'scope')).toEqual(['b', 'd']);
+      expect(namesOf(core, 'share')).toEqual(['a', 'd']);
+      expect(namesOf(core, 'scope')).toEqual(['b']);
+      expect(servedByOf(core)).toEqual({});
+    });
+
+    it('anchors a remote onto a covering build and maps that build onto itself', async () => {
+      config.feature.useAutoExternalPooling = true;
+      // The shape that merged emission into the gate. Neither b nor d is witnessed: the global mapping
+      // offers core@17.0.0 beside util@17.1.0 and no build shipped that pair. b's build covers d, so d
+      // takes b's whole family — and b, which does not win core globally, needs the same entry for
+      // *itself*, or its util file would resolve its peers through the global core one hop in
+      // (constraint 4). Both entries name b's build; nothing is islanded and nothing is scoped.
+      givenExternals({
+        '@framework/core': external([
+          sharedVersion('17.0.0', [meta('a', { req: '^17.0.0' }), meta('d', { req: '^17.0.0' })], {
+            action: 'share',
+          }),
+          sharedVersion('17.1.0', [meta('b', { req: '^17.0.0' }), meta('c', { req: '^17.0.0' })], {
+            action: 'skip',
+          }),
+        ]),
+        '@framework/util': external([
+          sharedVersion('17.1.0', [meta('b', { req: '^17.0.0' })], { action: 'share' }),
+          sharedVersion('17.1.0', [meta('c', { req: '^17.0.0' })], { action: 'skip' }),
+        ]),
+      });
+
+      await poolSharedExternals();
+
+      const core = rebuiltFor('@framework/core')!;
+      expect(namesOf(core, 'share')).toEqual(['a', 'd']);
+      expect(namesOf(core, 'scope')).toEqual([]);
+      expect(servedByOf(core)).toEqual({ b: 'b', c: 'b' });
+
+      const util = rebuiltFor('@framework/util')!;
+      expect(namesOf(util, 'share')).toEqual(['b']);
+      expect(servedByOf(util)).toEqual({});
+      expect(config.log.warn).not.toHaveBeenCalledWith(3, expect.stringContaining('islanded'));
     });
 
     it('groups scope versions by each remote real tag (F3)', async () => {
@@ -651,6 +716,26 @@ describe('createPoolSharedExternals', () => {
       await expect(poolSharedExternals()).resolves.toBeUndefined();
 
       expect(adapters.sharedExternalsRepo.addOrUpdate).not.toHaveBeenCalled();
+    });
+
+    it('does not throw when a remote serves its own family for lack of coverage', async () => {
+      config.feature.useAutoExternalPooling = true;
+      config.strict.strictExternalCompatibility = true;
+      // b is islanded by the coverage gate, not by an incompatibility: every range here accepts every tag,
+      // so nothing about its versions is wrong and a strict portfolio must not fail on it (constraint 10).
+      givenExternals({
+        '@framework/core': external([
+          sharedVersion('17.0.6', [meta('a', { req: '^17.0.0' })], { action: 'share' }),
+          sharedVersion('17.0.8', [meta('b', { req: '^17.0.0' })]),
+        ]),
+        '@framework/cdk': external([
+          sharedVersion('17.0.8', [meta('b', { req: '^17.0.0' })], { action: 'share' }),
+        ]),
+      });
+
+      await expect(poolSharedExternals()).resolves.toBeUndefined();
+
+      expect(namesOf(rebuiltFor('@framework/core')!, 'scope')).toEqual(['b']);
     });
 
     it('throws under strictExternalCompatibility when a remote is islanded', async () => {

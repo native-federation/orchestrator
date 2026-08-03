@@ -170,8 +170,11 @@ export function tagsPerBuild(
 }
 
 /**
- * The tag the shared set publishes per specifier: each member's `share` version, over the specifiers
- * its serving basis provides. What a consumer would land on through the global `imports`.
+ * The tag the global `imports` publishes per specifier — mirroring `generate-import-map`'s two passes,
+ * because a rule about what a consumer lands on through `imports` has to read the same thing the map
+ * emits: the `share` version's basis first, then its siblings and the `skip` copies, each filling only
+ * the specifiers nobody claimed yet (`selfFillUncovered`). Reading the basis alone understates it —
+ * a package's secondary entrypoints are routinely published from a sibling copy of the same tag.
  */
 export function sharedTagPerSpecifier(
   members: PoolMember[],
@@ -179,11 +182,25 @@ export function sharedTagPerSpecifier(
 ): Map<Specifier, VersionName> {
   const shared = new Map<Specifier, VersionName>();
 
+  const claim = (version: {
+    tag: VersionName;
+    remotes: PoolMember['external']['versions'][number]['remotes'];
+  }): void => {
+    for (const meta of version.remotes) {
+      if (islanded.has(meta.name)) continue;
+      for (const specifier in meta.entries) {
+        if (!shared.has(specifier)) shared.set(specifier, version.tag);
+      }
+    }
+  };
+
   for (const member of members) {
-    const winner = member.external.versions.find(v => v.action === 'share');
-    const basis = winner?.remotes.find(r => !islanded.has(r.name));
-    if (!basis) continue;
-    for (const specifier in basis.entries) shared.set(specifier, winner!.tag);
+    const versions = member.external.versions;
+    const winner = versions.find(v => v.action === 'share');
+    if (winner) claim(winner);
+    for (let v = 0; v < versions.length; v++) {
+      if (versions[v]!.action === 'skip') claim(versions[v]!);
+    }
   }
 
   return shared;
@@ -238,6 +255,32 @@ export function electedTags(members: PoolMember[]): Map<ExternalName, VersionNam
   }
 
   return elected;
+}
+
+/**
+ * The copy whose file the global mapping publishes, per member: the first copy of the member's `share`
+ * version that still runs its own build. A remote deduping onto a foreign build is skipped, because
+ * publishing its file while it runs somebody else's makes the global mapping and `servedBy` name two
+ * different builds for one remote (constraint 17). Order is otherwise the basis precedence `commit()`
+ * established, so skipping never promotes a worse-covered copy over a better one.
+ *
+ * A member with no entry has no basis left and leaves the shared set.
+ */
+export function basisPerMember(
+  members: PoolMember[],
+  islanded: Islanded,
+  dedupsElsewhere: (remote: RemoteName) => boolean
+): Map<ExternalName, RemoteName> {
+  const basis = new Map<ExternalName, RemoteName>();
+
+  for (const member of members) {
+    const winner = member.external.versions.find(v => v.action === 'share');
+    if (!winner) continue;
+    const own = winner.remotes.find(r => !islanded.has(r.name) && !dedupsElsewhere(r.name));
+    if (own) basis.set(member.name, own.name);
+  }
+
+  return basis;
 }
 
 /** First appearance of each remote across the pool — the arrival order anchor tiebreaks read. */

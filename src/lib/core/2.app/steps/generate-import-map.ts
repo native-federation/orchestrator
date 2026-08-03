@@ -114,6 +114,7 @@ export function createGenerateImportMap(
     chunkBundles: Record<string, Set<string>>
   ): void {
     const sharedExternals = ports.sharedExternalsRepo.getFromScope(shareScope);
+    const index = buildServedIndex(sharedExternals);
 
     for (const [externalName, external] of Object.entries(sharedExternals)) {
       let override: SharedVersion | undefined | 'NOT_AVAILABLE' = undefined;
@@ -168,6 +169,22 @@ export function createGenerateImportMap(
 
         version.remotes.forEach(r => {
           const rScope = getScope(shareScope, r.name, externalName);
+          // Pooling anchored this remote on another build, so its scope names that build's files for
+          // everything it imports rather than the shared source's.
+          if (index && r.servedBy) {
+            const files = index.get(r.servedBy);
+            const servedScope = getScope(shareScope, r.servedBy, externalName);
+            for (const specifier of Object.keys(r.entries)) {
+              const source = files?.get(specifier);
+              if (!source) continue;
+              const url = _path.join(servedScope, source.file);
+              addToScope(importMap, rScope, { [specifier]: url });
+              addIntegrity(importMap, url, r.servedBy, source.file);
+              registerBundleChunks(chunkBundles, r.servedBy, source.bundle);
+              source.meta.cached = true;
+            }
+            return;
+          }
           for (const m of mappings) {
             addToScope(importMap, rScope, { [m.packageName]: m.url });
           }
@@ -240,6 +257,86 @@ export function createGenerateImportMap(
   }
 
   /**
+   * Where a build serves a specifier from, per remote — built only when some copy carries a `servedBy`,
+   * so an unpooled portfolio allocates nothing. Pool-wide rather than per-external on purpose: the
+   * specifier a consumer is anchored on may be an *entry* of a different external of the serving build,
+   * which is the whole reason coverage is keyed by specifier (see docs/version-resolver.md §"The
+   * provenance promise").
+   */
+  type ServedSource = { file: string; bundle?: string; meta: SharedVersionMeta };
+
+  function buildServedIndex(
+    externals: Record<string, SharedExternal>
+  ): Map<RemoteName, Map<string, ServedSource>> | undefined {
+    let anyServed = false;
+    for (const external of Object.values(externals)) {
+      for (const version of external.versions) {
+        if (version.remotes.some(r => r.servedBy)) anyServed = true;
+      }
+    }
+    if (!anyServed) return undefined;
+
+    const index = new Map<RemoteName, Map<string, ServedSource>>();
+    for (const external of Object.values(externals)) {
+      for (const version of external.versions) {
+        for (const remote of version.remotes) {
+          let own = index.get(remote.name);
+          if (!own) index.set(remote.name, (own = new Map()));
+          for (const [specifier, file] of Object.entries(remote.entries)) {
+            if (!own.has(specifier))
+              own.set(specifier, { file, bundle: remote.bundle, meta: remote });
+          }
+        }
+      }
+    }
+    return index;
+  }
+
+  // A cross-build scope entry, held back until every global mapping is in place so that a scope which
+  // would merely repeat `imports` can be dropped (Performance §9).
+  type ServedScope = { scope: string; specifier: string; source: ServedSource; from: RemoteName };
+
+  function collectServed(
+    into: ServedScope[],
+    index: Map<RemoteName, Map<string, ServedSource>>,
+    ctx: string,
+    externalName: string,
+    version: SharedVersion
+  ): void {
+    for (const consumer of version.remotes) {
+      if (!consumer.servedBy) continue;
+      const files = index.get(consumer.servedBy);
+      const scope = getScope(ctx, consumer.name, externalName);
+      for (const specifier of Object.keys(consumer.entries)) {
+        const source = files?.get(specifier);
+        if (!source) {
+          config.log.warn(
+            4,
+            `[${ctx}][${externalName}][${consumer.name}] '${consumer.servedBy}' does not serve '${specifier}'.`
+          );
+          continue;
+        }
+        into.push({ scope, specifier, source, from: consumer.servedBy });
+      }
+    }
+  }
+
+  function flushServed(
+    importMap: ImportMap,
+    chunkBundles: Record<string, Set<string>>,
+    served: ServedScope[]
+  ): void {
+    for (const { scope, specifier, source, from } of served) {
+      const url = _path.join(getScope(GLOBAL_SCOPE, from), source.file);
+      if (importMap.imports[specifier] === url) continue;
+      addToScope(importMap, scope, { [specifier]: url });
+      addIntegrity(importMap, url, from, source.file);
+      registerBundleChunks(chunkBundles, from, source.bundle);
+      source.meta.cached = true;
+    }
+  }
+
+  /**
    * Step 4.3: Added the globally shared externals.
    * @param importMap
    * @returns
@@ -249,11 +346,17 @@ export function createGenerateImportMap(
     chunkBundles: Record<string, Set<string>>
   ): ImportMap {
     const sharedExternals = ports.sharedExternalsRepo.getFromScope();
+    const index = buildServedIndex(sharedExternals);
+    const served: ServedScope[] = [];
+    const cachedBefore = new Map<string, string>();
 
     for (const [externalName, external] of Object.entries(sharedExternals)) {
-      const cachedBefore = cachedFingerprint(external);
+      cachedBefore.set(externalName, cachedFingerprint(external));
 
       for (const version of external.versions) {
+        if (index && version.action !== 'scope') {
+          collectServed(served, index, GLOBAL_SCOPE, externalName, version);
+        }
         if (version.action === 'skip') continue;
         if (version.action === 'scope') {
           for (const remote of version.remotes) {
@@ -293,7 +396,12 @@ export function createGenerateImportMap(
         if (version.action !== 'skip') continue;
         selfFillUncovered(importMap, chunkBundles, externalName, version.remotes);
       }
-      if (cachedFingerprint(external) !== cachedBefore) {
+    }
+
+    flushServed(importMap, chunkBundles, served);
+
+    for (const [externalName, external] of Object.entries(sharedExternals)) {
+      if (cachedFingerprint(external) !== cachedBefore.get(externalName)) {
         ports.sharedExternalsRepo.addOrUpdate(externalName, external);
       }
     }
@@ -311,6 +419,9 @@ export function createGenerateImportMap(
   ): void {
     for (let i = from; i < remotes.length; i++) {
       const remote = remotes[i]!;
+      // A remote pooling anchored elsewhere takes every entrypoint from that build, so filling from its
+      // own would put a second build into the global mapping.
+      if (remote.servedBy) continue;
       for (const [packageName, file] of Object.entries(remote.entries)) {
         if (importMap.imports[packageName]) continue;
         if (config.strict.strictEntryPointCoverage || config.profile.scopeUncoveredEntrypoints) {

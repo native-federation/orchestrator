@@ -813,13 +813,30 @@ all here, because a decision that lives in a working note rots as soon as the no
 the remote consumes, at versions the remote's own `requiredVersion` accepts. Otherwise it serves its own
 family, which is one build by definition.
 
-**How the promise is checked — one build, _or_ every member at the remote's own declared tag.** The
-strict one-build form is too strong, and cannot be used as the criterion. A remote may also take a member
-from elsewhere at *exactly* the tag it ships itself: its own build compiled that version alongside the
-rest of its family, so its own build is the witness. This is provenance reasoning, not version distance —
-tags are compared for **identity against the consumer's own**, never for distance. Measured, this is not
-a corner case: on the seven-remote production capture one remote runs two origins and is perfectly
-witnessed, and the widening is what brings that capture's cost to zero.
+**How the promise is checked — one build, _or_ a build that witnesses the combination.** The strict
+one-build form is too strong, and cannot be used as the criterion. A remote may also take a member from
+elsewhere at *exactly* the tag it ships itself: its own build compiled that version alongside the rest of
+its family, so its own build is the witness. This is provenance reasoning, not version distance — tags are
+compared for **identity**, never for distance. Measured, this is not a corner case: on the seven-remote
+production capture one remote runs two origins and is perfectly witnessed, and the widening is what brings
+that capture's cost to zero.
+
+**The witness generalises past the consumer's own build, and has to** — implemented and measured
+2026-08-03. The criterion as first written compared the shared tags against *the consumer's own*, and that
+is one case of a wider rule: a remote may keep resolving through the global `imports` when **some** live
+build in the pool ships every specifier it consumes at exactly the tags `imports` serves them at. The
+consumer's own build is the special case where that build is itself. The general form is sound for exactly
+the reason the next paragraph gives — at equal versions provider identity is irrelevant, so a set of tags
+some build compiled together *is* that build's combination however many origins the individual files come
+from. Measured, the difference is the whole cost of the promise: with the own-build form only, the
+production capture pays +5 downloads, because one remote sits a patch below the shared set on every member
+it declares while a sibling build ships precisely the combination the shared set offers it. Under the
+general form both recorded portfolios pay **nothing at all**.
+
+Read this together with the paragraph on what `imports` publishes: the tags being witnessed are the ones
+the *map* serves, which for a package's secondary entrypoints is routinely a sibling copy of the same tag
+rather than the basis (`selfFillUncovered`). A rule about what a consumer lands on has to read what the map
+emits, or it understates the shared set and islands remotes that were never at risk.
 
 **Why the witness is sound: at equal versions, provider identity is irrelevant.** `@framework/core@22.0.5`
 from one remote and `@framework/core@22.0.5` from another are the same published artefact, so *which*
@@ -930,6 +947,21 @@ Under the promise none of those depend on version distance: the rule reads **cov
   without it, a remote ran a torn `@framework/core` and the capture only looked cheaper because the
   guarantee had shrunk. Measured effect on the hand-tagged production capture: no package is published at
   two tags any more, where two were before.
+- **A basis must run its own file** — implemented 2026-08-03, and the piece whose absence stopped the first
+  attempt. `remotes[0]` of a `share` version is the copy the global `imports` publishes, so a remote that
+  pooling has anchored on a *foreign* build may not be it: the record would then serve the member from that
+  remote's file while telling the remote itself to take it from somebody else's — measured, `util` served
+  from `b`'s file while `b` was assigned to `d`. Nothing crashes; it is simply not a coherent record. The
+  basis is therefore the first copy of the winning version that still runs its own build, in the precedence
+  order `commit()` established, and a member where no such copy is left keeps no global mapping at all.
+- **The `share` tag itself does not move, and that leaves something on the table.** Election picks a build
+  in the sense that matters — every remote ends up running one — but it does so through `servedBy` and
+  scope entries rather than by promoting another version to `share`. Where the elected copy is the one that
+  dedups away, the member loses its global mapping and *both* its consumers name the anchor's file
+  explicitly, which is two scope entries and a dead elected tag where re-electing onto the build the pool
+  actually runs would be one global entry and no scopes. Runtime and download count are the same either
+  way, so this is map size, not correctness; the case is locked as
+  `never islands a clean subset consumer of an asymmetric family`.
 - **A member no anchor wins must stay shared with the remotes that are at its version.** Electing a build
   brings a second way to lose a winner, unrelated to the first: an anchor may contribute to the shared set
   only if it wins *every* member it ships, so a provider disqualified there takes its member out of the
@@ -944,6 +976,14 @@ Under the promise none of those depend on version distance: the rule reads **cov
   pre-pooling elected tag per member, and it has to land together with the anchor self-scope above: a
   consumer taking a member from an anchor-disqualified provider resolves that member's own peers in the
   provider's scope, so the second hop is only coherent once the provider maps its family onto itself.
+
+  **As implemented** (2026-08-03) the distinction the sweep reads is not *why* the winner was lost but
+  whether the copy in front of it still has somewhere to resolve: a copy carrying a `servedBy` is mapped
+  explicitly, keeps its dedup, and must not be swept; a copy that was resolving through the global mapping
+  has nothing left and self-serves. That is the same outcome for both causes the bullet distinguishes, and
+  it needs no retained tag — the copies that would have re-published the elected tag are exactly the ones
+  that keep deduping onto the build the pool runs. What it does not do is republish a member whose every
+  surviving copy dedups elsewhere; nobody resolves such a member globally, so nothing reads the entry.
 - **The expectations that encode the old promise get rewritten deliberately**, not deleted: patch drift
   across builds and ragged coverage are currently *tolerated by design*, and each such test records a
   portfolio whose cost changes.
@@ -966,7 +1006,16 @@ row above it, and in every row `splitPackages` is empty and no remote runs a tor
 | + coverage and emission keyed by entrypoint specifier | 57 | 96 (+33.3%) |
 | + the same-tag witness | 52 (+13.0%) | 96 |
 | + per-remote auto-pooling, tag replaces auto-pool | 52 | 95 (+31.9%) |
-| **+ the same-tag witness keyed by specifier too** | **46 (+0%)** | **95 (+31.9%)** |
+| + the same-tag witness keyed by specifier too | 46 (+0%) | 95 (+31.9%) |
+| **as built, witness generalised past the consumer's own build** | **equal (+0%)** | **equal (+0%)** |
+
+The last row is the shipped gate rather than a prototype: measured with the flag on and off in the same
+run, on both recorded portfolios, downloads are **equal** — `splitPackages` empty, no remote holding two
+Angular minor lines, the same 25 and 30 shared tags as before. Iteration 9 re-measures it through
+`capture.e2e.spec.ts` and records the absolute figures beside these; the seven-remote arm reads 46 either
+way, matching the row above, and the eleven-remote arm was read off a throwaway probe whose absolute count
+is not comparable file-for-file with the 72 recorded for the shipped rule. What moved the eleven-remote
+figure from the accepted +31.9% to zero is the generalised witness alone.
 
 So the promise is **free on the production capture** — `e2e/pooling/flag.e2e.spec.ts`'s
 `costs nothing at all on the production capture`, which asserts pooled and unpooled downloads are *equal*,
@@ -1022,8 +1071,12 @@ defect they exist for closed:
   `splitPackages` — with `e2e/pooling/flag.e2e.spec.ts` as the regression guard, and any change in
   downloads or shared members is recorded in this document.
 
-Status: **decided, cost accepted, unimplemented.** The import-map behaviour described above was measured
-separately, with handcrafted maps in Chromium against synthetic origins.
+Status: **shipped on the init path; the dynamic path still runs the old gate.** The coverage gate, the
+witness, multi-anchor assignment, `servedBy` and cross-build scope emission are in `pool-shared-externals.ts`
+and `generate-import-map.ts`; every reproduction on the init path now ends with each remote running one
+build, transitive peer bindings included. Still open: the dynamic mirror, the log line a coverage-driven
+self-serve needs, and the expectations elsewhere in the suite that still assert the old promise —
+`minorLine` and `findDisagreement` therefore stay, called only from the dynamic path.
 
 ## Dynamic Init
 
