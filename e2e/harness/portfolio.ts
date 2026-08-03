@@ -94,13 +94,26 @@ export const dep = (pkg: string, version: string, o: DepOptions = {}): DenseShar
   return o.peers?.length ? Object.assign(shared, { [PEERS]: o.peers }) : shared;
 };
 
-export const remote = (name: string, scopeUrl: string, shared: DenseSharedInfo[]): RemoteEntry =>
-  ({
+export const remote = (name: string, scopeUrl: string, shared: DenseSharedInfo[]): RemoteEntry => {
+  // A bare specifier survives bundling only because it was externalized, and anything externalized is in
+  // the remote entry — so a build importing a peer the entry does not declare models a state no real
+  // remote can reach, and any tearing it shows is the harness's rather than the rule's.
+  const declared = new Set(shared.flatMap(entry => Object.keys(entrypointsOf(entry))));
+  for (const entry of shared)
+    for (const peer of peersOf(entry))
+      if (!declared.has(peer))
+        throw new Error(
+          `${name} declares no '${peer}', so '${entry.packageName}' cannot import it as a peer. ` +
+            `See docs/version-resolver.md §"The provenance promise", the "Done when" bullet on peer edges.`
+        );
+
+  return {
     name,
     url: `${scopeUrl}remoteEntry.json`,
     exposes: [mockExposedModule(EXPOSED, 'comp.js')],
     shared,
-  }) as RemoteEntry;
+  } as RemoteEntry;
+};
 
 /**
  * Bundle → chunk files, kept for `server.ts` under a symbol: `JSON.stringify` ignores symbol keys, so

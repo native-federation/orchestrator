@@ -348,11 +348,14 @@ test.describe('provenance: the second hop', () => {
       dep('@angular/core', '22.0.6', { req: '^22.0.0' }),
       dep('@angular/router', '22.0.6', { req: '^22.0.0', peers: ['@angular/core'] }),
     ]),
-    // A newer core, one patch up. Copy counts tie, so the newest tag wins core globally and mfe1's own
-    // core loses — while mfe1 stays unislanded, because 22.0.6 and 22.0.9 are one minor line.
+    // Two remotes one patch up on core alone. Copies tie 2–2, so the newest tag wins core globally and
+    // mfe1's own core loses it — the old rule left mfe1 unislanded, 22.0.6 and 22.0.9 being one minor line.
     remote('team/mfe2', SCOPE.mfe2, [dep('@angular/core', '22.0.9', { req: '^22.0.0' })]),
-    // The consumer, which declares router alone.
+    remote('team/mfe4', SCOPE.mfe4, [dep('@angular/core', '22.0.9', { req: '^22.0.0' })]),
+    // The consumer of mfe1's router. It declares the core its router imports, as a real remote entry must:
+    // anything externalized is in the entry, so `remote()` rejects a peer the entry does not declare.
     remote('team/mfe3', SCOPE.mfe3, [
+      dep('@angular/core', '22.0.6', { req: '^22.0.0' }),
       dep('@angular/router', '22.0.6', { req: '^22.0.0', peers: ['@angular/core'] }),
     ]),
   ];
@@ -368,28 +371,26 @@ test.describe('provenance: the second hop', () => {
     await nf.init(torn());
     await nf.loadAll();
 
-    expect((await nf.map()).scopes?.[SCOPE.mfe1]).toEqual({
-      '@angular/core': 'http://mfe1/@angular/core.js',
-      '@angular/router': 'http://mfe1/@angular/router.js',
-    });
+    const map = await nf.map();
+    // The self-scope names exactly the member mfe1 lost. Router needs no entry: its global mapping is
+    // already mfe1's file, and a scope repeating the global mapping is not emitted (Performance §9).
+    expect(map.scopes?.[SCOPE.mfe1]).toEqual({ '@angular/core': 'http://mfe1/@angular/core.js' });
+    expect(map.imports['@angular/router']).toBe('http://mfe1/@angular/router.js');
     expect((await nf.bindings())['mfe1|@angular/router@22.0.6']).toEqual({
       '@angular/core': 'mfe1|@angular/core@22.0.6',
     });
 
-    // mfe3 declares router alone, so router's basis moves to mfe3 when mfe1 leaves the shared set and
-    // mfe3 runs its own copy — the same version, one download more than before.
+    // And the consumer rides that build coherently: mfe1's build covers what mfe3 imports, so mfe3 is
+    // anchored on it and resolves both members from mfe1 — the router file it gets is the one whose peer
+    // edge the scope above repaired. One router copy exists on the page, so there is nothing else to bind.
     expect((await nf.load('team/mfe3')).seen).toEqual({
-      '@angular/router': 'mfe3|@angular/router@22.0.6',
+      '@angular/core': 'mfe1|@angular/core@22.0.6',
+      '@angular/router': 'mfe1|@angular/router@22.0.6',
     });
-    expect(nf.downloads()).toHaveLength(4);
-
-    // The one binding still crossing builds is mfe3's, and it is the fixture's own doing: mfe3 imports a
-    // peer it declares nowhere, so nothing in the shared record models it and pooling cannot reach it.
-    // See docs/version-resolver.md §"The provenance promise", the "Done when" bullet on peer edges
-    // staying inside what a remote declares.
-    expect((await nf.bindings())['mfe3|@angular/router@22.0.6']).toEqual({
-      '@angular/core': 'mfe2|@angular/core@22.0.9',
+    expect(await nf.bindings()).toEqual({
+      'mfe1|@angular/router@22.0.6': { '@angular/core': 'mfe1|@angular/core@22.0.6' },
     });
+    expect(nf.downloads()).toHaveLength(3);
   });
 
   test('keeps the provider own family on its own build', async ({ nf }) => {
