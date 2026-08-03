@@ -3,13 +3,12 @@ import { dep, remote, SCOPE, HOST_NAME } from '../harness/portfolio';
 import type { RemoteEntry } from 'lib/core/1.domain';
 
 /**
- * **F-B — the provenance promise, as it does not hold yet.**
+ * **The provenance promise, as it does not hold yet.**
  *
  * Every test in this file asserts *today's* behaviour, and today's behaviour is the defect: a remote is
  * served a coupled family assembled from builds that never shipped it together, is not islanded, and
- * nothing is logged. The six cases are `F-B-disjoint-serving-builds.md` §"Measured", ported verbatim
- * from the probes that measured them, plus two shapes that existed only as scratch probes: the second
- * hop (a torn anchor) and manifest-order dependence.
+ * nothing is logged. Six portfolios reproduce it in a real browser, and two further shapes generalize
+ * them: the second hop (a torn provider) and manifest-order dependence.
  *
  * They are written this way deliberately. The promise — `docs/version-resolver.md` §"The provenance
  * promise" — is what these portfolios *should* do, so locking the wrong answer first is what makes the
@@ -31,7 +30,7 @@ const consumesBoth = () =>
 
 test.describe('provenance: the init path splits a family silently', () => {
   test('serves a consumer two builds that share no member', async ({ nf }) => {
-    // F-B case 1, the minimal shape. mfe1 solely provides core, mfe2 solely provides router and its
+    // Case 1, the minimal shape. mfe1 solely provides core, mfe2 solely provides router and its
     // `^22.1.0` wins router outright. The two serving builds are disjoint, so gate 2 compares nothing
     // and passes; mfe3 declares both, at 22.0.5, and is handed one of each.
     await nf.init([
@@ -56,7 +55,7 @@ test.describe('provenance: the init path splits a family silently', () => {
   test('reaches the opposite verdict on the same portfolio in a different manifest order', async ({
     nf,
   }) => {
-    // F-B case 2, generalized to all six orderings of one three-remote portfolio — the shape the case
+    // Case 2, generalized to all six orderings of one three-remote portfolio — the shape the case
     // only showed in two. Nothing about the remotes changes between runs; only the order the manifest
     // lists them in.
     //
@@ -104,12 +103,12 @@ test.describe('provenance: the init path splits a family silently', () => {
   });
 
   test('splits a family the host itself half-serves', async ({ nf }) => {
-    // F-B case 3, the common real-world trigger: the host ships the framework core every remote
+    // Case 3, the common real-world trigger: the host ships the framework core every remote
     // dedups, and some remote ships a newer router the host does not carry. Host precedence pins core
     // to the host's build, router resolves freely to mfe1's — and the two never shipped together.
     //
-    // This is the PR's own case 2 with the one change that hides it: the router provider does not ship
-    // core, so the consumer is not itself the router basis.
+    // This is #63's own second repro with the one change that hides it: the router provider does not
+    // ship core, so the consumer is not itself the router basis.
     await nf.init(
       [
         remote('team/mfe1', SCOPE.mfe1, [dep('@angular/router', '22.1.0', { req: '^22.1.0' })]),
@@ -138,7 +137,7 @@ test.describe('provenance: the init path splits a family silently', () => {
 
 test.describe('provenance: the dynamic path mirrors it', () => {
   test('hands a late-loaded remote the same split, with an empty delta', async ({ nf }) => {
-    // F-B case 4. `disagreementAcrossCommittedBuilds` passes the *committed* serving builds and, like
+    // Case 4. `disagreementAcrossCommittedBuilds` passes the *committed* serving builds and, like
     // the init path, never compares the loaded remote's own build against them — so case 1 reproduces
     // through `initRemoteEntry` unchanged.
     const late = consumesBoth();
@@ -172,7 +171,7 @@ test.describe('provenance: the dynamic path mirrors it', () => {
  */
 test.describe('provenance: the cases no tag comparison can reach', () => {
   test('lets a declared bridge-tag coupling constrain nothing', async ({ nf }) => {
-    // F-B case 5. `docs/version-resolver.md` §"Declare the coupling you actually have" recommends
+    // Case 5. `docs/version-resolver.md` §"Declare the coupling you actually have" recommends
     // co-tagging a bridge member to express a coupling auto-pooling cannot see. Here it buys gate 1
     // only: a design-system remote ships design-system packages and a shell ships framework ones, so
     // the two serving builds are disjoint *by construction* and gate 2 can never fire on them.
@@ -202,7 +201,7 @@ test.describe('provenance: the cases no tag comparison can reach', () => {
   test('splits a lockstep pair between two providers that agree exactly on their overlap', async ({
     nf,
   }) => {
-    // F-B case 6, and the case that fixes the framing. Nothing is disjoint here: both serving builds
+    // Case 6, and the case that fixes the framing. Nothing is disjoint here: both serving builds
     // ship core@22.0.5 and agree on it *byte for byte*, so this survives any tightening of the
     // comparison — minor line, patch, or exact tag equality alike. The pair that matters, material
     // against cdk, is in neither build.
@@ -245,8 +244,10 @@ test.describe('provenance: the cases no tag comparison can reach', () => {
  *
  * Until now no fixture could show this: `externalModule` made every external a leaf, so a torn provider
  * passed green. `dep(..., { peers })` gives an external real imports, and `nf.bindings()` reports what
- * they bound to — see the self-scope item in F-B §"Options measured", measured independently in
- * `F-B-anchor-selfscope-probe.js`.
+ * they bound to. Measured independently with handcrafted import maps in Chromium: a scope entry pointing
+ * at another origin's build does beat the global `imports` for importers under that prefix, so the fix is
+ * the anchor self-scope of `docs/version-resolver.md` §"The provenance promise" and not a change to
+ * `ImportMap`.
  */
 test.describe('provenance: the second hop', () => {
   const torn = () => [

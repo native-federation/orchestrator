@@ -12,7 +12,7 @@ import { createDetermineSharedExternals } from '../determine-shared-externals';
 import { createPoolSharedExternals } from './pool-shared-externals';
 
 /**
- * Follow-up **F-A**, the islanding cascade: adding one previous-major remote to a healthy portfolio
+ * **The islanding cascade**: adding one previous-major remote to a healthy portfolio
  * used to island remotes that were perfectly compatible with each other. On the production capture it
  * took 7 remotes from 36 to 64 downloads and islanded 5 of 8, three of them healthy Angular-22 remotes.
  *
@@ -27,9 +27,10 @@ import { createPoolSharedExternals } from './pool-shared-externals';
  * the docs always claimed (fewest extra downloads), counted in the right unit.
  *
  * What it does NOT fix is the second describe below: the election is still per external, so members of
- * one pool can elect opposite lines. See `F-A-islanding-cascade.md`.
+ * one pool can elect opposite lines — see `docs/version-resolver.md` §"3. Optimal Version Strategy",
+ * "Known limitation".
  */
-describe('pooling: islanding cascade (F-A)', () => {
+describe('pooling: islanding cascade', () => {
   const SCOPE = {
     'team/mfe-a': 'http://mfe-a/',
     'team/mfe-b': 'http://mfe-b/',
@@ -182,7 +183,8 @@ describe('pooling: islanding cascade (F-A)', () => {
    * CHARACTERISATION of what remains open: the objective is exact per external, but it is still
    * evaluated per external. When two members of one pool have their remote-count majority on opposite
    * lines they elect opposite winners, and pooling amplifies the split. A failure here is probably
-   * good news — re-read `F-A-islanding-cascade.md` before "repairing" it.
+   * good news — a pool-aware election would be the fix, so read the "Known limitation" note in
+   * `docs/version-resolver.md` §"3. Optimal Version Strategy" before "repairing" it.
    */
   describe('residual: per-member elections can still disagree across a pool', () => {
     it('splits a family when each member has its majority on a different line', async () => {

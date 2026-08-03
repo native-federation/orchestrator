@@ -550,7 +550,9 @@ Pooling is opt-in and inert by default. An external joins a pool in one of two w
 - **Auto (by npm scope).** Set `useAutoExternalPooling: true` in the mode `feature` block. Scoped packages
   are grouped by their scope — `@framework/core`, `@framework/common` → pool `framework`. Unscoped
   packages (`utils`, `tslib`) are never auto-pooled. The scope is derived from the package name, so
-  this grouping is global and cannot drift.
+  this grouping is global and cannot drift. (Global grouping is the part that changes under "The
+  provenance promise" below: an auto-pool becomes per remote, and a `pool` tag on any of its members
+  replaces it for that remote.)
 - **Remote-declared tag.** A remote adds an optional `pool` field to a shared external in its
   `remoteEntry.json` (mirrors `shareScope`). A tag is **remote-local**: it groups only the externals
   that _one_ remote tags together. This is how a transitive coupling is expressed — auto-pooling groups
@@ -769,15 +771,25 @@ production capture. A remote loaded later is exactly the consumer that would bri
 Finally, pooling is gated on the resolver having actually re-elected something: it skips any pool no
 member of which was touched this pass, so a warm init that adds no remotes does no pooling work at all.
 
-### The provenance promise — decided 2026-07-31, not yet implemented
+### The provenance promise — decided 2026-07-31, cost accepted 2026-08-03
 
 Everything above describes what ships today. This section states the promise pooling is moving to, so
-that the gap between the two is written down rather than discovered.
+that the gap between the two is written down rather than discovered. It is self-contained on purpose:
+the rule, the measured cost, the semantic changes it carries and the conditions for calling it done are
+all here, because a decision that lives in a working note rots as soon as the note does.
 
 **The promise.** Within a pool, every member a remote runs comes from a build that shipped them
 **together**. A remote may `skip` onto a shared build only when that build serves a **superset** of what
 the remote consumes, at versions the remote's own `requiredVersion` accepts. Otherwise it serves its own
 family, which is one build by definition.
+
+**How the promise is checked — one build, _or_ every member at the remote's own declared tag.** The
+strict one-build form is too strong, and cannot be used as the criterion. A remote may also take a member
+from elsewhere at *exactly* the tag it ships itself: its own build compiled that version alongside the
+rest of its family, so its own build is the witness. This is provenance reasoning, not version distance —
+tags are compared for **identity against the consumer's own**, never for distance. Measured, this is not
+a corner case: on the seven-remote production capture one remote runs two origins and is perfectly
+witnessed, and the widening is what brings that capture's cost to zero.
 
 **Why it is not what gates 1 and 2 deliver.** The opening of this chapter argues safety from provenance —
 "those files were compiled and tested together". Gate 2 does not test provenance; it tests whether two
@@ -796,17 +808,11 @@ Under the promise none of those depend on version distance: the rule reads **cov
 
 **What has to change to deliver it.**
 
-- **Election picks a build, not a version per member.** This is the load-bearing change: measured on the
-  seven-remote capture, enforcing the promise on top of today's per-member election costs +128%
-  downloads, and on a build-electing substrate +24% (46 → 57), with every remote's family resolving to a
-  single origin. Measured multi-anchor in the browser on 2026-07-31 it costs **+13% at seven remotes
-  (46 → 52) and +32% at eleven (72 → 95)** — the reverse of the static model's prediction that
-  multi-anchor would come in *below* today's cost. Two thirds of the first figure measured was an
-  artefact rather than the promise: coverage keyed by external name makes a flat remote and a dense one
-  mutually uncoverable for a build-tool reason, and keying it by entrypoint specifier alone takes eleven
-  remotes from 112 to 96. See `F-B-disjoint-serving-builds.md` §"Options measured" for the lever-by-lever
-  table and §"Decision — reopened" for what is still open. The affordability of the promise is **not
-  settled**, and the bridge-tag pattern this chapter recommends is part of what makes coverage scarce.
+- **Election picks a build, not a version per member.** This is the load-bearing change. Enforcing the
+  promise on top of today's per-member election costs +128% downloads on the seven-remote capture, so the
+  substrate has to change with the rule: election picks a *build* per pool, and a remote dedups only onto
+  a build that covers every member it consumes at versions its own `requiredVersion` accepts — coverage
+  plus `isCompatible`, no version-distance test anywhere.
 - **Consumers must be assignable to different anchors.** One build rarely covers a large portfolio, and
   forcing a single anchor per pool both costs more and scopes members that nothing required to be scoped
   — two remotes sharing no member already satisfy the promise, yet a single-anchor rule removes one of
@@ -819,9 +825,17 @@ Under the promise none of those depend on version distance: the rule reads **cov
   not the obstacle: measured in Chromium, a scope entry pointing at another origin's build beats the global
   `imports` for importers under that prefix, and three consumer groups can run three builds of one
   specifier, with no change to `ImportMap`.
-- **Coverage is per entrypoint.** `generate-import-map` serves an entrypoint the shared source lacks from
-  the consumer's own build — a second build. Package-granularity coverage therefore breaks the promise
-  silently; see "Entrypoint coverage and tearing".
+- **Coverage is per entrypoint, and keyed by _specifier_ rather than by external name.**
+  `generate-import-map` serves an entrypoint the shared source lacks from the consumer's own build — a
+  second build — so package-granularity coverage breaks the promise silently; see "Entrypoint coverage and
+  tearing". Keying on the external *name* is worse than imprecise: a flat remote declares
+  `@framework/core/primitives/di` as its own external while a dense one carries the same specifier as an
+  *entry* of `@framework/core`, and comparing names makes the two shapes mutually uncoverable for a
+  build-tool reason with no provenance content. Keying on specifiers alone took the eleven-remote
+  portfolio from 112 downloads to 96. The **emission** has to be specifier-keyed too, or a consumer
+  anchored via a specifier its anchor provides as an entry gets no mapping at all and the page dies on an
+  unresolved module specifier. The same argument applies to the same-tag witness above: comparing a
+  member's share version cannot fire on a flat member that has none, and specifier-keyed it does.
 - **Host precedence needs no reconciliation** — resolved 2026-07-31. The worry was that an anchor chosen by
   coverage may not be the host. It cannot arise: consumption is derived from **declarations**
   (`consumedMembers`, `family-instance.ts`), so a remote consumes exactly the members it declares as shared,
@@ -833,15 +847,120 @@ Under the promise none of those depend on version distance: the rule reads **cov
   shared is outside pooling entirely — nothing maps it, then or now.) One consequence to keep true:
   `pool-shared-externals.ts` drops the `host` bit when grouping `scope` versions, on the grounds that the
   host is never islanded. That still holds under the promise, for the new reason that coverage cannot move
-  the host — so the comment there stays accurate rather than becoming accidentally true.
+  the host — so the comment there stays accurate rather than becoming accidentally true. What it does
+  need is an **explicit exemption in the same-tag witness**: measured, the witness happily rewrites the
+  host's own `@framework/core` to another remote's build of the same tag. Version-safe, but the host is
+  never reassigned, so the witness has to skip it.
+- **Auto-pooling becomes per remote, and a `pool` tag replaces it rather than adding to it** — decided
+  2026-08-03. Today an external's auto-scope edge is a single global node per npm scope, so `@framework/*`
+  pools by name alone whether or not any remote ships two of its members; a tag edge, by contrast, is
+  per `(remote, label)` and merges only through a shared member. That asymmetry goes away. An auto-pool
+  becomes a **per-remote** collection of one npm scope's externals, so a pool forms exactly when some
+  remote declares members from both sides — which is this chapter's own argument that the consumer is the
+  witness, and it makes "two disjoint builds of one pool agree vacuously" true by construction instead of
+  by an argument the promise has just shown to be unsound. In addition, for a given remote an auto-pool is
+  **skipped entirely when any of its members carries a `pool` property**: one tag on
+  `@acme/design-system` then stops dragging `@acme/shell/*`, which nobody coupled to anything, into the
+  framework pool. The skip is per `(remote, scope)` — tagging inside `@acme` does not disturb that
+  remote's `@framework` auto-pool. **Entrypoints must follow their package** into whatever pool it joins,
+  or a flat remote that tags anything in a scope also drops the edge for `@framework/core/primitives/*`
+  and `@framework/common/http`, those leave pooling entirely, and a remote runs a torn `@framework/core`.
+  Consequence to accept deliberately: two remotes in one npm scope that **share no member stop forming a
+  pool at all**, which rewrites the paragraph under "Enabling pooling" above and the four `pool-graph`
+  specs that lock the global reading.
+- **A member no anchor wins must stay shared with the remotes that are at its version.** Electing a build
+  brings a second way to lose a winner, unrelated to the first: an anchor may contribute to the shared set
+  only if it wins *every* member it ships, so a provider disqualified there takes its member out of the
+  shared set even though its build is perfectly coherent. `rebuildMember` already sweeps orphaned `skip`
+  copies into `scope` when no `share` version survives, which is right for the *original* cause — an
+  islanded build is one pooling has judged incoherent, and deduping onto it is the leak pooling exists to
+  stop — and wrong for the new one. Narrowed accordingly (decided 2026-08-03): the sweep stands when the
+  winner was lost to **islanding**, and relaxes when it was lost to **anchor-disqualification**, where the
+  member stays mapped globally at the tag the resolver elected before pooling ran and only copies at a
+  *different* tag are scoped. Without this, a member every provider loses leaves the global set for
+  everyone and N providers of one tag download N copies where one would do. It requires retaining the
+  pre-pooling elected tag per member, and it has to land together with the anchor self-scope above: a
+  consumer taking a member from an anchor-disqualified provider resolves that member's own peers in the
+  provider's scope, so the second hop is only coherent once the provider maps its family onto itself.
 - **The expectations that encode the old promise get rewritten deliberately**, not deleted: patch drift
   across builds and ragged coverage are currently *tolerated by design*, and each such test records a
   portfolio whose cost changes.
+- **Two statements above stop being true and are restated, not quietly dropped.** Pooling "never moves a
+  winner" becomes **never re-runs the compatibility search**: coverage-driven election can put a pool on
+  an older build that every range accepts — cheapest, no scopes at all — and the newest compatible tag
+  then does not win. Host precedence and `requiredVersion` acceptance are still settled before pooling
+  runs, which is the part that mattered. And gate 2's "builds that ship disjoint members agree vacuously"
+  survives only as a description of what ships, not as a safety argument; the promise replaces it.
 
-Status: decided in principle, **cost not accepted**, unimplemented. Every download figure above is now a
-browser measurement over the recorded portfolios in `e2e/fixtures`, reproducible from
-`e2e/pooling/capture.e2e.spec.ts`; the eleven-remote multi-anchor figure was the last one still modelled
-and, when run, came out +56% rather than below cost. The import-map behaviour described above was measured
+**What it costs — accepted 2026-08-03.** Every figure below is a Chromium measurement over the recorded
+portfolios in `e2e/fixtures`, reproducible from `e2e/pooling/capture.e2e.spec.ts`. Seven remotes is the
+production capture; eleven is that capture plus four synthetic siblings. Each row adds one lever to the
+row above it, and in every row `splitPackages` is empty and no remote runs a torn family.
+
+| | 7 remotes | 11 remotes |
+| --- | --- | --- |
+| shipped, promise violated | 46 | 72 |
+| multi-anchor election, coverage keyed by external name | 57 (+23.9%) | 112 (+55.6%) |
+| + coverage and emission keyed by entrypoint specifier | 57 | 96 (+33.3%) |
+| + the same-tag witness | 52 (+13.0%) | 96 |
+| + per-remote auto-pooling, tag replaces auto-pool | 52 | 95 (+31.9%) |
+| **+ the same-tag witness keyed by specifier too** | **46 (+0%)** | **95 (+31.9%)** |
+
+So the promise is **free on the production capture** — `e2e/pooling/flag.e2e.spec.ts`'s
+`costs nothing at all on the production capture`, which asserts pooled and unpooled downloads are *equal*,
+stays green unchanged — and costs **+31.9% on the eleven-remote portfolio**. That figure is an upper
+bound: the anchor-disqualification rule above was measured only on a synthetic five-remote shape (5
+downloads → 4) and can only widen deduping on the captures.
+
+What the eleven-remote residue is made of, attributed per origin and per specifier: one remote sitting on
+`22.0.6` against a shared `22.0.8` accounts for +17 of the +23 — a single file before, a whole family
+after — with +8 on a remote alone in its pool shape, +3 for an anchor swap, and −5 elsewhere. Two remotes
+holding 41 of the 95 downloads do not move at all, being gate-1 islands on the previous major already. Two
+properties make the residue defensible: the count of specifiers existing in more than one copy is
+**identical** before and after (18 at eleven, 12 at seven), so the promise never splits a package that is
+single-copy today — it only adds copies to families already split — and the extra copies are **not**
+byte-identical duplicates, so they cannot be dismissed as waste. Each exists because provenance genuinely
+differs. The cost measures how incoherent a portfolio is, not how wasteful the rule is.
+
+The +17 remote is the one place where a cheaper answer exists and was rejected: a *same-minor* witness
+instead of a same-tag one would recover it. That is exactly the version-distance reasoning this section
+removes, and the authoring rule above already tells owners that pooling does not enforce coupling inside a
+minor line. Holding the line keeps the promise unconditional.
+
+**What it has to log.** A remote that downloads its whole family because no anchor covers it is the
+promise's main cost, and under the prototype it was invisible — coverage rather than a verdict moves the
+remote, and coverage logged nothing. The table under "What pooling logs" gains a line for it, or the cost
+lands on portfolio owners unannounced.
+
+**Done when.** The promise's own criteria — no version-distance logic, per-specifier coverage,
+multi-anchor assignment, host precedence — are the bullets above. These are the conditions for calling the
+defect they exist for closed:
+
+- Every portfolio in `e2e/pooling/provenance.e2e.spec.ts` ends with the consumer running **one build, or
+  every member at its own declared tag**, in whichever order the manifest lists them, on both the init and
+  the dynamic path. Two of those portfolios discriminate between rules: the bridge-tag one is out of reach
+  of anything that compares tags, since its members version independently, and the lockstep-pair one is out
+  of reach of anything that compares the serving builds with each other however tightly — they already
+  agree exactly, on every member they share.
+- **A member no anchor wins is still shared with the remotes that are at its version**, and still mapped in
+  the global `imports`.
+- Whatever closes them **says so**, per "What it has to log" above.
+- That is asserted against fixtures whose members **import their peers**. With leaf externals the criterion
+  is satisfiable while the promise is violated: a consumer's top-level resolution stays coherent even when
+  the build serving it binds a foreign copy of a sibling. Done — `dep(..., { peers })` and `nf.bindings()`.
+- Those peer edges stay **inside what the remote declares**. A bare specifier survives bundling only
+  because it was externalized, and anything externalized is in the remote entry — so a fixture whose build
+  imports a specifier it declares nowhere models nothing, and its failures are the harness's rather than the
+  rule's. `dep` should reject such a `peers` entry; two fixtures currently rely on it.
+- `e2e/pooling/asymmetric.e2e.spec.ts`'s `lets disjoint builds of one pool agree vacuously` stays green.
+  Remotes that share no member already satisfy the promise, so nothing may be scoped and the global set must
+  not shrink. This is what fails under a single-anchor rule, and what the per-remote auto-pool rule makes
+  true by construction.
+- The cost is re-measured through `e2e/pooling/capture.e2e.spec.ts` — downloads, `sharedTags`,
+  `splitPackages` — with `e2e/pooling/flag.e2e.spec.ts` as the regression guard, and any change in
+  downloads or shared members is recorded in this document.
+
+Status: **decided, cost accepted, unimplemented.** The import-map behaviour described above was measured
 separately, with handcrafted maps in Chromium against synthetic origins.
 
 ## Dynamic Init
@@ -1288,7 +1407,9 @@ Because the shared version itself is one download whichever candidate wins, mini
 > **Known limitation.** The objective is exact per external, but it is evaluated *per external*. With
 > `useAutoExternalPooling` enabled, two members of one pool whose remote-count majorities sit on
 > different version lines will elect opposite winners, and pooling amplifies that split into islanded
-> families. See `F-A-islanding-cascade.md`.
+> families. Making the election pool-aware is the fix and is not implemented; the shape is characterised
+> in `pooling/islanding-cascade.regression.spec.ts`, second `describe`, which locks the split as an
+> expectation so that repairing it goes red deliberately.
 
 ### 4. Caching Strategy
 
