@@ -37,9 +37,9 @@ export function versionAcceptance(
  * The tail of winner election: derive every other version's verdict from the chosen one, apply the
  * entrypoint coverage policy, clear `dirty`.
  *
- * Shared with pooling, which re-points a winner onto a family instance and so also moves the
- * `remotes[0]` serving basis that `findTears` keys off. Pooling passes in the resolver's memoized
- * `isCompatible` rather than building a second memo.
+ * `determine` is the only caller — it passes its memoized `isCompatible` and the `acceptance` it already
+ * built for the election. Pooling used to call this too, when it re-pointed a winner onto a family
+ * instance; that election was reverted, and pooling now rewrites verdicts itself in `rebuildMember`.
  */
 export function createApplyWinner(config: LoggingConfig & ModeConfig) {
   return function applyWinner(
@@ -115,7 +115,6 @@ export function createApplyWinner(config: LoggingConfig & ModeConfig) {
           return true;
         }
         first.remotes.push(...v.remotes);
-        first.host ||= v.host;
         return false;
       });
     }

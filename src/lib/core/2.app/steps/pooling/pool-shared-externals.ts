@@ -11,7 +11,12 @@ import { NFError } from 'lib/core/native-federation.error';
 import type { DrivingContract } from '../../driving-ports/driving.contract';
 import type { LoggingConfig } from '../../config/log.contract';
 import type { ModeConfig } from '../../config/mode.contract';
-import { buildInstances, consumedMembers, servingBuilds } from './family-instance';
+import {
+  buildInstances,
+  consumedMembers,
+  ownTagsPerRemote,
+  servingBuilds,
+} from './family-instance';
 import {
   acceptanceTable,
   arrivalOrder,
@@ -127,31 +132,38 @@ export function findTornRemotes(
   served: Served,
   hosts: ReadonlySet<RemoteName>
 ): { remote: RemoteName; combination: string }[] {
+  const { suspect, selfServed } = movedRemotes(members, islanded, basis, served, hosts);
+  if (suspect.size === 0) return [];
+
   const instances = buildInstances(members, islanded);
+  const own = ownTagsPerRemote(members, suspect);
   const torn: { remote: RemoteName; combination: string }[] = [];
 
-  for (const [remote, wants] of consumed) {
-    if (islanded.has(remote) || hosts.has(remote)) continue;
-
+  for (const remote of suspect) {
+    const ownBuild = own.get(remote);
+    const mine = selfServed.get(remote);
     const resolved = new Map<ExternalName, VersionName>();
-    for (const member of wants) {
-      // An explicit anchor, else the global mapping, else nobody publishes it and the copy self-serves.
-      const from = served.get(remote)?.get(member) ?? basis.get(member) ?? remote;
-      const tag = instances.get(from)?.get(member);
+
+    for (const member of consumed.get(remote) ?? []) {
+      // A copy `rebuildMember` will scope resolves itself whatever the member's basis is; otherwise an
+      // explicit anchor, else the global mapping, else nobody publishes it and it self-serves anyway.
+      const from = mine?.has(member)
+        ? remote
+        : (served.get(remote)?.get(member) ?? basis.get(member) ?? remote);
+      // Its own tags are read from every row, `scope` included: a copy about to self-serve is what a tear
+      // is made of, and `buildInstances` leaves those out by design.
+      const tag = from === remote ? ownBuild?.get(member) : instances.get(from)?.get(member);
       if (tag !== undefined) resolved.set(member, tag);
     }
     if (resolved.size === 0) continue;
 
+    // Its own build first: a remote running its whole family from itself is coherent by definition, and
+    // that is where a self-serving copy has just put it.
+    if (ships(ownBuild, resolved)) continue;
+
     let witnessed = false;
-    for (const [, ships] of instances) {
-      let all = true;
-      for (const [member, tag] of resolved) {
-        if (ships.get(member) !== tag) {
-          all = false;
-          break;
-        }
-      }
-      if (all) {
+    for (const [, build] of instances) {
+      if (ships(build, resolved)) {
         witnessed = true;
         break;
       }
@@ -166,6 +178,64 @@ export function findTornRemotes(
   }
 
   return torn;
+}
+
+const ships = (
+  build: Map<ExternalName, VersionName> | undefined,
+  resolved: Map<ExternalName, VersionName>
+): boolean => {
+  if (!build) return false;
+  for (const [member, tag] of resolved) if (build.get(member) !== tag) return false;
+  return true;
+};
+
+/**
+ * The only remotes whose resolution pooling can have changed, and therefore the only ones worth checking:
+ * one it anchored elsewhere, one consuming a member nothing publishes any more (`rebuildMember` self-serves
+ * such a copy), or one holding a `scope` copy without being islanded — which gate 1 makes impossible and is
+ * listed anyway, since it is the shape a tear would take if that ever stopped holding. Everything else
+ * resolves the global mapping wholesale, exactly as gate 2 witnessed it.
+ *
+ * `selfServed` is what each of them must serve itself, mirroring `rebuildMember` so the two cannot drift.
+ */
+function movedRemotes(
+  members: PoolMember[],
+  islanded: Map<RemoteName, IslandCause>,
+  basis: Map<ExternalName, RemoteName>,
+  served: Served,
+  hosts: ReadonlySet<RemoteName>
+): { suspect: Set<RemoteName>; selfServed: Map<RemoteName, Set<ExternalName>> } {
+  const suspect = new Set<RemoteName>();
+  const selfServed = new Map<RemoteName, Set<ExternalName>>();
+
+  const add = (remote: RemoteName) => {
+    if (!islanded.has(remote) && !hosts.has(remote)) suspect.add(remote);
+  };
+
+  for (const remote of served.keys()) add(remote);
+
+  for (const member of members) {
+    const unpublished = !basis.has(member.name);
+    for (const version of member.external.versions) {
+      const scoped = version.action === 'scope';
+      if (!unpublished && !scoped) continue;
+
+      for (const meta of version.remotes) {
+        add(meta.name);
+        // A scoped copy always serves itself, and a clean copy of a member nothing publishes any more does
+        // too — unless pooling gave it an anchor, which is the one thing that keeps such a copy deduping.
+        const servesItself =
+          scoped || (unpublished && served.get(meta.name)?.get(member.name) === undefined);
+        if (!servesItself) continue;
+
+        let mine = selfServed.get(meta.name);
+        if (!mine) selfServed.set(meta.name, (mine = new Set()));
+        mine.add(member.name);
+      }
+    }
+  }
+
+  return { suspect, selfServed };
 }
 
 export function createPoolSharedExternals(

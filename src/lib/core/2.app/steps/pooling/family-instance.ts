@@ -1,4 +1,4 @@
-import type { ExternalName, RemoteName } from 'lib/core/1.domain';
+import type { ExternalName, RemoteName, VersionName } from 'lib/core/1.domain';
 import type { FamilyInstance, FamilyInstances, PoolMember } from './pool.types';
 
 // Per remote, every member it ships and the tag it ships it at. An islanded remote offers nothing at
@@ -30,6 +30,36 @@ export function buildInstances(
   }
 
   return instances;
+}
+
+/**
+ * Per remote, the tag it ships each member at — **including** copies marked `scope`, which is what
+ * separates this from `buildInstances`. That one answers "what can this build serve others", where a
+ * `scope` copy serves nobody; this one answers "what does this remote run itself", where a `scope` copy is
+ * precisely what it runs. Only the second question can see a torn family.
+ */
+export function ownTagsPerRemote(
+  members: PoolMember[],
+  // Callers that only judge a few remotes pay for a few: the whole pool is never needed at once.
+  only?: ReadonlySet<RemoteName>
+): Map<RemoteName, Map<ExternalName, VersionName>> {
+  const own = new Map<RemoteName, Map<ExternalName, VersionName>>();
+
+  for (const member of members) {
+    for (const version of member.external.versions) {
+      for (const meta of version.remotes) {
+        if (only && !only.has(meta.name)) continue;
+
+        let tags = own.get(meta.name);
+        if (!tags) own.set(meta.name, (tags = new Map()));
+        // First tag wins, as in `buildInstances`, so a record holding two rows of one tag is read
+        // deterministically.
+        if (!tags.has(member.name)) tags.set(member.name, version.tag);
+      }
+    }
+  }
+
+  return own;
 }
 
 // Per remote, what it must be served. Wider than its instance: a copy marked `scope` is excluded
