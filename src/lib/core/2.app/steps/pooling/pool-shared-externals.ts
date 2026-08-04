@@ -291,7 +291,7 @@ export function createPoolSharedExternals(
       if (cause.kind === 'incompatible') {
         config.log.warn(
           3,
-          `[${scope}][pool:${poolName}] '${remote}' is islanded: '${cause.member}@${cause.tag}' is incompatible with the shared version, so all ${scoped} members it imports are scoped for it.`
+          `[${scope}][pool:${poolName}] '${remote}' is islanded: the resolver scoped its '${cause.member}@${cause.tag}', so all ${scoped} members it imports are scoped for it.`
         );
         continue;
       }

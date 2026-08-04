@@ -408,7 +408,9 @@ describe('createPoolSharedExternals', () => {
         .mocked(config.log.warn)
         .mock.calls.filter(c => String(c[1]).includes("'c' is islanded"));
       expect(warnings).toHaveLength(1);
-      expect(warnings[0]![1]).toContain("'@framework/common@18' is incompatible");
+      // Says what pooling knows — determine wrote this verdict — not that pooling found an
+      // incompatibility of its own. See F-D-review-nits.md §3.
+      expect(warnings[0]![1]).toContain("the resolver scoped its '@framework/common@18'");
       // c declares both members of this pool, so what it imports and the pool coincide here.
       expect(warnings[0]![1]).toContain('all 2 members it imports are scoped');
     });
@@ -499,11 +501,9 @@ describe('createPoolSharedExternals', () => {
       );
       givenExternals({
         '@framework/core': external([
-          sharedVersion(
-            '17.0.0',
-            [meta('a', { req: '^17.0.0' }), meta('c', { req: '~17.0.0' })],
-            { action: 'share' }
-          ),
+          sharedVersion('17.0.0', [meta('a', { req: '^17.0.0' }), meta('c', { req: '~17.0.0' })], {
+            action: 'share',
+          }),
           sharedVersion('17.1.0', [meta('b', { req: '^17.0.0' })]),
         ]),
         '@framework/util': external([
@@ -669,7 +669,7 @@ describe('createPoolSharedExternals', () => {
       );
       expect(config.log.warn).toHaveBeenCalledWith(
         3,
-        expect.stringContaining("'c' is islanded: '@framework/core@18' is incompatible")
+        expect.stringContaining("'c' is islanded: the resolver scoped its '@framework/core@18'")
       );
     });
 

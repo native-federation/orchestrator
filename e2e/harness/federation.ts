@@ -225,10 +225,19 @@ export const test = base.extend<{ nf: Federation }, Worker>({
       islands: async () =>
         (await nf.warns())
           .map(msg => {
-            const gate1 = /'([^']+)' is islanded: '([^']+)' is incompatible/.exec(msg);
+            // Tolerant of how the sentence between the two quotes is phrased: it has been reworded once
+            // already, and three parsers of it went red for a change that altered no behaviour.
+            const gate1 = /'([^']+)' is islanded: .*?'([^']+)'/.exec(msg);
             if (gate1) return `${gate1[1]} on ${gate1[2]}`;
             const gate2 = /'([^']+)' serves its own family: .* '([^']+)' is the gap/.exec(msg);
-            return gate2 ? `${gate2[1]} self-serves, no build covers ${gate2[2]}` : undefined;
+            if (gate2) return `${gate2[1]} self-serves, no build covers ${gate2[2]}`;
+            // The no-tear fallback. No portfolio is known to reach it, which is exactly why it is parsed:
+            // unreported, a torn remote would leave `islands()` empty and a test asserting that would pass.
+            const torn =
+              /'([^']+)' serves its own family: the mapping would have handed it (.*), which no build/.exec(
+                msg
+              );
+            return torn ? `${torn[1]} self-serves, torn on ${torn[2]}` : undefined;
           })
           .filter((entry): entry is string => entry !== undefined)
           .sort(),

@@ -491,13 +491,13 @@ flowchart TD
     F5 --> G
 
     G --> G1[For each remaining version:]
-    G1 --> G2{Compatible with shared version?}
-    G2 -->|Yes| G3[Action: SKIP<br/>Use shared version]
-    G2 -->|No| G4{strictVersion: true?}
-    G4 -->|Yes| G5{strictExternalCompatibility enabled?}
+    G1 --> G2{Does EVERY copy accept<br/>the shared version?}
+    G2 -->|Yes| G3[Action: SKIP<br/>the whole version uses the shared one]
+    G2 -->|No| G4{Any copy rejecting it<br/>with strictVersion: true?}
     G4 -->|No| G6[Action: SKIP<br/>Use incompatible shared version + warning]
+    G4 -->|Yes| G5{strictExternalCompatibility enabled?}
     G5 -->|Yes| G7[Throw NFError]
-    G5 -->|No| G8[Action: SCOPE<br/>Download individually]
+    G5 -->|No| G8[Split the version per copy:<br/>the rejecting ones SCOPE,<br/>the rest SKIP]
 
     C --> H[Resolution complete]
     E --> H
@@ -510,6 +510,31 @@ flowchart TD
 > [`strict.strictEntryPointCoverage`](./config.md#modeConfig) a `SKIP` version whose specifiers the
 > winner cannot cover is promoted to `SCOPE`. See
 > [Entrypoint coverage and tearing](#entrypoint-coverage-and-tearing).
+
+#### A verdict belongs to the copy, not the version
+
+Note where the two questions are asked, because they are asked at different granularities. **Whether a
+version may be redirected** (G2) is asked of the version as a whole: it is one file served from one basis,
+so redirecting it has to satisfy every remote it would redirect — see `versionDemands`. **Whose build must
+change** (G8) is per copy: `requiredVersion` and `strictVersion` are per-build settings, so two remotes
+that happen to ship the same tag can disagree about the winner, and only the ones that reject it keep their
+own build.
+
+So a version that fails G2 is **split**: the rejecting copies become a `scope` version at that tag, the
+rest stay `skip` and dedup. A tag can therefore hold two versions in the record, one `skip` and one
+`scope` — at most one of each, and both sorted where that tag belongs. Three consequences worth knowing:
+
+- **The winner is never split.** Its copies are never really asked to accept its own tag, and host
+  precedence makes the host's version the winner, so a host copy never lands in a `scope` version.
+- **A copy declaring `strictVersion: false` dedups** even where its own range rejects the shared version —
+  that is what the flag asks for — rather than being carried into a strict sibling's `scope`.
+- **The objective prices the split**, not the version: see
+  [Optimal Version Strategy](#3-optimal-version-strategy-default).
+
+Before this, the verdict was written onto the version, so one strict pin scoped every remote that happened
+to ship its tag — and with pooling on, gate 1 read that as an incompatibility and islanded those remotes
+across their whole family. `determine-shared-externals.split.spec.ts` locks the mechanics;
+`pooling/per-copy-verdicts.regression.spec.ts` locks the two portfolios it was measured on.
 
 ### Step 4: Generate Import Map
 
@@ -628,6 +653,12 @@ the one thing the per-external resolver cannot do: deduping that matching siblin
 leak a foreign build in through a shared intermediary (the `@design-system/ui`-against-`core@15` hazard).
 One incompatibility anywhere in the family islands the remote everywhere.
 
+What gate 1 reads is therefore only as good as the verdict it reads. Because `determine` marks the copies
+that objected rather than the versions they sit in (see
+[A verdict belongs to the copy](#a-verdict-belongs-to-the-copy-not-the-version)), a remote that merely
+happens to ship a pinner's tag is not islanded with it — it never objected, so there is nothing for pooling
+to defer.
+
 Gate 1 reads the `scope` verdicts out of storage, and an island is *also* persisted as `scope` — so the
 two are indistinguishable in the record. What keeps the reading honest is that a pool is re-elected as a
 **unit**: `spread-pool-dirtiness` marks every member of a pool dirty as soon as any one of them is, so the
@@ -657,6 +688,25 @@ gain in provenance, which is most of why an early prototype measured 24% dearer 
 **whole** family itself. No partial mixing: one member at the remote's own tag beside another from a foreign
 build at a different tag is exactly the combination nothing compiled, so the witness too is all-or-nothing
 across the family rather than a per-member test.
+
+**The guarantee, enforced rather than implied.** Before writing a pool's verdicts, the step checks them: for
+every remote, the `(member → tag)` combination the record will make it resolve must be one that **some
+single build shipped**. A violation islands that remote — self-serving a whole family is always coherent —
+and the assignment is redone, since taking a build away can move everyone who was deduping onto it. Two
+things this is careful about:
+
+- **Tags, never origins.** Two builds shipping one tag of a member are interchangeable providers, so a
+  remote drawing `core@22.0.6` from one remote and `router@22.0.6` from another is *not* torn as long as
+  some build shipped that pair of tags. Only the combination is constrained.
+- **A host is never judged.** It cannot be repointed onto another build — its map is committed and it wins
+  every external it ships — so there is nothing to enforce and no safe fallback to enforce it with.
+
+The gates above already leave this true: an islanded remote self-serves, an anchored one takes every member
+from a build the coverage rule vetted, and an unassigned one was witnessed. No portfolio is known to reach
+the fallback. It is checked anyway because a torn family is not a cost defect but a page that crashes, and
+the argument closing it spans three separate rules. `findTornRemotes` is the check;
+`find-torn-remotes.spec.ts` pins its contract, and `family-coherence.regression.spec.ts` and
+`pooling.integration.spec.ts` assert the guarantee over every fixture they run.
 
 **Why the witness is sound: at equal versions, provider identity is irrelevant.** `@framework/core@22.0.5`
 from one remote and from another are the same published artefact, so *which* copy is elected as the shared
@@ -853,7 +903,8 @@ remote can fix a portfolio it does not own), but worth knowing before adding a t
 
 | level | line | what to do |
 | --- | --- | --- |
-| `warn` | `'<remote>' is islanded: '<member>@<tag>' is incompatible with the shared version, so all N members it imports are scoped for it.` | Gate 1. That remote re-downloads the whole family. Align its version, or accept the cost. N counts what that remote imports, not the pool: in a ragged pool the two differ, and only its own copies can scope. |
+| `warn` | `'<remote>' is islanded: the resolver scoped its '<member>@<tag>', so all N members it imports are scoped for it.` | Gate 1. That remote re-downloads the whole family. Align its version, or accept the cost. N counts what that remote imports, not the pool: in a ragged pool the two differ, and only its own copies can scope. The sentence says what pooling *knows* — that `determine` scoped this copy — rather than asserting an incompatibility of its own: the copy is scoped because its own range rejected the shared version, but that is the resolver's finding, not one pooling can verify from the record. |
+| `warn` | `'<remote>' serves its own family: the mapping would have handed it <member>@<tag>, …, which no build shipped together, so all N members it imports are scoped for it.` | The no-tear guarantee caught a combination nothing built and fell back to self-serving. No portfolio is known to reach this; if you see it, the record disagrees with the gates and it is worth reporting with the line. |
 | `warn` | `'<remote>' serves its own family: no shared build offers every entrypoint it imports at a version it accepts — '<gap>' is the gap, closest is '<build>'. All N members it imports are scoped for it.` | Gate 2, and **the promise's main cost**. Nothing shipped the combination the shared set would have handed it, so it downloads its own family. `<gap>` is the one thing the closest build fell short on: an entrypoint it does not carry, or `<member>@<tag>` where the version is outside this remote's range. Closing that gap in either build recovers the dedup. When no other build serves any of it the clause reads `no other build in the pool serves any of it` instead. |
 | `warn` | `'<member>' is scoped-only — no coherent shared build provides it; N remotes download their own copy.` | Sharing was possible and was lost. Counts only the copies that really self-serve: a copy pooling anchored elsewhere still dedups. Suppressed when an island in the same pass took the member's last provider — that island's own warning already named the cause. |
 | `debug` | `[pool:<name>] N members across M remotes, incompatible={…}` | Pool formation, for confirming membership came out as intended. The set is gate 1's, listed before the coverage gate runs — a remote that ends up serving its own family for lack of coverage appears in its own `warn`, not here. |
@@ -1272,7 +1323,7 @@ Each new dependency gets one of these actions during dynamic init:
 | --------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **SKIP**  | Version already exists or use existing shared version. In a shareScope context this action is used for overriding by skipping the provided external and loading a compatible cached version instead. |
 | **SHARE** | No compatible version exists (yet), become the shared version for this scope                                                                                                                         |
-| **SCOPE** | Incompatible version with strictVersion: true, or (under `strictEntryPointCoverage`) a version whose entrypoints the shared winner cannot cover — served coherently from its own build.               |
+| **SCOPE** | A copy whose own range rejects the shared version while `strictVersion: true`, or (under `strictEntryPointCoverage`) one whose entrypoints the shared winner cannot cover — served coherently from its own build. Per copy, not per version: co-tagged copies that accept the shared version keep deduping. |
 
 ### Example: Dynamic Loading Scenario
 
@@ -1632,15 +1683,20 @@ await initFederation(manifest, {
 
 The resolver calculates which version minimizes extra downloads per scope by examining which versions would need to be individually scoped due to incompatibility, and how many copies each of those scopes costs.
 
-A scoped version is served to **every one of its remotes from that remote's own build**, so it costs one download per remote copy that is not already cached — not one per version. A version shipped by three remotes therefore costs three downloads when it is scoped, and a copy already in the cache costs nothing:
+The unit of cost is a **copy that has to keep its own build**: a rejected version is split, so what a
+candidate really costs is the copies that themselves reject it while `strictVersion` is set and that are not
+already cached. Not one per version, and not the whole version either — a copy whose own range accepts the
+candidate dedups, and so does one declaring `strictVersion: false`:
 
 ```
 // The resolver calculates which version minimizes extra downloads per scope:
 
 Global scope - if 18.2.0 is chosen:
-  18.1.0 (2 remotes): compatible (SKIP)             → 0 extra downloads
-  17.0.2 (3 remotes): incompatible + strict (SCOPE) → 3 extra downloads
-  Total cost: 3 extra downloads
+  18.1.0 (2 remotes, both accept 18.2.0):     compatible (SKIP)  → 0 extra downloads
+  17.0.2 (3 remotes, 1 of them pinning ~17):  splits             → 1 extra download
+                                              (the pinner SCOPEs, its two
+                                               co-tagged neighbours SKIP)
+  Total cost: 1 extra download
 
 Team-a scope - if 3.1.0 is chosen:
   3.0.5 (1 remote): compatible (SKIP) → 0 extra downloads
@@ -1649,13 +1705,25 @@ Team-a scope - if 3.1.0 is chosen:
 Result: Choose 18.2.0 globally, 3.1.0 for team-a scope
 ```
 
-Because the shared version itself is one download whichever candidate wins, minimizing this sum is exactly minimizing total downloads for the external. Counting scoped *versions* instead — as earlier releases did — would have priced that `17.0.2` scope at 1 rather than 3, and a candidate scoping two single-remote versions would have looked twice as expensive as one scoping a version shipped by ten remotes.
+Because the shared version itself is one download whichever candidate wins, minimizing this sum is exactly minimizing total downloads for the external — provided the sum counts what will really be downloaded. Two earlier ways of counting both overstated it: per scoped *version* would have priced that `17.0.2` line at 1 whatever its remote count, so a candidate scoping two single-remote versions looked twice as expensive as one scoping a version shipped by ten remotes; per *whole scoped version* would have priced it at 3, charging the two neighbours that dedup for a download they never make, and could prefer a candidate that is dearer once resolved.
 
-> **Consequence.** A large group of remotes sitting on an older tag can now win over a smaller group on
-> a newer one — that is what "fewest extra downloads" asks for. Ties still break toward the newest tag,
-> but they are rarer than when the cost was counted per version. Host precedence
-> (`remoteEntry` of the host) and `profile.latestSharedExternal` are decided before this objective runs
-> and are unaffected.
+> **Consequence.** A large group of remotes sitting on an older tag can win over a smaller group on a
+> newer one — that is what "fewest extra downloads" asks for. Ties break toward the newest tag, and they
+> are **more common** now that a version costs only its objectors: prices are smaller, so candidates draw
+> level more often. Host precedence (`remoteEntry` of the host) and `profile.latestSharedExternal` are
+> decided before this objective runs and are unaffected.
+>
+> One asymmetry falls out of pricing a cached copy at zero, and it is by design rather than a defect: the
+> same portfolio can elect different equal-cost winners assembled cold and assembled incrementally, since
+> incrementally the copies already downloaded are free to keep. `e2e/pooling/entrypoints.e2e.spec.ts` pins
+> both ends of one such portfolio.
+>
+> **Knowingly approximate in one term.** The sum prices what the *rejected* versions cost and leaves the
+> winner's own download out, so two candidates that differ only in whether their copies are already cached
+> score the same, where the cached one is really a download cheaper. Adding the term is one expression
+> inside the existing loop, but it would decide ties — a cached candidate would start winning ties that
+> currently go to the newest tag — so it is left out deliberately rather than overlooked. It matters more
+> now that rival prices are exact per copy and therefore smaller, which makes ties more common.
 
 > **Known limitation.** The objective is exact per external, but it is evaluated *per external*. With
 > `useAutoExternalPooling` enabled, two members of one pool whose remote-count majorities sit on

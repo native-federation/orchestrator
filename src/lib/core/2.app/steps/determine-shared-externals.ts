@@ -23,8 +23,9 @@ export function createDetermineSharedExternals(
    *
    * The shared external versions that were merged into the cache/storage caused the shared
    * external to be 'dirty', this step cleans all dirty externals in the storage by calculating
-   * the most optimal version to share since only 1 version can be shared globally. All other
-   * versions that are compatible are skipped and the incompatible ones are defined as scoped external.
+   * the most optimal version to share since only 1 version can be shared globally. Every other copy
+   * either skips onto the winner or, where its own range rejects it and `strictVersion` is set, is split
+   * out into a scoped external of its own tag.
    *
    * Check the docs for a full explanation of the dependency resolver.
    *

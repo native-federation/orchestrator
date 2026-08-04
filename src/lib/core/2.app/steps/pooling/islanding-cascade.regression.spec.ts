@@ -105,7 +105,7 @@ describe('pooling: islanding cascade', () => {
   const islandedRemotes = () =>
     vi
       .mocked(config.log.warn)
-      .mock.calls.map(c => /'([^']+)' is islanded: '([^']+)'/.exec(String(c[1])))
+      .mock.calls.map(c => /'([^']+)' is islanded: .*?'([^']+)'/.exec(String(c[1])))
       .filter(m => m !== null)
       .map(m => `${m![1]} on ${m![2]}`)
       .sort();
