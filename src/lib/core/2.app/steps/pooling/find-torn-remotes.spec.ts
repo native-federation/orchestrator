@@ -14,13 +14,21 @@ describe('findTornRemotes', () => {
   const CORE = '@a/core';
   const ROUTER = '@a/router';
 
-  const meta = (name: string): SharedVersionMeta => mockVersionRemote(name, 'ext');
+  // Each copy declares its own member as its specifier, the way a real remote entry does. Keying them all
+  // on one placeholder would make every build cover every other one vacuously.
+  const meta = (name: string, member: ExternalName, extra?: string[]): SharedVersionMeta =>
+    mockVersionRemote(name, member, {
+      entries: Object.fromEntries(
+        [member, ...(extra ?? [])].map(specifier => [specifier, `${specifier}.js`])
+      ),
+    });
 
   const row = (
+    member: ExternalName,
     tag: string,
     remotes: string[],
     action: SharedVersion['action'] = 'skip'
-  ): SharedVersion => ({ tag, host: false, action, remotes: remotes.map(meta) });
+  ): SharedVersion => ({ tag, host: false, action, remotes: remotes.map(r => meta(r, member)) });
 
   /**
    * W ships core only, Q router only, V both — so V is the one build that witnesses the shared pair — and
@@ -31,24 +39,23 @@ describe('findTornRemotes', () => {
       name: CORE,
       external: {
         dirty: false,
-        versions: [row('2.0.0', ['team/W', 'team/V'], 'share'), row('1.0.0', ['team/R'])],
+        versions: [
+          row(CORE, '2.0.0', ['team/W', 'team/V'], 'share'),
+          row(CORE, '1.0.0', ['team/R']),
+        ],
       },
     },
     {
       name: ROUTER,
       external: {
         dirty: false,
-        versions: [row('2.0.0', ['team/Q', 'team/V'], 'share'), row('1.0.0', ['team/R'])],
+        versions: [
+          row(ROUTER, '2.0.0', ['team/Q', 'team/V'], 'share'),
+          row(ROUTER, '1.0.0', ['team/R']),
+        ],
       },
     },
   ];
-
-  const consumed = new Map<RemoteName, ExternalName[]>([
-    ['team/W', [CORE]],
-    ['team/Q', [ROUTER]],
-    ['team/V', [CORE, ROUTER]],
-    ['team/R', [CORE, ROUTER]],
-  ]);
 
   const bothBases = new Map<ExternalName, RemoteName>([
     [CORE, 'team/W'],
@@ -60,7 +67,7 @@ describe('findTornRemotes', () => {
   const routerOnly = new Map<ExternalName, RemoteName>([[ROUTER, 'team/Q']]);
 
   it('catches a remote left holding its own copy of one member and a foreign build of another', () => {
-    const torn = findTornRemotes(members(), new Map(), consumed, routerOnly, new Map(), new Set());
+    const torn = findTornRemotes(members(), new Map(), routerOnly, new Map(), new Set());
 
     // R would run its own core@1.0.0 beside router@2.0.0 from Q. Nobody built that pair.
     expect(torn).toEqual([{ remote: 'team/R', combination: '@a/core@1.0.0, @a/router@2.0.0' }]);
@@ -72,9 +79,29 @@ describe('findTornRemotes', () => {
     // reads tags, not origins.
     const served = new Map([['team/R', new Map([[CORE, 'team/V']])]]);
 
-    const torn = findTornRemotes(members(), new Map(), consumed, bothBases, served, new Set());
+    const torn = findTornRemotes(members(), new Map(), bothBases, served, new Set());
 
     expect(torn).toEqual([]);
+  });
+
+  it('catches a secondary entrypoint resolving at a tag its own package does not', () => {
+    // The tear a member-keyed check cannot see. R is anchored on V for core, and resolves router through the
+    // global mapping: `@a/router` from Q's winning 2.0.0, but `@a/router/testing` from its own 1.0.0 row,
+    // because no copy of the winner carries that entrypoint and the mapping falls through to whoever does
+    // (`selfFillUncovered`). R therefore runs one package from two builds. Keyed by member this reads as
+    // `{core@2.0.0, router@2.0.0}`, which V witnesses, and the guard would pass a page that crashes.
+    const record = members();
+    const router = record.find(m => m.name === ROUTER)!;
+    router.external.versions.find(v => v.tag === '1.0.0')!.remotes = [
+      meta('team/R', ROUTER, [`${ROUTER}/testing`]),
+    ];
+    const served = new Map([['team/R', new Map([[CORE, 'team/V']])]]);
+
+    const torn = findTornRemotes(record, new Map(), bothBases, served, new Set());
+
+    expect(torn).toEqual([
+      { remote: 'team/R', combination: '@a/core@2.0.0, @a/router@2.0.0, @a/router/testing@1.0.0' },
+    ]);
   });
 
   it('catches a scoped copy beside a deduped sibling, which is what the record really resolves', () => {
@@ -88,7 +115,7 @@ describe('findTornRemotes', () => {
     const core = record.find(m => m.name === CORE)!;
     core.external.versions.find(v => v.tag === '1.0.0')!.action = 'scope';
 
-    const torn = findTornRemotes(record, new Map(), consumed, bothBases, new Map(), new Set());
+    const torn = findTornRemotes(record, new Map(), bothBases, new Map(), new Set());
 
     expect(torn).toEqual([{ remote: 'team/R', combination: '@a/core@1.0.0, @a/router@2.0.0' }]);
   });
@@ -97,7 +124,7 @@ describe('findTornRemotes', () => {
     // Cost, not correctness: a remote with no anchor, no scoped copy and no unpublished member resolves the
     // global mapping wholesale — exactly what gate 2 already witnessed — so it is not worth re-deriving.
     // Nothing here is suspect, so the check returns before building a single map.
-    const torn = findTornRemotes(members(), new Map(), consumed, bothBases, new Map(), new Set());
+    const torn = findTornRemotes(members(), new Map(), bothBases, new Map(), new Set());
 
     expect(torn).toEqual([]);
   });
@@ -114,20 +141,13 @@ describe('findTornRemotes', () => {
     ]);
 
     // Even with core's basis gone, an anchored copy resolves the anchor's build rather than its own.
-    const torn = findTornRemotes(members(), new Map(), consumed, routerOnly, served, new Set());
+    const torn = findTornRemotes(members(), new Map(), routerOnly, served, new Set());
 
     expect(torn).toEqual([]);
   });
 
   it('never judges a host', () => {
-    const torn = findTornRemotes(
-      members(),
-      new Map(),
-      consumed,
-      routerOnly,
-      new Map(),
-      new Set(['team/R'])
-    );
+    const torn = findTornRemotes(members(), new Map(), routerOnly, new Map(), new Set(['team/R']));
 
     expect(torn).toEqual([]);
   });
@@ -137,7 +157,7 @@ describe('findTornRemotes', () => {
       ['team/R', { kind: 'incompatible', member: CORE, tag: '1.0.0' }],
     ]);
 
-    const torn = findTornRemotes(members(), islanded, consumed, routerOnly, new Map(), new Set());
+    const torn = findTornRemotes(members(), islanded, routerOnly, new Map(), new Set());
 
     expect(torn).toEqual([]);
   });

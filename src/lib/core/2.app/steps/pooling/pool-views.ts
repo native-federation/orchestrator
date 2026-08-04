@@ -3,6 +3,7 @@ import type {
   BuildView,
   CommittedView,
   Islanded,
+  OwnCopy,
   PoolMember,
   Specifier,
 } from './pool.types';
@@ -88,26 +89,29 @@ function walkBuilds(
 }
 
 /**
- * Per remote, the tag it ships each member at — **including** copies marked `scope`, which is what
- * separates this from `liveBuilds`. That one answers "what can this build serve others"; this one answers
- * "what does this remote run itself", where a `scope` copy is precisely what it runs. Only the second
- * question can see a torn family.
+ * Per remote, every copy it holds — **including** ones marked `scope`, which is what separates this from
+ * `liveBuilds`. That one answers "what can this build serve others"; this one answers "what does this remote
+ * run itself", where a `scope` copy is precisely what it runs. Only the second question can see a torn
+ * family.
  */
-export function ownTagsPerRemote(
+export function ownCopies(
   members: PoolMember[],
   // Callers that only judge a few remotes pay for a few: the whole pool is never needed at once.
   only?: ReadonlySet<RemoteName>
-): Map<RemoteName, Map<ExternalName, VersionName>> {
-  const own = new Map<RemoteName, Map<ExternalName, VersionName>>();
+): Map<RemoteName, OwnCopy[]> {
+  const own = new Map<RemoteName, OwnCopy[]>();
 
   for (const member of members) {
     for (const version of member.external.versions) {
       for (const meta of version.remotes) {
         if (only && !only.has(meta.name)) continue;
 
-        let tags = own.get(meta.name);
-        if (!tags) own.set(meta.name, (tags = new Map()));
-        if (!tags.has(member.name)) tags.set(member.name, version.tag);
+        let copies = own.get(meta.name);
+        if (!copies) own.set(meta.name, (copies = []));
+        // A remote ships one copy per member, so a second row for one member is a record it cannot
+        // produce; the first wins so such a record still reads deterministically.
+        if (!copies.some(c => c.member === member.name))
+          copies.push({ member: member.name, tag: version.tag, entries: meta.entries });
       }
     }
   }

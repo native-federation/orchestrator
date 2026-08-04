@@ -20,7 +20,7 @@ import {
   coversWholePool,
   hostRemotes,
   liveBuilds,
-  ownTagsPerRemote,
+  ownCopies,
   servingBuilds,
   sharedTagPerSpecifier,
 } from './pool-views';
@@ -109,9 +109,13 @@ function servedPerRemote(
 
 /**
  * The no-tear guarantee, checked on what is about to be written rather than argued from the gates: every
- * non-host remote must resolve a `(member → tag)` combination that some single build shipped. Which remote
+ * non-host remote must resolve a `(specifier → tag)` combination that some single build shipped. Which remote
  * serves a tag is free — two builds at one tag are interchangeable providers — so this compares tags only,
  * never origins. A host is never judged: it cannot be repointed onto another build.
+ *
+ * Keyed by specifier like everything else in the design, not by member: an entrypoint the serving basis lacks
+ * is published from a sibling copy at that copy's tag (`selfFillUncovered`), so a member-level check reads one
+ * tag for a package the remote really resolves at two.
  *
  * No portfolio is known to reach a tear through `poolFamily` — the gates leave it true — and it is checked
  * regardless, because it is the one thing pooling exists to prevent and because `rebuildMember`'s last rule
@@ -121,7 +125,6 @@ function servedPerRemote(
 export function findTornRemotes(
   members: PoolMember[],
   islanded: Islanded,
-  consumed: Map<RemoteName, ExternalName[]>,
   basis: Map<ExternalName, RemoteName>,
   served: Served,
   hosts: ReadonlySet<RemoteName>
@@ -130,34 +133,48 @@ export function findTornRemotes(
   if (suspect.size === 0) return [];
 
   const builds = liveBuilds(members, islanded);
-  const own = ownTagsPerRemote(members, suspect);
+  // What the global `imports` publishes per specifier — not the member's basis, which understates it
+  // exactly where a tear hides.
+  const shared = sharedTagPerSpecifier(members, islanded);
+  const own = ownCopies(members, suspect);
   const torn: { remote: RemoteName; combination: string }[] = [];
 
   for (const remote of suspect) {
-    const ownBuild = own.get(remote);
+    const copies = own.get(remote) ?? [];
     const mine = selfServed.get(remote);
-    const resolved = new Map<ExternalName, VersionName>();
+    const anchors = served.get(remote);
+    // Its own tags are read from every row, `scope` included: a copy about to self-serve is what a tear is
+    // made of, and `liveBuilds` leaves those out by design.
+    const ownTags = new Map<Specifier, VersionName>();
+    const resolved = new Map<Specifier, VersionName>();
 
-    for (const member of consumed.get(remote) ?? []) {
+    for (const copy of copies) {
       // A copy `rebuildMember` will scope resolves itself whatever the member's basis is; otherwise an
-      // explicit anchor, else the global mapping, else nobody publishes it and it self-serves anyway.
-      const from = mine?.has(member)
-        ? remote
-        : (served.get(remote)?.get(member) ?? basis.get(member) ?? remote);
-      // Its own tags are read from every row, `scope` included: a copy about to self-serve is what a tear
-      // is made of, and `liveBuilds` leaves those out by design.
-      const tag = from === remote ? ownBuild?.get(member) : builds.get(from)?.instance.get(member);
-      if (tag !== undefined) resolved.set(member, tag);
+      // explicit anchor, else the global mapping — and where that publishes nothing, nobody serves the
+      // specifier and there is no combination to judge.
+      const from = mine?.has(copy.member) ? remote : anchors?.get(copy.member);
+
+      for (const specifier in copy.entries) {
+        if (!ownTags.has(specifier)) ownTags.set(specifier, copy.tag);
+
+        const tag =
+          from === remote
+            ? copy.tag
+            : from !== undefined
+              ? builds.get(from)?.tags.get(specifier)
+              : shared.get(specifier);
+        if (tag !== undefined && !resolved.has(specifier)) resolved.set(specifier, tag);
+      }
     }
     if (resolved.size === 0) continue;
 
     // Its own build first: a remote running its whole family from itself is coherent by definition, and
     // that is where a self-serving copy has just put it.
-    if (ships(ownBuild, resolved)) continue;
+    if (ships(ownTags, resolved)) continue;
 
     let witnessed = false;
     for (const [, build] of builds) {
-      if (ships(build.instance, resolved)) {
+      if (ships(build.tags, resolved)) {
         witnessed = true;
         break;
       }
@@ -166,7 +183,7 @@ export function findTornRemotes(
     if (!witnessed) {
       torn.push({
         remote,
-        combination: [...resolved].map(([member, tag]) => `${member}@${tag}`).join(', '),
+        combination: [...resolved].map(([specifier, tag]) => `${specifier}@${tag}`).join(', '),
       });
     }
   }
@@ -175,11 +192,11 @@ export function findTornRemotes(
 }
 
 const ships = (
-  build: Map<ExternalName, VersionName> | undefined,
-  resolved: Map<ExternalName, VersionName>
+  build: Map<Specifier, VersionName> | undefined,
+  resolved: Map<Specifier, VersionName>
 ): boolean => {
   if (!build) return false;
-  for (const [member, tag] of resolved) if (build.get(member) !== tag) return false;
+  for (const [specifier, tag] of resolved) if (build.get(specifier) !== tag) return false;
   return true;
 };
 
@@ -313,7 +330,7 @@ export function createPoolSharedExternals(
     // since taking a build away can move everyone who was deduping onto it. Terminates for the same reason
     // the coverage gate does: each round islands at least one more remote.
     for (;;) {
-      const torn = findTornRemotes(members, islanded, consumed, basis, served, hosts);
+      const torn = findTornRemotes(members, islanded, basis, served, hosts);
       if (torn.length === 0) break;
 
       for (const { remote, combination } of torn)

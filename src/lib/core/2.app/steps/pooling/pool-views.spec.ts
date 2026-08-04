@@ -5,7 +5,7 @@ import {
   consumedSpecifiers,
   hostRemotes,
   liveBuilds,
-  ownTagsPerRemote,
+  ownCopies,
   servingBuilds,
   sharedTagPerSpecifier,
 } from './pool-views';
@@ -164,22 +164,27 @@ describe('liveBuilds', () => {
   });
 });
 
-describe('ownTagsPerRemote', () => {
+describe('ownCopies', () => {
   // The counterpart of `liveBuilds`: what a remote runs itself, `scope` copies included. Only this question
-  // can see a torn family, which is why `findTornRemotes` reads it rather than the instance.
+  // can see a torn family, which is why `findTornRemotes` reads it rather than the instance. It carries the
+  // entries too, since the tear it looks for is a specifier resolving at a tag its package does not.
   it('reads a scoped copy, which the instance omits', () => {
-    const own = ownTagsPerRemote(soleProviderIsland());
+    const own = ownCopies(soleProviderIsland());
 
-    expect(Object.fromEntries(own.get('form-overview')!)).toEqual({
-      '@angular/core': '21.2.18',
-      '@angular/animations': '21.2.18',
-    });
+    expect(own.get('form-overview')!.map(c => `${c.member}@${c.tag}`)).toEqual([
+      '@angular/core@21.2.18',
+      '@angular/animations@21.2.18',
+    ]);
+  });
+
+  it('carries the specifiers each copy declares', () => {
+    const own = ownCopies(soleProviderIsland());
+
+    expect(Object.keys(own.get('form-overview')![0]!.entries)).toEqual(['@angular/core']);
   });
 
   it('reads only the remotes it was asked for', () => {
-    expect([...ownTagsPerRemote(soleProviderIsland(), new Set(['approve'])).keys()]).toEqual([
-      'approve',
-    ]);
+    expect([...ownCopies(soleProviderIsland(), new Set(['approve'])).keys()]).toEqual(['approve']);
   });
 });
 

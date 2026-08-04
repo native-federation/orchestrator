@@ -17,6 +17,13 @@ export type FamilyInstance = Map<ExternalName, VersionName>;
 /** Every specifier a build serves, mapped to the file it serves it from. */
 export type Coverage = Map<Specifier, string>;
 
+/** One copy a remote holds, as it runs it itself: `scope` rows included. */
+export type OwnCopy = {
+  member: ExternalName;
+  tag: VersionName;
+  entries: Record<Specifier, string>;
+};
+
 /** One build, as every gate reads it. */
 export type BuildView = {
   coverage: Coverage;
