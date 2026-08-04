@@ -98,7 +98,8 @@ test.describe('entrypoint coverage: electing the basis', () => {
 
     // The price of self-fill, which only a real page shows: mfe3 takes the basis for what it covers
     // and its own build for `/paginator`, so both builds are evaluated. Every entrypoint still
-    // resolves — that is what `scopeUncoveredEntrypoints` trades away below.
+    // resolves, and because both copies carry one tag this is a merge rather than a tear — so neither
+    // coverage setting changes it.
     const loaded = await nf.loadAll();
     expect(loaded['team/mfe3']!.seen).toEqual({
       [M]: build(1),
@@ -136,29 +137,33 @@ test.describe('entrypoint coverage: a remote joining an already-resolved version
     expect(storedActions(await nf.store(), M)).toEqual([`${TAG}:share`]);
   });
 
-  test('scopes the joining remote when the cached basis cannot cover it', async ({ nf }) => {
-    const [first, late] = joined();
-    const profile = { scopeUncoveredEntrypoints: true };
-    await nf.init([first], { profile });
-    await nf.init([first, late], { profile });
+  // The joiner builds the tag that is already shared, so the two copies merge and the union of their
+  // entrypoints is published. Both coverage settings only govern tears *between* versions, so neither
+  // splits the joiner out — nothing here is torn to begin with.
+  for (const [name, profile, strict] of [
+    ['scopeUncoveredEntrypoints', { scopeUncoveredEntrypoints: true }, undefined],
+    ['strictEntryPointCoverage', undefined, { strictEntryPointCoverage: true }],
+  ] as const) {
+    test(`merges the joining remote into the cached version under ${name}`, async ({ nf }) => {
+      const [first, late] = joined();
+      const options = { ...(profile ? { profile } : {}), ...(strict ? { strict } : {}) };
+      await nf.init([first], options);
+      await nf.init([first, late], options);
 
-    // Two records on one tag: the cached basis keeps the shared copy, the newcomer takes a scoped one.
-    expect(storedActions(await nf.store(), M)).toEqual([`${TAG}:share`, `${TAG}:scope`]);
+      // One record on the tag: the joiner deduped into the shared copy rather than taking its own.
+      expect(storedActions(await nf.store(), M)).toEqual([`${TAG}:share`]);
 
-    const map = await nf.map();
-    expect(map.imports[`${M}/table`]).toBe(`${SCOPE.mfe1}${M}/table.js`);
-    // The whole package from mfe3's own build, so it is not torn across two.
-    expect(map.scopes?.[SCOPE.mfe3]).toEqual({
-      [M]: `${SCOPE.mfe3}${M}.js`,
-      [`${M}/table`]: `${SCOPE.mfe3}${M}/table.js`,
-      [`${M}/sort`]: `${SCOPE.mfe3}${M}/sort.js`,
+      const map = await nf.map();
+      expect(map.imports[`${M}/table`]).toBe(`${SCOPE.mfe1}${M}/table.js`);
+      // `/sort` is the entrypoint only the joiner bundles, published from its build at the same tag.
+      expect(map.imports[`${M}/sort`]).toBe(`${SCOPE.mfe3}${M}/sort.js`);
+      expect((await nf.load('team/mfe3')).seen).toEqual({
+        [M]: build(1),
+        [`${M}/table`]: build(1),
+        [`${M}/sort`]: build(3),
+      });
     });
-    expect((await nf.load('team/mfe3')).seen).toEqual({
-      [M]: build(3),
-      [`${M}/table`]: build(3),
-      [`${M}/sort`]: build(3),
-    });
-  });
+  }
 
   test('re-resolves compatibility when a strict remote joins a skipped version', async ({ nf }) => {
     // 22.0.5 is skipped on the first init because mfe2 accepts whatever is shared. mfe3 then joins

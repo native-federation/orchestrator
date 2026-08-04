@@ -39,6 +39,7 @@ describe('determine: splitting a version on election', () => {
       strict?: boolean;
       cached?: boolean;
       entries?: Record<string, string>;
+      servedBy?: string;
     }[],
     o: { host?: boolean } = {}
   ): SharedVersion => ({
@@ -51,6 +52,7 @@ describe('determine: splitting a version on election', () => {
         strictVersion: r.strict ?? true,
         cached: r.cached ?? false,
         ...(r.entries ? { entries: r.entries } : {}),
+        ...(r.servedBy ? { servedBy: r.servedBy } : {}),
       })
     ),
   });
@@ -216,6 +218,80 @@ describe('determine: splitting a version on election', () => {
 
     // The strict check is asked of the row, above the split: one objecting copy still fails the portfolio.
     await expect(createDetermineSharedExternals(config, adapters)()).rejects.toThrow();
+  });
+
+  /**
+   * A warm init reads `servedBy` written by the previous portfolio's pooling — determine runs before
+   * `poolSharedExternals` (init.flow.ts), so these anchors are always already in the record. An anchored
+   * copy resolves through its anchor's build, not through the shared version, which cuts both ways: what it
+   * bundles cannot cover anyone else, and the shared version cannot tear it.
+   */
+  describe('copies pooling anchored on a foreign build', () => {
+    it('scopes a torn copy an anchored sibling only appeared to cover', async () => {
+      config.profile.scopeUncoveredEntrypoints = true;
+      const winner = majority('2.2.0', 4);
+      // The widest copy of the winner is the anchored one, so only it declares `/extra`.
+      Object.assign(winner.remotes[3]!, {
+        servedBy: 'team/mfe9',
+        entries: { 'dep-a': 'a.js', 'dep-a/extra': 'x.js' },
+      });
+      seed([
+        winner,
+        version('2.1.0', [
+          {
+            remote: 'team/mfe-a',
+            req: '^2.1.0',
+            entries: { 'dep-a': 'a.js', 'dep-a/extra': 'x.js' },
+          },
+        ]),
+      ]);
+
+      await createDetermineSharedExternals(config, adapters)();
+
+      // The anchored copy bundles `/extra`, but the map serves it mfe9's file in its own scope only —
+      // nothing publishes `/extra` for mfe-a, so mfe-a is genuinely torn and takes its own build.
+      expect(rows()).toEqual([majorityRow('2.2.0', 4), '2.1.0:scope:[team/mfe-a]']);
+    });
+
+    it('keeps an anchored copy deduping, since its anchor already serves it', async () => {
+      config.profile.scopeUncoveredEntrypoints = true;
+      seed([
+        majority('2.2.0', 4),
+        version('2.1.0', [
+          {
+            remote: 'team/mfe-a',
+            req: '^2.1.0',
+            servedBy: 'team/mfe9',
+            entries: { 'dep-a': 'a.js', 'dep-a/extra': 'x.js' },
+          },
+        ]),
+      ]);
+
+      await createDetermineSharedExternals(config, adapters)();
+
+      // Scoping it would throw away the dedup pooling arranged, to fix a tear that does not exist: the
+      // map names mfe9's files for both of its specifiers.
+      expect(rows()).toEqual([majorityRow('2.2.0', 4), '2.1.0:skip:[team/mfe-a]']);
+    });
+
+    it('does not refuse the portfolio for an anchored copy under strictEntryPointCoverage', async () => {
+      config.strict.strictEntryPointCoverage = true;
+      seed([
+        majority('2.2.0', 4),
+        version('2.1.0', [
+          {
+            remote: 'team/mfe-a',
+            req: '^2.1.0',
+            servedBy: 'team/mfe9',
+            entries: { 'dep-a': 'a.js', 'dep-a/extra': 'x.js' },
+          },
+        ]),
+      ]);
+
+      // The throw happens before pooling runs, so nothing downstream can walk it back.
+      await expect(createDetermineSharedExternals(config, adapters)()).resolves.toBeDefined();
+      expect(rows()).toEqual([majorityRow('2.2.0', 4), '2.1.0:skip:[team/mfe-a]']);
+    });
   });
 
   // The objective has to price a rejected row at the copies that really self-serve. Charging it for every

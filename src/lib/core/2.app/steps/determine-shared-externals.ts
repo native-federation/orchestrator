@@ -5,7 +5,7 @@ import {
   type SharedExternal,
   type SharedVersion,
 } from 'lib/core/1.domain';
-import { countUncoveredEntrypoints } from 'lib/core/1.domain/externals/basis';
+import { countUncoveredEntrypoints, versionEntries } from 'lib/core/1.domain/externals/basis';
 import { NFError } from 'lib/core/native-federation.error';
 import type { DrivingContract } from '../driving-ports/driving.contract';
 import type { LoggingConfig } from '../config/log.contract';
@@ -92,17 +92,22 @@ export function createDetermineSharedExternals(
     return Promise.resolve(touched);
   };
 
-  // Entrypoints declared by the versions `winner` would skip that its basis can't serve.
+  // Entrypoints declared by the versions `winner` would skip that its own copies can't serve. Prices
+  // exactly the tears `applyWinner.findTears` would report, so an anchored copy — which resolves through
+  // its pooling anchor, not through the winner — is no more a tear here than it is there.
   function uncoveredTears(
     external: SharedExternal,
     winner: SharedVersion,
     accepts: (version: SharedVersion, tag: string) => boolean
   ): number {
-    const basis = winner.remotes[0]!.entries;
+    const basis = versionEntries(winner);
     return external.versions.reduce((sum, v) => {
       if (v === winner) return sum;
       if (!accepts(v, winner.tag)) return sum;
-      return sum + v.remotes.reduce((n, r) => n + countUncoveredEntrypoints(r, basis), 0);
+      return v.remotes.reduce(
+        (n, r) => (r.servedBy ? n : n + countUncoveredEntrypoints(r, basis)),
+        sum
+      );
     }, 0);
   }
 

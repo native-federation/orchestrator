@@ -1,5 +1,6 @@
 import type { DrivingContract } from 'lib/core/2.app/driving-ports/driving.contract';
 import type { SharedVersion, SharedVersionMeta } from 'lib/core/1.domain';
+import { versionEntries } from 'lib/core/1.domain/externals/basis';
 import type { GetSharedOptions, ShareInfos, Shared } from './share-infos.contract';
 import * as _path from 'lib/utils/path';
 
@@ -32,30 +33,24 @@ export function createGetShared(
           const requiredVersion = resolveRequiredVersion(version, options, scopeType);
 
           // MF's shared config is flat: one key per entrypoint. Emit a separate
-          // Shared for each entry so secondary entrypoints reach MF consumers.
-          const claimed = new Set<string>();
-          for (const source of version.remotes) {
-            for (const [entryName, file] of Object.entries(source.entries)) {
-              if (claimed.has(entryName)) continue;
-              claimed.add(entryName);
+          // Shared for each merged entry so secondary entrypoints reach MF consumers.
+          for (const [entryName, source] of versionEntries(version)) {
+            const url = resolveUrl(source, source.entries[entryName]!);
+            if (!url) continue;
 
-              const url = resolveUrl(source, file);
-              if (!url) continue;
+            const shareObject: Shared = {
+              version: version.tag,
+              get: () => ports.browser.importModule(url).then(module => () => module),
+              shareConfig: {
+                singleton,
+                requiredVersion,
+                ...(scopeType === 'strict' ? { strictVersion: true } : {}),
+              },
+            };
+            if (scopeType !== 'global') shareObject.scope = scope;
 
-              const shareObject: Shared = {
-                version: version.tag,
-                get: () => ports.browser.importModule(url).then(module => () => module),
-                shareConfig: {
-                  singleton,
-                  requiredVersion,
-                  ...(scopeType === 'strict' ? { strictVersion: true } : {}),
-                },
-              };
-              if (scopeType !== 'global') shareObject.scope = scope;
-
-              if (!shared[entryName]) shared[entryName] = [];
-              shared[entryName]!.push(shareObject);
-            }
+            if (!shared[entryName]) shared[entryName] = [];
+            shared[entryName]!.push(shareObject);
           }
         }
       }

@@ -22,6 +22,7 @@ export type BootOptions = {
   /** Serve this URL as the host remote entry (`hostRemoteEntry`). */
   host?: string;
   profile?: Record<string, unknown>;
+  strict?: Record<string, unknown>;
   /** Route the import map through es-module-shims in shim mode instead of a native import map. */
   shim?: boolean;
   /** Pass the manifest as a URL for the library to fetch, instead of as an object. */
@@ -61,6 +62,7 @@ const options = (o: BootOptions) => ({
   },
   ...(o.shim ? useShimImportMap({ shimMode: true }) : {}),
   ...(o.profile ? { profile: o.profile } : {}),
+  ...(o.strict ? { strict: o.strict } : {}),
   ...(o.host ? { hostRemoteEntry: o.host } : {}),
 });
 

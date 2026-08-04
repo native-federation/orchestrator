@@ -1,4 +1,5 @@
 import type { ExternalName, RemoteName, SharedVersion, VersionName } from 'lib/core/1.domain';
+import { forEachVersionEntry } from 'lib/core/1.domain/externals/basis';
 import type {
   BuildView,
   CommittedView,
@@ -286,11 +287,15 @@ export function sharedTagPerSpecifier(
 }
 
 /**
- * The order `generate-import-map` fills the global `imports` in, and the single place it is encoded on this
- * side: per member the `share` version's basis first, then its siblings, then the `skip` copies, each filling
- * only what nobody claimed yet (`selfFillUncovered`). Both gates decide on what a consumer would *land on*,
- * so both read this rather than the winning version alone — a package's secondary entrypoints are routinely
- * published from a sibling copy of the same tag.
+ * The order `generate-import-map` fills the global `imports` in: per member the `share` version's basis first,
+ * then its siblings (`mergeVersionEntries`), then the `skip` copies (`selfFillUncovered`), each filling only
+ * what nobody claimed yet. Both gates decide on what a consumer would *land on*, so both read this rather than
+ * the winning version alone — a package's secondary entrypoints are routinely published from a sibling copy of
+ * the same tag.
+ *
+ * Which copies may claim is not restated here: `forEachVersionEntry` is the rule the builders publish by, so an
+ * anchored copy — whose files the map names per consumer rather than globally — cannot be modelled as
+ * publishing them. Islanded copies are discounted on top, being about to self-serve.
  *
  * `visit` is called in claim order for every candidate; first claim per specifier wins, which the callers
  * apply themselves so the walk stays allocation-free.
@@ -300,14 +305,9 @@ function forEachGlobalClaim(
   islanded: Islanded | undefined,
   visit: (specifier: Specifier, tag: VersionName, meta: VersionMeta) => void
 ): void {
-  const claim = (version: SharedVersion) => {
-    const remotes = version.remotes;
-    for (let r = 0; r < remotes.length; r++) {
-      const meta = remotes[r]!;
-      if (islanded?.has(meta.name)) continue;
-      for (const specifier in meta.entries) visit(specifier, version.tag, meta);
-    }
-  };
+  const accepts = islanded ? (meta: VersionMeta) => !islanded.has(meta.name) : undefined;
+  const claim = (version: SharedVersion) =>
+    forEachVersionEntry(version, accepts, (specifier, meta) => visit(specifier, version.tag, meta));
 
   for (const member of members) {
     const versions = member.external.versions;

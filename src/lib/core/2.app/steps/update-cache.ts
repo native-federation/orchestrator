@@ -3,14 +3,16 @@ import {
   type RemoteEntry,
   type DenseSharedInfo,
   type SharedInfoActions,
-  type SharedVersion,
   type SharedVersionAction,
+  type SharedVersionMeta,
   GLOBAL_SCOPE,
 } from 'lib/core/1.domain';
 import {
   addRemoteToVersion,
+  committedEntries,
   findVersionForTag,
   uncoveredEntrypoints,
+  versionEntries,
 } from 'lib/core/1.domain/externals/basis';
 import type { DrivingContract } from '../driving-ports/driving.contract';
 import type { LoggingConfig } from '../config/log.contract';
@@ -49,17 +51,18 @@ export function createUpdateCache(
       if (remoteEntry?.override) removeCachedRemoteEntries(new Set([remoteEntry.name]));
 
       storeRemoteEntry(remoteEntry, (entry, external, ctx) => {
-        const { action, sharedVersion } = resolveSharedExternal(entry, external, ctx);
+        const { action, provided, sameVersion } = resolveSharedExternal(entry, external, ctx);
         actions[external.packageName] = { action };
 
-        if (action === 'skip' && sharedVersion?.remotes[0]?.entries) {
-          actions[external.packageName]!.covered = Object.keys(sharedVersion.remotes[0].entries);
+        if (action === 'skip' && provided) {
+          actions[external.packageName]!.covered = Array.from(provided.keys());
+          if (sameVersion) actions[external.packageName]!.sameVersion = true;
 
           if (external.shareScope) {
             actions[external.packageName]!.override = resolveOverrideEntries(
               entry,
               external,
-              sharedVersion
+              provided
             );
           }
         }
@@ -82,7 +85,11 @@ export function createUpdateCache(
       assertSameVersionCompatibility,
       commit,
     }: SharedExternalContext
-  ): { action: SharedVersionAction; sharedVersion?: SharedVersion } {
+  ): {
+    action: SharedVersionAction;
+    provided?: Map<string, SharedVersionMeta>;
+    sameVersion?: boolean;
+  } {
     let action: SharedVersionAction = scopeType === 'strict' ? 'share' : 'skip';
 
     const sharedVersion = cached.versions.find(c => c.action === 'share');
@@ -104,8 +111,22 @@ export function createUpdateCache(
       config.log.warn(8, errorMsg);
     }
 
-    if (action === 'skip' && sharedVersion) {
-      const uncovered = uncoveredEntrypoints(remote, sharedVersion.remotes[0]!.entries);
+    // Snapshotted before this remote joins the version below: a copy of the shared tag merges its
+    // extra entrypoints in, and it has to serve them itself since the import map is committed.
+    //
+    // What the shared version can serve *this* remote, which is not its whole surface: a global skip
+    // inherits the committed `imports`, so only a copy already published there covers it, while a
+    // shareScope skip gets a per-consumer override that can name any copy. Both the tear check and
+    // `covered` read it, or `convert-to-import-map` would self-fill what this step called covered.
+    const provided = sharedVersion
+      ? sharedInfo.shareScope
+        ? versionEntries(sharedVersion)
+        : committedEntries(sharedVersion)
+      : undefined;
+    const sameVersion = sharedVersion?.tag === tag;
+
+    if (action === 'skip' && provided && !sameVersion) {
+      const uncovered = uncoveredEntrypoints(remote, provided);
       if (uncovered.length > 0) {
         const msg = `[${sharedInfo.shareScope ?? GLOBAL_SCOPE}][${remoteEntry.name}][${sharedInfo.packageName}] Entrypoints not covered by the shared version: ${uncovered.join(', ')}.`;
 
@@ -138,24 +159,34 @@ export function createUpdateCache(
     }
 
     commit();
-    return { action, sharedVersion };
+    return { action, provided, sameVersion };
   }
 
+  // Each entrypoint is served by the copy of the shared version that declares it.
   function resolveOverrideEntries(
     remoteEntry: RemoteEntry,
     external: DenseSharedInfo,
-    sharedVersion: SharedVersion
+    provided: Map<string, SharedVersionMeta>
   ): Record<string, string> {
+    return Object.fromEntries(
+      Array.from(provided, ([packageName, provider]) => [
+        packageName,
+        _path.join(
+          providerScopeUrl(remoteEntry, external, provider.name),
+          provider.entries[packageName]!
+        ),
+      ])
+    );
+  }
+
+  function providerScopeUrl(
+    remoteEntry: RemoteEntry,
+    external: DenseSharedInfo,
+    providerName: string
+  ): string {
     return ports.remoteInfoRepo
-      .tryGet(sharedVersion.remotes[0]!.name)
-      .map(remote =>
-        Object.fromEntries(
-          Object.entries(sharedVersion.remotes[0]!.entries).map(([packageName, file]) => [
-            packageName,
-            _path.join(remote.scopeUrl, file),
-          ])
-        )
-      )
+      .tryGet(providerName)
+      .map(remote => remote.scopeUrl)
       .orThrow(() => {
         config.log.error(
           8,
@@ -163,9 +194,7 @@ export function createUpdateCache(
             external.packageName
           }@${external.version}][override] Remote name not found in cache.`
         );
-        return new NFError(
-          `Could not find override url from remote ${sharedVersion.remotes[0]!.name}`
-        );
+        return new NFError(`Could not find override url from remote ${providerName}`);
       });
   }
 }
