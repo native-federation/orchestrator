@@ -63,9 +63,16 @@ export function findVersionForTag(
 // tear: the version exposes the union of its copies' entrypoints, each served by the first copy
 // that declares it — basis precedence first. See
 // docs/version-resolver.md#entrypoint-coverage-and-tearing.
+//
+// Only copies that publish their own files count. Pooling anchors a copy on a foreign build via
+// `servedBy`, and the import map then names the anchor's files for it, per consumer — so what such a
+// copy bundles answers for nobody but itself, and counting it would promise a specifier no consumer of
+// this version can resolve. Pooling keeps an anchored copy out of the basis slot for exactly this
+// reason, so a `share` version's basis always survives the skip.
 export function versionEntries(version: SharedVersion): Map<string, SharedVersionMeta> {
   const entries = new Map<string, SharedVersionMeta>();
   for (const remote of version.remotes) {
+    if (remote.servedBy) continue;
     for (const entrypoint in remote.entries) {
       if (!entries.has(entrypoint)) entries.set(entrypoint, remote);
     }

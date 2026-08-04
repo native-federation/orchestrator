@@ -4,6 +4,18 @@ import {
   SharedVersionAction,
   SharedVersionMeta,
 } from 'lib/core/1.domain';
+import type { ForVersionChecking } from 'lib/core/2.app/driving-ports/for-version-checking.port';
+
+/**
+ * Mirrors the newest-first sort that every `commit()` performs (`store-remote-entry.ts:201`), so a
+ * hand-seeded fixture cannot encode a version order production is unable to produce. Seed helpers that
+ * write straight into the repository must go through this — `determine` reads `versions[0]` as the latest
+ * and keeps the first candidate of equal cost, both of which are only correct on a sorted list.
+ */
+export const newestFirst = (
+  versions: SharedVersion[],
+  compare: ForVersionChecking['compare']
+): SharedVersion[] => [...versions].sort((a, b) => compare(b.tag, a.tag));
 
 export const mockVersionRemote = (
   name: string,
@@ -16,6 +28,7 @@ export const mockVersionRemote = (
   cached: options.cached ?? false,
   bundle: options.bundle,
   pool: options.pool,
+  servedBy: options.servedBy,
   entries: options.entries ?? { [external]: options.file ?? `${external}.js` },
 });
 

@@ -111,9 +111,10 @@ describe('createExternalsAudit', () => {
       (ports.sharedExternalsRepo.getFromScope as Mock).mockReturnValue({
         'dep-b': mockExternal_B({
           dirty: false,
+          // Newest-first, as every commit() leaves it — the scoped copy is the older tag here.
           versions: [
-            mockVersion_B.v2_1_1({ remotes: ['team/mfe1'], action: 'scope' }),
             mockVersion_B.v2_2_2({ remotes: ['team/other-mfe'], action: 'share' }),
+            mockVersion_B.v2_1_1({ remotes: ['team/mfe1'], action: 'scope' }),
           ],
         }),
       });

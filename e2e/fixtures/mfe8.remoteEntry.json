@@ -1,0 +1,167 @@
+{
+  "$version": "v4",
+  "name": "team/mfe8",
+  "shared": [
+    {
+      "singleton": true,
+      "strictVersion": true,
+      "requiredVersion": "~21.2.0",
+      "packageName": "@angular/core",
+      "entries": {
+        "@angular/core": "_angular_core.3MtLn_Z5WC.js",
+        "@angular/core/event-dispatch-contract.min.js": "_angular_core_event_dispatch_contract_min_js.ITd6tmMHd6.js",
+        "@angular/core/primitives/di": "_angular_core_primitives_di.bLeoKcfEuF.js",
+        "@angular/core/primitives/event-dispatch": "_angular_core_primitives_event_dispatch.T53FRbrnM-.js",
+        "@angular/core/primitives/signals": "_angular_core_primitives_signals.r4dEkgeqoK.js",
+        "@angular/core/rxjs-interop": "_angular_core_rxjs_interop.C4H5goWzp0.js"
+      },
+      "version": "21.2.15",
+      "bundle": "browser-angular_core",
+      "pool": "ng-core"
+    },
+    {
+      "singleton": true,
+      "strictVersion": true,
+      "requiredVersion": "~21.2.0",
+      "packageName": "@angular/common",
+      "entries": {
+        "@angular/common": "_angular_common._aEzBk64LR.js",
+        "@angular/common/http": "_angular_common_http.A55bcCG_Pq.js"
+      },
+      "version": "21.2.15",
+      "bundle": "browser-angular_common",
+      "pool": "ng-core"
+    },
+    {
+      "singleton": true,
+      "strictVersion": true,
+      "requiredVersion": "~21.2.0",
+      "packageName": "@angular/elements",
+      "entries": {
+        "@angular/elements": "_angular_elements.IHTCLi2a2_.js"
+      },
+      "version": "21.2.15",
+      "bundle": "browser-angular_elements",
+      "pool": "ng-core"
+    },
+    {
+      "singleton": true,
+      "strictVersion": true,
+      "requiredVersion": "~21.2.0",
+      "packageName": "@angular/forms",
+      "entries": {
+        "@angular/forms": "_angular_forms.LhHBf56n2q.js"
+      },
+      "version": "21.2.15",
+      "bundle": "browser-angular_forms",
+      "pool": "ng-core"
+    },
+    {
+      "singleton": true,
+      "strictVersion": true,
+      "requiredVersion": "~21.2.0",
+      "packageName": "@angular/platform-browser",
+      "entries": {
+        "@angular/platform-browser": "_angular_platform_browser.eMBIKkCnyw.js",
+        "@angular/platform-browser/animations": "_angular_platform_browser_animations.taX2TqVs87.js",
+        "@angular/platform-browser/animations/async": "_angular_platform_browser_animations_async.v0H0uyeFHs.js"
+      },
+      "version": "21.2.15",
+      "bundle": "browser-angular_platform_browser",
+      "pool": "ng-core"
+    },
+    {
+      "singleton": true,
+      "strictVersion": true,
+      "requiredVersion": "~21.2.0",
+      "packageName": "@angular/router",
+      "entries": {
+        "@angular/router": "_angular_router.PEqC96U_ac.js"
+      },
+      "version": "21.2.15",
+      "bundle": "browser-angular_router",
+      "pool": "ng-core"
+    },
+    {
+      "singleton": true,
+      "strictVersion": true,
+      "requiredVersion": "~21.2.0",
+      "packageName": "@angular/animations",
+      "entries": {
+        "@angular/animations": "_angular_animations.E6vXl48WNn.js",
+        "@angular/animations/browser": "_angular_animations_browser.jEGDEzUmGa.js"
+      },
+      "version": "21.2.15",
+      "bundle": "browser-angular_animations",
+      "pool": "ng-core"
+    },
+    {
+      "singleton": true,
+      "strictVersion": true,
+      "requiredVersion": "~21.2.0",
+      "packageName": "@angular/compiler",
+      "entries": {
+        "@angular/compiler": "_angular_compiler.88MfaBxGsu.js"
+      },
+      "version": "21.2.15",
+      "bundle": "browser-angular_compiler",
+      "pool": "ng-core"
+    },
+    {
+      "singleton": true,
+      "strictVersion": true,
+      "requiredVersion": "~21.2.0",
+      "packageName": "@angular/platform-browser-dynamic",
+      "entries": {
+        "@angular/platform-browser-dynamic": "_angular_platform_browser_dynamic.fEPz1xo87P.js"
+      },
+      "version": "21.2.15",
+      "bundle": "browser-angular_platform_browser_dynamic",
+      "pool": "ng-core"
+    },
+    {
+      "singleton": true,
+      "strictVersion": true,
+      "requiredVersion": "^7.8.0",
+      "packageName": "rxjs",
+      "entries": {
+        "rxjs": "rxjs.PbwwNyz7Ek.js",
+        "rxjs/operators": "rxjs_operators.x0pSkonkM2.js"
+      },
+      "version": "7.8.2",
+      "bundle": "browser-rxjs"
+    },
+    {
+      "singleton": true,
+      "strictVersion": true,
+      "requiredVersion": "^2.3.0",
+      "packageName": "tslib",
+      "entries": {
+        "tslib": "tslib.UCeSNSMV7v.js"
+      },
+      "version": "2.8.1",
+      "bundle": "browser-tslib"
+    }
+  ],
+  "exposes": [
+    {
+      "key": "./widget",
+      "outFileName": "widget-3RZSHEJW.js"
+    }
+  ],
+  "chunks": {
+    "browser-angular_core": [
+      "chunk-T3D_QDJ2.js",
+      "chunk-VJQRUN9R.js"
+    ],
+    "browser-angular_common": [
+      "chunk-RVJXKA__.js"
+    ],
+    "browser-rxjs": [
+      "chunk-HEAUJ_XA.js",
+      "chunk-UC3MZHWR.js",
+      "chunk-5C9EDKQA.js"
+    ],
+    "mapping-or-exposed": []
+  }
+}

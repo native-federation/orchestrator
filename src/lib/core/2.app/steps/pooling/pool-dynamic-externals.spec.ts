@@ -2,8 +2,50 @@ import type { ForPoolingDynamicExternals } from '../../driver-ports/init/for-poo
 import { createPoolDynamicExternals } from './pool-dynamic-externals';
 import type { ConfigContract } from 'lib/core/2.app/config';
 import { mockConfig } from 'lib/testing/config.mock';
-import type { RemoteEntry, SharedInfo, SharedInfoActions } from 'lib/core/1.domain';
+import type {
+  RemoteEntry,
+  SharedExternal,
+  SharedInfo,
+  SharedInfoActions,
+  SharedVersion,
+} from 'lib/core/1.domain';
 import { mockSharedInfo } from 'lib/testing/domain/remote-entry/shared-info.mock';
+import { mockVersionRemote } from 'lib/testing/domain/externals/version.mock';
+import { mockAdapters } from 'lib/testing/adapters.mock';
+import { Optional } from 'lib/utils/optional';
+import type { RemoteInfo } from 'lib/core/1.domain';
+import type { DrivingContract } from '../../driving-ports/driving.contract';
+
+// A committed external: the first version is the `share` one, i.e. `remotes[0]` of it is the build
+// serving that member. Later versions are copies other builds hold.
+//
+// `update-cache` runs before this step and commits the loaded remote's own copies too, so a fixture that
+// leaves `mfe` out of the record models a state production cannot reach — and the gate reads what the
+// remote imports off exactly those copies. Every portfolio below that expects a verdict lists `mfe`.
+const committed = (
+  name: string,
+  ...versions: {
+    tag: string;
+    remotes: string[];
+    action?: SharedVersion['action'];
+    // `store-remote-entry` persists a declared `pool` onto the copy, so the committed record is where
+    // membership is read from — a tag on somebody else's copy groups this family for the whole portfolio.
+    pool?: string;
+  }[]
+): SharedExternal => ({
+  dirty: false,
+  versions: versions.map((v, i) => ({
+    tag: v.tag,
+    host: false,
+    action: v.action ?? (i === 0 ? 'share' : 'skip'),
+    remotes: v.remotes.map(remote =>
+      mockVersionRemote(remote, name, {
+        requiredVersion: `^${v.tag.split('.')[0]}.0.0`,
+        pool: v.pool,
+      })
+    ),
+  })),
+});
 
 const shared = (name: string, opt: { pool?: string; shareScope?: string } = {}): SharedInfo =>
   mockSharedInfo(name, {
@@ -24,11 +66,26 @@ const entryWith = (...externals: SharedInfo[]): RemoteEntry =>
 describe('createPoolDynamicExternals', () => {
   let poolDynamicExternals: ForPoolingDynamicExternals;
   let config: ConfigContract;
+  let adapters: DrivingContract;
+
+  // The `committed` helper derives every range from its own version tag, so "same major" is exactly the
+  // acceptance a real portfolio has here — and the coverage gate needs it to be real, since an anchor that
+  // offers a version the loaded remote rejects has to fail on versions rather than on coverage.
+  const acceptsSameMajor = () =>
+    vi.fn(
+      (tag: string, range: string) => tag.split('.')[0] === range.replace(/^\^/, '').split('.')[0]
+    );
+
+  const givenCommitted = (externals: Record<string, SharedExternal>) => {
+    adapters.sharedExternalsRepo.getFromScope = vi.fn(() => externals);
+  };
 
   beforeEach(() => {
     config = mockConfig();
     config.feature.useAutoExternalPooling = true;
-    poolDynamicExternals = createPoolDynamicExternals(config);
+    adapters = mockAdapters();
+    adapters.sharedExternalsRepo.getFromScope = vi.fn(() => ({}));
+    poolDynamicExternals = createPoolDynamicExternals(config, adapters);
   });
 
   it('leaves an all-compatible (all skip) family untouched', async () => {
@@ -48,6 +105,13 @@ describe('createPoolDynamicExternals', () => {
 
   it('forces the whole family to scope when one member is incompatible', async () => {
     const entry = entryWith(shared('@framework/core'), shared('@framework/common'));
+    givenCommitted({
+      '@framework/core': committed('@framework/core', { tag: '17.0.0', remotes: ['host', 'mfe'] }),
+      '@framework/common': committed('@framework/common', {
+        tag: '17.0.0',
+        remotes: ['host', 'mfe'],
+      }),
+    });
     const actions: SharedInfoActions = {
       '@framework/core': { action: 'skip', override: 'http://host/core.js' },
       '@framework/common': { action: 'scope' },
@@ -84,6 +148,14 @@ describe('createPoolDynamicExternals', () => {
       shared('@framework/common'),
       shared('@framework/cdk')
     );
+    givenCommitted({
+      '@framework/core': committed('@framework/core', { tag: '17.0.0', remotes: ['host', 'mfe'] }),
+      '@framework/common': committed('@framework/common', {
+        tag: '17.0.0',
+        remotes: ['host', 'mfe'],
+      }),
+      '@framework/cdk': committed('@framework/cdk', { tag: '17.0.0', remotes: ['host', 'mfe'] }),
+    });
     const actions: SharedInfoActions = {
       '@framework/core': { action: 'skip', override: 'http://host/core.js' },
       '@framework/common': { action: 'share' },
@@ -95,6 +167,212 @@ describe('createPoolDynamicExternals', () => {
     expect(result.actions['@framework/core']).toEqual({ action: 'scope' });
     expect(result.actions['@framework/common']).toEqual({ action: 'scope' });
     expect(result.actions['@framework/cdk']).toEqual({ action: 'scope' });
+  });
+
+  it('scopes the family when no committed build ships the combination it would be handed', async () => {
+    // The capture's shape: forms@22.0.8 and forms/signals@21.2.18 are both committed, from two builds
+    // that ship neither of the other's members. Nobody so far consumed both; this remote would be the one
+    // to bridge them, running forms from one build and signals from another. The old gate compared the two
+    // committed builds with each other, which is version arithmetic; the promise asks whether *any* build
+    // shipped the pair, and none did.
+    adapters.versionCheck.isCompatible = acceptsSameMajor();
+    givenCommitted({
+      '@framework/forms': committed(
+        '@framework/forms',
+        { tag: '22.0.8', remotes: ['team/a', 'mfe'] },
+        { tag: '21.2.18', remotes: ['team/legacy'] }
+      ),
+      '@framework/forms/signals': committed(
+        '@framework/forms/signals',
+        { tag: '21.2.18', remotes: ['team/legacy'] },
+        { tag: '22.0.8', remotes: ['mfe'] }
+      ),
+    });
+    const entry = entryWith(shared('@framework/forms'), shared('@framework/forms/signals'));
+    const actions: SharedInfoActions = {
+      '@framework/forms': { action: 'skip' },
+      '@framework/forms/signals': { action: 'skip' },
+    };
+
+    const result = await poolDynamicExternals({ entry, actions });
+
+    expect(result.actions['@framework/forms']).toEqual({ action: 'scope' });
+    expect(result.actions['@framework/forms/signals']).toEqual({ action: 'scope' });
+    // team/legacy comes closest — it is the one build carrying both members — and the reason it cannot
+    // serve mfe is the version, not the coverage. Saying "an entrypoint is missing" here would send the
+    // owner looking for the wrong thing.
+    expect(config.log.warn).toHaveBeenCalledWith(
+      8,
+      expect.stringContaining(
+        "'mfe' serves its own family: no committed build offers every entrypoint it imports at a version it accepts — '@framework/forms@21.2.18' is the gap, closest is 'team/legacy'."
+      )
+    );
+  });
+
+  it('dedups when a committed build did ship the whole combination', async () => {
+    // The same shape with the bridge present: team/a ships both members at the tags the committed map
+    // serves them at, so the combination mfe is handed is one a build compiled — provider identity is
+    // irrelevant at equal versions — and mfe keeps both dedups, adding nothing to the map.
+    givenCommitted({
+      '@framework/forms': committed('@framework/forms', {
+        tag: '22.0.8',
+        remotes: ['team/a', 'mfe'],
+      }),
+      '@framework/forms/signals': committed('@framework/forms/signals', {
+        tag: '22.0.8',
+        remotes: ['team/a', 'mfe'],
+      }),
+    });
+    const entry = entryWith(shared('@framework/forms'), shared('@framework/forms/signals'));
+    const actions: SharedInfoActions = {
+      '@framework/forms': { action: 'skip' },
+      '@framework/forms/signals': { action: 'skip' },
+    };
+
+    const result = await poolDynamicExternals({ entry, actions });
+
+    expect(result.actions).toEqual({
+      '@framework/forms': { action: 'skip' },
+      '@framework/forms/signals': { action: 'skip' },
+    });
+  });
+
+  it('anchors onto a committed island and maps its files per consumer', async () => {
+    // What lifting the override guard onto the global path buys. team/legacy is a committed island: every
+    // copy it holds is scoped, so it demonstrably runs its own build and its files sit in the map under
+    // its own scope. mfe ships the same previous-major family, which the committed 22 winner cannot serve,
+    // so instead of downloading its own it takes legacy's — through a per-consumer override, because the
+    // global `imports` names the 22 build.
+    adapters.versionCheck.isCompatible = acceptsSameMajor();
+    adapters.remoteInfoRepo.tryGet = vi.fn(name =>
+      name === 'team/legacy'
+        ? Optional.of({ scopeUrl: 'http://legacy/', exposes: [] } as RemoteInfo)
+        : Optional.empty<RemoteInfo>()
+    );
+    // The committed map serves core from team/a and cdk from team/b, so nothing witnesses the pair mfe
+    // would be handed — the only build carrying both is the island.
+    givenCommitted({
+      '@framework/core': committed(
+        '@framework/core',
+        { tag: '22.0.8', remotes: ['team/a'] },
+        { tag: '21.2.18', remotes: ['team/legacy'], action: 'scope' },
+        { tag: '21.2.18', remotes: ['mfe'] }
+      ),
+      '@framework/cdk': committed(
+        '@framework/cdk',
+        { tag: '22.0.6', remotes: ['team/b'] },
+        { tag: '21.2.18', remotes: ['team/legacy'], action: 'scope' },
+        { tag: '21.2.18', remotes: ['mfe'] }
+      ),
+    });
+    const entry = entryWith(shared('@framework/core'), shared('@framework/cdk'));
+    const actions: SharedInfoActions = {
+      '@framework/core': { action: 'skip' },
+      '@framework/cdk': { action: 'skip' },
+    };
+
+    const result = await poolDynamicExternals({ entry, actions });
+
+    expect(result.actions['@framework/core']).toEqual({
+      action: 'skip',
+      covered: ['@framework/core'],
+      override: { '@framework/core': 'http://legacy/@framework/core.js' },
+    });
+    expect(result.actions['@framework/cdk']).toEqual({
+      action: 'skip',
+      covered: ['@framework/cdk'],
+      override: { '@framework/cdk': 'http://legacy/@framework/cdk.js' },
+    });
+    expect(config.log.warn).not.toHaveBeenCalled();
+  });
+
+  it('refuses to anchor onto a build that is itself deduping', async () => {
+    // Constraint 9. team/b covers mfe and its versions fit, but it does not win `@framework/core`: its own
+    // family resolves through the committed 22.0.8 winner, so its modules are already bound to that copy.
+    // A consumer deduping onto it would inherit the tear one hop in, and no additive map can repair it —
+    // so mfe serves its own family instead.
+    adapters.versionCheck.isCompatible = vi.fn(() => true);
+    givenCommitted({
+      '@framework/core': committed(
+        '@framework/core',
+        { tag: '22.0.8', remotes: ['team/a'] },
+        { tag: '22.0.6', remotes: ['team/b', 'mfe'] }
+      ),
+      '@framework/cdk': committed('@framework/cdk', {
+        tag: '22.0.6',
+        remotes: ['team/b', 'mfe'],
+      }),
+    });
+    const entry = entryWith(shared('@framework/core'), shared('@framework/cdk'));
+    const actions: SharedInfoActions = {
+      '@framework/core': { action: 'skip' },
+      '@framework/cdk': { action: 'skip' },
+    };
+
+    const result = await poolDynamicExternals({ entry, actions });
+
+    expect(result.actions['@framework/core']).toEqual({ action: 'scope' });
+    expect(result.actions['@framework/cdk']).toEqual({ action: 'scope' });
+  });
+
+  it('scopes patch drift across two committed builds, which the old gate deduped', async () => {
+    // Rewritten for the promise. The committed map serves core@22.0.8 from team/a and cdk@22.0.6 from
+    // team/b; mfe imports both. The old gate deduped it because 22.0.8 and 22.0.6 sit on one minor line —
+    // benign drift by construction. No build shipped that pair, so mfe serves its own family and pays the
+    // download. team/b is not an anchor either: it does not win core (constraint 9).
+    adapters.versionCheck.isCompatible = vi.fn(() => true);
+    givenCommitted({
+      '@framework/core': committed(
+        '@framework/core',
+        { tag: '22.0.8', remotes: ['team/a'] },
+        { tag: '22.0.6', remotes: ['team/b'] },
+        { tag: '22.0.5', remotes: ['mfe'] }
+      ),
+      '@framework/cdk': committed(
+        '@framework/cdk',
+        { tag: '22.0.6', remotes: ['team/b'] },
+        { tag: '22.0.5', remotes: ['mfe'] }
+      ),
+    });
+    const entry = entryWith(shared('@framework/core'), shared('@framework/cdk'));
+    const actions: SharedInfoActions = {
+      '@framework/core': { action: 'skip' },
+      '@framework/cdk': { action: 'skip' },
+    };
+
+    const result = await poolDynamicExternals({ entry, actions });
+
+    expect(result.actions['@framework/core']).toEqual({ action: 'scope' });
+    expect(result.actions['@framework/cdk']).toEqual({ action: 'scope' });
+  });
+
+  it('never mutates a committed version, whatever it decides', async () => {
+    const externals = {
+      '@framework/forms': committed(
+        '@framework/forms',
+        { tag: '22.0.8', remotes: ['team/a', 'mfe'] },
+        { tag: '21.2.18', remotes: ['team/legacy'] }
+      ),
+      '@framework/forms/signals': committed(
+        '@framework/forms/signals',
+        { tag: '21.2.18', remotes: ['team/legacy'] },
+        { tag: '22.0.8', remotes: ['mfe'] }
+      ),
+    };
+    givenCommitted(externals);
+    const snapshot = JSON.stringify(externals);
+    const entry = entryWith(shared('@framework/forms'), shared('@framework/forms/signals'));
+
+    await poolDynamicExternals({
+      entry,
+      actions: {
+        '@framework/forms': { action: 'skip' },
+        '@framework/forms/signals': { action: 'skip' },
+      },
+    });
+
+    expect(JSON.stringify(externals)).toBe(snapshot);
+    expect(adapters.sharedExternalsRepo.addOrUpdate).not.toHaveBeenCalled();
   });
 
   it('leaves a whole-pool-introducing remote (all share) untouched', async () => {
@@ -135,6 +413,18 @@ describe('createPoolDynamicExternals', () => {
       shared('@framework/core', { pool: 'framework' }),
       shared('@design-system/ui', { pool: 'framework' })
     );
+    givenCommitted({
+      '@framework/core': committed('@framework/core', {
+        tag: '17.0.0',
+        remotes: ['mfe'],
+        pool: 'framework',
+      }),
+      '@design-system/ui': committed('@design-system/ui', {
+        tag: '17.0.0',
+        remotes: ['mfe'],
+        pool: 'framework',
+      }),
+    });
     const actions: SharedInfoActions = {
       '@framework/core': { action: 'skip', override: 'http://host/core.js' },
       '@design-system/ui': { action: 'scope' },
@@ -171,6 +461,10 @@ describe('createPoolDynamicExternals', () => {
   it('pools via an explicit pool tag even when auto-pooling is off', async () => {
     config.feature.useAutoExternalPooling = false;
     const entry = entryWith(shared('foo', { pool: 'grp' }), shared('bar', { pool: 'grp' }));
+    givenCommitted({
+      foo: committed('foo', { tag: '17.0.0', remotes: ['mfe'], pool: 'grp' }),
+      bar: committed('bar', { tag: '17.0.0', remotes: ['mfe'], pool: 'grp' }),
+    });
     const actions: SharedInfoActions = {
       foo: { action: 'skip', override: 'http://host/foo.js' },
       bar: { action: 'scope' },
@@ -182,10 +476,19 @@ describe('createPoolDynamicExternals', () => {
     expect(result.actions.bar).toEqual({ action: 'scope' });
   });
 
-  it('has-pool early-out: an incompatible family is left untouched when auto-pooling is off and the entry has no pool tag', async () => {
-    // Auto-pooling off and no tag on the entry → no pool, so determine's actions pass through.
+  it('has-pool early-out: nothing pools when auto-pooling is off and the scope carries no tag at all', async () => {
+    // Auto-pooling off and no `pool` tag anywhere in the committed scope → no pool, so determine's actions
+    // pass through even though the family is right there in the record.
     config.feature.useAutoExternalPooling = false;
+    adapters.sharedExternalsRepo.hasPoolTag = vi.fn(() => false);
     const entry = entryWith(shared('@framework/core'), shared('@framework/common'));
+    givenCommitted({
+      '@framework/core': committed('@framework/core', { tag: '17.0.0', remotes: ['host', 'mfe'] }),
+      '@framework/common': committed('@framework/common', {
+        tag: '17.0.0',
+        remotes: ['host', 'mfe'],
+      }),
+    });
     const actions: SharedInfoActions = {
       '@framework/core': { action: 'skip', override: 'http://host/core.js' },
       '@framework/common': { action: 'scope' },
@@ -198,6 +501,29 @@ describe('createPoolDynamicExternals', () => {
       override: 'http://host/core.js',
     });
     expect(result.actions['@framework/common']).toEqual({ action: 'scope' });
+    expect(adapters.sharedExternalsRepo.getFromScope).not.toHaveBeenCalled();
+  });
+
+  it('subjects an untagged entry to a pool another remote tagged', async () => {
+    // The dynamic counterpart of "one remote declaring this is enough for the whole portfolio". `team/a`
+    // tagged the lockstep pair at init; this entry declares neither tag nor a shared npm scope, and is
+    // still subject to the family's coherence rules — previously it slipped through untouched and could
+    // bridge two builds the portfolio had deliberately pooled apart.
+    config.feature.useAutoExternalPooling = false;
+    const entry = entryWith(shared('foo'), shared('bar'));
+    givenCommitted({
+      foo: committed('foo', { tag: '17.0.0', remotes: ['team/a', 'mfe'], pool: 'grp' }),
+      bar: committed('bar', { tag: '17.0.0', remotes: ['team/a', 'mfe'], pool: 'grp' }),
+    });
+    const actions: SharedInfoActions = {
+      foo: { action: 'skip', override: 'http://host/foo.js' },
+      bar: { action: 'scope' },
+    };
+
+    const result = await poolDynamicExternals({ entry, actions });
+
+    expect(result.actions.foo).toEqual({ action: 'scope' });
+    expect(result.actions.bar).toEqual({ action: 'scope' });
   });
 
   it('never pools the strict scope (an incompatible global sibling cannot island it)', async () => {

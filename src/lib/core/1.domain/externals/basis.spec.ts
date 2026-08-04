@@ -153,6 +153,23 @@ describe('basis', () => {
 
       expect(versionEntries(v).get('dep-a')!.name).toBe('basis');
     });
+
+    // Pooling anchored `anchored` on a foreign build, so the import map names that build's files in its
+    // scope. Counting `dep-a/sub` here would promise a specifier no other consumer can resolve: the
+    // global mapping never gets it, and every user of this basis would go looking.
+    it('should skip a copy pooling anchored on a foreign build', () => {
+      const anchored = { ...remote('anchored', ['dep-a', 'dep-a/sub']), servedBy: 'elsewhere' };
+      const v = version([remote('basis', ['dep-a']), anchored]);
+
+      expect(Array.from(versionEntries(v).keys())).toEqual(['dep-a']);
+    });
+
+    it('should fall through to the next copy for an entrypoint an anchored one claimed first', () => {
+      const anchored = { ...remote('anchored', ['dep-a']), servedBy: 'elsewhere' };
+      const v = version([anchored, remote('serving', ['dep-a'])]);
+
+      expect(versionEntries(v).get('dep-a')!.name).toBe('serving');
+    });
   });
 
   describe('uncoveredEntrypoints', () => {

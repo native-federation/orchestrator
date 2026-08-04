@@ -112,7 +112,10 @@ describe('createConvertToImportMap', () => {
         shared: [mockSharedInfoE.v1_2_3()],
       });
       const actions: SharedInfoActions = {
-        'dep-e': { action: 'scope', override: { 'dep-e': mockScopeUrl_MFE1({ file: 'dep-e.js' }) } },
+        'dep-e': {
+          action: 'scope',
+          override: { 'dep-e': mockScopeUrl_MFE1({ file: 'dep-e.js' }) },
+        },
       };
 
       const importMap = await convertToImportMap({ entry: remoteEntry, actions });
@@ -150,6 +153,34 @@ describe('createConvertToImportMap', () => {
       });
       const actions: SharedInfoActions = {
         'dep-a': { action: 'skip', override: { 'dep-a': mockScopeUrl_MFE1({ file: 'dep-a.js' }) } },
+      };
+
+      const importMap = await convertToImportMap({ entry: remoteEntry, actions });
+      expect(importMap).toEqual({
+        imports: {},
+        scopes: {
+          [mockScopeUrl_MFE2()]: {
+            'dep-a': mockScopeUrl_MFE1({ file: 'dep-a.js' }),
+          },
+        },
+      });
+    });
+
+    it('should honour an override on a global skip, which pooling writes', async () => {
+      // A global skip normally inherits the one global mapping and needs no entry of its own. Pooling
+      // writes an override when it anchors the loaded remote on a build the map does not already serve
+      // from — a committed island, whose files live nowhere but its own scope. Without this the remote
+      // resolves through the global winner and runs a combination nothing shipped.
+      const remoteEntry: RemoteEntry = mockRemoteEntry_MFE2({
+        exposes: [],
+        shared: [mockSharedInfoA.v2_1_2()],
+      });
+      const actions: SharedInfoActions = {
+        'dep-a': {
+          action: 'skip',
+          covered: ['dep-a'],
+          override: { 'dep-a': mockScopeUrl_MFE1({ file: 'dep-a.js' }) },
+        },
       };
 
       const importMap = await convertToImportMap({ entry: remoteEntry, actions });

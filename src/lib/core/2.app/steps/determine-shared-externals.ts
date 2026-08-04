@@ -1,32 +1,31 @@
 import type { ForDeterminingSharedExternals } from '../driver-ports/init/for-determining-shared-externals.port';
 import {
+  type ExternalName,
   GLOBAL_SCOPE,
   type SharedExternal,
   type SharedVersion,
-  type SharedVersionMeta,
 } from 'lib/core/1.domain';
-import {
-  countUncoveredEntrypoints,
-  uncoveredEntrypoints,
-  versionDemands,
-  versionEntries,
-} from 'lib/core/1.domain/externals/basis';
+import { countUncoveredEntrypoints, versionEntries } from 'lib/core/1.domain/externals/basis';
 import { NFError } from 'lib/core/native-federation.error';
 import type { DrivingContract } from '../driving-ports/driving.contract';
 import type { LoggingConfig } from '../config/log.contract';
 import type { ModeConfig } from '../config/mode.contract';
+import { createApplyWinner, type IsCompatible, versionAcceptance } from './apply-winner';
 
 export function createDetermineSharedExternals(
   config: LoggingConfig & ModeConfig,
   ports: Pick<DrivingContract, 'versionCheck' | 'sharedExternalsRepo'>
 ): ForDeterminingSharedExternals {
+  const applyWinner = createApplyWinner(config);
+
   /**
    * Step 3: Determine which version is the optimal version to share.
    *
    * The shared external versions that were merged into the cache/storage caused the shared
    * external to be 'dirty', this step cleans all dirty externals in the storage by calculating
-   * the most optimal version to share since only 1 version can be shared globally. All other
-   * versions that are compatible are skipped and the incompatible ones are defined as scoped external.
+   * the most optimal version to share since only 1 version can be shared globally. Every other copy
+   * either skips onto the winner or, where its own range rejects it and `strictVersion` is set, is split
+   * out into a scoped external of its own tag.
    *
    * Check the docs for a full explanation of the dependency resolver.
    *
@@ -37,14 +36,15 @@ export function createDetermineSharedExternals(
    *
    * @param config
    * @param adapters
-   * @returns
+   * @returns the externals it re-elected, per scope — pooling's signal for what changed, since this
+   * step clears `dirty` on everything it touches.
    */
   return () => {
     // The selection loop asks this O(versions² × demands) times but has only
     // (candidate tag × distinct requiredVersion) distinct questions to ask. Scoped to one resolve,
     // so the map needs no bound.
     const memo = new Map<string, boolean>();
-    const isCompatible = (tag: string, requiredVersion: string): boolean => {
+    const isCompatible: IsCompatible = (tag, requiredVersion) => {
       const key = `${tag}|${requiredVersion}`;
       let hit = memo.get(key);
       if (hit === undefined) {
@@ -54,19 +54,24 @@ export function createDetermineSharedExternals(
       return hit;
     };
 
+    const touched = new Map<string, Set<ExternalName>>();
+
     for (const shareScope of ports.sharedExternalsRepo.getScopes()) {
       const sharedExternals = ports.sharedExternalsRepo.getFromScope(shareScope);
 
       try {
+        const elected = new Set<ExternalName>();
         Object.entries(sharedExternals)
           .filter(([_, e]) => e.dirty)
-          .forEach(([name, external]) =>
+          .forEach(([name, external]) => {
             ports.sharedExternalsRepo.addOrUpdate(
               name,
               setVersionActions(name, external, isCompatible),
               shareScope
-            )
-          );
+            );
+            elected.add(name);
+          });
+        if (elected.size > 0) touched.set(shareScope, elected);
       } catch (error) {
         config.log.error(
           3,
@@ -84,10 +89,12 @@ export function createDetermineSharedExternals(
         );
       }
     }
-    return Promise.resolve();
+    return Promise.resolve(touched);
   };
 
-  // Entrypoints declared by the versions `winner` would skip that its own copies can't serve.
+  // Entrypoints declared by the versions `winner` would skip that its own copies can't serve. Prices
+  // exactly the tears `applyWinner.findTears` would report, so an anchored copy — which resolves through
+  // its pooling anchor, not through the winner — is no more a tear here than it is there.
   function uncoveredTears(
     external: SharedExternal,
     winner: SharedVersion,
@@ -97,35 +104,24 @@ export function createDetermineSharedExternals(
     return external.versions.reduce((sum, v) => {
       if (v === winner) return sum;
       if (!accepts(v, winner.tag)) return sum;
-      return sum + v.remotes.reduce((n, r) => n + countUncoveredEntrypoints(r, basis), 0);
+      return v.remotes.reduce(
+        (n, r) => (r.servedBy ? n : n + countUncoveredEntrypoints(r, basis)),
+        sum
+      );
     }, 0);
   }
 
   function setVersionActions(
     externalName: string,
     external: SharedExternal,
-    isCompatible: (tag: string, requiredVersion: string) => boolean
+    isCompatible: IsCompatible
   ) {
     if (external.versions.length === 1) {
-      external.versions[0]!.action = 'share';
-      external.dirty = false;
-      return external;
+      return applyWinner(externalName, external, external.versions[0]!, isCompatible);
     }
 
-    // Every compatibility question below is asked of the whole version, not of its basis: see
-    // `versionDemands`. Computed once, since the selection loop is O(versions²).
-    const demands = new Map<SharedVersion, SharedVersionMeta[]>(
-      external.versions.map(v => [v, versionDemands(v)])
-    );
-
-    // A version can only be redirected to `tag` if none of its remotes rejects that tag.
-    const accepts = (version: SharedVersion, tag: string): boolean =>
-      demands.get(version)!.every(d => isCompatible(tag, d.requiredVersion));
-
-    // The remote that makes the redirect unsafe: it rejects `tag` and pinned `strictVersion`,
-    // so it has to keep its own build instead of being deduped away.
-    const objector = (version: SharedVersion, tag: string): SharedVersionMeta | undefined =>
-      demands.get(version)!.find(d => d.strictVersion && !isCompatible(tag, d.requiredVersion));
+    const acceptance = versionAcceptance(external, isCompatible);
+    const { accepts } = acceptance;
 
     let sharedVersion = external.versions.find(v => v.host);
 
@@ -137,14 +133,39 @@ export function createDetermineSharedExternals(
       // find version with least extra downloads, sorted by SEMVER version (O^2 complexity)
       let leastExtraDownloads = Number.MAX_VALUE;
       let leastTears = Number.MAX_VALUE;
+      // What a rejected version really costs: `applyWinner` splits it, so only the copies that themselves
+      // reject the winner keep their own build. Cached copies are already downloaded and non-strict ones take
+      // whatever is shared, so neither costs anything. Grouped by range so the O(versions²) selection loop
+      // does not also scale with remote count.
+      const selfServing = new Map<SharedVersion, { requiredVersion: string; copies: number }[]>(
+        external.versions.map(v => {
+          const groups = new Map<string, { requiredVersion: string; copies: number }>();
+          for (const remote of v.remotes) {
+            if (remote.cached || !remote.strictVersion) continue;
+            const group = groups.get(remote.requiredVersion);
+            if (group) group.copies++;
+            else
+              groups.set(remote.requiredVersion, {
+                requiredVersion: remote.requiredVersion,
+                copies: 1,
+              });
+          }
+          return [v, [...groups.values()]];
+        })
+      );
+
+      const costOf = (version: SharedVersion, tag: string) =>
+        selfServing
+          .get(version)!
+          .reduce((n, g) => (isCompatible(tag, g.requiredVersion) ? n : n + g.copies), 0);
+
       external.versions.forEach(vA => {
-        // A version costs an extra download when one of its remotes pinned a range that vA's
-        // tag does not satisfy and has not been downloaded yet.
-        const extraDownloads = external.versions.filter(vB =>
-          demands
-            .get(vB)!
-            .some(d => !d.cached && d.strictVersion && !isCompatible(vA.tag, d.requiredVersion))
-        ).length;
+        const extraDownloads = external.versions.reduce(
+          // A copy of the winner is never redirected, so it never self-serves however its own range
+          // reads — see `applyWinner`, which does not split the winner either.
+          (sum, vB) => (vB === vA ? sum : sum + costOf(vB, vA.tag)),
+          0
+        );
         // Tiebreak equal-download candidates toward the one that leaves fewest entrypoints
         // uncovered across the versions it would skip (fewest tears / scope-promotions).
         if (extraDownloads < leastExtraDownloads) {
@@ -168,106 +189,6 @@ export function createDetermineSharedExternals(
     }
 
     // Determine action of other versions based on chosen sharedVersion
-    external.versions.forEach(v => {
-      if (accepts(v, sharedVersion!.tag)) {
-        v.action = 'skip';
-        return;
-      }
-
-      const strict = objector(v, sharedVersion!.tag);
-
-      if (config.strict.strictExternalCompatibility && strict) {
-        config.log.error(
-          3,
-          `[${strict.name}][${externalName}@${v.tag}] Is not compatible with requiredRange '${strict.requiredVersion}' of shared ${externalName}@${sharedVersion!.tag}.`
-        );
-
-        throw new NFError(`External ${externalName}@${v.tag} could not be shared.`);
-      }
-      v.action = strict ? 'scope' : 'skip';
-    });
-
-    sharedVersion.action = 'share';
-
-    applyEntrypointCoveragePolicy(externalName, external);
-
-    external.dirty = false;
-    return external;
-  }
-
-  // Both settings only govern tears *between* versions: copies of the shared tag always merge.
-  // `strictEntryPointCoverage` refuses a tear, `profile.scopeUncoveredEntrypoints` scopes the
-  // torn copy, otherwise the import-map builders self-fill it.
-  function applyEntrypointCoveragePolicy(externalName: string, external: SharedExternal): void {
-    const { strictEntryPointCoverage } = config.strict;
-    if (!strictEntryPointCoverage && !config.profile.scopeUncoveredEntrypoints) return;
-
-    const tears = findTears(external);
-    if (tears.length === 0) return;
-
-    if (strictEntryPointCoverage) {
-      const { version, remote, uncovered } = tears[0]!;
-      config.log.error(
-        3,
-        `[${externalName}@${version.tag}][${remote.name}] Entrypoints not covered by the shared version: ${uncovered.join(', ')}.`
-      );
-      throw new NFError(
-        `External ${externalName} could not be shared without tearing entrypoints.`
-      );
-    }
-
-    scopeTornRemotes(externalName, external, tears);
-  }
-
-  function findTears(external: SharedExternal): Tear[] {
-    const shared = external.versions.find(v => v.action === 'share');
-    if (!shared) return [];
-
-    const basis = versionEntries(shared);
-    const tears: Tear[] = [];
-
-    for (const version of external.versions) {
-      if (version.action === 'scope') continue;
-      // Its own copies are part of the basis, so they can never tear it.
-      if (version === shared) continue;
-
-      version.remotes.forEach(remote => {
-        const uncovered = uncoveredEntrypoints(remote, basis);
-        if (uncovered.length > 0) tears.push({ version, remote, uncovered });
-      });
-    }
-
-    return tears;
-  }
-
-  function scopeTornRemotes(externalName: string, external: SharedExternal, tears: Tear[]): void {
-    const torn = new Set(tears.map(t => t.remote));
-    const demotedByTag = new Map<string, SharedVersionMeta[]>();
-
-    for (const { version, remote, uncovered } of tears) {
-      const group = demotedByTag.get(version.tag);
-      if (group) group.push(remote);
-      else demotedByTag.set(version.tag, [remote]);
-
-      config.log.debug(
-        3,
-        `[${externalName}@${version.tag}][${remote.name}] Scoped: entrypoints not covered by the shared version: ${uncovered.join(', ')}.`
-      );
-    }
-
-    for (const version of external.versions) {
-      if (version.remotes.some(r => torn.has(r))) {
-        version.remotes = version.remotes.filter(r => !torn.has(r));
-      }
-    }
-    external.versions = external.versions.filter(v => v.remotes.length > 0);
-
-    for (const [tag, remotes] of demotedByTag) {
-      const scoped = external.versions.find(v => v.tag === tag && v.action === 'scope');
-      if (scoped) scoped.remotes.push(...remotes);
-      else external.versions.push({ tag, host: false, action: 'scope', remotes });
-    }
+    return applyWinner(externalName, external, sharedVersion, isCompatible, acceptance);
   }
 }
-
-type Tear = { version: SharedVersion; remote: SharedVersionMeta; uncovered: string[] };
