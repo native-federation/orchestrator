@@ -128,6 +128,56 @@ describe('createProcessDynamicRemoteEntry - scoped', () => {
     });
   });
 
+  // `mfe3` is a copy of the shared version that pooling anchored on `team/mfe9`, so the committed map
+  // already points mfe3's own scope at mfe9's files. Listing `dep-a/sub` as covered would hand the joiner
+  // a URL under mfe3's scope — mfe3's own build, the one pooling took out of service — putting a second
+  // build of the package in front of it. Uncovered is the honest answer; `poolDynamicExternals` is what
+  // redirects it to the anchor when the joiner is pooled too.
+  it('should not serve an entrypoint only a pooling-anchored copy declares', async () => {
+    adapters.versionCheck.isCompatible = vi.fn(() => true);
+
+    adapters.sharedExternalsRepo.tryGet = vi.fn(
+      (): Optional<SharedExternal> =>
+        Optional.of(
+          mockExternal.shared(
+            [
+              mockVersion_A.v2_1_2({
+                remotes: {
+                  'team/mfe2': { cached: true, entries: { 'dep-a': 'dep-a.js' } },
+                  'team/mfe3': {
+                    servedBy: 'team/mfe9',
+                    entries: { 'dep-a': 'dep-a.js', 'dep-a/sub': 'dep-a-sub.js' },
+                  },
+                },
+                action: 'share',
+              }),
+            ],
+            { dirty: false }
+          )
+        )
+    );
+
+    const remoteEntry = mockRemoteEntry_MFE1({
+      shared: [
+        mockSharedInfoA.v2_1_1({
+          shareScope: 'custom-scope',
+          entries: { 'dep-a': 'dep-a.js', 'dep-a/sub': 'dep-a-sub.js' },
+        }),
+      ],
+      exposes: [],
+    });
+
+    const actual = await updateCache(remoteEntry);
+
+    expect(actual.actions).toEqual({
+      'dep-a': {
+        action: 'skip',
+        covered: ['dep-a'],
+        override: { 'dep-a': mockScopeUrl_MFE2({ file: 'dep-a.js' }) },
+      },
+    });
+  });
+
   it('should scope instead of skip when the shared version lacks an entrypoint under scopeUncoveredEntrypoints', async () => {
     config.profile.scopeUncoveredEntrypoints = true;
     adapters.versionCheck.isCompatible = vi.fn(() => true);
@@ -302,6 +352,7 @@ describe('createProcessDynamicRemoteEntry - scoped', () => {
       'dep-a': {
         action: 'skip',
         covered: ['dep-a'],
+        sameVersion: true,
         override: { 'dep-a': mockScopeUrl_MFE2({ file: 'dep-a.js' }) },
       },
     });

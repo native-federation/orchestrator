@@ -28,6 +28,7 @@ export const mockVersionRemote = (
   cached: options.cached ?? false,
   bundle: options.bundle,
   pool: options.pool,
+  servedBy: options.servedBy,
   entries: options.entries ?? { [external]: options.file ?? `${external}.js` },
 });
 

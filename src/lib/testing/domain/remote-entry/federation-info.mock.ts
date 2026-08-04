@@ -50,6 +50,14 @@ export const mockFederationInfo_MFE2 = (
     ],
   });
 
+export const mockFederationInfo_MFE3 = (
+  o: { exposes?: ExposesInfo[]; shared?: DenseSharedInfo[] } = {}
+) =>
+  mockFederationInfo('team/mfe3', {
+    exposes: o.exposes ?? [],
+    shared: o.shared ?? [mockSharedInfoA.v2_1_1()],
+  });
+
 export const mockFederationInfo_HOST = (
   o: { exposes?: ExposesInfo[]; shared?: DenseSharedInfo[] } = {}
 ) =>

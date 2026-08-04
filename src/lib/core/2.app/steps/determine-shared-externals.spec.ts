@@ -480,21 +480,26 @@ describe('createDetermineSharedExternals', () => {
       );
     });
 
-    it('should split an uncovered sibling of a single-version external into a scope version', async () => {
+    // Copies of one tag build the same code, so their entrypoints merge instead of tearing:
+    // neither setting applies within a version.
+    const externalWithUncoveredSiblings = () => ({
+      'dep-b': mockExternal_B({
+        dirty: true,
+        versions: [
+          mockVersion_B.v2_1_2({
+            remotes: {
+              'team/mfe1': { entries: { 'dep-b': 'dep-b.js', 'dep-b/x': 'dep-b-x.js' } },
+              'team/mfe2': { entries: { 'dep-b': 'dep-b.js' } },
+              'team/mfe3': { entries: { 'dep-b': 'dep-b.js', 'dep-b/y': 'dep-b-y.js' } },
+            },
+          }),
+        ],
+      }),
+    });
+
+    it('should keep uncovered siblings of one version sharing under scopeUncoveredEntrypoints', async () => {
       config.profile.scopeUncoveredEntrypoints = true;
-      adapters.sharedExternalsRepo.getFromScope = vi.fn(() => ({
-        'dep-b': mockExternal_B({
-          dirty: true,
-          versions: [
-            mockVersion_B.v2_1_2({
-              remotes: {
-                'team/mfe1': { entries: { 'dep-b': 'dep-b.js', 'dep-b/x': 'dep-b-x.js' } },
-                'team/mfe2': { entries: { 'dep-b': 'dep-b.js', 'dep-b/y': 'dep-b-y.js' } },
-              },
-            }),
-          ],
-        }),
-      }));
+      adapters.sharedExternalsRepo.getFromScope = vi.fn(externalWithUncoveredSiblings);
 
       await determineSharedExternals();
 
@@ -502,30 +507,6 @@ describe('createDetermineSharedExternals', () => {
         'dep-b',
         mockExternal_B({
           dirty: false,
-          versions: [
-            mockVersion_B.v2_1_2({
-              remotes: {
-                'team/mfe1': { entries: { 'dep-b': 'dep-b.js', 'dep-b/x': 'dep-b-x.js' } },
-              },
-              action: 'share',
-            }),
-            mockVersion_B.v2_1_2({
-              remotes: {
-                'team/mfe2': { entries: { 'dep-b': 'dep-b.js', 'dep-b/y': 'dep-b-y.js' } },
-              },
-              action: 'scope',
-            }),
-          ],
-        }),
-        '__GLOBAL__'
-      );
-    });
-
-    it('should split only the uncovered sibling and keep covered ones sharing', async () => {
-      config.profile.scopeUncoveredEntrypoints = true;
-      adapters.sharedExternalsRepo.getFromScope = vi.fn(() => ({
-        'dep-b': mockExternal_B({
-          dirty: true,
           versions: [
             mockVersion_B.v2_1_2({
               remotes: {
@@ -533,6 +514,37 @@ describe('createDetermineSharedExternals', () => {
                 'team/mfe2': { entries: { 'dep-b': 'dep-b.js' } },
                 'team/mfe3': { entries: { 'dep-b': 'dep-b.js', 'dep-b/y': 'dep-b-y.js' } },
               },
+              action: 'share',
+            }),
+          ],
+        }),
+        '__GLOBAL__'
+      );
+    });
+
+    it('should not reject uncovered siblings of one version under strictEntryPointCoverage', async () => {
+      config.strict.strictEntryPointCoverage = true;
+      adapters.sharedExternalsRepo.getFromScope = vi.fn(externalWithUncoveredSiblings);
+
+      await expect(determineSharedExternals()).resolves.toEqual(
+        new Map([['__GLOBAL__', new Set(['dep-b'])]])
+      );
+      expect(config.log.error).not.toHaveBeenCalled();
+    });
+
+    it('should split only the uncovered copy of a skipped version and keep covered ones sharing', async () => {
+      config.profile.scopeUncoveredEntrypoints = true;
+      adapters.sharedExternalsRepo.getFromScope = vi.fn(() => ({
+        'dep-b': mockExternal_B({
+          dirty: true,
+          versions: [
+            mockVersion_B.v2_1_2({ remotes: ['team/host'], action: 'skip' }),
+            mockVersion_B.v2_1_1({
+              remotes: {
+                'team/mfe2': { entries: { 'dep-b': 'dep-b.js' } },
+                'team/mfe3': { entries: { 'dep-b': 'dep-b.js', 'dep-b/y': 'dep-b-y.js' } },
+              },
+              action: 'skip',
             }),
           ],
         }),
@@ -545,14 +557,12 @@ describe('createDetermineSharedExternals', () => {
         mockExternal_B({
           dirty: false,
           versions: [
-            mockVersion_B.v2_1_2({
-              remotes: {
-                'team/mfe1': { entries: { 'dep-b': 'dep-b.js', 'dep-b/x': 'dep-b-x.js' } },
-                'team/mfe2': { entries: { 'dep-b': 'dep-b.js' } },
-              },
-              action: 'share',
+            mockVersion_B.v2_1_2({ remotes: ['team/host'], action: 'share' }),
+            mockVersion_B.v2_1_1({
+              remotes: { 'team/mfe2': { entries: { 'dep-b': 'dep-b.js' } } },
+              action: 'skip',
             }),
-            mockVersion_B.v2_1_2({
+            mockVersion_B.v2_1_1({
               remotes: {
                 'team/mfe3': { entries: { 'dep-b': 'dep-b.js', 'dep-b/y': 'dep-b-y.js' } },
               },

@@ -488,6 +488,35 @@ describe('createGetShared', () => {
         'https://cdn.test/host/@angular/core-testing.js'
       );
     });
+
+    // `team/mfe1` is a copy pooling anchored on another build, so the import map already runs it on that
+    // build's files. Handing MF a `get()` for its own `/testing` file would load a second build of the
+    // package behind MF's back — the one thing MF's shared scope exists to prevent.
+    it('does not source an entrypoint from a copy pooling anchored on a foreign build', async () => {
+      const ports = setup(
+        global({
+          '@angular/core': mockExternal.shared([
+            mockSharedVersion('20.0.0', '@angular/core', {
+              remotes: {
+                'team/host': { entries: { '@angular/core': '@angular/core.js' } },
+                'team/mfe1': {
+                  servedBy: 'team/mfe9',
+                  entries: {
+                    '@angular/core': '@angular/core.js',
+                    '@angular/core/testing': '@angular/core-testing.js',
+                  },
+                },
+              },
+              action: 'share',
+            }),
+          ]),
+        })
+      );
+
+      const shared = createGetShared(ports)();
+
+      expect(Object.keys(shared)).toEqual(['@angular/core']);
+    });
   });
 
   describe('requiredVersion across sibling remotes', () => {

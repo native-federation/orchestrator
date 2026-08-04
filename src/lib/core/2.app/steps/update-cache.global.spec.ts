@@ -269,9 +269,71 @@ describe('createProcessDynamicRemoteEntry - scoped', () => {
     );
 
     expect(result.actions).toEqual({
-      'dep-a': { action: 'skip', covered: ['dep-a'] },
+      'dep-a': { action: 'skip', covered: ['dep-a'], sameVersion: true },
     });
   });
+
+  // The joining copy builds the tag that is already shared: its extra entrypoints merge in and it
+  // serves them itself, since the committed import map cannot be repointed. Both coverage settings
+  // are about tears between versions, so neither applies here.
+  it.each([
+    ['neither setting', () => {}],
+    ['scopeUncoveredEntrypoints', (c: ModeConfig) => (c.profile.scopeUncoveredEntrypoints = true)],
+    ['strictEntryPointCoverage', (c: ModeConfig) => (c.strict.strictEntryPointCoverage = true)],
+  ])(
+    'should merge extra entrypoints of a remote joining the shared version with %s',
+    async (_name, enable) => {
+      enable(config);
+      adapters.versionCheck.isCompatible = vi.fn(() => true);
+      adapters.sharedExternalsRepo.tryGet = vi.fn(
+        (): Optional<SharedExternal> =>
+          Optional.of(
+            mockExternal.shared(
+              [
+                mockVersion_A.v2_1_1({
+                  remotes: { 'team/mfe2': { cached: true } },
+                  action: 'share',
+                }),
+              ],
+              { dirty: false }
+            )
+          )
+      );
+
+      const remoteEntry = mockRemoteEntry_MFE1({
+        shared: [
+          mockSharedInfoA.v2_1_1({ entries: { 'dep-a': 'dep-a.js', 'dep-a/sub': 'dep-a-sub.js' } }),
+        ],
+        exposes: [],
+      });
+
+      const result = await updateCache(remoteEntry);
+
+      expect(result.actions).toEqual({
+        'dep-a': { action: 'skip', covered: ['dep-a'], sameVersion: true },
+      });
+      // Merged into the shared version, so its own entrypoint is reachable from that version.
+      expect(adapters.sharedExternalsRepo.addOrUpdate).toHaveBeenCalledWith(
+        'dep-a',
+        mockExternal.shared(
+          [
+            mockVersion_A.v2_1_1({
+              remotes: {
+                'team/mfe2': { cached: true },
+                'team/mfe1': {
+                  cached: false,
+                  entries: { 'dep-a': 'dep-a.js', 'dep-a/sub': 'dep-a-sub.js' },
+                },
+              },
+              action: 'share',
+            }),
+          ],
+          { dirty: false }
+        ),
+        undefined
+      );
+    }
+  );
 
   it('should warn users if the requiredVersions differ and strictVersion', async () => {
     adapters.versionCheck.isCompatible = vi.fn(() => true);
@@ -316,7 +378,7 @@ describe('createProcessDynamicRemoteEntry - scoped', () => {
     );
 
     expect(result.actions).toEqual({
-      'dep-a': { action: 'skip', covered: ['dep-a'] },
+      'dep-a': { action: 'skip', covered: ['dep-a'], sameVersion: true },
     });
     expect(config.log.warn).toHaveBeenCalledWith(
       8,

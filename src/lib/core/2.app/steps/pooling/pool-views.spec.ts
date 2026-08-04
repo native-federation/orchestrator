@@ -19,7 +19,13 @@ import type { PoolMember } from './pool.types';
 
 // A remote's copy of one member: `req` is its own range, `entries` the specifiers it carries (defaulting to
 // just the member itself, which is what a flat build emits).
-type Copy = { remote: string; req?: string; entries?: Record<string, string>; host?: boolean };
+type Copy = {
+  remote: string;
+  req?: string;
+  entries?: Record<string, string>;
+  host?: boolean;
+  servedBy?: string;
+};
 
 const member = (
   name: string,
@@ -36,6 +42,7 @@ const member = (
         mockVersionRemote(c.remote, name, {
           requiredVersion: c.req ?? '^22.0.0',
           entries: c.entries ?? { [name]: `${name}.js` },
+          servedBy: c.servedBy,
         })
       ),
     })),
@@ -248,6 +255,33 @@ describe('sharedTagPerSpecifier', () => {
     expect(Object.fromEntries(sharedTagPerSpecifier(members, new Set()))).toEqual({
       '@ng/core': '22.0.8',
       '@ng/core/testing': '22.0.8',
+    });
+  });
+
+  // The map names an anchored copy's specifiers from its anchor, in its own scope, so counting it as a global
+  // publisher would witness a remote against a mapping that does not exist. `versionEntries` — the rule the
+  // builders publish by — leaves it out for the same reason, and this walk reads that rule rather than its own.
+  it('leaves out a copy pooling anchored on a foreign build', () => {
+    const members = [
+      member('@ng/core', [
+        {
+          tag: '22.0.8',
+          action: 'share',
+          copies: [
+            { remote: 'mfe5' },
+            {
+              remote: 'mfe2',
+              servedBy: 'mfe9',
+              entries: { '@ng/core': 'c.js', '@ng/core/testing': 't.js' },
+            },
+          ],
+        },
+      ]),
+    ];
+
+    // `/testing` is the anchored copy's alone, so nothing publishes it globally.
+    expect(Object.fromEntries(sharedTagPerSpecifier(members, new Set()))).toEqual({
+      '@ng/core': '22.0.8',
     });
   });
 });
