@@ -34,7 +34,11 @@ type IslandCause =
   | { kind: 'incompatible'; member: ExternalName; tag: VersionName }
   // No build in the pool serves everything it consumes at versions it accepts, and no build witnesses
   // the combination the global mapping offers it either. `gap` is what the closest build fell short on.
-  | { kind: 'uncovered'; gap: string; closest?: RemoteName };
+  | { kind: 'uncovered'; gap: string; closest?: RemoteName }
+  // The record about to be written would hand it members from builds that never shipped them together.
+  // The gates leave this unreachable; it is checked anyway because it is the one thing pooling exists to
+  // prevent — see `findTornRemotes`.
+  | { kind: 'torn'; combination: string };
 
 /**
  * Per remote, the members it must be served from a build other than that member's own basis — an
@@ -67,6 +71,101 @@ function islandedRemotes(members: PoolMember[]): Map<RemoteName, IslandCause> {
               tag: version.tag,
             });
   return islanded;
+}
+
+const basisFor = (
+  members: PoolMember[],
+  islanded: Map<RemoteName, IslandCause>,
+  serving: ServingBuild
+): Map<ExternalName, RemoteName> =>
+  basisPerMember(members, islanded, remote => {
+    const build = serving.get(remote);
+    return build !== undefined && build !== remote;
+  });
+
+// Only where the serving build differs from what the global mapping already publishes: a remote whose
+// anchor *is* the basis resolves through `imports` and needs no scope entry at all (Performance §9).
+function servedPerRemote(
+  consumed: Map<RemoteName, ExternalName[]>,
+  serving: ServingBuild,
+  basis: Map<ExternalName, RemoteName>
+): Served {
+  const served: Served = new Map();
+
+  for (const [remote, build] of serving) {
+    const byMember = new Map<ExternalName, RemoteName>();
+    for (const name of consumed.get(remote) ?? []) {
+      if (basis.get(name) !== build) byMember.set(name, build);
+    }
+    if (byMember.size > 0) served.set(remote, byMember);
+  }
+
+  return served;
+}
+
+/**
+ * The no-tear guarantee, checked on what is about to be written rather than argued from the gates: every
+ * non-host remote must resolve a `(member → tag)` combination that some single build shipped. Which remote
+ * serves a tag is free — two builds at one tag are interchangeable providers — so this compares tags only,
+ * never origins.
+ *
+ * The gates already leave it true: an islanded remote self-serves its whole family, an anchored one takes
+ * every member from a build the coverage rule vetted, and an unassigned one was witnessed. The reason to
+ * check regardless is `rebuildMember`'s last rule — when a member loses its basis, a copy with no
+ * `servedBy` self-serves — which is decided after gate 2 has stopped looking.
+ *
+ * A host is never judged: it cannot be repointed onto another build, so there is nothing to enforce.
+ *
+ * Exported for its own test: no portfolio reaches it through `poolFamily`, so the contract has to be
+ * pinned on hand-built input.
+ */
+export function findTornRemotes(
+  members: PoolMember[],
+  islanded: Map<RemoteName, IslandCause>,
+  consumed: Map<RemoteName, ExternalName[]>,
+  basis: Map<ExternalName, RemoteName>,
+  served: Served,
+  hosts: ReadonlySet<RemoteName>
+): { remote: RemoteName; combination: string }[] {
+  const instances = buildInstances(members, islanded);
+  const torn: { remote: RemoteName; combination: string }[] = [];
+
+  for (const [remote, wants] of consumed) {
+    if (islanded.has(remote) || hosts.has(remote)) continue;
+
+    const resolved = new Map<ExternalName, VersionName>();
+    for (const member of wants) {
+      // An explicit anchor, else the global mapping, else nobody publishes it and the copy self-serves.
+      const from = served.get(remote)?.get(member) ?? basis.get(member) ?? remote;
+      const tag = instances.get(from)?.get(member);
+      if (tag !== undefined) resolved.set(member, tag);
+    }
+    if (resolved.size === 0) continue;
+
+    let witnessed = false;
+    for (const [, ships] of instances) {
+      let all = true;
+      for (const [member, tag] of resolved) {
+        if (ships.get(member) !== tag) {
+          all = false;
+          break;
+        }
+      }
+      if (all) {
+        witnessed = true;
+        break;
+      }
+    }
+
+    if (!witnessed) {
+      torn.push({
+        remote,
+        combination: [...resolved].map(([member, tag]) => `${member}@${tag}`).join(', '),
+      });
+    }
+  }
+
+  return torn;
 }
 
 export function createPoolSharedExternals(
@@ -143,27 +242,30 @@ export function createPoolSharedExternals(
         members.map(m => `  - ${m.name}`).join('\n')
     );
 
-    const serving = assignServingBuilds(members, islanded);
+    let serving = assignServingBuilds(members, islanded);
 
     // Nothing to island and nothing reassigned: determine's verdicts already stand for every member, so
     // rebuilding them would write back what storage holds.
     if (islanded.size === 0 && serving.size === 0) return;
 
-    const basis = basisPerMember(members, islanded, remote => {
-      const build = serving.get(remote);
-      return build !== undefined && build !== remote;
-    });
-
-    // Only where the serving build differs from what the global mapping already publishes: a remote whose
-    // anchor *is* the basis resolves through `imports` and needs no scope entry at all (Performance §9).
-    const served: Served = new Map();
     const consumed = consumedMembers(members);
-    for (const [remote, build] of serving) {
-      const byMember = new Map<ExternalName, RemoteName>();
-      for (const name of consumed.get(remote) ?? []) {
-        if (basis.get(name) !== build) byMember.set(name, build);
-      }
-      if (byMember.size > 0) served.set(remote, byMember);
+    const hosts = hostRemotes(members);
+    let basis = basisFor(members, islanded, serving);
+    let served = servedPerRemote(consumed, serving, basis);
+
+    // Enforce the no-tear guarantee instead of relying on the gates to imply it. Self-serving a whole
+    // family is always coherent, so a torn remote is islanded and the assignment redone — taking a build
+    // away can move everyone who was deduping onto it. Monotone, exactly as the coverage gate is: each
+    // round islands at least one more remote, so it terminates.
+    for (;;) {
+      const torn = findTornRemotes(members, islanded, consumed, basis, served, hosts);
+      if (torn.length === 0) break;
+
+      for (const { remote, combination } of torn)
+        islanded.set(remote, { kind: 'torn', combination });
+      serving = assignServingBuilds(members, islanded);
+      basis = basisFor(members, islanded, serving);
+      served = servedPerRemote(consumed, serving, basis);
     }
 
     // Defensive: determine already throws on real incompatibilities under strictExternalCompatibility. A
@@ -190,6 +292,13 @@ export function createPoolSharedExternals(
         config.log.warn(
           3,
           `[${scope}][pool:${poolName}] '${remote}' is islanded: '${cause.member}@${cause.tag}' is incompatible with the shared version, so all ${scoped} members it imports are scoped for it.`
+        );
+        continue;
+      }
+      if (cause.kind === 'torn') {
+        config.log.warn(
+          3,
+          `[${scope}][pool:${poolName}] '${remote}' serves its own family: the mapping would have handed it ${cause.combination}, which no build shipped together, so all ${scoped} members it imports are scoped for it.`
         );
         continue;
       }
