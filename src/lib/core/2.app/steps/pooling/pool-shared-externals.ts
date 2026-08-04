@@ -126,9 +126,10 @@ const anyAnchorStored = (members: PoolMember[]): boolean =>
  * serves a tag is free — two builds at one tag are interchangeable providers — so this compares tags only,
  * never origins. A host is never judged: it cannot be repointed onto another build.
  *
- * Keyed by specifier like everything else in the design, not by member: an entrypoint the serving basis lacks
- * is published from a sibling copy at that copy's tag (`selfFillUncovered`), so a member-level check reads one
- * tag for a package the remote really resolves at two.
+ * Keyed by specifier like everything else in the design, not by member: a specifier no copy of the winning
+ * version bundles is published from a `skip` copy at that version's tag (`selfFillUncovered`), so a
+ * member-level check reads one tag for a package the remote really resolves at two. Copies of the winning
+ * tag merging their entrypoints (`mergeVersionEntries`) never do this — one tag, nothing to tear.
  *
  * No portfolio is known to reach a tear through `poolFamily` — the gates leave it true — and it is checked
  * regardless, because it is the one thing pooling exists to prevent and because `rebuildMember`'s last rule

@@ -697,7 +697,7 @@ provenance and a cost in downloads.
    sibling build ships that combination. It is sound because at equal versions provider identity is
    irrelevant — `core@22.0.5` from two remotes is one published artefact. Two details: the tags witnessed
    are the ones the **map** serves, which for secondary entrypoints is routinely a sibling copy of the tag
-   rather than the basis (`selfFillUncovered`); and the host is **exempt**, or the witness rewrites the
+   rather than the basis (`mergeVersionEntries`); and the host is **exempt**, or the witness rewrites the
    host's own copy to another remote's build of the same tag.
 2. **One covering build.** Otherwise the remote may dedup onto a single build offering **every** entrypoint
    it consumes, at versions its own `requiredVersion` accepts, reusing the resolver's memoized
