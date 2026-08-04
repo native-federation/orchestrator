@@ -32,7 +32,7 @@ import {
   type Acceptance,
 } from './anchoring';
 import { buildPools } from './pool-graph';
-import { poolableScopes, remotesInPool } from './pool.util';
+import { lazy, poolableScopes, remotesInPool } from './pool.util';
 import type { Islanded, PoolMember, PoolName, Specifier } from './pool.types';
 
 type IslandCause =
@@ -54,6 +54,13 @@ type Served = Map<RemoteName, Map<ExternalName, RemoteName>>;
 
 /** The build serving each remote the gate moved, itself where it serves its own family. */
 type ServingBuild = Map<RemoteName, RemoteName>;
+
+/** Projections gate 2 reads that no round of it can change. */
+type GateViews = {
+  consumedSpecifiers: () => Map<RemoteName, Set<Specifier>>;
+  acceptance: () => Acceptance;
+  arrival: () => Map<RemoteName, number>;
+};
 
 /**
  * Gate 1: remotes that are strict-incompatible on any member, islanded across the WHOLE family. Reads
@@ -314,6 +321,14 @@ export function createPoolSharedExternals(
     const consumed = consumedMembers(members);
     const hosts = hostRemotes(members);
 
+    // None of these three depend on `islanded`, so they survive every round of the coverage gate and every
+    // re-assignment the no-tear loop asks for — and the healthy path never asks for them at all.
+    const views: GateViews = {
+      consumedSpecifiers: lazy(() => consumedSpecifiers(members)),
+      acceptance: lazy(() => acceptanceTable(members, ports.versionCheck.isCompatible)),
+      arrival: lazy(() => arrivalOrder(members)),
+    };
+
     config.log.debug(
       3,
       `[${scope}][pool:${poolName}] ${members.length} members across ${allRemotes.length} remotes, incompatible={${[...islanded.keys()].join(', ') || '∅'}}\n` +
@@ -321,7 +336,7 @@ export function createPoolSharedExternals(
     );
 
     const assign = () => {
-      const serving = assignServingBuilds(members, islanded, consumed, hosts);
+      const serving = assignServingBuilds(members, islanded, consumed, hosts, views);
       const basis = basisFor(members, islanded, serving);
       return { serving, basis, served: servedPerRemote(consumed, serving, basis) };
     };
@@ -384,7 +399,8 @@ export function createPoolSharedExternals(
     members: PoolMember[],
     islanded: Map<RemoteName, IslandCause>,
     consumed: Map<RemoteName, ExternalName[]>,
-    hosts: Set<RemoteName>
+    hosts: Set<RemoteName>,
+    views: GateViews
   ): ServingBuild {
     for (;;) {
       const bases = servingBuilds(members, islanded);
@@ -401,7 +417,7 @@ export function createPoolSharedExternals(
 
       const builds = liveBuilds(members, islanded);
       const shared = sharedTagPerSpecifier(members, islanded);
-      const consumedSpec = consumedSpecifiers(members);
+      const consumedSpec = views.consumedSpecifiers();
 
       const needAnchor = new Map<RemoteName, ExternalName[]>();
       const needSpecifiers = new Map<RemoteName, Set<Specifier>>();
@@ -414,14 +430,14 @@ export function createPoolSharedExternals(
 
       if (needAnchor.size === 0) return new Map();
 
-      const acceptance: Acceptance = acceptanceTable(members, ports.versionCheck.isCompatible);
+      const acceptance = views.acceptance();
       const assignment = assignAnchors({
         builds,
         acceptance,
         consumedSpecifiers: needSpecifiers,
         consumedMembers: needAnchor,
         hosts,
-        arrival: arrivalOrder(members),
+        arrival: views.arrival(),
       });
 
       // A build somebody else dedups onto has to run its own copies of what it hands out, or the files it

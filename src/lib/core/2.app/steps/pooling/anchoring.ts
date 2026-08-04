@@ -215,9 +215,12 @@ export function assignAnchors(input: AnchorInput): Assignment {
   // at all must still self-serve rather than fall through to the greedy pass and be anchored onto somebody
   // else.
   for (const host of [...hosts].sort(byPriority)) {
-    const served = builds.has(host)
-      ? [...pending].filter(consumer => consumer !== host && canServe(host, consumer))
-      : [];
+    const served: RemoteName[] = [];
+    if (builds.has(host)) {
+      for (const consumer of pending) {
+        if (consumer !== host && canServe(host, consumer)) served.push(consumer);
+      }
+    }
     electAnchor(host, served);
   }
 
@@ -227,9 +230,10 @@ export function assignAnchors(input: AnchorInput): Assignment {
 
     for (const candidate of candidates) {
       if (anchored.has(candidate)) continue;
-      const served = [...pending].filter(
-        consumer => consumer !== candidate && canServe(candidate, consumer)
-      );
+      const served: RemoteName[] = [];
+      for (const consumer of pending) {
+        if (consumer !== candidate && canServe(candidate, consumer)) served.push(consumer);
+      }
       // Strictly greater, so a tie stays with the earlier candidate and the order above decides.
       if (served.length > bestServed.length) {
         best = candidate;

@@ -3,6 +3,13 @@ import type { ForSharedExternalsStorage } from '../../driving-ports/for-shared-e
 import type { ModeConfig } from '../../config/mode.contract';
 import type { PoolMember } from './pool.types';
 
+// A projection built at most once, and only if a gate gets far enough to ask for it. Both pooling steps
+// iterate to a fixed point over views that do not change between rounds.
+export function lazy<T>(make: () => T): () => T {
+  let value: T | undefined;
+  return () => (value ??= make());
+}
+
 export function remotesInPool(members: PoolMember[]): RemoteName[] {
   return [
     ...new Set(members.flatMap(m => m.external.versions.flatMap(v => v.remotes.map(r => r.name)))),
