@@ -289,10 +289,17 @@ whatever they are set to. An anchored copy is exempt in both directions — it c
 the shared version cannot tear it, because it resolves through its anchor's build rather than through the
 version. Scoping is per remote copy, not per version: given a shared surface
 `{table, sort}`, a skipped `{table}` and a skipped `{table, paginator}`, only the third is split out — the
-first two keep sharing. The additive dynamic-init path applies the same policy to a runtime remote whose
-tag differs from the shared one, and the import-map builders keep a last-resort net for stale storage: an
-uncovered specifier reaching them is refused under `strictEntryPointCoverage` or
+first two keep sharing. The import-map builders keep a last-resort net for stale storage: an uncovered
+specifier reaching them is refused under `strictEntryPointCoverage` or
 [`strict.strictImportMap`](./config.md#modeConfig), and warned about otherwise.
+
+The additive dynamic-init path applies the same policy to a runtime remote whose tag differs from the shared
+one, but measures it against a smaller surface: what the **committed** import map publishes for the version,
+not the whole union. A copy that joined at runtime served its own extra entrypoints into its own scope alone
+— the committed `imports` cannot be added to — so it is part of the version and covers nobody. Reading the
+whole union there would report a specifier as covered that the joining remote has no way to resolve. A
+shareScope skip is not restricted this way: it is handed a per-consumer override that names its provider
+outright, so any copy can serve it.
 
 To minimise tears (and scope promotions) the resolver also uses coverage as a **tiebreaker** when choosing
 the shared version: among candidates that tie on the extra-downloads heuristic, it prefers the one whose

@@ -9,6 +9,7 @@ import {
 } from 'lib/core/1.domain';
 import {
   addRemoteToVersion,
+  committedEntries,
   findVersionForTag,
   uncoveredEntrypoints,
   versionEntries,
@@ -112,7 +113,16 @@ export function createUpdateCache(
 
     // Snapshotted before this remote joins the version below: a copy of the shared tag merges its
     // extra entrypoints in, and it has to serve them itself since the import map is committed.
-    const provided = sharedVersion ? versionEntries(sharedVersion) : undefined;
+    //
+    // What the shared version can serve *this* remote, which is not its whole surface: a global skip
+    // inherits the committed `imports`, so only a copy already published there covers it, while a
+    // shareScope skip gets a per-consumer override that can name any copy. Both the tear check and
+    // `covered` read it, or `convert-to-import-map` would self-fill what this step called covered.
+    const provided = sharedVersion
+      ? sharedInfo.shareScope
+        ? versionEntries(sharedVersion)
+        : committedEntries(sharedVersion)
+      : undefined;
     const sameVersion = sharedVersion?.tag === tag;
 
     if (action === 'skip' && provided && !sameVersion) {

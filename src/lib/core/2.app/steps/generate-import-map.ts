@@ -380,9 +380,8 @@ export function createGenerateImportMap(
           continue;
         }
 
-        version.remotes[0]!.cached = true;
-
-        // Registers the bundle of every copy it maps, the basis included.
+        // Marks and registers the copies it maps, the basis included — so `cached` names the copies this
+        // map really publishes, which the dynamic path reads as what it may call covered.
         mergeVersionEntries(importMap, chunkBundles, externalName, version);
       }
 
@@ -412,6 +411,11 @@ export function createGenerateImportMap(
     externalName: string,
     version: SharedVersion
   ): void {
+    // Scope lookup and chunk registration belong to the copy, not to each of its specifiers. A copy none
+    // of whose specifiers survive the check below never enters it: nothing points at its build, so its
+    // chunks are not needed and calling it cached would claim a mapping it does not have.
+    const scopes = new Map<RemoteName, string>();
+
     for (const [packageName, remote] of versionEntries(version)) {
       // Another external claimed this specifier as one of its own entries — reachable when
       // `feature.convertFlatSharedInfo` is off and one remote emits a secondary entrypoint as a
@@ -423,12 +427,16 @@ export function createGenerateImportMap(
         );
         continue;
       }
+      let scope = scopes.get(remote.name);
+      if (scope === undefined) {
+        scopes.set(remote.name, (scope = getScope(GLOBAL_SCOPE, remote.name, externalName)));
+        registerBundleChunks(chunkBundles, remote.name, remote.bundle);
+        remote.cached = true;
+      }
       const file = remote.entries[packageName]!;
-      const url = _path.join(getScope(GLOBAL_SCOPE, remote.name, externalName), file);
+      const url = _path.join(scope, file);
       addToGlobal(importMap, { [packageName]: url });
       addIntegrity(importMap, url, remote.name, file);
-      registerBundleChunks(chunkBundles, remote.name, remote.bundle);
-      remote.cached = true;
     }
   }
 

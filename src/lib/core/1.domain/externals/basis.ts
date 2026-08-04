@@ -70,9 +70,26 @@ export function findVersionForTag(
 // this version can resolve. Pooling keeps an anchored copy out of the basis slot for exactly this
 // reason, so a `share` version's basis always survives the skip.
 export function versionEntries(version: SharedVersion): Map<string, SharedVersionMeta> {
+  return collectEntries(version, false);
+}
+
+// The part of that surface a committed import map already publishes, which on the dynamic path is less than
+// all of it: a copy that joined at runtime served its extra entrypoints into its own scope alone, so it is
+// part of the version yet can serve nobody else. `cached` is set by whichever import-map builder mapped the
+// copy, so it answers exactly that. Only a consumer that resolves through the committed mapping needs this
+// — a per-consumer override names its provider outright and can use any copy.
+export function committedEntries(version: SharedVersion): Map<string, SharedVersionMeta> {
+  return collectEntries(version, true);
+}
+
+function collectEntries(
+  version: SharedVersion,
+  committedOnly: boolean
+): Map<string, SharedVersionMeta> {
   const entries = new Map<string, SharedVersionMeta>();
   for (const remote of version.remotes) {
     if (remote.servedBy) continue;
+    if (committedOnly && !remote.cached) continue;
     for (const entrypoint in remote.entries) {
       if (!entries.has(entrypoint)) entries.set(entrypoint, remote);
     }
