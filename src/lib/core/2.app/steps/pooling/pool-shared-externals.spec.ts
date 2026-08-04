@@ -455,6 +455,70 @@ describe('createPoolSharedExternals', () => {
       expect(adapters.sharedExternalsRepo.addOrUpdate).toHaveBeenCalledTimes(2);
     });
 
+    it('islands a remote whose uncovered entrypoint would come from its own build', async () => {
+      config.feature.useAutoExternalPooling = true;
+      // The gate used to short-circuit as soon as one build was the basis of every *member*, on the
+      // argument that it therefore covered everyone. It does not: mfe1 wins both members but does not
+      // bundle `@framework/core/testing`, so `generate-import-map` self-fills that specifier from mfe2's
+      // own 17.0.6 build into the global imports — mfe2 then runs core@17.0.8 beside core/testing@17.0.6,
+      // and so does every other remote importing that entrypoint. Coverage is a specifier question, which
+      // is exactly what `coversWholePool` now asks before taking the free path.
+      givenExternals({
+        '@framework/core': external([
+          sharedVersion('17.0.8', [meta('mfe1', { req: '^17.0.0', file: 'core.js' })], {
+            action: 'share',
+          }),
+          sharedVersion('17.0.6', [
+            {
+              ...meta('mfe2', { req: '^17.0.0' }),
+              entries: {
+                '@framework/core': 'core.js',
+                '@framework/core/testing': 'core-testing.js',
+              },
+            },
+          ]),
+        ]),
+        '@framework/common': external([
+          sharedVersion('17.0.8', [meta('mfe1', { req: '^17.0.0' })], { action: 'share' }),
+          sharedVersion('17.0.6', [meta('mfe2', { req: '^17.0.0' })]),
+        ]),
+      });
+
+      await poolSharedExternals();
+
+      const core = rebuiltFor('@framework/core')!;
+      expect(namesOf(core, 'share')).toEqual(['mfe1']);
+      expect(namesOf(core, 'scope')).toEqual(['mfe2']);
+      expect(namesOf(rebuiltFor('@framework/common')!, 'scope')).toEqual(['mfe2']);
+      expect(config.log.warn).toHaveBeenCalledWith(
+        3,
+        expect.stringContaining(
+          "'mfe2' serves its own family: no shared build offers every entrypoint it imports at a version it accepts — '@framework/core/testing' is the gap, closest is 'mfe1'."
+        )
+      );
+    });
+
+    it('still takes the free path when the one basis covers every entrypoint', async () => {
+      config.feature.useAutoExternalPooling = true;
+      // The same patch drift with nothing uncovered: mfe1's build serves every specifier mfe2 imports at
+      // the tags the map publishes, so mfe2 is witnessed and pooling writes nothing at all.
+      givenExternals({
+        '@framework/core': external([
+          sharedVersion('17.0.8', [meta('mfe1', { req: '^17.0.0' })], { action: 'share' }),
+          sharedVersion('17.0.6', [meta('mfe2', { req: '^17.0.0' })]),
+        ]),
+        '@framework/common': external([
+          sharedVersion('17.0.8', [meta('mfe1', { req: '^17.0.0' })], { action: 'share' }),
+          sharedVersion('17.0.6', [meta('mfe2', { req: '^17.0.0' })]),
+        ]),
+      });
+
+      await poolSharedExternals();
+
+      expect(adapters.sharedExternalsRepo.addOrUpdate).not.toHaveBeenCalled();
+      expect(config.log.warn).not.toHaveBeenCalled();
+    });
+
     it('islands a remote no shared build serves its whole family', async () => {
       config.feature.useAutoExternalPooling = true;
       // b draws core from a (17.0.0) and cdk from itself (17.1.0). The old gate read that as a minor-line

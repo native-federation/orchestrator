@@ -17,6 +17,7 @@ import {
   basisPerMember,
   consumedMembers,
   consumedSpecifiers,
+  coversWholePool,
   hostRemotes,
   liveBuilds,
   ownTagsPerRemote,
@@ -364,10 +365,15 @@ export function createPoolSharedExternals(
     for (;;) {
       const bases = servingBuilds(members, islanded);
 
-      // One build serves every member, so it covers everyone by construction and every copy already
-      // resolves to it. The healthy-portfolio path: no per-build views, no acceptance table, no assignment,
-      // nothing written.
-      if (new Set(bases.values()).size < 2 && bases.size === members.length) return new Map();
+      // One build serves every member *and* every entrypoint anyone consumes, so the map hands every copy
+      // that single build and gate 2 below would witness all of them. The healthy-portfolio path: no
+      // per-build views, no acceptance table, no assignment, nothing written. Being the basis of every
+      // member is not sufficient on its own — see `coversWholePool`.
+      const distinct = new Set(bases.values());
+      if (distinct.size === 1 && bases.size === members.length) {
+        const sole = [...distinct][0]!;
+        if (coversWholePool(members, sole, islanded)) return new Map();
+      }
 
       const builds = liveBuilds(members, islanded);
       const shared = sharedTagPerSpecifier(members, islanded);

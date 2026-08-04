@@ -158,6 +158,37 @@ export function consumedSpecifiers(members: PoolMember[]): Map<RemoteName, Set<S
 }
 
 /**
+ * Does one build serve every specifier the pool's live copies consume? The cheap form of
+ * `consumedSpecifiers` against one `liveBuilds` entry, for the only question the healthy path asks.
+ *
+ * Keyed by specifier, because being the basis of every *member* is not the same thing: an entrypoint the
+ * basis does not carry is served from the declaring remote's own build, at that remote's own tag (see
+ * §"Entrypoint coverage and tearing"), which is a torn package and not something a member-level test can
+ * see.
+ */
+export function coversWholePool(
+  members: PoolMember[],
+  build: RemoteName,
+  islanded: Islanded
+): boolean {
+  const served = new Set<Specifier>();
+  const wanted = new Set<Specifier>();
+
+  for (const member of members) {
+    for (const version of member.external.versions) {
+      for (const meta of version.remotes) {
+        if (islanded.has(meta.name)) continue;
+        const into = meta.name === build ? served : wanted;
+        for (const specifier in meta.entries) into.add(specifier);
+      }
+    }
+  }
+
+  for (const specifier of wanted) if (!served.has(specifier)) return false;
+  return true;
+}
+
+/**
  * The build serving each member, i.e. `remotes[0]` of its shared version — skipping copies islanding has
  * taken, since those are about to self-serve. A member with no entry is served by nobody and every
  * consumer falls back to its own build.
