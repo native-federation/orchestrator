@@ -168,23 +168,32 @@ describe('entrypoint coverage (integration)', () => {
         },
       ]);
 
-    it('should scope the joining remote when the cached basis cannot cover it', async () => {
+    // The joining remote builds the tag that is already shared, so the two copies merge and the
+    // union of their entrypoints is exposed — the coverage policy only governs other versions.
+    it('should merge the joining remote into the cached version under scopeUncoveredEntrypoints', async () => {
       config.profile.scopeUncoveredEntrypoints = true;
       servedByDI();
 
       const { map } = await run([REMOTES[2]!]);
 
       expect(stored!.versions.map(v => [v.tag, v.action, v.remotes.map(r => r.name)])).toEqual([
-        ['22.0.6', 'share', [DI]],
-        ['22.0.6', 'scope', [MU]],
+        ['22.0.6', 'share', [DI, MU]],
       ]);
       expect(map.imports).toEqual({
         '@angular/material/table': `http://feed/${DI}/table-DI.js`,
-      });
-      // The whole bunch from MU's own build, so the package is not torn.
-      expect(map.scopes?.[`http://feed/${MU}/`]).toEqual({
         '@angular/material/sort': `http://feed/${MU}/sort-MU.js`,
-        '@angular/material/table': `http://feed/${MU}/table-MU.js`,
+      });
+    });
+
+    it('should merge the joining remote under strictEntryPointCoverage', async () => {
+      config.strict.strictEntryPointCoverage = true;
+      servedByDI();
+
+      const { map } = await run([REMOTES[2]!]);
+
+      expect(map.imports).toEqual({
+        '@angular/material/table': `http://feed/${DI}/table-DI.js`,
+        '@angular/material/sort': `http://feed/${MU}/sort-MU.js`,
       });
     });
 

@@ -59,22 +59,33 @@ export function findVersionForTag(
   return scoped;
 }
 
-export function uncoveredEntrypoints(
-  remote: SharedVersionMeta,
-  basis: Record<string, string>
-): string[] {
-  return Object.keys(remote.entries).filter(entrypoint => !(entrypoint in basis));
+// Every copy of a version builds the same tag, so a specifier only some of them bundle is not a
+// tear: the version exposes the union of its copies' entrypoints, each served by the first copy
+// that declares it — basis precedence first. See
+// docs/version-resolver.md#entrypoint-coverage-and-tearing.
+export function versionEntries(version: SharedVersion): Map<string, SharedVersionMeta> {
+  const entries = new Map<string, SharedVersionMeta>();
+  for (const remote of version.remotes) {
+    for (const entrypoint in remote.entries) {
+      if (!entries.has(entrypoint)) entries.set(entrypoint, remote);
+    }
+  }
+  return entries;
+}
+
+// A `versionEntries` map or a bare name set both answer "can this be served?".
+type Covered = Pick<ReadonlySet<string>, 'has'>;
+
+export function uncoveredEntrypoints(remote: SharedVersionMeta, covered: Covered): string[] {
+  return Object.keys(remote.entries).filter(entrypoint => !covered.has(entrypoint));
 }
 
 // `uncoveredEntrypoints` without materializing the names: the resolver's O(versions²) selection
 // loop asks this once per remote per candidate and only needs the count. Keep the two in sync.
-export function countUncoveredEntrypoints(
-  remote: SharedVersionMeta,
-  basis: Record<string, string>
-): number {
+export function countUncoveredEntrypoints(remote: SharedVersionMeta, covered: Covered): number {
   let uncovered = 0;
   for (const entrypoint in remote.entries) {
-    if (!(entrypoint in basis)) uncovered++;
+    if (!covered.has(entrypoint)) uncovered++;
   }
   return uncovered;
 }

@@ -9,6 +9,7 @@ import {
   countUncoveredEntrypoints,
   uncoveredEntrypoints,
   versionDemands,
+  versionEntries,
 } from 'lib/core/1.domain/externals/basis';
 import { NFError } from 'lib/core/native-federation.error';
 import type { DrivingContract } from '../driving-ports/driving.contract';
@@ -86,13 +87,13 @@ export function createDetermineSharedExternals(
     return Promise.resolve();
   };
 
-  // Entrypoints declared by the versions `winner` would skip that its basis can't serve.
+  // Entrypoints declared by the versions `winner` would skip that its own copies can't serve.
   function uncoveredTears(
     external: SharedExternal,
     winner: SharedVersion,
     accepts: (version: SharedVersion, tag: string) => boolean
   ): number {
-    const basis = winner.remotes[0]!.entries;
+    const basis = versionEntries(winner);
     return external.versions.reduce((sum, v) => {
       if (v === winner) return sum;
       if (!accepts(v, winner.tag)) return sum;
@@ -107,7 +108,6 @@ export function createDetermineSharedExternals(
   ) {
     if (external.versions.length === 1) {
       external.versions[0]!.action = 'share';
-      applyEntrypointCoveragePolicy(externalName, external);
       external.dirty = false;
       return external;
     }
@@ -195,6 +195,7 @@ export function createDetermineSharedExternals(
     return external;
   }
 
+  // Both settings only govern tears *between* versions: copies of the shared tag always merge.
   // `strictEntryPointCoverage` refuses a tear, `profile.scopeUncoveredEntrypoints` scopes the
   // torn copy, otherwise the import-map builders self-fill it.
   function applyEntrypointCoveragePolicy(externalName: string, external: SharedExternal): void {
@@ -222,15 +223,15 @@ export function createDetermineSharedExternals(
     const shared = external.versions.find(v => v.action === 'share');
     if (!shared) return [];
 
-    const basis = shared.remotes[0]!.entries;
+    const basis = versionEntries(shared);
     const tears: Tear[] = [];
 
     for (const version of external.versions) {
       if (version.action === 'scope') continue;
+      // Its own copies are part of the basis, so they can never tear it.
+      if (version === shared) continue;
 
-      version.remotes.forEach((remote, index) => {
-        if (version === shared && index === 0) return;
-
+      version.remotes.forEach(remote => {
         const uncovered = uncoveredEntrypoints(remote, basis);
         if (uncovered.length > 0) tears.push({ version, remote, uncovered });
       });

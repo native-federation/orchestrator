@@ -215,61 +215,71 @@ specifier to its output file:
 
 The resolver treats the whole `entries` map as one shared external: version negotiation happens once per
 package, and every specifier in `entries` follows the winning version's placement — scoped, shareScope,
-global, or the skip/override redirect. When a shared version wins, the **basis** remote's `entries` are the
-source served to every consumer of that version, so each secondary entrypoint resolves to the same
-provider as its primary. (Older/flat remote builds emit one `SharedInfo` per specifier; set
+global, or the skip/override redirect. When a shared version wins, the union of its copies' `entries` is
+the surface served to every consumer of that version, so each secondary entrypoint resolves to the same
+version as its primary. (Older/flat remote builds emit one `SharedInfo` per specifier; set
 [`feature.convertFlatSharedInfo`](./config.md#modeConfig) to group them at runtime.)
 
 #### The basis of a version
 
 Several remotes can report the same version of a package, and they all land in one `SharedVersion` as its
 `remotes` list. They build the same tag, but each bundles only the entrypoints it actually imports, so the
-lists can differ. `remotes[0]` is the version's **basis** — the copy whose `entries` every consumer
-resolves to — and the cache keeps it sorted on insert by this precedence:
+lists can differ. `remotes[0]` is the version's **basis** — the copy that serves every specifier it
+declares, and thus the primary — and the cache keeps it sorted on insert by this precedence:
 
 1. **host** — the shell's build is already loaded in the browser and cannot be repointed.
 2. **cached** — an already-served copy; repointing it would invalidate a committed import map and force a
    redundant download.
-3. **widest coverage** — the copy declaring the most entrypoints, so siblings need no self-fill.
+3. **widest coverage** — the copy declaring the most entrypoints, so fewest builds are needed.
 4. **arrival order** — ties keep the incumbent, so generated import maps stay byte-stable.
 
 Rule 3 is what makes a superset copy win: given `{table}`, `{table}` and `{sort, table}` of one version,
 the third becomes the basis and serves both specifiers from a single build. Rules 1 and 2 deliberately
-outrank it — stability beats optimality — so a host or already-served basis can still leave gaps, which
-fall through to the coverage policy below.
+outrank it — stability beats optimality — so a host or already-served basis can leave gaps its siblings
+fill (see below).
+
+#### Merging within a version
+
+Copies of one version build the same tag, so a specifier only some of them bundle is not a conflict: the
+version **exposes the union of its copies' entries**, each specifier served by the first copy that declares
+it in basis precedence. Given a cached basis `{table}` and a sibling `{table, sort}`, `table` resolves to
+the basis's build and `sort` to the sibling's — every entrypoint any copy declares stays importable, and
+no copy is pushed out of sharing because it bundles more than the basis. This is unconditional: the
+coverage settings below never apply within a version.
 
 #### Entrypoint coverage and tearing
 
-The basis's `entries` are not guaranteed to list every specifier a consumer needs. A `skip` version
-redirected to the winner, or a sibling remote of the same shared version, can declare a secondary
-entrypoint the basis's build does not contain — for example the basis ships `@angular/core` while a
-compatible, deduped remote also imports `@angular/core/testing`:
+A version's merged entries are not guaranteed to list every specifier a consumer needs. A `skip` version
+redirected to the winner can declare a secondary entrypoint no copy of the winner contains — for example
+the shared version ships `@angular/core` while a compatible, deduped remote on another tag also imports
+`@angular/core/testing`:
 
 ```
 @angular/core  20.0.0  share  mfe-a  entries { @angular/core }
 @angular/core  20.1.0  skip   mfe-b  entries { @angular/core, @angular/core/testing }
 ```
 
-Serving those two specifiers from two different builds is a **tear**. It is harmless for most libraries but
-can break packages whose secondary entrypoints share module-singleton state with the primary. Three
-behaviours are available, in precedence order:
+Serving those two specifiers from two **different versions** is a **tear**. It is harmless for most
+libraries but can break packages whose secondary entrypoints share module-singleton state with the primary.
+Three behaviours are available, in precedence order:
 
-| Setting | Behaviour on an uncovered entrypoint |
+| Setting | Behaviour on an entrypoint uncovered by the shared version |
 | --- | --- |
 | [`strict.strictEntryPointCoverage`](./config.md#modeConfig) | **Throws.** Resolution refuses to share a package it cannot serve coherently. |
-| [`profile.scopeUncoveredEntrypoints`](./config.md#modeConfig) | **Scopes.** The uncovered copy is split out into a `scope` version of its own tag and serves its whole `entries` bunch from its own build. Sharing continues for the copies the basis does cover. |
+| [`profile.scopeUncoveredEntrypoints`](./config.md#modeConfig) | **Scopes.** The uncovered copy is split out into a `scope` version of its own tag and serves its whole `entries` bunch from its own build. Sharing continues for the copies the shared version does cover. |
 | neither (default) | **Self-fills.** The specifier is served from the declaring remote's own build and a warning is logged. Nothing is dropped; the package tears. |
 
-Scoping is per remote copy, not per version: given a basis `{table, sort}`, a covered `{table}` and an
-uncovered `{table, paginator}`, only the third is split out — the first two keep sharing. The additive
-dynamic-init path applies the same policy to a runtime remote, and the import-map builders keep a
-last-resort net for stale storage: an uncovered specifier reaching them is refused under
-`strictEntryPointCoverage` or [`strict.strictImportMap`](./config.md#modeConfig), and warned about
-otherwise.
+Both settings are strictly about tears between versions; copies of the shared version itself always merge,
+whatever they are set to. Scoping is per remote copy, not per version: given a shared surface
+`{table, sort}`, a skipped `{table}` and a skipped `{table, paginator}`, only the third is split out — the
+first two keep sharing. The additive dynamic-init path applies the same policy to a runtime remote whose
+tag differs from the shared one, and the import-map builders keep a last-resort net for stale storage: an
+uncovered specifier reaching them is refused under `strictEntryPointCoverage` or
+[`strict.strictImportMap`](./config.md#modeConfig), and warned about otherwise.
 
 To minimise tears (and scope promotions) the resolver also uses coverage as a **tiebreaker** when choosing
 the shared version: among candidates that tie on the extra-downloads heuristic, it prefers the one whose
-`entries` leave the fewest specifiers uncovered across the versions it would skip. A decisive
+merged entries leave the fewest specifiers uncovered across the versions it would skip. A decisive
 extra-downloads winner is never overridden, and an exact tie still keeps the highest version.
 
 ### Shared scopes
@@ -502,8 +512,8 @@ flowchart TD
 ```
 
 > The "least extra downloads" choice (F5) is tie-broken by entrypoint coverage, and with
-> [`strict.strictEntryPointCoverage`](./config.md#modeConfig) a `SKIP` version whose specifiers the
-> winner cannot cover is promoted to `SCOPE`. See
+> [`profile.scopeUncoveredEntrypoints`](./config.md#modeConfig) a `SKIP` copy whose specifiers the
+> winner cannot cover is promoted to `SCOPE` — copies of the winner's own tag merge instead. See
 > [Entrypoint coverage and tearing](#entrypoint-coverage-and-tearing).
 
 ### Step 4: Generate Import Map
@@ -693,7 +703,7 @@ Each new dependency gets one of these actions during dynamic init:
 | --------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **SKIP**  | Version already exists or use existing shared version. In a shareScope context this action is used for overriding by skipping the provided external and loading a compatible cached version instead. |
 | **SHARE** | No compatible version exists (yet), become the shared version for this scope                                                                                                                         |
-| **SCOPE** | Incompatible version with strictVersion: true, or (under `strictEntryPointCoverage`) a version whose entrypoints the shared winner cannot cover — served coherently from its own build.               |
+| **SCOPE** | Incompatible version with strictVersion: true, or (under `scopeUncoveredEntrypoints`) a version on another tag whose entrypoints the shared winner cannot cover — served coherently from its own build. A remote on the shared tag merges its entrypoints in instead, serving the extras from its own build. |
 
 ### Example: Dynamic Loading Scenario
 

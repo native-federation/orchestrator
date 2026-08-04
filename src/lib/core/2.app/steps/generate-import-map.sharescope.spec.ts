@@ -220,6 +220,53 @@ describe('createGenerateImportMap (shareScope-externals)', () => {
     });
   });
 
+  // The shared version's surface is the union of its copies, so a skipped version is remapped to
+  // entrypoints no single copy of the winner bundles alone.
+  it.each([
+    ['neither setting', () => {}],
+    ['scopeUncoveredEntrypoints', () => (config.profile.scopeUncoveredEntrypoints = true)],
+    ['strictEntryPointCoverage', () => (config.strict.strictEntryPointCoverage = true)],
+  ])('should remap to a merged entrypoint of the shared version with %s', async (_name, enable) => {
+    enable();
+    adapters.sharedExternalsRepo.getFromScope = vi.fn((scope?: string): shareScope => {
+      return !scope || scope === GLOBAL_SCOPE
+        ? {}
+        : {
+            'dep-a': mockExternal_A({
+              dirty: false,
+              versions: [
+                mockVersion_A.v2_1_2({
+                  action: 'share',
+                  remotes: {
+                    'team/mfe1': { entries: { 'dep-a': 'dep-a.js' } },
+                    'team/mfe3': { entries: { 'dep-a/sub': 'dep-a-sub.js' } },
+                  },
+                }),
+                mockVersion_A.v2_1_1({
+                  action: 'skip',
+                  remotes: {
+                    'team/mfe2': { entries: { 'dep-a': 'dep-a.js', 'dep-a/sub': 'dep-a-sub.js' } },
+                  },
+                }),
+              ],
+            }),
+          };
+    });
+
+    const actual = await generateImportMap();
+
+    const merged = {
+      'dep-a': mockScopeUrl_MFE1({ file: 'dep-a.js' }),
+      'dep-a/sub': mockScopeUrl_MFE3({ file: 'dep-a-sub.js' }),
+    };
+    expect(actual.scopes).toEqual({
+      [mockScopeUrl_MFE1()]: merged,
+      [mockScopeUrl_MFE3()]: merged,
+      [mockScopeUrl_MFE2()]: merged,
+    });
+    expect(config.log.warn).not.toHaveBeenCalled();
+  });
+
   it('should self-fill entrypoints a skipped version declares but the override lacks', async () => {
     adapters.sharedExternalsRepo.getFromScope = vi.fn((scope?: string): shareScope => {
       return !scope || scope === GLOBAL_SCOPE

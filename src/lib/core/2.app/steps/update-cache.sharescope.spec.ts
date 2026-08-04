@@ -302,6 +302,7 @@ describe('createProcessDynamicRemoteEntry - scoped', () => {
       'dep-a': {
         action: 'skip',
         covered: ['dep-a'],
+        sameVersion: true,
         override: { 'dep-a': mockScopeUrl_MFE2({ file: 'dep-a.js' }) },
       },
     });

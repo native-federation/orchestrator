@@ -216,6 +216,38 @@ describe('createConvertToImportMap', () => {
       });
     });
 
+    // `sameVersion` marks a skip against the remote's own tag: the copies merge, so the coverage
+    // policy does not apply and the entrypoint comes from this remote's build.
+    it.each([
+      ['scopeUncoveredEntrypoints', () => (config.profile.scopeUncoveredEntrypoints = true)],
+      ['strictEntryPointCoverage', () => (config.strict.strictEntryPointCoverage = true)],
+    ])('should still serve a same-version entrypoint with %s on', async (_name, enable) => {
+      enable();
+      const remoteEntry: RemoteEntry = mockRemoteEntry_MFE2({
+        exposes: [],
+        shared: [
+          mockSharedInfoA.v2_1_2({
+            shareScope: 'custom-scope',
+            entries: { 'dep-a': 'dep-a.js', 'dep-a/sub': 'dep-a-sub.js' },
+          }),
+        ],
+      });
+      const actions: SharedInfoActions = {
+        'dep-a': {
+          action: 'skip',
+          sameVersion: true,
+          override: { 'dep-a': mockScopeUrl_MFE1({ file: 'dep-a.js' }) },
+        },
+      };
+
+      const importMap = await convertToImportMap({ entry: remoteEntry, actions });
+      expect(importMap.scopes![mockScopeUrl_MFE2()]).toEqual({
+        'dep-a': mockScopeUrl_MFE1({ file: 'dep-a.js' }),
+        'dep-a/sub': mockScopeUrl_MFE2({ file: 'dep-a-sub.js' }),
+      });
+      expect(config.log.warn).not.toHaveBeenCalled();
+    });
+
     it('should not self-fill an uncovered entrypoint when scopeUncoveredEntrypoints is on', async () => {
       config.profile.scopeUncoveredEntrypoints = true;
       const remoteEntry: RemoteEntry = mockRemoteEntry_MFE2({

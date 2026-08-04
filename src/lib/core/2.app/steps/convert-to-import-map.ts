@@ -60,10 +60,10 @@ export function createConvertToImportMap(
       // by the global share elsewhere; a shareScope skip is always paired with an
       // override (see update-cache) that remaps its entrypoints.
       if (actions[external.packageName]!.action === 'skip') {
-        const { override, covered } = actions[external.packageName]!;
+        const { override, covered, sameVersion } = actions[external.packageName]!;
         if (!external.shareScope) {
           if (covered) {
-            serveUncovered(remoteEntry, external, covered, remoteEntryScope, importMap);
+            serveUncovered(remoteEntry, external, covered, remoteEntryScope, importMap, sameVersion);
           }
           return;
         }
@@ -76,7 +76,8 @@ export function createConvertToImportMap(
             external,
             covered ?? Object.keys(override),
             remoteEntryScope,
-            importMap
+            importMap,
+            sameVersion
           );
           return;
         }
@@ -171,17 +172,23 @@ export function createConvertToImportMap(
     return importMap;
   }
 
+  // `sameVersion` means the shared copy builds this remote's own tag, so its extra entrypoints
+  // merge in rather than tearing the package: the coverage policy does not apply.
   function serveUncovered(
     remoteEntry: RemoteEntry,
     external: { packageName: string; entries: Record<string, string> },
     covered: string[],
     remoteEntryScope: string,
-    importMap: ImportMap
+    importMap: ImportMap,
+    sameVersion = false
   ): void {
     const provided = new Set(covered);
     Object.entries(external.entries).forEach(([packageName, fileName]) => {
       if (provided.has(packageName)) return;
-      if (config.strict.strictEntryPointCoverage || config.profile.scopeUncoveredEntrypoints) {
+      if (
+        !sameVersion &&
+        (config.strict.strictEntryPointCoverage || config.profile.scopeUncoveredEntrypoints)
+      ) {
         warnUncoveredEntrypoint(remoteEntry.name, external.packageName, packageName);
         return;
       }

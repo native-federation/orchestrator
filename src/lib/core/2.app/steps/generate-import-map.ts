@@ -10,6 +10,7 @@ import {
   type SharedVersion,
   type SharedVersionMeta,
 } from 'lib/core/1.domain';
+import { versionEntries } from 'lib/core/1.domain/externals/basis';
 import type { LoggingConfig } from '../config/log.contract';
 import type { ModeConfig } from '../config/mode.contract';
 import * as _path from 'lib/utils/path';
@@ -117,7 +118,6 @@ export function createGenerateImportMap(
 
     for (const [externalName, external] of Object.entries(sharedExternals)) {
       let override: SharedVersion | undefined | 'NOT_AVAILABLE' = undefined;
-      let overrideScope: string | undefined = undefined;
       const cachedBefore = cachedFingerprint(external);
 
       for (const version of external.versions) {
@@ -137,43 +137,46 @@ export function createGenerateImportMap(
 
         version.remotes[0]!.cached = true;
 
-        // Serve every entrypoint from one source: the winning remote, or the override
-        // provider when a 'skip' version is redirected elsewhere.
-        let source = version.remotes[0]!;
-        let sourceScope = getScope(shareScope, source.name, externalName);
+        // Serve every entrypoint from one version: this one, or the override version when a
+        // 'skip' is redirected elsewhere. Within a version the copies merge, so the surface is
+        // the union of what they bundle, each specifier from the copy that declares it.
+        let serving = version;
 
-        if (version.action === 'share') {
-          registerBundleChunks(chunkBundles, source.name, source.bundle);
-        } else if (version.action === 'skip') {
+        if (version.action === 'skip') {
           if (!override) {
             override = findOverride(external, shareScope, externalName) ?? 'NOT_AVAILABLE';
           }
           if (override !== 'NOT_AVAILABLE') {
-            if (!overrideScope)
-              overrideScope = getScope(shareScope, override.remotes[0]!.name, externalName);
-            source = override.remotes[0]!;
-            sourceScope = overrideScope;
-            override.remotes[0]!.cached = true;
+            serving = override;
             version.remotes[0]!.cached = false;
           }
         }
 
-        const mappings: { packageName: string; url: string; name: RemoteName; file: string }[] =
-          Object.entries(source.entries).map(([packageName, file]) => ({
+        const provided = versionEntries(serving);
+        const mappings: { packageName: string; url: string; name: RemoteName; file: string }[] = [];
+
+        for (const [packageName, provider] of provided) {
+          const file = provider.entries[packageName]!;
+          mappings.push({
             packageName,
-            url: _path.join(sourceScope, file),
-            name: source.name,
+            url: _path.join(getScope(shareScope, provider.name, externalName), file),
+            name: provider.name,
             file,
-          }));
+          });
+          provider.cached = true;
+          if (version.action === 'share') {
+            registerBundleChunks(chunkBundles, provider.name, provider.bundle);
+          }
+        }
 
         version.remotes.forEach(r => {
           const rScope = getScope(shareScope, r.name, externalName);
           for (const m of mappings) {
             addToScope(importMap, rScope, { [m.packageName]: m.url });
           }
-          // Entrypoints the shared source can't provide are served from this remote's own build.
+          // Entrypoints no copy of the serving version has are served from this remote's own build.
           for (const [packageName, file] of Object.entries(r.entries)) {
-            if (packageName in source.entries) continue;
+            if (provided.has(packageName)) continue;
             if (
               config.strict.strictEntryPointCoverage ||
               config.profile.scopeUncoveredEntrypoints
@@ -274,18 +277,10 @@ export function createGenerateImportMap(
           continue;
         }
 
-        const scope = getScope(GLOBAL_SCOPE, version.remotes[0]!.name, externalName);
-        for (const [packageName, file] of Object.entries(version.remotes[0]!.entries)) {
-          const url = _path.join(scope, file);
-          addToGlobal(importMap, { [packageName]: url });
-          addIntegrity(importMap, url, version.remotes[0]!.name, file);
-        }
+        version.remotes[0]!.cached = true;
         registerBundleChunks(chunkBundles, version.remotes[0]!.name, version.remotes[0]!.bundle);
 
-        version.remotes[0]!.cached = true;
-
-        // Siblings build the same tag, so filling from one is not version tearing.
-        selfFillUncovered(importMap, chunkBundles, externalName, version.remotes, 1);
+        mergeVersionEntries(importMap, chunkBundles, externalName, version);
       }
 
       // Second pass, so winners have claimed their imports first.
@@ -301,16 +296,33 @@ export function createGenerateImportMap(
     return importMap;
   }
 
+  // Copies of one tag build the same code, so serving a specifier only some of them bundle is not
+  // tearing: the version exposes the union of its copies, whatever the coverage policy.
+  function mergeVersionEntries(
+    importMap: ImportMap,
+    chunkBundles: Record<string, Set<string>>,
+    externalName: string,
+    version: SharedVersion
+  ): void {
+    for (const [packageName, remote] of versionEntries(version)) {
+      if (importMap.imports[packageName]) continue;
+      const file = remote.entries[packageName]!;
+      const url = _path.join(getScope(GLOBAL_SCOPE, remote.name, externalName), file);
+      addToGlobal(importMap, { [packageName]: url });
+      addIntegrity(importMap, url, remote.name, file);
+      registerBundleChunks(chunkBundles, remote.name, remote.bundle);
+      remote.cached = true;
+    }
+  }
+
   // Reaching here with a coverage policy set means stale storage, so it is refused instead.
   function selfFillUncovered(
     importMap: ImportMap,
     chunkBundles: Record<string, Set<string>>,
     externalName: string,
-    remotes: SharedVersionMeta[],
-    from = 0
+    remotes: SharedVersionMeta[]
   ): void {
-    for (let i = from; i < remotes.length; i++) {
-      const remote = remotes[i]!;
+    for (const remote of remotes) {
       for (const [packageName, file] of Object.entries(remote.entries)) {
         if (importMap.imports[packageName]) continue;
         if (config.strict.strictEntryPointCoverage || config.profile.scopeUncoveredEntrypoints) {

@@ -1,4 +1,11 @@
-import { addRemoteToVersion, isBetterBasis, uncoveredEntrypoints, versionDemands } from './basis';
+import {
+  addRemoteToVersion,
+  countUncoveredEntrypoints,
+  isBetterBasis,
+  uncoveredEntrypoints,
+  versionDemands,
+  versionEntries,
+} from './basis';
 import type { SharedVersion, SharedVersionMeta } from './version.contract';
 
 const remote = (
@@ -131,14 +138,51 @@ describe('basis', () => {
     });
   });
 
-  describe('uncoveredEntrypoints', () => {
-    it('should list only the entrypoints the basis cannot serve', () => {
-      const basis = remote('a', ['dep-a']).entries;
+  describe('versionEntries', () => {
+    it('should merge the entrypoints of every copy', () => {
+      const v = version([remote('a', ['dep-a']), remote('b', ['dep-a', 'dep-a/sub'])]);
 
-      expect(uncoveredEntrypoints(remote('b', ['dep-a', 'dep-a/sub']), basis)).toEqual([
+      expect(Array.from(versionEntries(v), ([entry, r]) => [entry, r.name])).toEqual([
+        ['dep-a', 'a'],
+        ['dep-a/sub', 'b'],
+      ]);
+    });
+
+    it('should let the earliest copy claim a shared entrypoint', () => {
+      const v = version([remote('basis', ['dep-a']), remote('other', ['dep-a'])]);
+
+      expect(versionEntries(v).get('dep-a')!.name).toBe('basis');
+    });
+  });
+
+  describe('uncoveredEntrypoints', () => {
+    it('should list only the entrypoints the version cannot serve', () => {
+      const covered = versionEntries(version([remote('a', ['dep-a'])]));
+
+      expect(uncoveredEntrypoints(remote('b', ['dep-a', 'dep-a/sub']), covered)).toEqual([
         'dep-a/sub',
       ]);
-      expect(uncoveredEntrypoints(remote('b', ['dep-a']), basis)).toEqual([]);
+      expect(uncoveredEntrypoints(remote('b', ['dep-a']), covered)).toEqual([]);
+    });
+
+    it('should treat a sibling entrypoint as covered once it joins the version', () => {
+      const v = version([remote('a', ['dep-a'])]);
+      const sibling = remote('b', ['dep-a', 'dep-a/sub']);
+
+      addRemoteToVersion(v, sibling);
+
+      expect(uncoveredEntrypoints(sibling, versionEntries(v))).toEqual([]);
+    });
+  });
+
+  describe('countUncoveredEntrypoints', () => {
+    it('should match the name-materializing variant', () => {
+      const covered = versionEntries(version([remote('a', ['dep-a'])]));
+
+      expect(countUncoveredEntrypoints(remote('b', ['dep-a', 'dep-a/sub', 'dep-a/x']), covered)).toBe(
+        2
+      );
+      expect(countUncoveredEntrypoints(remote('b', ['dep-a']), covered)).toBe(0);
     });
   });
 });
