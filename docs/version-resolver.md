@@ -261,9 +261,13 @@ behaviours are available, in precedence order:
 | neither (default) | **Self-fills.** The specifier is served from the declaring remote's own build and a warning is logged. Nothing is dropped; the package tears. |
 
 **Inside a pool the tear cannot happen at all**, whichever of the three is configured: pooling tests coverage
-itself, per specifier, and a remote no build covers takes its whole family from its own build (see
-[How pooling resolves](#how-pooling-resolves)). All three settings are `false` in every shipped profile, so a
-pooled family relies on the pooling rule, and an unpooled package still self-fills as described.
+itself, **per specifier**, and a remote no build covers takes its whole family from its own build (see
+[How pooling resolves](#how-pooling-resolves)). Per specifier is the load-bearing part — a build can be the
+elected basis of every *member* of a pool and still not carry one secondary entrypoint, which the mapping then
+serves from the declaring remote's own build at that remote's own tag. Every test pooling applies, including
+the shortcut it takes when one build already serves the whole pool, is therefore keyed on specifiers. All three
+settings are `false` in every shipped profile, so a pooled family relies on the pooling rule, and an unpooled
+package still self-fills as described.
 
 Scoping is per remote copy, not per version: given a basis `{table, sort}`, a covered `{table}` and an
 uncovered `{table, paginator}`, only the third is split out — the first two keep sharing. The additive
@@ -753,8 +757,9 @@ host → most consumers fully covered → fewer anchors → arrival order → na
 serves every member the gate short-circuits before building anything, so the healthy path stays free.
 
 **The guarantee is enforced, not implied.** Before writing a pool's verdicts the step checks them: the
-`(member → tag)` combination the record will make each remote resolve must be one **some single build
-shipped**. A violation islands that remote — self-serving is always coherent — and the assignment is redone,
+`(specifier → tag)` combination the record will make each remote resolve must be one **some single build
+shipped**. Keyed by specifier for the same reason coverage is: a member-level check reads one tag for a
+package whose secondary entrypoint the mapping serves from another build. A violation islands that remote — self-serving is always coherent — and the assignment is redone,
 since taking a build away can move everyone deduping onto it. The constraint is on **tags, never origins**:
 two builds shipping one tag of a member are interchangeable providers, so drawing `core@22.0.6` from one
 remote and `router@22.0.6` from another is not torn as long as some build shipped that pair. A host is never
@@ -799,7 +804,9 @@ member unserved and push another remote onto its own — so it iterates to a fix
 after a round that moved someone, and terminates in at most one round per remote.
 
 Every _other_ remote keeps the resolver's per-member verdict untouched, and a pool where nobody islands and
-nobody is reassigned is a true no-op: pooling writes nothing at all. When it does rebuild a member it
+nobody is reassigned is a true no-op: pooling writes nothing at all — unless the record still carries a
+`servedBy` from an earlier portfolio, which this election did not grant and which the map would otherwise keep
+honouring, so the pool is rebuilt to clear it. When it does rebuild a member it
 re-emits the versions in descending tag order, the order `commit()` guarantees and the resolver reads as
 "the latest" — grouping them by action would silently change what a later re-election elects.
 
@@ -868,6 +875,11 @@ _membership_ — it decides which externals form the pool — but the pool then 
 tag are still subject to the family's coherence rules for those two packages. That is deliberate (one
 remote can fix a portfolio it does not own), but worth knowing before adding a tag.
 
+This holds on both paths, because both read membership out of the **committed record** rather than out of the
+entry in front of them: a remote loaded by `initRemoteEntry` is subject to a pool some other remote's tag
+formed, and to a cross-scope bridge it declares nothing about itself. Without that, an untagged remote loaded
+later is exactly the consumer that bridges two builds the portfolio had deliberately pooled apart.
+
 #### What pooling logs
 
 | level | line | what to do |
@@ -875,7 +887,7 @@ remote can fix a portfolio it does not own), but worth knowing before adding a t
 | `warn` | `'<remote>' is islanded: the resolver scoped its '<member>@<tag>', so all N members it imports are scoped for it.` | Gate 1. That remote re-downloads the whole family. Align its version, or accept the cost. N counts what that remote imports, not the pool. The sentence reports what `determine` found rather than asserting an incompatibility pooling could verify itself. |
 | `warn` | `'<remote>' serves its own family: no shared build offers every entrypoint it imports at a version it accepts — '<gap>' is the gap, closest is '<build>'. All N members it imports are scoped for it.` | Gate 2, and **the promise's main cost**. `<gap>` is the one thing the closest build fell short on: an entrypoint it does not carry, or `<member>@<tag>` outside this remote's range. Closing that gap in either build recovers the dedup. When no other build serves any of it the clause reads `no other build in the pool serves any of it`. |
 | `warn` | `'<remote>' serves its own family: no committed build offers every entrypoint it imports at a version it accepts — '<gap>' is the gap, closest is '<build>'. All N members it imports are scoped for it.` | Dynamic init only (step 8) — the same finding read off the committed record: the remote just loaded would have bridged builds that shipped none of each other's members. |
-| `warn` | `'<remote>' serves its own family: the mapping would have handed it <member>@<tag>, …, which no build shipped together, so all N members it imports are scoped for it.` | The no-tear check caught a combination nothing built. No portfolio is known to reach this; if you see it, the record disagrees with the gates and it is worth reporting with the line. |
+| `warn` | `'<remote>' serves its own family: the mapping would have handed it <specifier>@<tag>, …, which no build shipped together, so all N members it imports are scoped for it.` | The no-tear check caught a combination nothing built. No portfolio is known to reach this; if you see it, the record disagrees with the gates and it is worth reporting with the line. |
 | `warn` | `'<member>' is scoped-only — no coherent shared build provides it; N remotes download their own copy.` | Sharing was possible and was lost. Counts only the copies that really self-serve: a copy anchored elsewhere still dedups. Suppressed when an island in the same pass took the member's last provider — that island's warning already named the cause. |
 | `debug` | `[pool:<name>] N members across M remotes, incompatible={…}` | Pool formation, for confirming membership came out as intended. The set is gate 1's, listed before the coverage gate runs. |
 
@@ -887,14 +899,19 @@ having re-elected something — a warm init that adds no remotes does no pooling
 
 Because the import map is immutable once committed, the dynamic pass is **additive**: it adjusts only the
 newly loaded remote, never retro-corrects committed remotes, and coordinates each shareScope
-independently. It reads the record *after* `update-cache` stored the loaded remote's own copies, which is
+independently. Membership comes from the committed record, so the loaded remote is subject to every pool the
+portfolio has — including one formed by another remote's `pool` tag — and only the members it declares itself
+can have their verdict rewritten. It reads the record *after* `update-cache` stored the loaded remote's own copies, which is
 what lets both paths share one implementation. Both gates are mirrored, in the same order:
 
 1. **The witness.** May the remote resolve through the committed `imports` as they stand — did some build
    ship every specifier it imports at exactly the tags the map serves them at? Its own build counts, and so
    does a committed island's. Witnessed ⇒ nothing changes and the delta stays empty.
 2. **One committed build, whole.** Otherwise the remote may take a single committed build that covers every
-   entrypoint it imports at versions it accepts, mapped per consumer through the override below.
+   entrypoint it imports at versions it accepts, mapped per consumer through the override below. Candidates
+   are tried cheapest first — a build the committed `imports` already serves this pool from costs no download
+   at all, then the host, whose build the browser has loaded regardless, then by name so the choice is
+   reload-stable.
 3. **Otherwise it serves its own family**, and says so.
 
 The candidate in (2) has to **already serve its own whole family**: either it wins every member it ships,
