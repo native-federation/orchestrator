@@ -481,7 +481,13 @@ describe('createSharedExternalsRepository', () => {
       });
     });
 
-    it('should remove a duplicate version without setting the external dirty flag', () => {
+    // Rewritten: this used to assert that losing one copy of a version that keeps others leaves the
+    // external clean, on the grounds that its tag list did not change. The tag list is not the whole
+    // record — the removed copy may have been the version's basis, and under pooling it may be the build a
+    // surviving copy's `servedBy` names. An override whose replacement entry no longer declares this
+    // external never marks it dirty itself, so nothing would re-elect it and the record would keep pointing
+    // at a build that no longer serves it. `dirty` is now set for any lost copy.
+    it('should set the external dirty flag when a version loses one of its copies', () => {
       const versionB1 = mockVersion.shared(v2_1_2, 'dep-b', {
         remotes: ['team/mfe1', 'team/mfe2'],
       });
@@ -504,7 +510,7 @@ describe('createSharedExternalsRepository', () => {
       });
       expect(mockStorage['shared-externals']).toEqual({
         [GLOBAL_SCOPE]: {
-          'dep-b': { dirty: false, versions: [versionB1_withoutTeam1] },
+          'dep-b': { dirty: true, versions: [versionB1_withoutTeam1] },
           'dep-d': { dirty: false, versions: [versionD1] },
         },
       });

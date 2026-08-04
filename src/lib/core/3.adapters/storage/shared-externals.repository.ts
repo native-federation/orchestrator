@@ -53,7 +53,7 @@ const createSharedExternalsRepository = (config: StorageConfig): ForSharedExtern
         const removeExternals: string[] = [];
 
         Object.entries(scope).forEach(([name, external]) => {
-          let removedVersion = false;
+          let removedCopy = false;
 
           for (let i = external.versions.length - 1; i >= 0; i--) {
             const remotes = external.versions[i]!.remotes;
@@ -65,17 +65,21 @@ const createSharedExternalsRepository = (config: StorageConfig): ForSharedExtern
             }
             if (keep !== remotes.length) {
               remotes.length = keep;
+              removedCopy = true;
               _dirty = true;
             }
 
             if (remotes.length === 0) {
               external.versions.splice(i, 1);
-              removedVersion = true;
               _dirty = true;
             }
           }
 
-          if (removedVersion) {
+          // Any lost copy re-elects the external, not only one that emptied a version: the copy may have
+          // been the version's basis, or the build a surviving copy's `servedBy` names. A replacement entry
+          // that no longer declares this external never marks it dirty itself, so the record would keep
+          // pointing at a build that does not serve it any more.
+          if (removedCopy) {
             external.dirty = true;
             if (external.versions.length === 0) removeExternals.push(name);
           }
