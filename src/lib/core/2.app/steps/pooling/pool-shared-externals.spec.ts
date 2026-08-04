@@ -145,9 +145,30 @@ describe('createPoolSharedExternals', () => {
 
       await poolSharedExternals();
 
-      expect(adapters.sharedExternalsRepo.getScopes).not.toHaveBeenCalled();
+      // `getScopes` is names only; what must not happen is reading a scope out of storage.
       expect(adapters.sharedExternalsRepo.getFromScope).not.toHaveBeenCalled();
       expect(adapters.sharedExternalsRepo.addOrUpdate).not.toHaveBeenCalled();
+    });
+
+    // The narrowing: with auto-pooling off, only the tagged scope is read. One tag used to make every
+    // non-strict scope build a pool graph.
+    it('reads only the scopes that carry a pool tag', async () => {
+      config.feature.useAutoExternalPooling = false;
+      adapters.sharedExternalsRepo.getScopes = vi.fn(() => [GLOBAL_SCOPE, 'team-a', 'team-b']);
+      adapters.sharedExternalsRepo.scopeType = vi.fn(() => 'shareScope' as const);
+      adapters.sharedExternalsRepo.hasPoolTag = vi.fn(scope => scope === 'team-a');
+      givenExternals({
+        foo: external([
+          sharedVersion('17', [meta('mfe1', { pool: 'grp' }), meta('mfe2', { pool: 'grp' })], {
+            action: 'share',
+          }),
+        ]),
+      });
+
+      await poolSharedExternals();
+
+      expect(adapters.sharedExternalsRepo.getFromScope).toHaveBeenCalledTimes(1);
+      expect(adapters.sharedExternalsRepo.getFromScope).toHaveBeenCalledWith('team-a');
     });
 
     it('still pools when a pool tag was seen even with auto-pooling off', async () => {
@@ -172,7 +193,7 @@ describe('createPoolSharedExternals', () => {
       expectPooled('bar');
     });
 
-    it('never early-outs when auto-pooling is on, regardless of the pool-tag memo', async () => {
+    it('never early-outs when auto-pooling is on, regardless of the pool-tag answer', async () => {
       config.feature.useAutoExternalPooling = true;
       adapters.sharedExternalsRepo.hasPoolTag = vi.fn(() => false);
       givenExternals({

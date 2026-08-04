@@ -12,6 +12,6 @@ export type ForSharedExternalsStorage = {
     external: SharedExternal,
     shareScope?: string
   ) => ForSharedExternalsStorage;
-  hasPoolTag: () => boolean;
+  hasPoolTag: (shareScope?: string) => boolean;
   commit: () => ForSharedExternalsStorage;
 };

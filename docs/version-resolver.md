@@ -1214,6 +1214,13 @@ plain reload, and it had grown with the per-remote scope nodes of the auto-pooli
 checks the scope for a dirty external before building anything, which is equivalent (a scope with nothing
 dirty has no pool with a dirty member) and drops it to 0.006 ms.
 
+A second, smaller one on the same path: `hasPoolTag` used to answer across all share scopes, so with
+auto-pooling off a single `pool` tag put *every* non-strict scope through a pool graph — twice, once per
+pooling step. It now answers per scope, which is equivalent because a pool never spans share scopes: with
+auto-pooling off, an untagged scope contributes no edge that can join anything (the `entrypoint -> package`
+edge is not itself a reason to pool), so its graph had no pools in it either way. On four scopes of which
+one is tagged this halves the step, 0.57–0.70 ms → 0.28–0.38 ms.
+
 **Import-map size** grows with the scope blocks the promise emits: at eleven remotes 9.4 kB → 12.1 kB
 (+29%), 51 → 50 global imports and 77 → 110 scope entries; at seven remotes the map is byte-identical,
 because pooling there only *moves* four entries out of `imports` into a scope block that already exists.

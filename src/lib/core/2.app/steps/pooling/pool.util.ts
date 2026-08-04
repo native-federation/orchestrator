@@ -10,9 +10,10 @@ export function remotesInPool(members: PoolMember[]): RemoteName[] {
 }
 
 /**
- * The scopes either pooling step has anything to do in. With auto-pooling off and no `pool` tag anywhere
- * nothing can be pooled at all, and the scope walk is skipped; auto-pooling on must never early-out, since
- * any scoped package is potentially poolable. The `strict` scope is never pooled.
+ * The scopes either pooling step has anything to do in. With auto-pooling off only a scope that carries a
+ * `pool` tag of its own can pool anything, and a pool never spans share scopes — so one tag must not put
+ * every other scope through a graph build. Auto-pooling on must never early-out, since any scoped package is
+ * potentially poolable. The `strict` scope is never pooled.
  *
  * Names only, so a caller that decides to skip a scope never reads it out of storage.
  */
@@ -21,10 +22,14 @@ export function poolableScopes(
   repo: Pick<ForSharedExternalsStorage, 'getScopes' | 'scopeType' | 'hasPoolTag'>
 ): { useAutoExternalPooling: boolean; scopes: string[] } {
   const { useAutoExternalPooling } = config.feature;
-  if (!useAutoExternalPooling && !repo.hasPoolTag()) return { useAutoExternalPooling, scopes: [] };
 
   return {
     useAutoExternalPooling,
-    scopes: repo.getScopes().filter(scope => repo.scopeType(scope) !== 'strict'),
+    scopes: repo
+      .getScopes()
+      .filter(
+        scope =>
+          repo.scopeType(scope) !== 'strict' && (useAutoExternalPooling || repo.hasPoolTag(scope))
+      ),
   };
 }

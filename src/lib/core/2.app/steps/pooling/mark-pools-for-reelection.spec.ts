@@ -146,6 +146,20 @@ describe('createMarkPoolsForReelection', () => {
       expect(adapters.sharedExternalsRepo.getFromScope).not.toHaveBeenCalled();
     });
 
+    // The narrowing: a tag in one scope cannot form a pool in another, so the untagged scopes are never
+    // read. Before this, one tag anywhere put every non-strict scope through a pool-graph build.
+    it('reads only the scopes that carry a pool tag', async () => {
+      adapters.sharedExternalsRepo.getScopes = vi.fn(() => [GLOBAL_SCOPE, 'team-a', 'team-b']);
+      adapters.sharedExternalsRepo.scopeType = vi.fn(() => 'shareScope' as const);
+      adapters.sharedExternalsRepo.hasPoolTag = vi.fn(scope => scope === 'team-a');
+      given({ 'pkg-a': ext('pkg-a', true, 'grp'), 'pkg-b': ext('pkg-b', false, 'grp') });
+
+      await markPoolsForReelection();
+
+      expect(adapters.sharedExternalsRepo.getFromScope).toHaveBeenCalledTimes(1);
+      expect(adapters.sharedExternalsRepo.getFromScope).toHaveBeenCalledWith('team-a');
+    });
+
     // The tag lives in storage, so a warm init that merged nothing still pools.
     it('spreads across a tag-formed pool when storage carries the tag', async () => {
       adapters.sharedExternalsRepo.hasPoolTag = vi.fn(() => true);

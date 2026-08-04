@@ -37,6 +37,10 @@ describe('createSharedExternalsRepository', () => {
    * `hasPoolTag()` reads the cache, not a flag set while this init's entries were merged. That is the
    * whole point: with auto-pooling off, a warm init whose tagged remotes are all cached merges nothing,
    * and pooling still has to coordinate their pool — see docs/version-resolver.md §"How pooling resolves".
+   *
+   * It answers per share scope, defaulting to the global one like every other read on this repository. A
+   * pool never spans share scopes, so a tag elsewhere is no reason to pool here — that is what keeps one
+   * tag from putting every scope through a pool-graph build.
    */
   describe('pool tags', () => {
     const taggedExternal = (pool?: string): SharedExternal => ({
@@ -83,7 +87,25 @@ describe('createSharedExternalsRepository', () => {
         [GLOBAL_SCOPE]: { 'dep-a': taggedExternal() },
         'team-a': { 'dep-b': taggedExternal('grp') },
       });
-      expect(externalsRepo.hasPoolTag()).toBe(true);
+      expect(externalsRepo.hasPoolTag('team-a')).toBe(true);
+    });
+
+    // The narrowing itself: `team-a`'s tag cannot form a pool in the global scope, so it must not report
+    // one there — otherwise every scope pays for a pool graph because one of them was tagged.
+    it('does not report another scope tag for the scope asked about', () => {
+      const { externalsRepo } = setupWithCache({
+        [GLOBAL_SCOPE]: { 'dep-a': taggedExternal() },
+        'team-a': { 'dep-b': taggedExternal('grp') },
+      });
+      expect(externalsRepo.hasPoolTag(GLOBAL_SCOPE)).toBe(false);
+      expect(externalsRepo.hasPoolTag()).toBe(false);
+    });
+
+    it('reports none for a scope that does not exist', () => {
+      const { externalsRepo } = setupWithCache({
+        [GLOBAL_SCOPE]: { 'dep-a': taggedExternal('grp') },
+      });
+      expect(externalsRepo.hasPoolTag('team-unknown')).toBe(false);
     });
 
     it('ignores a blank tag', () => {
