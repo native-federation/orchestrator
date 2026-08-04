@@ -159,12 +159,18 @@ describe('createDetermineSharedExternals', () => {
         );
       });
 
+      // Both versions carry two copies, so the two candidates cost the same two extra downloads and
+      // the newest wins the tie. That keeps 2.1.1 the redirected version, which is what this
+      // describe is about — with one copy on 2.2.2, 2.1.1 would simply be the cheaper winner and
+      // nothing would be redirected onto a tag a non-basis remote pinned.
+      const WIDE = ['team/mfe1', 'team/mfe4'];
+
       const withStrictSibling = (remotes: Record<string, { strictVersion: boolean }>) =>
         vi.fn(() => ({
           'dep-b': mockExternal_B({
             dirty: true,
             versions: [
-              mockVersion_B.v2_2_2({ remotes: ['team/mfe1'], action: 'skip' }),
+              mockVersion_B.v2_2_2({ remotes: WIDE, action: 'skip' }),
               mockVersion_B.v2_1_1({ remotes, action: 'skip' }),
             ],
           }),
@@ -173,23 +179,28 @@ describe('createDetermineSharedExternals', () => {
       const LOOSE = { 'team/mfe2': { strictVersion: false } };
       const STRICT = { 'team/mfe3': { strictVersion: true } };
 
-      // The basis is the widest copy, so either remote can hold that slot.
+      // The basis is the widest copy, so either remote can hold that slot — and which one holds it must
+      // not change the outcome, since the verdict follows each copy's own settings.
       it.each([
         ['non-strict remote as basis', { ...LOOSE, ...STRICT }],
         ['strict remote as basis', { ...STRICT, ...LOOSE }],
-      ])('should set "scope" with the %s', async (_label, remotes) => {
+      ])('should scope only the strict copy, with the %s', async (_label, remotes) => {
         config.strict.strictExternalCompatibility = false;
         adapters.sharedExternalsRepo.getFromScope = withStrictSibling(remotes);
 
         await determineSharedExternals();
 
+        // 2.1.1 splits rather than scoping whole: `team/mfe2` declared `strictVersion: false`, which
+        // means "serve me the shared version even where my range rejects it", so it dedups onto 2.2.2
+        // instead of being dragged into its sibling's verdict. See F-F-per-version-verdicts.md.
         expect(adapters.sharedExternalsRepo.addOrUpdate).toHaveBeenCalledWith(
           'dep-b',
           mockExternal_B({
             dirty: false,
             versions: [
-              mockVersion_B.v2_2_2({ remotes: ['team/mfe1'], action: 'share' }),
-              mockVersion_B.v2_1_1({ remotes, action: 'scope' }),
+              mockVersion_B.v2_2_2({ remotes: WIDE, action: 'share' }),
+              mockVersion_B.v2_1_1({ remotes: LOOSE, action: 'skip' }),
+              mockVersion_B.v2_1_1({ remotes: STRICT, action: 'scope' }),
             ],
           }),
           '__GLOBAL__'
@@ -201,7 +212,10 @@ describe('createDetermineSharedExternals', () => {
         adapters.sharedExternalsRepo.getFromScope = withStrictSibling({ ...LOOSE, ...STRICT });
 
         await expect(determineSharedExternals()).rejects.toEqual(
-          new NFError('Could not determine shared externals in scope __GLOBAL__.', expect.any(Error))
+          new NFError(
+            'Could not determine shared externals in scope __GLOBAL__.',
+            expect.any(Error)
+          )
         );
       });
     });
@@ -238,6 +252,51 @@ describe('createDetermineSharedExternals', () => {
         }),
         'custom-scope'
       );
+    });
+  });
+
+  // Pooling's W2 gate: this step clears `dirty`, so its return value is the only record of what it
+  // re-elected. A scope with nothing dirty must be absent, not present-and-empty.
+  describe('touched externals', () => {
+    it('should report the re-elected externals per scope', async () => {
+      adapters.sharedExternalsRepo.getScopes = vi.fn(() => ['__GLOBAL__', 'custom-scope']);
+      adapters.sharedExternalsRepo.getFromScope = vi.fn(scope =>
+        scope === '__GLOBAL__'
+          ? {
+              'dep-a': mockExternal_A({
+                dirty: true,
+                versions: [mockVersion_A.v2_1_1({ remotes: ['team/mfe1'], action: 'skip' })],
+              }),
+              'dep-b': mockExternal_B({
+                dirty: false,
+                versions: [mockVersion_B.v2_1_1({ remotes: ['team/mfe1'], action: 'share' })],
+              }),
+            }
+          : {
+              'dep-b': mockExternal_B({
+                dirty: true,
+                versions: [mockVersion_B.v2_1_1({ remotes: ['team/mfe2'], action: 'skip' })],
+              }),
+            }
+      );
+
+      await expect(determineSharedExternals()).resolves.toEqual(
+        new Map([
+          ['__GLOBAL__', new Set(['dep-a'])],
+          ['custom-scope', new Set(['dep-b'])],
+        ])
+      );
+    });
+
+    it('should report nothing when no external was dirty', async () => {
+      adapters.sharedExternalsRepo.getFromScope = vi.fn(() => ({
+        'dep-a': mockExternal_A({
+          dirty: false,
+          versions: [mockVersion_A.v2_1_1({ remotes: ['team/mfe1'], action: 'share' })],
+        }),
+      }));
+
+      await expect(determineSharedExternals()).resolves.toEqual(new Map());
     });
   });
 
@@ -514,7 +573,7 @@ describe('createDetermineSharedExternals', () => {
       );
       expect(config.log.error).toHaveBeenCalledWith(
         3,
-        "[dep-b@2.1.1][team/mfe2] Entrypoints not covered by the shared version: dep-b/sub."
+        '[dep-b@2.1.1][team/mfe2] Entrypoints not covered by the shared version: dep-b/sub.'
       );
     });
 
@@ -530,7 +589,9 @@ describe('createDetermineSharedExternals', () => {
         }),
       }));
 
-      await expect(determineSharedExternals()).resolves.toBeUndefined();
+      await expect(determineSharedExternals()).resolves.toEqual(
+        new Map([['__GLOBAL__', new Set(['dep-b'])]])
+      );
     });
 
     it('should keep a fully covered skip version as skip', async () => {

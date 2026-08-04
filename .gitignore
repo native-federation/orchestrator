@@ -1,3 +1,8 @@
 node_modules
 dist
 coverage
+test-results
+playwright-report
+
+# Follow-up notes and throwaway prototypes: working documents only, never committed.
+/F-*

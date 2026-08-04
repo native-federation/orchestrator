@@ -148,8 +148,11 @@ describe('createProcessRemoteEntries', () => {
     });
   });
 
-  describe('pool-tag memo', () => {
-    it('flags the shared-externals repo when a shared external declares a pool tag', async () => {
+  // A declared `pool` tag reaches storage on the version meta, which is what `hasPoolTag()` reads.
+  // This step used to also set an in-memory flag; it no longer does, because a warm init may not
+  // refetch the tagged remote at all (see shared-externals.repository.spec.ts).
+  describe('pool tags reach storage', () => {
+    it('stores the pool tag on the version meta', async () => {
       const remoteEntries = [
         mockRemoteEntry_MFE1({
           shared: [mockSharedInfo('dep-a', { singleton: true, pool: 'grp' })],
@@ -158,10 +161,11 @@ describe('createProcessRemoteEntries', () => {
 
       await processRemoteEntries(remoteEntries);
 
-      expect(adapters.sharedExternalsRepo.markPoolTagPresent).toHaveBeenCalled();
+      const stored = (adapters.sharedExternalsRepo.addOrUpdate as Mock).mock.calls.at(-1)![1];
+      expect(stored.versions[0].remotes[0].pool).toBe('grp');
     });
 
-    it('does not flag the repo when no shared external declares a pool tag', async () => {
+    it('leaves the meta without a tag when none is declared', async () => {
       const remoteEntries = [
         mockRemoteEntry_MFE1({
           shared: [mockSharedInfo('dep-a', { singleton: true })],
@@ -170,7 +174,8 @@ describe('createProcessRemoteEntries', () => {
 
       await processRemoteEntries(remoteEntries);
 
-      expect(adapters.sharedExternalsRepo.markPoolTagPresent).not.toHaveBeenCalled();
+      const stored = (adapters.sharedExternalsRepo.addOrUpdate as Mock).mock.calls.at(-1)![1];
+      expect(stored.versions[0].remotes[0].pool).toBeUndefined();
     });
   });
 

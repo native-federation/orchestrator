@@ -1,0 +1,117 @@
+{
+  "$version": "v4",
+  "name": "team/mfe6",
+  "shared": [
+    {
+      "singleton": true,
+      "strictVersion": true,
+      "requiredVersion": "~22.0.5",
+      "packageName": "@angular/common",
+      "entries": {
+        "@angular/common": "_angular_common.Lu6og_S5-b.js",
+        "@angular/common/http": "_angular_common_http.QEha5Dit9J.js"
+      },
+      "version": "22.0.7",
+      "bundle": "browser-angular_common",
+      "pool": "ng-core"
+    },
+    {
+      "singleton": true,
+      "strictVersion": true,
+      "requiredVersion": "~22.0.5",
+      "packageName": "@angular/core",
+      "entries": {
+        "@angular/core": "_angular_core.UMMCyWUqaY.js",
+        "@angular/core/event-dispatch-contract.min.js": "_angular_core_event_dispatch_contract_min_js.3axcNP9xmW.js",
+        "@angular/core/primitives/di": "_angular_core_primitives_di.3a1m1JbxuW.js",
+        "@angular/core/primitives/event-dispatch": "_angular_core_primitives_event_dispatch.4LXubbUqKr.js",
+        "@angular/core/primitives/signals": "_angular_core_primitives_signals.oh4bHH6sE5.js",
+        "@angular/core/rxjs-interop": "_angular_core_rxjs_interop.In6-dakyyE.js"
+      },
+      "version": "22.0.7",
+      "bundle": "browser-angular_core",
+      "pool": "ng-core"
+    },
+    {
+      "singleton": true,
+      "strictVersion": true,
+      "requiredVersion": "~22.0.5",
+      "packageName": "@angular/elements",
+      "entries": {
+        "@angular/elements": "_angular_elements.tffEdIFZat.js"
+      },
+      "version": "22.0.7",
+      "bundle": "browser-angular_elements",
+      "pool": "ng-core"
+    },
+    {
+      "singleton": true,
+      "strictVersion": true,
+      "requiredVersion": "~22.0.5",
+      "packageName": "@angular/forms",
+      "entries": {
+        "@angular/forms": "_angular_forms.t8ZCel-dsW.js"
+      },
+      "version": "22.0.7",
+      "bundle": "browser-angular_forms",
+      "pool": "ng-core"
+    },
+    {
+      "singleton": true,
+      "strictVersion": true,
+      "requiredVersion": "~22.0.5",
+      "packageName": "@angular/platform-browser",
+      "entries": {
+        "@angular/platform-browser": "_angular_platform_browser.04AElcDjMF.js"
+      },
+      "version": "22.0.7",
+      "bundle": "browser-angular_platform_browser",
+      "pool": "ng-core"
+    },
+    {
+      "singleton": true,
+      "strictVersion": true,
+      "requiredVersion": "~7.8.0",
+      "packageName": "rxjs",
+      "entries": {
+        "rxjs": "rxjs._3LcsHIuu_.js",
+        "rxjs/operators": "rxjs_operators.G4NPpguNIR.js"
+      },
+      "version": "7.8.2",
+      "bundle": "browser-rxjs"
+    },
+    {
+      "singleton": true,
+      "strictVersion": true,
+      "requiredVersion": "^2.3.0",
+      "packageName": "tslib",
+      "entries": {
+        "tslib": "tslib.BX2MinpEcV.js"
+      },
+      "version": "2.8.1",
+      "bundle": "browser-tslib"
+    }
+  ],
+  "exposes": [
+    {
+      "key": "./tag-picker",
+      "outFileName": "tag-picker-ZN44DAGS.js"
+    }
+  ],
+  "chunks": {
+    "browser-angular_common": [
+      "chunk-VL5BWA7L.js"
+    ],
+    "browser-angular_core": [
+      "chunk-PF4UPZYJ.js",
+      "chunk-7RE2YQUI.js",
+      "chunk-QSAF4UWN.js",
+      "chunk-PCFXKM5P.js",
+      "chunk-PZNONLPT.js"
+    ],
+    "browser-rxjs": [
+      "chunk-64WOUHHJ.js"
+    ],
+    "mapping-or-exposed": []
+  }
+}

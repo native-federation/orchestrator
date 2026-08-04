@@ -15,6 +15,15 @@ import type { LoggingConfig } from '../config/log.contract';
 import type { ModeConfig } from '../config/mode.contract';
 import type { DrivingContract } from '../driving-ports/driving.contract';
 
+/**
+ * The three steps that decide entrypoint coverage, wired together: `process-remote-entries` stores the
+ * copies, `determine` elects the basis, `generate-import-map` serves what the basis cannot.
+ *
+ * `e2e/pooling/entrypoints.e2e.spec.ts` asks the same questions of a real browser and says more about what a
+ * page ends up running — but CI does not run the e2e suite (`npm run test-e2e` is local only), so deleting
+ * this file in favour of it left #62's policy with no gate at all. Keep both.
+ */
+
 // Real-world regression (issue #61): three remotes share `@angular/material@22.0.6` but only
 // `@par-ticle/mutations` bundles the `/sort` entrypoint.
 const MATERIAL = '@angular/material';

@@ -56,17 +56,11 @@ export function createConvertToImportMap(
         return;
       }
 
-      // Skipped externals are provided by another remote. A global skip is served
-      // by the global share elsewhere; a shareScope skip is always paired with an
-      // override (see update-cache) that remaps its entrypoints.
+      // Skipped externals are provided by another remote. An override — from a shareScope skip, or from
+      // pooling having anchored this remote on one committed build — names whose files, per consumer. A
+      // global skip without one inherits the committed global mapping and needs no entry of its own.
       if (actions[external.packageName]!.action === 'skip') {
         const { override, covered } = actions[external.packageName]!;
-        if (!external.shareScope) {
-          if (covered) {
-            serveUncovered(remoteEntry, external, covered, remoteEntryScope, importMap);
-          }
-          return;
-        }
         if (override) {
           Object.entries(override).forEach(([packageName, url]) => {
             addToScopes(remoteEntryScope, packageName, url, importMap);
@@ -78,6 +72,12 @@ export function createConvertToImportMap(
             remoteEntryScope,
             importMap
           );
+          return;
+        }
+        if (!external.shareScope) {
+          if (covered) {
+            serveUncovered(remoteEntry, external, covered, remoteEntryScope, importMap);
+          }
           return;
         }
         // Reaching here means the resolver failed to produce the expected override.

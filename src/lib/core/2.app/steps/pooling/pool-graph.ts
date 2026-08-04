@@ -48,21 +48,23 @@ function createDSU() {
   };
 }
 
-// Namespaced node keys, NUL-separated so no kind or `(remote, tag)` pair can alias another. A
-// per-`(remote, tag)` node makes explicit tags remote-local (merge only via a shared member); a
-// per-scope node makes auto-pooling global (safe: the scope is machine-derived).
+// Namespaced node keys, NUL-separated so no kind or `(remote, …)` pair can alias another. Both tag
+// and scope nodes are per remote, so every edge is remote-local and pools merge only through a
+// shared member — see docs/version-resolver.md §"The provenance promise", the auto-pooling bullet.
 const extNode = (name: ExternalName): string => `ext\x00${name}`;
 const tagNode = (remote: string, tag: string): string => `tag\x00${remote}\x00${tag}`;
-const scopeNode = (scope: string): string => `scope\x00${scope}`;
+const scopeNode = (remote: string, scope: string): string => `scope\x00${remote}\x00${scope}`;
 
 export type PoolEdge = { remote: string; tag: string };
 
-// A poolable external's edges: `scope` (auto-pooling, global) and any declared `tags` (remote-local).
+// A poolable external's edges: `scope` (auto-pooling, per declaring remote) and any declared `tags`.
+// `remotes` is every remote declaring the external, which is what makes auto-pooling remote-local.
 // `value` is the payload returned per member — a `SharedExternal` for init, a package name for dynamic.
 export type PoolCandidate<T> = {
   name: ExternalName;
   scope?: string;
   tags: readonly PoolEdge[];
+  remotes: readonly string[];
   value: T;
 };
 
@@ -72,13 +74,30 @@ export function autoScope(name: string, useAutoExternalPooling: boolean): string
   return useAutoExternalPooling ? SCOPED_PACKAGE.exec(name)?.[1] : undefined;
 }
 
+// The package a secondary entrypoint belongs to, or undefined when the name is already a package.
+// An npm package name carries at most one `/` (after a leading `@scope`), so any deeper segment is a
+// subpath of the package above it: `@framework/core/testing` -> `@framework/core`, `rxjs/operators`
+// -> `rxjs`.
+export function owningPackage(name: ExternalName): ExternalName | undefined {
+  const depth = name.startsWith('@') ? 2 : 1;
+  let cut = -1;
+  for (let seen = 0; seen < depth; seen++) {
+    cut = name.indexOf('/', cut + 1);
+    if (cut === -1) return undefined;
+  }
+  return name.slice(0, cut);
+}
+
 /**
  * Group one shareScope's candidates into pools by shared membership: pool = connected component of a
- * graph with edges from auto-pooling (`external -> scope`, global) and declared tags
- * (`external -> tag@remote`, remote-local). See docs/version-resolver.md + plan.md. Returns only real
- * pools (>=2 members), keyed by and iterated in order of their canonical name (smallest member —
- * reload-stable). An explicit-tag member that pooled with nothing is warned (likely typo or missing
- * sibling); auto-scope singletons stay silent.
+ * graph whose edges are all remote-local — `external -> scope@remote` for each remote that declares
+ * it (auto-pooling) and `external -> tag@remote` for each declared tag — plus an unconditional
+ * `entrypoint -> package` edge. A pool therefore forms exactly when some remote declares members
+ * from both sides. See docs/version-resolver.md.
+ *
+ * Returns only real pools (>=2 members), keyed by and iterated in order of their canonical name
+ * (smallest member — reload-stable). An explicit-tag member that pooled with nothing is warned
+ * (likely typo or missing sibling); auto-scope singletons stay silent.
  */
 export function groupByMembership<T>(
   candidates: readonly PoolCandidate<T>[],
@@ -86,30 +105,53 @@ export function groupByMembership<T>(
 ): Map<PoolName, T[]> {
   const dsu = createDSU();
   const tagged = new Set<ExternalName>();
-  const poolable: { name: ExternalName; value: T }[] = [];
+  const joined = new Set<ExternalName>();
+
+  // A `pool` tag replaces auto-pooling for the remote that declared it, per npm scope: one tag on a
+  // member must not drag every other package of that scope in behind it.
+  const tagRules = new Set<string>();
+  for (const candidate of candidates) {
+    if (candidate.scope === undefined) continue;
+    for (const edge of candidate.tags) tagRules.add(`${edge.remote}\x00${candidate.scope}`);
+  }
 
   for (const candidate of candidates) {
-    let joined = false;
-    if (candidate.scope !== undefined) {
-      dsu.union(extNode(candidate.name), scopeNode(candidate.scope));
-      joined = true;
-    }
     for (const edge of candidate.tags) {
       dsu.union(extNode(candidate.name), tagNode(edge.remote, edge.tag));
       tagged.add(candidate.name);
-      joined = true;
+      joined.add(candidate.name);
     }
-    if (joined) poolable.push({ name: candidate.name, value: candidate.value });
+    if (candidate.scope === undefined) continue;
+    for (const remote of candidate.remotes) {
+      if (tagRules.has(`${remote}\x00${candidate.scope}`)) continue;
+      dsu.union(extNode(candidate.name), scopeNode(remote, candidate.scope));
+      joined.add(candidate.name);
+    }
+  }
+
+  // An entrypoint follows its package into whatever pool the package joins. Without this a remote
+  // that tags anything in a scope drops the auto edge for its own flat entrypoints too, and they
+  // leave pooling entirely — measured as a torn package.
+  const declared = new Set(candidates.map(c => c.name));
+  for (const candidate of candidates) {
+    const owner = owningPackage(candidate.name);
+    if (owner !== undefined && declared.has(owner))
+      dsu.union(extNode(candidate.name), extNode(owner));
   }
 
   const byComponent = new Map<number, { name: ExternalName; value: T }[]>();
-  for (const entry of poolable) {
-    const root = dsu.component(extNode(entry.name));
-    (byComponent.get(root) ?? byComponent.set(root, []).get(root)!).push(entry);
+  for (const candidate of candidates) {
+    const root = dsu.component(extNode(candidate.name));
+    const members = byComponent.get(root) ?? byComponent.set(root, []).get(root)!;
+    members.push({ name: candidate.name, value: candidate.value });
   }
 
   const pools: { name: ExternalName; value: T }[][] = [];
   for (const members of byComponent.values()) {
+    // Joinedness is a property of the component, not of one member: an entrypoint contributes no edge
+    // of its own yet pools with the package that does.
+    if (!members.some(m => joined.has(m.name))) continue;
+
     members.sort((a, b) => a.name.localeCompare(b.name));
     if (members.length < 2) {
       const only = members[0]!;
@@ -144,6 +186,7 @@ export function buildPools(
           return tag ? [{ remote: r.name, tag }] : [];
         })
       ),
+      remotes: external.versions.flatMap(v => v.remotes.map(r => r.name)),
       value: { name, external },
     })
   );

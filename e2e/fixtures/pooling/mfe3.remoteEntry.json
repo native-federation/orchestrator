@@ -1,0 +1,54 @@
+{
+  "name": "team/mfe3",
+  "exposes": [
+    {
+      "key": "./Component",
+      "outFileName": "Component-L9TQ4WBX.js"
+    }
+  ],
+  "shared": [
+    {
+      "packageName": "@acme/platform",
+      "outFileName": "_acme_platform.Yv2sN6hg8L.js",
+      "requiredVersion": "~4.2.0",
+      "singleton": true,
+      "strictVersion": true,
+      "version": "4.2.9",
+      "pool": "acme-platform"
+    },
+    {
+      "packageName": "@acme/platform/forms",
+      "outFileName": "_acme_platform_forms.Rk8pJ3wdCz.js",
+      "requiredVersion": "~4.2.0",
+      "singleton": true,
+      "strictVersion": true,
+      "version": "4.2.9",
+      "pool": "acme-platform"
+    },
+    {
+      "packageName": "@acme/widgets",
+      "outFileName": "_acme_widgets.Ja5xT9mkQr.js",
+      "requiredVersion": "~4.2.0",
+      "singleton": true,
+      "strictVersion": true,
+      "version": "4.2.9",
+      "pool": "acme-platform"
+    },
+    {
+      "packageName": "rxjs",
+      "outFileName": "rxjs.Ht7cW1sQ3f.js",
+      "requiredVersion": "^7.8.0",
+      "singleton": true,
+      "strictVersion": true,
+      "version": "7.8.2"
+    },
+    {
+      "packageName": "@nf-internal/chunk-B6HN1YFS",
+      "outFileName": "chunk-B6HN1YFS.js",
+      "singleton": false,
+      "strictVersion": false,
+      "version": "0.0.0",
+      "requiredVersion": "0.0.0"
+    }
+  ]
+}

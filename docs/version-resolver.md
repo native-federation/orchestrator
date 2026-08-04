@@ -260,6 +260,15 @@ behaviours are available, in precedence order:
 | [`profile.scopeUncoveredEntrypoints`](./config.md#modeConfig) | **Scopes.** The uncovered copy is split out into a `scope` version of its own tag and serves its whole `entries` bunch from its own build. Sharing continues for the copies the basis does cover. |
 | neither (default) | **Self-fills.** The specifier is served from the declaring remote's own build and a warning is logged. Nothing is dropped; the package tears. |
 
+**Inside a pool the tear cannot happen at all**, whichever of the three is configured: pooling tests coverage
+itself, **per specifier**, and a remote no build covers takes its whole family from its own build (see
+[How pooling resolves](#how-pooling-resolves)). Per specifier is the load-bearing part — a build can be the
+elected basis of every *member* of a pool and still not carry one secondary entrypoint, which the mapping then
+serves from the declaring remote's own build at that remote's own tag. Every test pooling applies, including
+the shortcut it takes when one build already serves the whole pool, is therefore keyed on specifiers. All three
+settings are `false` in every shipped profile, so a pooled family relies on the pooling rule, and an unpooled
+package still self-fills as described.
+
 Scoping is per remote copy, not per version: given a basis `{table, sort}`, a covered `{table}` and an
 uncovered `{table, paginator}`, only the third is split out — the first two keep sharing. The additive
 dynamic-init path applies the same policy to a runtime remote, and the import-map builders keep a
@@ -486,13 +495,13 @@ flowchart TD
     F5 --> G
 
     G --> G1[For each remaining version:]
-    G1 --> G2{Compatible with shared version?}
-    G2 -->|Yes| G3[Action: SKIP<br/>Use shared version]
-    G2 -->|No| G4{strictVersion: true?}
-    G4 -->|Yes| G5{strictExternalCompatibility enabled?}
+    G1 --> G2{Does EVERY copy accept<br/>the shared version?}
+    G2 -->|Yes| G3[Action: SKIP<br/>the whole version uses the shared one]
+    G2 -->|No| G4{Any copy rejecting it<br/>with strictVersion: true?}
     G4 -->|No| G6[Action: SKIP<br/>Use incompatible shared version + warning]
+    G4 -->|Yes| G5{strictExternalCompatibility enabled?}
     G5 -->|Yes| G7[Throw NFError]
-    G5 -->|No| G8[Action: SCOPE<br/>Download individually]
+    G5 -->|No| G8[Split the version per copy:<br/>the rejecting ones SCOPE,<br/>the rest SKIP]
 
     C --> H[Resolution complete]
     E --> H
@@ -505,6 +514,30 @@ flowchart TD
 > [`strict.strictEntryPointCoverage`](./config.md#modeConfig) a `SKIP` version whose specifiers the
 > winner cannot cover is promoted to `SCOPE`. See
 > [Entrypoint coverage and tearing](#entrypoint-coverage-and-tearing).
+
+#### A verdict belongs to the copy, not the version
+
+Note where the two questions are asked, because they are asked at different granularities. **Whether a
+version may be redirected** (G2) is asked of the version as a whole: it is one file served from one basis,
+so redirecting it has to satisfy every remote it would redirect — see `versionDemands`. **Whose build must
+change** (G8) is per copy: `requiredVersion` and `strictVersion` are per-build settings, so two remotes
+that happen to ship the same tag can disagree about the winner, and only the ones that reject it keep their
+own build.
+
+So a version that fails G2 is **split**: the rejecting copies become a `scope` version at that tag, the
+rest stay `skip` and dedup. A tag can therefore hold two versions in the record, one `skip` and one
+`scope` — at most one of each, and both sorted where that tag belongs. Three consequences worth knowing:
+
+- **The winner is never split.** Its copies are never really asked to accept its own tag, and host
+  precedence makes the host's version the winner, so a host copy never lands in a `scope` version.
+- **A copy declaring `strictVersion: false` dedups** even where its own range rejects the shared version —
+  that is what the flag asks for — rather than being carried into a strict sibling's `scope`.
+- **The objective prices the split**, not the version: see
+  [Optimal Version Strategy](#3-optimal-version-strategy-default).
+
+The granularity matters most with pooling on: a verdict written onto the *version* would scope every remote
+that merely happens to ship a pinner's tag, and gate 1 would read that as an incompatibility and island
+those remotes across their whole family.
 
 ### Step 4: Generate Import Map
 
@@ -539,9 +572,9 @@ The sharper hazard is **transitive coupling** through a shared intermediary. Sup
 cannot see each other). The coupled group must resolve to one mutually-compatible version _together_,
 and that has to hold transitively through intermediaries like the design system.
 
-**Pooling** groups such externals and reconciles the whole group onto a single source. It is a
-re-resolution layered on top of normal resolution: it rewrites the resolver's output but emits no new
-versions.
+**Pooling** groups such externals and makes each remote take the whole group from a build that shipped them
+together — its own included. It is a re-resolution layered on top of normal resolution: it rewrites the
+resolver's output but emits no new versions and elects no tag of its own.
 
 ### Enabling pooling
 
@@ -549,8 +582,12 @@ Pooling is opt-in and inert by default. An external joins a pool in one of two w
 
 - **Auto (by npm scope).** Set `useAutoExternalPooling: true` in the mode `feature` block. Scoped packages
   are grouped by their scope — `@framework/core`, `@framework/common` → pool `framework`. Unscoped
-  packages (`utils`, `tslib`) are never auto-pooled. The scope is derived from the package name, so
-  this grouping is global and cannot drift.
+  packages (`utils`, `tslib`) are never auto-pooled. An auto-pool is **per remote**: the scope edge is
+  contributed by each remote that declares the external, so a pool forms only once some remote declares
+  members from both sides. Two remotes that share no member do not pool, and need not — neither is in a
+  position to run an incoherent pair. A remote that has **tagged** any member of a scope contributes no
+  auto edge for that scope, so one tag on a design-system package does not drag every unrelated package of
+  the same scope in behind it.
 - **Remote-declared tag.** A remote adds an optional `pool` field to a shared external in its
   `remoteEntry.json` (mirrors `shareScope`). A tag is **remote-local**: it groups only the externals
   that _one_ remote tags together. This is how a transitive coupling is expressed — auto-pooling groups
@@ -563,79 +600,341 @@ initFederation(manifest, {
 });
 ```
 
-**Membership is by shared members, not by name.** Pool identity is not a string that remotes must
-agree on — it is the **connected component** of a graph. Each external is a node, joined by an edge to
-its npm scope (auto-pooling, global) and to each `(remote, tag)` that declares it (remote-local). Two
-remotes' groups merge only when they **share a member**, never because they chose the same tag string.
-Drift is therefore harmless: mfe-A calling a group `"angular"` and mfe-B calling it `"design-system"`
-still pool together when they overlap on one external, while two unrelated groups that happen to reuse
-a label stay separate.
+**Membership is by shared members, not by name.** Pool identity is not a string that remotes must agree
+on — it is the **connected component** of a graph. Each external is a node, joined by an edge to each
+`(remote, scope)` that declares it (auto-pooling) and to each `(remote, tag)` that declares it (explicit
+tags). **Every edge is remote-local**, so two remotes' groups merge only when they **share a member**,
+never because they chose the same tag string or happen to publish under one npm scope. Drift is therefore
+harmless: mfe-A calling a group `"angular"` and mfe-B calling it `"design-system"` still pool together when
+they overlap on one external, while two unrelated groups reusing a label stay separate.
+
+One edge is **not** remote-local: a secondary entrypoint is always joined to its package
+(`@framework/core/testing` → `@framework/core`), whoever declares either. A package and its entrypoints
+are one artefact, so they must not be separable — they genuinely tear when they are, with one remote's
+`@framework/forms` served beside another's `@framework/forms/signals`. The edge is not itself a reason to
+pool: with pooling inert, a package and its entrypoints form no pool.
 
 Because a tag is remote-local, it does **not** merge with a same-named auto scope by string. To pull a
 cross-scope sibling into a family, co-tag a **bridge member**: tagging both `@design-system/ui` and
-`@framework/core` with the same label connects the tag group to `@framework/core`'s auto scope through
-the shared `@framework/core` node. (A coupling that no single remote witnesses — where no remote ships
-both members — cannot be expressed; this is rare and by design.) A member that carries an explicit tag
-yet pools with nothing is almost always a typo or a missing sibling, so it is logged; auto-scope
-singletons are normal and stay silent. Each pool is named by its smallest member, for stable,
-reload-safe logging.
+`@framework/core` with one label joins them through the shared `@framework/core` node. A member carrying an
+explicit tag that pools with nothing is almost always a typo or a missing sibling, so it is logged;
+auto-scope singletons are normal and stay silent. Each pool is named by its smallest member, for stable,
+reload-safe logging. (A coupling no single remote witnesses — where no remote ships both members — cannot
+be expressed; this is rare and by design.)
 
 ### How pooling resolves
 
-Pooling never re-runs the compatibility search. The resolver has already, per member, elected a
-winning version (`share`) and marked every other version `skip` (compatible) or `scope`
-(strict-incompatible). Pooling reads those verdicts and reconciles the family; it makes no
-`isCompatible` calls of its own.
+**The promise: within a pool, every member a remote runs comes from a build that shipped them together.** A
+remote may `skip` onto a shared build only when that build serves a **superset** of what it consumes, at
+versions its own `requiredVersion` accepts. Otherwise it serves its own family, which is one build by
+definition.
 
-The rule is **island-or-defer**. A remote that the resolver marked `scope` on _any_ member of the pool
-is **islanded**: its **entire** family is served from its own build, with **no** dedup — even on a
-member where its version matches the shared one. This is the whole point of pooling and the one thing
-the per-external resolver cannot do: deduping that matching sibling is exactly what would leak a
-foreign build in through a shared intermediary (the `@design-system/ui`-against-`core@15` hazard). One
-incompatibility anywhere in the family islands the remote everywhere.
+The unit is a **build** — one remote's whole set of `(member → tag)`. A build is internally consistent by
+construction, because those files were compiled and tested together, so a remote taking everything from one
+build is safe whatever the version metadata says. Nothing reads tag *distance*: the rule reads coverage and
+`versionCheck.isCompatible(tag, requiredVersion)`, and compares tags only for **identity**. Version
+arithmetic cannot carry the promise, since a minor line is a convention each vendor picks: builds shipping
+disjoint members would agree vacuously while handing a consumer a pair nobody built, a pool whose members
+version independently has no line to compare, and two unrelated packages sharing a minor line would island
+remotes that are perfectly fine.
 
-Every _other_ remote keeps the resolver's per-member verdict untouched — the winner stays `share`, its
-compatible dedups stay `skip`. Pooling adds nothing here; a fully compatible pool is a near no-op. It
-does **not** re-point members onto a single "anchor" remote: coherence is a property of _versions_
-(guaranteed by islanding), not of a common source, so different members may legitimately share from
-different remotes.
+Pooling never re-runs the compatibility search. The resolver has already, per member, elected a winning
+version (`share`) and marked every other version `skip` (compatible) or `scope` (strict-incompatible), so
+host precedence and `requiredVersion` acceptance are settled before pooling runs. Pooling grants no dedup
+the resolver did not — it only decides, per remote, whether that remote may **take** the dedups it was
+granted. It does not keep the elected winner in front of everybody: a remote moved onto another build
+resolves that build's files, so a pool can end up running an older tag every declared range accepts. The
+`share` *tag* is never re-elected; what moves is which file a given consumer resolves.
+
+**Gate 1 — strict incompatibility (island-or-defer).** A remote the resolver marked `scope` on _any_ member
+of the pool is **islanded**: its **entire** family comes from its own build, with **no** dedup, even on a
+member whose version matches the shared one. This is the whole point of pooling and the one thing the
+per-external resolver cannot do — deduping that matching sibling is exactly what leaks a foreign build in
+through a shared intermediary (the `@design-system/ui`-against-`core@15` hazard).
+
+Gate 1 is only as good as the verdict it reads, in two respects. `determine` marks the copies that
+**objected** rather than the versions they sit in (see
+[A verdict belongs to the copy](#a-verdict-belongs-to-the-copy-not-the-version)), so a remote that merely
+happens to ship a pinner's tag is not islanded with it. And an island is *itself* persisted as `scope`,
+indistinguishable in the record from a fresh incompatibility — so a pool is re-elected as a **unit**:
+`mark-pools-for-reelection` marks every member dirty as soon as one is, and pooling runs on a pool exactly
+when the resolver re-elected all of it. Without that, a joiner shipping part of a pool leaves the untouched
+members carrying the previous run's island and the island never expires.
+
+**Gate 2 — provenance.** For every remote gate 1 left alone, three questions **in this order** — asking
+coverage first would pin remotes already sitting at the shared tags onto one build, for no gain in
+provenance and a cost in downloads.
+
+1. **The witness — may it keep resolving through the global `imports` exactly as they stand?** It may when
+   **some** live build in the pool ships every specifier the remote consumes at exactly the tags the map
+   serves them at. Its own build is the common case; the general form is what makes a remote sitting one
+   patch below the shared set on everything it declares free rather than expensive, witnessed by whichever
+   sibling build ships that combination. It is sound because at equal versions provider identity is
+   irrelevant — `core@22.0.5` from two remotes is one published artefact. Two details: the tags witnessed
+   are the ones the **map** serves, which for secondary entrypoints is routinely a sibling copy of the tag
+   rather than the basis (`selfFillUncovered`); and the host is **exempt**, or the witness rewrites the
+   host's own copy to another remote's build of the same tag.
+2. **One covering build.** Otherwise the remote may dedup onto a single build offering **every** entrypoint
+   it consumes, at versions its own `requiredVersion` accepts, reusing the resolver's memoized
+   `isCompatible`.
+3. **Otherwise it serves its own family**, whole, from its own build — and says so in a `warn`, since this
+   is the rule's main cost and nothing else would make it visible.
+
+**All-or-nothing per remote.** A remote that cannot take every member it consumes from one build serves its
+**whole** family itself. One member at the remote's own tag beside another from a foreign build at a
+different tag is exactly the combination nothing compiled, so the witness too is all-or-nothing across the
+family rather than a per-member test.
+
+**A range-accepted `skip` does not survive the gate.** The resolver marks a remote `skip` whenever its
+declared range accepts the shared version; this gate decides whether it may *take* that dedup, and where no
+build shipped the resulting combination it may not. Declared ranges under-state real coupling — Angular
+publishes `^22.0.0` while `router@22.1.0` needs `core@22.1.0` — which is the whole signal pooling exists to
+compensate for.
+
+**The consumer gives way, never the host.** Host precedence is absolute on the *version*: the host ships
+`core@22.0.5`, so the shared `core` is `22.0.5`, and no coverage question moves it. It does not follow that a
+remote shipping `core@22.1.0` beside `router@22.1.0` must accept that copy — that pair is a combination no
+build shipped, so such a remote islands and pays the extra download while the host keeps its pin. Coherence
+costs the mixing remote a dedup, never the host its version. The host is never assigned an anchor either: it
+consumes exactly what it declares, so its family is its own build by construction. It stays a candidate
+anchor for everybody else.
+
+Coherence is **not** a property of versions alone, which is why gate 2 exists beside gate 1: a split family
+contains no incompatibility, so islanding never fires on it. What the promise forbids is one *remote*
+drawing a combination no build shipped — members may still legitimately be served from different remotes.
 
 ```mermaid
 flowchart TD
     A[Pool: coupled externals in one scope] --> B{≥2 members<br/>and ≥2 remotes?}
     B -->|No| Z[Nothing to coordinate<br/>keep per-external result]
-    B -->|Yes| C[For each remote copy in the pool]
-    C --> D{Remote islanded?<br/>marked SCOPE on any member}
-    D -->|Yes| E[SCOPE this copy<br/>whole family from own build, no dedup]
-    D -->|No| F[Keep base verdict<br/>SHARE winner / SKIP dedup]
+    B -->|Yes| C[Gate 1: island every remote<br/>marked SCOPE on any member]
+    C --> W{Gate 2a: does some build ship every<br/>specifier it imports at the tags<br/>the map already serves?}
+    W -->|Yes: witnessed| H
+    W -->|No| D{Gate 2b: does one build cover every<br/>entrypoint it imports, at versions<br/>its own range accepts?}
+    D -->|Yes| S[Anchor it on that build<br/>servedBy + per-consumer scope]
+    D -->|No| E[Serve its own family, whole<br/>warn; fixed point: re-check]
+    E --> W
+    S --> F[Rebuild members]
+    E --> F
+    F --> G[Self-serving copies take the whole<br/>family from their own build]
+    F --> H[Every other copy keeps its base verdict<br/>SHARE winner / SKIP dedup]
+    S --> I[Anchors map their own family onto<br/>themselves, for the second hop]
 ```
 
-**Scoped-only members.** If the winner's providers were all islanded away, the member has no shared
-build left: its remaining copies fall to `scope` (self-serve) and the member is scope-only. Pooling
-does **not** re-elect a surviving lower version — the pool exists to keep an _incompatible_ remote's
-family coherent, not to recover a dedup for bystanders. When a scoped-only member has more than one
-consumer (sharing was genuinely possible and lost) pooling logs
-`'<member>' is scoped-only — no coherent shared build provides it; N remotes download their own copy`;
-a single-consumer member is one download either way, so it is silent.
+**Scoped-only members.** If the winner's providers were all islanded away the member has no shared build
+left: its remaining copies fall to `scope` and the member is scope-only. Pooling does **not** re-elect a
+surviving lower version — the pool exists to keep an _incompatible_ remote's family coherent, not to recover
+a dedup for bystanders. An islanded remote also contributes **no** build to the pool, not even for a member
+it is the sole provider of; otherwise a previous-major remote correctly islanded on `@framework/core` would
+keep its `@framework/animations@21.2.18` globally shared beside `core@22.0.8`, and any remote consuming both
+loads a mismatched pair. Dropping the whole build is what makes the shared set itself coherent, at the cost
+of that member no longer being shared at all.
 
-Under `strictExternalCompatibility` any island throws (defensively — the per-external resolver already
-throws on a real incompatibility before pooling runs).
+Under `strictExternalCompatibility` a gate-1 island throws (defensively — the per-external resolver already
+throws on a real incompatibility before pooling runs). A gate-2 self-serve does **not** throw: nothing about
+its versions is wrong, so a coverage gap must not turn a strict portfolio into a failure.
 
-> **Compatible portfolios are unaffected.** Because pooling defers to the resolver everywhere except a
-> real incompatibility, coherent and lockstep families — the overwhelmingly common case — pass through
-> exactly as the per-external resolver left them. Pooling earns its keep only in the ragged,
-> incompatible case, which is exactly where islanding fires.
+> **Pooling buys coherence, not downloads.** On every portfolio measured it left the download count
+> unchanged or **increased** it; it never reduced it. What it removes is the incoherence: a shared set
+> spanning majors `{21, 22}` collapses to `{22}`, packages split across two tags disappear, and no remote is
+> handed a family assembled from builds that never shipped it. The seven-remote production capture is
+> unaffected in every measure — same downloads, same chunks, same shared tags, byte-identical import map —
+> while an eleven-remote portfolio costs +23.6%, essentially all of it the single remote that ships the
+> widest family and can therefore be covered by nobody. A warm init pays nothing: with no member re-elected,
+> pooling does no work and writes nothing. The escape hatch is to not pool the family (auto-pooling off, no
+> `pool` tag), not a per-portfolio knob. `e2e/pooling/capture.e2e.spec.ts` reproduces the figures.
+
+#### How the verdicts land in the record and the map
+
+Mechanics, for reading the code rather than for configuring the feature.
+
+**Assignment is per consumer, so one pool may run several builds.** One build rarely covers a whole
+portfolio, and forcing a single anchor costs more *and* scopes members nothing required it — two remotes
+sharing no member already satisfy the promise. Which build serves which remote is therefore recorded per
+remote on `SharedVersionMeta` (`servedBy`), not per version, since two consumers of one tag can legitimately
+take different anchors. The assignment is greedy and deterministic, never a search, with tiebreaks in order:
+host → most consumers fully covered → fewer anchors → arrival order → name. When a single build already
+serves every member the gate short-circuits before building anything, so the healthy path stays free.
+
+**The guarantee is enforced, not implied.** Before writing a pool's verdicts the step checks them: the
+`(specifier → tag)` combination the record will make each remote resolve must be one **some single build
+shipped**. Keyed by specifier for the same reason coverage is: a member-level check reads one tag for a
+package whose secondary entrypoint the mapping serves from another build. A violation islands that remote — self-serving is always coherent — and the assignment is redone,
+since taking a build away can move everyone deduping onto it. The constraint is on **tags, never origins**:
+two builds shipping one tag of a member are interchangeable providers, so drawing `core@22.0.6` from one
+remote and `router@22.0.6` from another is not torn as long as some build shipped that pair. A host is never
+judged, having no safe fallback — it cannot be repointed. The gates above already leave the check true and no
+portfolio is known to reach the fallback; it is checked anyway because a torn family is not a cost defect but
+a page that crashes, and the argument closing it spans three separate rules.
+
+**Coverage is keyed by specifier, not by external name.** `generate-import-map` serves an entrypoint the
+shared source lacks from the consumer's own build — a second build — so package-granularity coverage would
+break the promise silently (see "Entrypoint coverage and tearing"). Keying on the external *name* is worse
+than imprecise: a flat remote declares `@framework/core/primitives/di` as its own external where a dense one
+carries the same specifier as an *entry* of `@framework/core`, so comparing names makes the two build shapes
+mutually uncoverable for a reason with no provenance content. The witness and the emission are
+specifier-keyed for the same reason.
+
+**Three emission rules**, correctness rather than tidiness:
+
+- A deduping copy whose serving build is not the one the global `imports` publishes gets a **per-consumer
+  scope entry** at that build's files. The global path previously emitted nothing for a deduping copy and
+  let it inherit the one global mapping, which is how it would silently run a combination nothing compiled.
+- **Every anchor maps its own family onto itself.** A consumer's scope governs only the consumer's *own*
+  imports; the anchor's files resolve their peers in the **anchor's** scope and fall through to `imports`.
+  Without a scope entry for every member the anchor does not win globally, a consumer gets the anchor's
+  `router` bound to the global winner's `core` one hop in — coherent at the top and torn one hop deeper.
+- A scope entry that merely repeats the global mapping is **not** emitted, and each URL keeps the hash of
+  the remote that owns the file.
+
+**A basis must run its own file.** `remotes[0]` of a `share` version is the copy the global `imports`
+publishes, so a remote anchored onto a *foreign* build may not be it — the record would serve the member
+from that remote's file while telling the remote itself to take it from somebody else's. The basis is the
+first copy of the winning version that still runs its own build, in the precedence order `commit()`
+established; an anchor contributes to the shared set only if it wins **every** member it ships, and a member
+with no such copy left keeps no global mapping at all.
+
+The scoped-only sweep takes only the copies that were resolving through the global mapping. A copy carrying
+a `servedBy` is mapped explicitly at another build's files, keeps its dedup and is left alone — otherwise a
+member whose elected copy merely moved elsewhere would drag every remote at its version off the shared set,
+and N providers of one tag would download N copies where one would do.
+
+Gate 2 is **monotone** — moving a remote onto its own build removes it as a serving build, which can leave a
+member unserved and push another remote onto its own — so it iterates to a fixed point, re-entered only
+after a round that moved someone, and terminates in at most one round per remote.
+
+Every _other_ remote keeps the resolver's per-member verdict untouched, and a pool where nobody islands and
+nobody is reassigned is a true no-op: pooling writes nothing at all — unless the record still carries a
+`servedBy` from an earlier portfolio, which this election did not grant and which the map would otherwise keep
+honouring, so the pool is rebuilt to clear it. When it does rebuild a member it
+re-emits the versions in descending tag order, the order `commit()` guarantees and the resolver reads as
+"the latest" — grouping them by action would silently change what a later re-election elects.
+
+#### Declare the coupling you actually have
+
+Pooling compensates for information the remote entry does not carry: a monorepo's members are coupled
+far more tightly than their published ranges admit (Angular emits `^22.0.0` while `router@22.1.0` truly
+needs `core@22.1.0`). Where your real coupling is tighter than your declared range, **say so** —
+`~22.0.6` rather than `^22.0.0`.
+
+Note what that buys, because gate 2 enforces coupling at **every** granularity, patch included: `22.0.6`
+beside `22.0.8` from two builds is a combination nothing compiled, so the remote serves its own family
+whether or not you declared a tighter range. Declaring it routes through the *resolver* instead, which marks
+the version `scope`, and **gate 1** then islands the remote before any coverage question is asked. The
+difference is which verdict the portfolio owner sees, and how early: a range violation is a version problem
+with a name, while a coverage self-serve is a statement about what nobody built.
+
+**A tag is all-or-nothing per npm scope: tag the whole family, or none of it.** Tagging any member of a
+scope switches that remote's auto-pooling off for the *whole* scope (see "Enabling pooling"), while the
+tag itself only groups what you actually tagged — plus each tagged member's own package, since entrypoints
+follow their package. Tag one member of `@framework/*` and the rest of your `@framework` externals
+therefore contribute nothing to the graph from your remote: they pool only if some *other* remote declares
+two of them untagged and holds the scope open. Partial tagging can consequently make coverage **worse**
+than not tagging at all, and the failure is quiet — the members that fall out are still shared, just no
+longer coordinated with the family. Two habits avoid it:
+
+- If you tag, tag **every** member of that scope you declare, secondary entrypoints included. A build
+  that emits flat entries makes this easy to get wrong: `@framework/core` and
+  `@framework/core/primitives/di` are two externals, and tagging only the first leaves the second
+  relying on the package edge rather than on your tag.
+- Reach for a tag to express a coupling auto-pooling **cannot see** — a cross-scope sibling, or an
+  unscoped lockstep pair. For a coupling inside one npm scope, auto-pooling already has it, and a tag can
+  only narrow what it covers.
+
+#### Unscoped lockstep families (react/react-dom)
+
+Auto-pooling groups by npm scope, so it only ever matches `@scope/…` names. A lockstep pair with no
+scope — `react` + `react-dom`, `vue` + `vue-router` — is never auto-pooled, and the coupling cannot be
+inferred: a remote entry carries no `peerDependencies`. Declare it with a tag:
+
+```json
+// In remoteEntry.json
+{
+  "shared": [
+    {
+      "packageName": "react",
+      "singleton": true,
+      "version": "18.3.1",
+      "requiredVersion": "^18.0.0",
+      "pool": "react"
+    },
+    {
+      "packageName": "react-dom",
+      "singleton": true,
+      "version": "18.3.1",
+      "requiredVersion": "^18.0.0",
+      "pool": "react"
+    }
+  ]
+}
+```
+
+**One remote declaring this is enough for the whole portfolio.** The tag is remote-local for
+_membership_ — it decides which externals form the pool — but the pool then operates on the whole
+`SharedExternal` for each member: every version, every remote. So remotes that never declared a `pool`
+tag are still subject to the family's coherence rules for those two packages. That is deliberate (one
+remote can fix a portfolio it does not own), but worth knowing before adding a tag.
+
+This holds on both paths, because both read membership out of the **committed record** rather than out of the
+entry in front of them: a remote loaded by `initRemoteEntry` is subject to a pool some other remote's tag
+formed, and to a cross-scope bridge it declares nothing about itself. Without that, an untagged remote loaded
+later is exactly the consumer that bridges two builds the portfolio had deliberately pooled apart.
+
+#### What pooling logs
+
+| level | line | what to do |
+| --- | --- | --- |
+| `warn` | `'<remote>' is islanded: the resolver scoped its '<member>@<tag>', so all N members it imports are scoped for it.` | Gate 1. That remote re-downloads the whole family. Align its version, or accept the cost. N counts what that remote imports, not the pool. The sentence reports what `determine` found rather than asserting an incompatibility pooling could verify itself. |
+| `warn` | `'<remote>' serves its own family: no shared build offers every entrypoint it imports at a version it accepts — '<gap>' is the gap, closest is '<build>'. All N members it imports are scoped for it.` | Gate 2, and **the promise's main cost**. `<gap>` is the one thing the closest build fell short on: an entrypoint it does not carry, or `<member>@<tag>` outside this remote's range. Closing that gap in either build recovers the dedup. When no other build serves any of it the clause reads `no other build in the pool serves any of it`. |
+| `warn` | `'<remote>' serves its own family: no committed build offers every entrypoint it imports at a version it accepts — '<gap>' is the gap, closest is '<build>'. All N members it imports are scoped for it.` | Dynamic init only (step 8) — the same finding read off the committed record: the remote just loaded would have bridged builds that shipped none of each other's members. |
+| `warn` | `'<remote>' serves its own family: the mapping would have handed it <specifier>@<tag>, …, which no build shipped together, so all N members it imports are scoped for it.` | The no-tear check caught a combination nothing built. No portfolio is known to reach this; if you see it, the record disagrees with the gates and it is worth reporting with the line. |
+| `warn` | `'<member>' is scoped-only — no coherent shared build provides it; N remotes download their own copy.` | Sharing was possible and was lost. Counts only the copies that really self-serve: a copy anchored elsewhere still dedups. Suppressed when an island in the same pass took the member's last provider — that island's warning already named the cause. |
+| `debug` | `[pool:<name>] N members across M remotes, incompatible={…}` | Pool formation, for confirming membership came out as intended. The set is gate 1's, listed before the coverage gate runs. |
 
 ### Scope and dynamic init
 
 Pooling applies to the **global scope and named shareScopes**; the `strict` scope is never pooled. It
-runs in both the initial pipeline and dynamic init (`initRemoteEntry`).
+runs in both the initial pipeline and dynamic init (`initRemoteEntry`), and is gated on the resolver
+having re-elected something — a warm init that adds no remotes does no pooling work at all.
 
-Because the import map is immutable once committed, the dynamic pass is **additive** — it adjusts only
-the newly loaded remote and never retro-corrects committed remotes. It coordinates each shareScope
-independently and applies the same rule: if any member is `scope` the whole family scopes with no
-dedup; otherwise the remote keeps the resolver's verdict (a `share`+`skip` mix is a coverage gap, not a
-conflict, so it is not forced to scope).
+Because the import map is immutable once committed, the dynamic pass is **additive**: it adjusts only the
+newly loaded remote, never retro-corrects committed remotes, and coordinates each shareScope
+independently. Membership comes from the committed record, so the loaded remote is subject to every pool the
+portfolio has — including one formed by another remote's `pool` tag — and only the members it declares itself
+can have their verdict rewritten. It reads the record *after* `update-cache` stored the loaded remote's own copies, which is
+what lets both paths share one implementation. Both gates are mirrored, in the same order:
+
+1. **The witness.** May the remote resolve through the committed `imports` as they stand — did some build
+   ship every specifier it imports at exactly the tags the map serves them at? Its own build counts, and so
+   does a committed island's. Witnessed ⇒ nothing changes and the delta stays empty.
+2. **One committed build, whole.** Otherwise the remote may take a single committed build that covers every
+   entrypoint it imports at versions it accepts, mapped per consumer through the override below. Candidates
+   are tried cheapest first — a build the committed `imports` already serves this pool from costs no download
+   at all, then the host, whose build the browser has loaded regardless, then by name so the choice is
+   reload-stable.
+3. **Otherwise it serves its own family**, and says so.
+
+The candidate in (2) has to **already serve its own whole family**: either it wins every member it ships,
+so the map already names its own files for all of them, or every copy it holds is scoped, so it is an
+island and runs its own build by construction. Anything in between resolved part of its family through the
+global winner — its modules are already bound to that copy, a consumer deduping onto it inherits the tear
+one hop in, and no additive map can repair it. A copy carrying a `servedBy` is deduping onto somebody else
+and is disqualified outright.
+
+Two consequences of "committed" not meaning "being decided". A `scope` copy is a **stable island** here,
+not a remote about to self-serve, so its files — already in the map under its own scope — can serve a
+remote loaded later; the init path excludes a `scope` copy from what a build may offer, and this path must
+not. And the per-consumer **override** that a shareScope `skip` has always carried is available on the
+global path too: a committed island's files live nowhere but its own scope, so a global dedup onto one has
+to be spelled out per consumer. Pooling writes an override only for the specifiers the committed map does
+not already serve from the chosen build, which is also why `update-cache` still computes the default
+override for a named shareScope only — on the global path that default would name the very files `imports`
+already carries.
+
+This gate is not redundant even though init enforced its own. Init guarantees no _remote_ runs a
+combination nothing shipped, but the committed shared set can still hold members from builds that ship
+none of each other's — `@framework/forms@22.0.8` beside `@framework/forms/signals@21.2.18`. A remote loaded
+later is exactly the consumer that would bridge them.
 
 ## Dynamic Init
 
@@ -693,7 +992,7 @@ Each new dependency gets one of these actions during dynamic init:
 | --------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **SKIP**  | Version already exists or use existing shared version. In a shareScope context this action is used for overriding by skipping the provided external and loading a compatible cached version instead. |
 | **SHARE** | No compatible version exists (yet), become the shared version for this scope                                                                                                                         |
-| **SCOPE** | Incompatible version with strictVersion: true, or (under `strictEntryPointCoverage`) a version whose entrypoints the shared winner cannot cover — served coherently from its own build.               |
+| **SCOPE** | A copy whose own range rejects the shared version while `strictVersion: true`, or (under `strictEntryPointCoverage`) one whose entrypoints the shared winner cannot cover — served coherently from its own build. Per copy, not per version: co-tagged copies that accept the shared version keep deduping. |
 
 ### Example: Dynamic Loading Scenario
 
@@ -963,6 +1262,10 @@ sequenceDiagram
 
 **Why this matters**: The dirty flag prevents unnecessary re-resolution of dependencies that haven't changed within their scope, improving performance when the same micro frontends are loaded repeatedly.
 
+Step 3 clears the flag on everything it resolves, so it hands the set of externals it re-elected on to
+step 4 (pooling), which skips any pool none of whose members appear in it. A warm init — every remote
+already cached, nothing dirty — therefore costs neither resolution nor pooling.
+
 ## Understanding "strictVersion"
 
 The `strictVersion` flag applies to shared dependencies (`singleton: true`) and determines how incompatible versions are handled within each scope:
@@ -1047,22 +1350,49 @@ await initFederation(manifest, {
 
 **Why this is default**: Minimizes bundle size and download time by choosing the version that requires the fewest additional scoped downloads within each scope.
 
-The resolver calculates which version minimizes extra downloads per scope by examining how many versions would need to be individually scoped due to incompatibility:
+The resolver calculates which version minimizes extra downloads per scope by examining which versions would need to be individually scoped due to incompatibility, and how many copies each of those scopes costs.
+
+The unit of cost is a **copy that has to keep its own build**: a rejected version is split, so what a
+candidate really costs is the copies that themselves reject it while `strictVersion` is set and that are not
+already cached. Not one per version, and not the whole version either — a copy whose own range accepts the
+candidate dedups, and so does one declaring `strictVersion: false`:
 
 ```
 // The resolver calculates which version minimizes extra downloads per scope:
 
 Global scope - if 18.2.0 is chosen:
-  18.1.0: compatible (SKIP) → 0 extra downloads
-  17.0.2: incompatible + strict (SCOPE) → 1 extra download
+  18.1.0 (2 remotes, both accept 18.2.0):     compatible (SKIP)  → 0 extra downloads
+  17.0.2 (3 remotes, 1 of them pinning ~17):  splits             → 1 extra download
+                                              (the pinner SCOPEs, its two
+                                               co-tagged neighbours SKIP)
   Total cost: 1 extra download
 
 Team-a scope - if 3.1.0 is chosen:
-  3.0.5: compatible (SKIP) → 0 extra downloads
+  3.0.5 (1 remote): compatible (SKIP) → 0 extra downloads
   Total cost: 0 extra downloads
 
 Result: Choose 18.2.0 globally, 3.1.0 for team-a scope
 ```
+
+Because the shared version itself is one download whichever candidate wins, minimizing this sum is exactly
+minimizing total downloads for the external — provided the sum counts what will really be downloaded, which
+is why it prices copies rather than versions. Pricing the whole version would charge the two neighbours that
+dedup for a download they never make, and can prefer a candidate that is dearer once resolved.
+
+> **Consequence.** A large group of remotes sitting on an older tag can win over a smaller group on a newer
+> one — that is what "fewest extra downloads" asks for. Ties break toward the newest tag, and they are common,
+> since a version costs only its objectors and prices are therefore small. Host precedence (`remoteEntry` of
+> the host) and `profile.latestSharedExternal` are decided before this objective runs and are unaffected.
+>
+> Two approximations, both deliberate. A cached copy is priced at zero, so the same portfolio can elect
+> different equal-cost winners assembled cold and assembled incrementally. And the sum leaves the *winner's*
+> own download out, so two candidates differing only in whether their copies are already cached score the
+> same; adding that term would start deciding ties that currently go to the newest tag.
+
+> **Known limitation.** The objective is exact per external, but it is evaluated *per external*. With
+> `useAutoExternalPooling` enabled, two members of one pool whose remote-count majorities sit on different
+> version lines elect opposite winners, and pooling amplifies that split into islanded families. Making the
+> election pool-aware is the fix and is not implemented.
 
 ### 4. Caching Strategy
 

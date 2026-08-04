@@ -12,7 +12,8 @@
     "lint": "eslint . -c eslint.config.js",
     "knip": "knip",
     "test-ci": "vitest run --coverage.reporter=json-summary",
-    "test": "vitest run"
+    "test": "vitest run",
+    "test-e2e": "playwright test -c e2e/playwright.config.ts"
   },
   "repository": {
     "type": "git",
@@ -23,6 +24,7 @@
     "node": ">=24.16.0"
   },
   "devDependencies": {
+    "@playwright/test": "1.62.0",
     "@softarc/native-federation": "^4.3.2",
     "@types/node": "^24.13.2",
     "@types/semver": "^7.7.0",

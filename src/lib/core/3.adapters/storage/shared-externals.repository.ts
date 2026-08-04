@@ -18,17 +18,19 @@ const createSharedExternalsRepository = (config: StorageConfig): ForSharedExtern
 
   const _cache: SharedExternals = STORAGE.get() ?? { [GLOBAL_SCOPE]: {} };
 
-  // Not persisted: re-derived from the freshly processed entries on every init, before pooling runs.
-  let _sawPoolTag = false;
-
   let _dirty = false;
 
   return {
-    markPoolTagPresent: function () {
-      _sawPoolTag = true;
-    },
-    hasPoolTag: function () {
-      return _sawPoolTag;
+    // Read from the cache rather than remembered from this init's entries: a warm init may not refetch
+    // the tagged remote at all, and pooling has to coordinate its pool anyway. Exits on the first hit.
+    // Per share scope, because a pool never spans one: a tag in another scope is no reason to pool here.
+    hasPoolTag: function (shareScope?: string) {
+      const scope = _cache[shareScope ?? GLOBAL_SCOPE];
+      if (!scope) return false;
+      for (const external of Object.values(scope))
+        for (const version of external.versions)
+          for (const remote of version.remotes) if (remote.pool?.trim()) return true;
+      return false;
     },
     getFromScope: function (shareScope?: string) {
       return { ..._cache[shareScope ?? GLOBAL_SCOPE] };
@@ -51,7 +53,7 @@ const createSharedExternalsRepository = (config: StorageConfig): ForSharedExtern
         const removeExternals: string[] = [];
 
         Object.entries(scope).forEach(([name, external]) => {
-          let removedVersion = false;
+          let removedCopy = false;
 
           for (let i = external.versions.length - 1; i >= 0; i--) {
             const remotes = external.versions[i]!.remotes;
@@ -63,17 +65,21 @@ const createSharedExternalsRepository = (config: StorageConfig): ForSharedExtern
             }
             if (keep !== remotes.length) {
               remotes.length = keep;
+              removedCopy = true;
               _dirty = true;
             }
 
             if (remotes.length === 0) {
               external.versions.splice(i, 1);
-              removedVersion = true;
               _dirty = true;
             }
           }
 
-          if (removedVersion) {
+          // Any lost copy re-elects the external, not only one that emptied a version: the copy may have
+          // been the version's basis, or the build a surviving copy's `servedBy` names. A replacement entry
+          // that no longer declares this external never marks it dirty itself, so the record would keep
+          // pointing at a build that does not serve it any more.
+          if (removedCopy) {
             external.dirty = true;
             if (external.versions.length === 0) removeExternals.push(name);
           }
