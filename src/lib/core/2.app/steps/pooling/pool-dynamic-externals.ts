@@ -7,14 +7,36 @@ import {
   GLOBAL_SCOPE,
   type RemoteName,
   STRICT_SCOPE,
-  type SharedExternal,
   type SharedInfoActions,
 } from 'lib/core/1.domain';
-import { autoScope, groupByMembership, type PoolCandidate } from './pool-graph';
-import { basisPerMember, committedView, consumedMembers, consumedSpecifiers } from './pool-views';
-import { acceptanceTable, acceptsAll, covers, explainSelfServe, isWitnessed } from './anchoring';
+import { buildPools } from './pool-graph';
+import {
+  basisPerMember,
+  committedView,
+  consumedMembers,
+  consumedSpecifiers,
+  hostRemotes,
+} from './pool-views';
+import { lazy } from './pool.util';
+import {
+  acceptanceTable,
+  acceptsAll,
+  covers,
+  explainSelfServe,
+  isWitnessed,
+  type Acceptance,
+} from './anchoring';
 import type { CommittedView, PoolMember, Specifier } from './pool.types';
 import * as _path from 'lib/utils/path';
+
+// One pool as both gates read it, for the remote being loaded.
+type GateViews = {
+  pool: PoolMember[];
+  view: CommittedView;
+  wants: ExternalName[];
+  specifiers: Set<Specifier>;
+  acceptance: () => Acceptance;
+};
 
 export function createPoolDynamicExternals(
   config: LoggingConfig & ModeConfig,
@@ -29,85 +51,84 @@ export function createPoolDynamicExternals(
   return ({ entry, actions }) => {
     const { useAutoExternalPooling } = config.feature;
 
-    // With auto-pooling off, only an explicit `pool` tag on this entry can form a pool.
-    if (!useAutoExternalPooling && !(entry.shared ?? []).some(e => e.pool?.trim())) {
-      return Promise.resolve({ entry, actions });
-    }
-
-    const byScope = new Map<string, PoolCandidate<string>[]>();
+    // The poolable singletons this entry declares, per share scope — what it may have its actions rewritten
+    // for. Membership is decided below, off the committed record rather than off this list.
+    const declared = new Map<string, Set<ExternalName>>();
     for (const external of entry.shared ?? []) {
       const name = external.packageName;
       if (!external.singleton || !actions[name]) continue;
       if (external.shareScope === STRICT_SCOPE) continue;
 
-      const tag = external.pool?.trim();
       const shareScope = external.shareScope ?? GLOBAL_SCOPE;
-      const candidates = byScope.get(shareScope) ?? [];
-      candidates.push({
-        name,
-        scope: autoScope(name, useAutoExternalPooling),
-        tags: tag ? [{ remote: entry.name, tag }] : [],
-        remotes: [entry.name],
-        value: name,
-      });
-      byScope.set(shareScope, candidates);
+      let names = declared.get(shareScope);
+      if (!names) declared.set(shareScope, (names = new Set()));
+      names.add(name);
     }
+    if (declared.size === 0) return Promise.resolve({ entry, actions });
 
     const scope = (name: string) => {
       actions[name]!.action = 'scope';
       delete actions[name]!.override;
     };
 
-    for (const [shareScope, candidates] of byScope) {
+    for (const [shareScope, names] of declared) {
+      // With auto-pooling off, a tag anywhere in the committed scope forms pools this entry is subject to —
+      // its own tag is not required. A tag is remote-local for *membership* only; the pool it forms then
+      // operates on the whole external, this entry's copies included (see docs/version-resolver.md
+      // §"Unscoped lockstep families"). Reading only this entry's tags is what let an untagged remote
+      // bridge two builds the portfolio had deliberately pooled apart.
+      if (!useAutoExternalPooling && !ports.sharedExternalsRepo.hasPoolTag(shareScope)) continue;
+
       const committed = ports.sharedExternalsRepo.getFromScope(shareScope);
 
-      for (const members of groupByMembership(candidates).values()) {
-        const memberActions = members.map(name => actions[name]!.action);
+      for (const pool of buildPools(committed, useAutoExternalPooling).values()) {
+        // Only the members this entry declares have an action to rewrite; the rest of the pool is context —
+        // its builds are candidates and its committed tags are what the gate reads.
+        const mine = pool.filter(member => names.has(member.name));
+        if (mine.length === 0) continue;
 
         // Island-or-defer: only a real incompatibility scopes the whole family (no dedup — a
         // same-version sibling would bridge the foreign build). A `share`+`skip` mix is a coverage
         // gap, not a conflict, so the gate below decides it on coverage.
-        if (memberActions.includes('scope')) {
-          members.forEach(scope);
+        if (mine.some(member => actions[member.name]!.action === 'scope')) {
+          mine.forEach(member => scope(member.name));
           continue;
         }
 
-        const pool = poolMembers(members, committed);
-        if (pool.length < 2) continue;
-
-        const view = committedView(pool);
-        const anchor = anchorFor(entry.name, pool, view);
+        const asked = gateViews(entry.name, pool);
+        const anchor = anchorFor(entry.name, asked);
         if (anchor === 'witnessed') continue;
 
         if (anchor === undefined) {
-          const reason = explainDynamic(entry.name, pool, view);
+          const reason = explainDynamic(entry.name, asked);
           const closest = reason.closest
             ? `closest is '${reason.closest}'`
             : 'no committed build serves any of it';
           config.log.warn(
             8,
-            `[${shareScope}] '${entry.name}' serves its own family: no committed build offers every entrypoint it imports at a version it accepts — '${reason.gap}' is the gap, ${closest}. All ${members.length} members it imports are scoped for it.`
+            `[${shareScope}] '${entry.name}' serves its own family: no committed build offers every entrypoint it imports at a version it accepts — '${reason.gap}' is the gap, ${closest}. All ${mine.length} members it imports are scoped for it.`
           );
-          members.forEach(scope);
+          mine.forEach(member => scope(member.name));
           continue;
         }
 
-        redirect(entry.name, anchor, pool, view, actions, shareScope);
+        redirect(entry.name, anchor, pool, asked.view, actions, shareScope);
       }
     }
 
     return Promise.resolve({ entry, actions });
   };
 
-  // The pool as the committed record holds it, the loaded remote's own copies included — `update-cache`
-  // stored them before this step ran, which is what lets the same primitives decide both paths.
-  function poolMembers(names: ExternalName[], committed: Record<string, SharedExternal>) {
-    const members: PoolMember[] = [];
-    for (const name of names) {
-      const external = committed[name];
-      if (external) members.push({ name, external });
-    }
-    return members;
+  // Everything both gates read about one pool, built once: `explainSelfServe` asks for the same projections
+  // the witness and the coverage test do, and only the version table is expensive enough to defer.
+  function gateViews(remote: RemoteName, pool: PoolMember[]): GateViews {
+    return {
+      pool,
+      view: committedView(pool),
+      wants: consumedMembers(pool).get(remote) ?? [],
+      specifiers: consumedSpecifiers(pool).get(remote) ?? new Set<Specifier>(),
+      acceptance: lazy(() => acceptanceTable(pool, ports.versionCheck.isCompatible)),
+    };
   }
 
   /**
@@ -117,29 +138,40 @@ export function createPoolDynamicExternals(
    */
   function anchorFor(
     remote: RemoteName,
-    pool: PoolMember[],
-    view: CommittedView
+    { pool, view, wants, specifiers, acceptance }: GateViews
   ): RemoteName | 'witnessed' | undefined {
-    const specifiers = consumedSpecifiers(pool).get(remote) ?? new Set<Specifier>();
     const shared = new Map<Specifier, string>();
     for (const [specifier, source] of view.global) shared.set(specifier, source.tag);
 
     if (isWitnessed(specifiers, shared, view.builds)) return 'witnessed';
 
-    const acceptance = acceptanceTable(pool, ports.versionCheck.isCompatible);
-    const wants = consumedMembers(pool).get(remote) ?? [];
     const basis = basisPerMember(pool);
 
-    for (const build of [...view.builds.keys()].sort()) {
+    for (const build of candidateOrder(pool, view)) {
       if (build === remote) continue;
       const candidate = view.builds.get(build)!;
       if (!servesItsOwnFamily(build, pool, basis)) continue;
       if (!covers(candidate.coverage, specifiers)) continue;
-      if (!acceptsAll(acceptance, candidate.instance, remote, wants)) continue;
+      if (!acceptsAll(acceptance(), candidate.instance, remote, wants)) continue;
       return build;
     }
 
     return undefined;
+  }
+
+  /**
+   * Cheapest candidate first: a build the committed map already serves this pool from costs nothing at all
+   * (`redirect` writes no override for a specifier already served from it), then the host, whose build the
+   * browser has loaded regardless. Name breaks the rest, so the choice stays reload-stable.
+   */
+  function candidateOrder(pool: PoolMember[], view: CommittedView): RemoteName[] {
+    const serving = new Set<RemoteName>();
+    for (const source of view.global.values()) serving.add(source.remote);
+    const hosts = hostRemotes(pool);
+
+    const rank = (build: RemoteName) => (serving.has(build) ? 0 : hosts.has(build) ? 1 : 2);
+
+    return [...view.builds.keys()].sort((a, b) => rank(a) - rank(b) || a.localeCompare(b));
   }
 
   /**
@@ -172,13 +204,11 @@ export function createPoolDynamicExternals(
     return ships > 0 && (winsAll || allScoped);
   }
 
-  function explainDynamic(remote: RemoteName, pool: PoolMember[], view: CommittedView) {
-    return explainSelfServe(
-      remote,
-      consumedMembers(pool).get(remote) ?? [],
-      consumedSpecifiers(pool).get(remote) ?? new Set(),
-      { builds: view.builds, acceptance: acceptanceTable(pool, ports.versionCheck.isCompatible) }
-    );
+  function explainDynamic(remote: RemoteName, { view, wants, specifiers, acceptance }: GateViews) {
+    return explainSelfServe(remote, wants, specifiers, {
+      builds: view.builds,
+      acceptance: acceptance(),
+    });
   }
 
   /**

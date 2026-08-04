@@ -24,7 +24,14 @@ import type { DrivingContract } from '../../driving-ports/driving.contract';
 // remote imports off exactly those copies. Every portfolio below that expects a verdict lists `mfe`.
 const committed = (
   name: string,
-  ...versions: { tag: string; remotes: string[]; action?: SharedVersion['action'] }[]
+  ...versions: {
+    tag: string;
+    remotes: string[];
+    action?: SharedVersion['action'];
+    // `store-remote-entry` persists a declared `pool` onto the copy, so the committed record is where
+    // membership is read from — a tag on somebody else's copy groups this family for the whole portfolio.
+    pool?: string;
+  }[]
 ): SharedExternal => ({
   dirty: false,
   versions: versions.map((v, i) => ({
@@ -32,7 +39,10 @@ const committed = (
     host: false,
     action: v.action ?? (i === 0 ? 'share' : 'skip'),
     remotes: v.remotes.map(remote =>
-      mockVersionRemote(remote, name, { requiredVersion: `^${v.tag.split('.')[0]}.0.0` })
+      mockVersionRemote(remote, name, {
+        requiredVersion: `^${v.tag.split('.')[0]}.0.0`,
+        pool: v.pool,
+      })
     ),
   })),
 });
@@ -95,6 +105,13 @@ describe('createPoolDynamicExternals', () => {
 
   it('forces the whole family to scope when one member is incompatible', async () => {
     const entry = entryWith(shared('@framework/core'), shared('@framework/common'));
+    givenCommitted({
+      '@framework/core': committed('@framework/core', { tag: '17.0.0', remotes: ['host', 'mfe'] }),
+      '@framework/common': committed('@framework/common', {
+        tag: '17.0.0',
+        remotes: ['host', 'mfe'],
+      }),
+    });
     const actions: SharedInfoActions = {
       '@framework/core': { action: 'skip', override: 'http://host/core.js' },
       '@framework/common': { action: 'scope' },
@@ -131,6 +148,14 @@ describe('createPoolDynamicExternals', () => {
       shared('@framework/common'),
       shared('@framework/cdk')
     );
+    givenCommitted({
+      '@framework/core': committed('@framework/core', { tag: '17.0.0', remotes: ['host', 'mfe'] }),
+      '@framework/common': committed('@framework/common', {
+        tag: '17.0.0',
+        remotes: ['host', 'mfe'],
+      }),
+      '@framework/cdk': committed('@framework/cdk', { tag: '17.0.0', remotes: ['host', 'mfe'] }),
+    });
     const actions: SharedInfoActions = {
       '@framework/core': { action: 'skip', override: 'http://host/core.js' },
       '@framework/common': { action: 'share' },
@@ -388,6 +413,18 @@ describe('createPoolDynamicExternals', () => {
       shared('@framework/core', { pool: 'framework' }),
       shared('@design-system/ui', { pool: 'framework' })
     );
+    givenCommitted({
+      '@framework/core': committed('@framework/core', {
+        tag: '17.0.0',
+        remotes: ['mfe'],
+        pool: 'framework',
+      }),
+      '@design-system/ui': committed('@design-system/ui', {
+        tag: '17.0.0',
+        remotes: ['mfe'],
+        pool: 'framework',
+      }),
+    });
     const actions: SharedInfoActions = {
       '@framework/core': { action: 'skip', override: 'http://host/core.js' },
       '@design-system/ui': { action: 'scope' },
@@ -424,6 +461,10 @@ describe('createPoolDynamicExternals', () => {
   it('pools via an explicit pool tag even when auto-pooling is off', async () => {
     config.feature.useAutoExternalPooling = false;
     const entry = entryWith(shared('foo', { pool: 'grp' }), shared('bar', { pool: 'grp' }));
+    givenCommitted({
+      foo: committed('foo', { tag: '17.0.0', remotes: ['mfe'], pool: 'grp' }),
+      bar: committed('bar', { tag: '17.0.0', remotes: ['mfe'], pool: 'grp' }),
+    });
     const actions: SharedInfoActions = {
       foo: { action: 'skip', override: 'http://host/foo.js' },
       bar: { action: 'scope' },
@@ -435,10 +476,19 @@ describe('createPoolDynamicExternals', () => {
     expect(result.actions.bar).toEqual({ action: 'scope' });
   });
 
-  it('has-pool early-out: an incompatible family is left untouched when auto-pooling is off and the entry has no pool tag', async () => {
-    // Auto-pooling off and no tag on the entry → no pool, so determine's actions pass through.
+  it('has-pool early-out: nothing pools when auto-pooling is off and the scope carries no tag at all', async () => {
+    // Auto-pooling off and no `pool` tag anywhere in the committed scope → no pool, so determine's actions
+    // pass through even though the family is right there in the record.
     config.feature.useAutoExternalPooling = false;
+    adapters.sharedExternalsRepo.hasPoolTag = vi.fn(() => false);
     const entry = entryWith(shared('@framework/core'), shared('@framework/common'));
+    givenCommitted({
+      '@framework/core': committed('@framework/core', { tag: '17.0.0', remotes: ['host', 'mfe'] }),
+      '@framework/common': committed('@framework/common', {
+        tag: '17.0.0',
+        remotes: ['host', 'mfe'],
+      }),
+    });
     const actions: SharedInfoActions = {
       '@framework/core': { action: 'skip', override: 'http://host/core.js' },
       '@framework/common': { action: 'scope' },
@@ -451,6 +501,29 @@ describe('createPoolDynamicExternals', () => {
       override: 'http://host/core.js',
     });
     expect(result.actions['@framework/common']).toEqual({ action: 'scope' });
+    expect(adapters.sharedExternalsRepo.getFromScope).not.toHaveBeenCalled();
+  });
+
+  it('subjects an untagged entry to a pool another remote tagged', async () => {
+    // The dynamic counterpart of "one remote declaring this is enough for the whole portfolio". `team/a`
+    // tagged the lockstep pair at init; this entry declares neither tag nor a shared npm scope, and is
+    // still subject to the family's coherence rules — previously it slipped through untouched and could
+    // bridge two builds the portfolio had deliberately pooled apart.
+    config.feature.useAutoExternalPooling = false;
+    const entry = entryWith(shared('foo'), shared('bar'));
+    givenCommitted({
+      foo: committed('foo', { tag: '17.0.0', remotes: ['team/a', 'mfe'], pool: 'grp' }),
+      bar: committed('bar', { tag: '17.0.0', remotes: ['team/a', 'mfe'], pool: 'grp' }),
+    });
+    const actions: SharedInfoActions = {
+      foo: { action: 'skip', override: 'http://host/foo.js' },
+      bar: { action: 'scope' },
+    };
+
+    const result = await poolDynamicExternals({ entry, actions });
+
+    expect(result.actions.foo).toEqual({ action: 'scope' });
+    expect(result.actions.bar).toEqual({ action: 'scope' });
   });
 
   it('never pools the strict scope (an incompatible global sibling cannot island it)', async () => {
