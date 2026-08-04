@@ -58,9 +58,9 @@ Native import maps are the default. `{ shim: true }` switches a test to the
 ## The specs — one file per permutation of the feature
 
 Pooling coordinates a *family* of externals — a monorepo's packages, which are only safe when they come
-from one build. Two rules decide whether a remote may take the dedups the resolver granted it: a remote
+from one build. Two gates decide whether a remote may take the dedups the resolver granted it: a remote
 that is version-incompatible on any member serves its whole family from its own build, and so does a
-remote whose builds **disagree**, i.e. place a member they both ship on a different minor line.
+remote for which no single build ships every specifier it imports at versions it accepts.
 
 The files are organized by what the *portfolio* looks like, not by which field of a `remoteEntry` it uses,
 because that is what decides the verdict: whether the remotes of a family declare the same members, and
