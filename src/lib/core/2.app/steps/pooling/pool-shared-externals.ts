@@ -107,6 +107,12 @@ function servedPerRemote(
   return served;
 }
 
+// Whether the stored record still names an anchor for anybody. A pool that needs no anchor this election is
+// only a no-op if the record agrees: a `servedBy` from an earlier portfolio would keep pointing the map at a
+// build gate 2 did not choose this time, and `rebuildMember` is what clears it.
+const anyAnchorStored = (members: PoolMember[]): boolean =>
+  members.some(m => m.external.versions.some(v => v.remotes.some(r => r.servedBy !== undefined)));
+
 /**
  * The no-tear guarantee, checked on what is about to be written rather than argued from the gates: every
  * non-host remote must resolve a `(specifier → tag)` combination that some single build shipped. Which remote
@@ -323,8 +329,9 @@ export function createPoolSharedExternals(
     let { serving, basis, served } = assign();
 
     // Nothing to island and nothing reassigned: determine's verdicts already stand for every member, so
-    // rebuilding them would write back what storage holds.
-    if (islanded.size === 0 && serving.size === 0) return;
+    // rebuilding them would write back what storage holds — unless the record still carries an anchor this
+    // election did not grant, which has to be cleared or the map keeps honouring it.
+    if (islanded.size === 0 && serving.size === 0 && !anyAnchorStored(members)) return;
 
     // A torn remote is islanded — self-serving a whole family is always coherent — and the assignment redone,
     // since taking a build away can move everyone who was deduping onto it. Terminates for the same reason
@@ -508,6 +515,11 @@ export function createPoolSharedExternals(
         (islanded.has(entry.remote) || entry.action === 'scope' ? scoped : clean).push(entry);
       }
     }
+
+    // A copy about to self-serve runs its own file, so an anchor left on it from an earlier portfolio
+    // would outlive the verdict it belonged to — and `servedBy` is persisted, read on the dynamic path as
+    // "this build dedups onto somebody else" and there disqualifies the island as a serving build.
+    for (const entry of scoped) delete entry.meta.servedBy;
 
     for (const entry of clean) {
       const build = served.get(entry.remote)?.get(member.name);

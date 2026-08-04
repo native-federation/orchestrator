@@ -341,6 +341,29 @@ describe('createPoolSharedExternals', () => {
       expect(externals['@pool/m2'].versions.some(v => v.action === 'scope')).toBe(false);
     });
 
+    it('clears an anchor this election did not grant', async () => {
+      config.feature.useAutoExternalPooling = true;
+      // A warm init re-elects the pool as a unit, so the record it reads still carries the `servedBy` of the
+      // previous portfolio. Here nobody needs an anchor any more, and the pool would otherwise take the
+      // no-op path and leave mfe2 pointed at mfe1's files — an assignment gate 2 never made this time.
+      const externals = {
+        '@framework/core': external([
+          sharedVersion('17', [meta('mfe1'), { ...meta('mfe2'), servedBy: 'mfe1' }], {
+            action: 'share',
+          }),
+        ]),
+        '@framework/common': external([
+          sharedVersion('17', [meta('mfe1'), meta('mfe2')], { action: 'share' }),
+        ]),
+      };
+      givenExternals(externals);
+
+      await poolSharedExternals();
+
+      expect(servedByOf(rebuiltFor('@framework/core')!)).toEqual({});
+      expect(namesOf(rebuiltFor('@framework/core')!, 'share')).toEqual(['mfe1', 'mfe2']);
+    });
+
     it('preserves the base resolver host winner', async () => {
       config.feature.useAutoExternalPooling = true;
       const build = () =>
