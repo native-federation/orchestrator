@@ -179,23 +179,28 @@ describe('createDetermineSharedExternals', () => {
       const LOOSE = { 'team/mfe2': { strictVersion: false } };
       const STRICT = { 'team/mfe3': { strictVersion: true } };
 
-      // The basis is the widest copy, so either remote can hold that slot.
+      // The basis is the widest copy, so either remote can hold that slot — and which one holds it must
+      // not change the outcome, since the verdict follows each copy's own settings.
       it.each([
         ['non-strict remote as basis', { ...LOOSE, ...STRICT }],
         ['strict remote as basis', { ...STRICT, ...LOOSE }],
-      ])('should set "scope" with the %s', async (_label, remotes) => {
+      ])('should scope only the strict copy, with the %s', async (_label, remotes) => {
         config.strict.strictExternalCompatibility = false;
         adapters.sharedExternalsRepo.getFromScope = withStrictSibling(remotes);
 
         await determineSharedExternals();
 
+        // 2.1.1 splits rather than scoping whole: `team/mfe2` declared `strictVersion: false`, which
+        // means "serve me the shared version even where my range rejects it", so it dedups onto 2.2.2
+        // instead of being dragged into its sibling's verdict. See F-F-per-version-verdicts.md.
         expect(adapters.sharedExternalsRepo.addOrUpdate).toHaveBeenCalledWith(
           'dep-b',
           mockExternal_B({
             dirty: false,
             versions: [
               mockVersion_B.v2_2_2({ remotes: WIDE, action: 'share' }),
-              mockVersion_B.v2_1_1({ remotes, action: 'scope' }),
+              mockVersion_B.v2_1_1({ remotes: LOOSE, action: 'skip' }),
+              mockVersion_B.v2_1_1({ remotes: STRICT, action: 'scope' }),
             ],
           }),
           '__GLOBAL__'

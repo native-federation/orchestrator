@@ -9,8 +9,9 @@ export type IsCompatible = (tag: string, requiredVersion: string) => boolean;
 export type VersionAcceptance = {
   // A version can only be redirected to `tag` if none of its remotes rejects that tag.
   accepts: (version: SharedVersion, tag: string) => boolean;
-  // The remote that makes the redirect unsafe: it rejects `tag` and pinned `strictVersion`,
-  // so it has to keep its own build instead of being deduped away.
+  // A representative copy that makes the redirect unsafe: it rejects `tag` while `strictVersion` is set,
+  // so it keeps its own build instead of being deduped away. One is enough for the message and the
+  // strict check; `applyWinner` enumerates the rest itself when it splits the version.
   objector: (version: SharedVersion, tag: string) => SharedVersionMeta | undefined;
   // For callers asking a question of their own, e.g. the resolver's extra-download count.
   demands: (version: SharedVersion) => SharedVersionMeta[];
@@ -56,10 +57,14 @@ export function createApplyWinner(config: LoggingConfig & ModeConfig) {
     if (external.versions.length > 1) {
       const { accepts, objector } = acceptance ?? versionAcceptance(external, isCompatible);
 
-      external.versions.forEach(v => {
+      const rebuilt: SharedVersion[] = [];
+
+      for (const v of external.versions) {
+        rebuilt.push(v);
+
         if (accepts(v, winner.tag)) {
           v.action = 'skip';
-          return;
+          continue;
         }
 
         const strict = objector(v, winner.tag);
@@ -72,8 +77,36 @@ export function createApplyWinner(config: LoggingConfig & ModeConfig) {
 
           throw new NFError(`External ${externalName}@${v.tag} could not be shared.`);
         }
-        v.action = strict ? 'scope' : 'skip';
-      });
+
+        // The winner is never redirected, so its copies are never really asked to accept its own tag;
+        // its verdict is `winner.action` below. Splitting it would scope copies that dedup today. Covers
+        // the host row too, which host precedence always makes the winner.
+        if (v === winner) continue;
+
+        if (!strict) {
+          v.action = 'skip';
+          continue;
+        }
+
+        // `accepts` aggregates over the whole version because one version is one file served from one
+        // basis — but only the copies that themselves reject the winner have to keep their own build.
+        const objecting = new Set(
+          v.remotes.filter(r => r.strictVersion && !isCompatible(winner.tag, r.requiredVersion))
+        );
+
+        if (objecting.size === v.remotes.length) {
+          v.action = 'scope';
+          continue;
+        }
+
+        v.remotes = v.remotes.filter(r => !objecting.has(r));
+        v.action = 'skip';
+        // Beside its source rather than appended: the record stays newest-first, which `commit()`
+        // guarantees and a later election reads as "the latest".
+        rebuilt.push({ tag: v.tag, host: false, action: 'scope', remotes: [...objecting] });
+      }
+
+      external.versions = rebuilt;
     }
 
     winner.action = 'share';

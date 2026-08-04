@@ -14,21 +14,18 @@ import { createPoolSharedExternals } from './pool-shared-externals';
 import { createGenerateImportMap } from '../generate-import-map';
 
 /**
- * Characterisation of `F-F-per-version-verdicts.md`: a verdict is written onto a whole `SharedVersion`,
- * but `requiredVersion` and `strictVersion` are per-build settings, so a row can hold copies that
- * disagree. When one copy rejects the winner and declared `strictVersion: true`, the row is marked
- * `scope` and every co-tagged copy is scoped with it — including copies whose own range accepts the
- * winner and which could simply dedup. Pooling then reads that verdict as an incompatibility and
- * islands those remotes across the whole family.
+ * Permanent guard for `F-F-per-version-verdicts.md`: a verdict belongs to the copy that objected, not to
+ * the whole `SharedVersion`. `requiredVersion` and `strictVersion` are per-build settings, so one row can
+ * hold copies that disagree; before the fix a single strict objector marked the row `scope` and every
+ * co-tagged copy was scoped with it, whereupon gate 1 islanded those remotes across the whole family.
  *
- * These expectations record the defect, not the intent. Marked below, per test:
- *   INVERTS  — what fix (1) changes (scope membership, download count, the false warning).
- *   HOLDS    — what must be true before and after (the objector self-serves, and I3: no remote runs a
- *              combination of tags no build shipped).
+ * Compatibility is still asked of the row as a whole — one version is one file served from one basis, so
+ * redirecting it has to satisfy everyone it would redirect. Only the write-back is per copy.
  *
- * Both fixtures come from measurements in the browser on `943a3ea` and 2026-07-31 respectively; see the
- * doc's "Measured" sections. The second one only reproduces warm — cold, the objector's own tag wins the
- * election and nothing is dragged — so its committed copies are seeded `cached`.
+ * Both fixtures were measured in the browser on `943a3ea` and 2026-07-31; see the doc's "Measured"
+ * sections for the pre-fix numbers (5 and 4 emitted URLs) these now improve on. The second one only
+ * reproduces warm — cold, the objector's own tag wins the election and nothing is dragged — so its
+ * committed copies are seeded `cached`.
  */
 describe('pooling: per-copy verdicts (F-F)', () => {
   const SCOPE = {
@@ -103,7 +100,7 @@ describe('pooling: per-copy verdicts (F-F)', () => {
       v => `${v.tag}:${v.action}:[${v.remotes.map(r => r.name).join(',')}]`
     );
 
-  it('scopes a compatible co-tagged remote, then islands it across the family', async () => {
+  it('keeps a compatible co-tagged remote deduping when its neighbour objects', async () => {
     // mfe-a and mfe-c both ship core@21.1.1; only mfe-c's `~21.1.1` rejects the 21.2.0 majority.
     // mfe-a's `^21.1.0` accepts it and could dedup.
     seed('@angular/core', [
@@ -128,19 +125,21 @@ describe('pooling: per-copy verdicts (F-F)', () => {
 
     const importMap = await runInit();
 
-    // INVERTS: mfe-a belongs in a `skip` row of its own tag, not in mfe-c's `scope` row.
+    // The verdict follows the copy: mfe-a keeps its own tag in a `skip` row of its own, mfe-c alone
+    // scopes. Both rows stay at 21.1.1 and stay adjacent, so the record is still newest-first.
     expect(rows('@angular/core')).toEqual([
       '21.2.0:share:[team/mfe-b,team/mfe-d,team/mfe-x]',
-      '21.1.1:scope:[team/mfe-a,team/mfe-c]',
+      '21.1.1:skip:[team/mfe-a]',
+      '21.1.1:scope:[team/mfe-c]',
     ]);
 
-    // INVERTS: mfe-a's `common` dedup is collateral from gate 1 islanding it on `core`.
+    // Nothing islands mfe-a any more, so its `common` dedup survives.
     expect(rows('@angular/common')).toEqual([
       '21.2.0:share:[team/mfe-b,team/mfe-d,team/mfe-x]',
-      '21.1.1:scope:[team/mfe-a]',
+      '21.1.1:skip:[team/mfe-a]',
     ]);
 
-    // HOLDS: the majority is shared from one build, and mfe-c honours its own pin.
+    // The majority is shared from one build, and mfe-c honours its own pin.
     expect(importMap.imports).toEqual({
       '@angular/core': 'http://mfe-b/@angular/core.js',
       '@angular/common': 'http://mfe-b/@angular/common.js',
@@ -149,26 +148,25 @@ describe('pooling: per-copy verdicts (F-F)', () => {
       '@angular/core': 'http://mfe-c/@angular/core.js',
     });
 
-    // INVERTS: mfe-a downloads a whole family it is compatible with. 5 files where 3 are reachable.
-    expect(importMap.scopes?.[SCOPE['team/mfe-a']]).toEqual({
-      '@angular/core': 'http://mfe-a/@angular/core.js',
-      '@angular/common': 'http://mfe-a/@angular/common.js',
-    });
-    expect(emittedUrls(importMap).size).toBe(5);
+    // mfe-a resolves both members through `imports`, i.e. from mfe-b's build — 3 files, the reachable
+    // minimum, down from the 5 measured in the browser.
+    expect(importMap.scopes?.[SCOPE['team/mfe-a']]).toBeUndefined();
+    expect(emittedUrls(importMap).size).toBe(3);
 
-    // INVERTS: the claim is false — mfe-a's `^21.1.0` accepts 21.2.0. Only mfe-c is incompatible.
-    expect(config.log.warn).toHaveBeenCalledWith(
+    // No warning may name mfe-a: its `^21.1.0` accepts 21.2.0, so there was never an incompatibility
+    // to report. mfe-c is not islanded either — it is the only copy of a `scope` row, which is the
+    // ordinary per-external outcome and needs no pooling verdict at all.
+    expect(config.log.warn).not.toHaveBeenCalledWith(
       3,
-      expect.stringContaining(
-        "'team/mfe-a' is islanded: '@angular/core@21.1.1' is incompatible with the shared version"
-      )
+      expect.stringContaining("'team/mfe-a' is islanded")
     );
 
-    // HOLDS: islanding is over-broad but never incoherent — every remote's tags are ones one build shipped.
+    // I3: every remote's resolved tags are ones a single build shipped. mfe-a takes core@21.2.0 and
+    // common@21.2.0, which is mfe-b's build; mfe-c runs its own 21.1.1.
     expect(findIncoherentRemotes({ importMap, members: stored(), scopeUrls: SCOPE })).toEqual([]);
   });
 
-  it('drags a co-tagged joiner that declares a wider range than the pinner', async () => {
+  it('shares the pinner\'s tag with a co-tagged joiner that accepts the winner', async () => {
     // mfe1 and mfe2 are already committed, so 22.1.0 wins on cost and mfe3 joins into mfe2's row.
     // mfe3 ships only `core`, so its "whole family" is one member: this instance separates fix (1)
     // from a gate-1-only fix, which would silence the warning but keep the download.
@@ -185,32 +183,30 @@ describe('pooling: per-copy verdicts (F-F)', () => {
 
     const importMap = await runInit();
 
-    // INVERTS: mfe3 accepts 22.1.0 and sits in the pinner's row only because they share a tag.
+    // Only the pinner scopes; mfe3 leaves its row and dedups.
     expect(rows('@angular/core')).toEqual([
       '22.1.0:share:[team/mfe1]',
-      '22.0.5:scope:[team/mfe2,team/mfe3]',
+      '22.0.5:skip:[team/mfe3]',
+      '22.0.5:scope:[team/mfe2]',
     ]);
 
-    // HOLDS: mfe2's pin is honoured from its own build.
+    // mfe2's pin is honoured from its own build.
     expect(importMap.scopes?.[SCOPE['team/mfe2']]).toEqual({
       '@angular/core': 'http://mfe2/@angular/core.js',
     });
 
-    // INVERTS: mfe3 downloads its own copy of a version it accepts. 4 files where 3 are reachable.
-    expect(importMap.scopes?.[SCOPE['team/mfe3']]).toEqual({
-      '@angular/core': 'http://mfe3/@angular/core.js',
-    });
-    expect(emittedUrls(importMap).size).toBe(4);
+    // This is the instance a gate-1-only fix could not recover: mfe3's copy sat inside a `scope` row, so
+    // it kept downloading its own build even once pooling stopped islanding it. 3 files, matching a cold
+    // resolution of the same three remotes.
+    expect(importMap.scopes?.[SCOPE['team/mfe3']]).toBeUndefined();
+    expect(emittedUrls(importMap).size).toBe(3);
 
-    // INVERTS: same false claim, against a range that accepts the winner.
-    expect(config.log.warn).toHaveBeenCalledWith(
+    expect(config.log.warn).not.toHaveBeenCalledWith(
       3,
-      expect.stringContaining(
-        "'team/mfe3' is islanded: '@angular/core@22.0.5' is incompatible with the shared version"
-      )
+      expect.stringContaining("'team/mfe3' is islanded")
     );
 
-    // HOLDS.
+    // I3: mfe3 runs core@22.1.0, which is mfe1's build.
     expect(findIncoherentRemotes({ importMap, members: stored(), scopeUrls: SCOPE })).toEqual([]);
   });
 });
