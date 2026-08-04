@@ -20,7 +20,7 @@ import { createGenerateImportMap } from '../generate-import-map';
 import { createUpdateCache } from '../update-cache';
 import { createPoolDynamicExternals } from './pool-dynamic-externals';
 import { createConvertToImportMap } from '../convert-to-import-map';
-import { committedView } from './anchoring';
+import { committedView } from './pool-views';
 import { findIncoherentRemotes } from 'lib/testing/pooling/no-tear';
 
 /**

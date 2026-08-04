@@ -8,7 +8,7 @@ import { dep, remote, SCOPE } from '../harness/portfolio';
  * itself (that is how an island is persisted). `determine` re-elects only *dirty* externals, and an
  * external is dirty only when a remote of its own merged, so a joiner that ships some members of a pool
  * and not others used to leave the rest carrying last run's pooling verdict — which gate 1 then read back
- * as an incompatibility. `spread-pool-dirtiness` closes that by re-electing a pool as a unit, so pooling
+ * as an incompatibility. `mark-pools-for-reelection` closes that by re-electing a pool as a unit, so pooling
  * runs on a pool exactly when every member of it was re-elected.
  * See docs/version-resolver.md §"How pooling resolves".
  *

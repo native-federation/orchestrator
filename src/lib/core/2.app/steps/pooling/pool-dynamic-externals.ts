@@ -11,22 +11,10 @@ import {
   type SharedInfoActions,
 } from 'lib/core/1.domain';
 import { autoScope, groupByMembership, type PoolCandidate } from './pool-graph';
-import { consumedMembers } from './family-instance';
-import {
-  acceptanceTable,
-  acceptsAll,
-  basisPerMember,
-  committedView,
-  type CommittedView,
-  consumedSpecifiers,
-  covers,
-  explainSelfServe,
-  isWitnessed,
-} from './anchoring';
-import type { FamilyInstances, PoolMember } from './pool.types';
+import { basisPerMember, committedView, consumedMembers, consumedSpecifiers } from './pool-views';
+import { acceptanceTable, acceptsAll, covers, explainSelfServe, isWitnessed } from './anchoring';
+import type { CommittedView, PoolMember, Specifier } from './pool.types';
 import * as _path from 'lib/utils/path';
-
-const NOTHING_ISLANDED = { has: () => false };
 
 export function createPoolDynamicExternals(
   config: LoggingConfig & ModeConfig,
@@ -125,29 +113,22 @@ export function createPoolDynamicExternals(
   /**
    * The init gate, asked of what the loaded remote would dedup onto: the witness first, then a committed
    * build that covers every entrypoint it imports at versions it accepts. Nothing here re-points an
-   * existing remote — the only thing that can move is the remote being loaded, which either takes one
-   * committed build whole or serves its own family.
-   *
-   * The candidate has to **already serve its own whole family** (constraint 9). A committed build whose
-   * own family resolved through the global winner has modules that are already bound; a consumer deduping
-   * onto it inherits that binding one hop in, and no additive map can repair it.
+   * existing remote — the only thing that can move is the remote being loaded.
    */
   function anchorFor(
     remote: RemoteName,
     pool: PoolMember[],
     view: CommittedView
   ): RemoteName | 'witnessed' | undefined {
-    const specifiers = consumedSpecifiers(pool).get(remote) ?? new Set<string>();
-    const tags = new Map<RemoteName, Map<string, string>>();
-    const shared = new Map<string, string>();
-    for (const [name, build] of view.builds) tags.set(name, build.tags);
+    const specifiers = consumedSpecifiers(pool).get(remote) ?? new Set<Specifier>();
+    const shared = new Map<Specifier, string>();
     for (const [specifier, source] of view.global) shared.set(specifier, source.tag);
 
-    if (isWitnessed(specifiers, shared, tags)) return 'witnessed';
+    if (isWitnessed(specifiers, shared, view.builds)) return 'witnessed';
 
     const acceptance = acceptanceTable(pool, ports.versionCheck.isCompatible);
     const wants = consumedMembers(pool).get(remote) ?? [];
-    const basis = basisPerMember(pool, NOTHING_ISLANDED, () => false);
+    const basis = basisPerMember(pool);
 
     for (const build of [...view.builds.keys()].sort()) {
       if (build === remote) continue;
@@ -162,11 +143,11 @@ export function createPoolDynamicExternals(
   }
 
   /**
-   * Constraint 9, read off the committed record: either the build wins every member it ships, so the map
-   * already names its own files for its whole family, or every copy it holds is scoped, so it is an island
-   * and runs its own build by construction. Anything in between resolved part of its family through the
-   * global winner — its modules are already bound, and a consumer deduping onto it inherits that.
-   * A copy carrying a `servedBy` is deduping onto somebody else and disqualifies it outright.
+   * Constraint 9, read off the committed record: a candidate qualifies only if it wins every member it
+   * ships (the map already names its own files for its whole family) or every copy it holds is scoped (an
+   * island, running its own build by construction). Anything in between resolved part of its family through
+   * the global winner, so its modules are already bound and a consumer deduping onto it inherits that —
+   * which no additive map can repair.
    */
   function servesItsOwnFamily(
     build: RemoteName,
@@ -192,30 +173,22 @@ export function createPoolDynamicExternals(
   }
 
   function explainDynamic(remote: RemoteName, pool: PoolMember[], view: CommittedView) {
-    const coverage = new Map<RemoteName, Map<string, string>>();
-    const instances = new Map() as FamilyInstances;
-    for (const [name, build] of view.builds) {
-      coverage.set(name, build.coverage);
-      instances.set(name, build.instance);
-    }
     return explainSelfServe(
       remote,
       consumedMembers(pool).get(remote) ?? [],
       consumedSpecifiers(pool).get(remote) ?? new Set(),
-      { coverage, instances, acceptance: acceptanceTable(pool, ports.versionCheck.isCompatible) }
+      { builds: view.builds, acceptance: acceptanceTable(pool, ports.versionCheck.isCompatible) }
     );
   }
 
   /**
    * Point the loaded remote at the anchor's files, through the per-consumer override
-   * `convert-to-import-map` already emits for a shareScope skip — which is what the global path had to
-   * learn to carry, since a committed island's files live nowhere but its own scope.
+   * `convert-to-import-map` emits for a skip. Only specifiers the committed map does not already serve from
+   * the anchor get an entry, so deduping onto the current global provider adds nothing to the delta.
    *
-   * Only specifiers the committed map does not already serve from the anchor get an entry, so a dedup onto
-   * a build that is already the global provider still adds nothing to the delta. `covered` is set for
-   * every member either way: it is per external, so a specifier the anchor serves as an entry of a
-   * *different* member would otherwise be self-filled from the loaded remote's own build — one file from a
-   * second build, which is the whole thing being prevented.
+   * `covered` is set for every member either way: it is per external, so a specifier the anchor serves as an
+   * entry of a *different* member would otherwise be self-filled from the loaded remote's own build — one
+   * file from a second build, which is the whole thing being prevented.
    */
   function redirect(
     remote: RemoteName,

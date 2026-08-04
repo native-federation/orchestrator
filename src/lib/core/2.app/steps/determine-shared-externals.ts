@@ -128,11 +128,10 @@ export function createDetermineSharedExternals(
       // find version with least extra downloads, sorted by SEMVER version (O^2 complexity)
       let leastExtraDownloads = Number.MAX_VALUE;
       let leastTears = Number.MAX_VALUE;
-      // What a rejected version really costs: `applyWinner` splits it, so only the copies that
-      // themselves reject the winner keep their own build. Grouped by range and counted, because the
-      // selection loop is O(versions²) and must not also scale with remote count — the reason
-      // `versionDemands` dedups. Cached copies are already downloaded, non-strict ones take whatever is
-      // shared, so neither can cost anything.
+      // What a rejected version really costs: `applyWinner` splits it, so only the copies that themselves
+      // reject the winner keep their own build. Cached copies are already downloaded and non-strict ones take
+      // whatever is shared, so neither costs anything. Grouped by range so the O(versions²) selection loop
+      // does not also scale with remote count.
       const selfServing = new Map<SharedVersion, { requiredVersion: string; copies: number }[]>(
         external.versions.map(v => {
           const groups = new Map<string, { requiredVersion: string; copies: number }>();

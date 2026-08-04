@@ -1,6 +1,6 @@
-import type { ForSpreadingPoolDirtiness } from '../../driver-ports/init/for-spreading-pool-dirtiness.port';
+import type { ForMarkingPoolsForReelection } from '../../driver-ports/init/for-marking-pools-for-reelection.port';
 import type { DrivingContract } from '../../driving-ports/driving.contract';
-import { createSpreadPoolDirtiness } from './spread-pool-dirtiness';
+import { createMarkPoolsForReelection } from './mark-pools-for-reelection';
 import { mockAdapters } from 'lib/testing/adapters.mock';
 import type { ConfigContract } from 'lib/core/2.app/config';
 import { mockConfig } from 'lib/testing/config.mock';
@@ -26,8 +26,8 @@ const ext = (name: string, dirty: boolean, pool?: string): SharedExternal => ({
   ],
 });
 
-describe('createSpreadPoolDirtiness', () => {
-  let spreadPoolDirtiness: ForSpreadingPoolDirtiness;
+describe('createMarkPoolsForReelection', () => {
+  let markPoolsForReelection: ForMarkingPoolsForReelection;
   let config: ConfigContract;
   let adapters: DrivingContract;
 
@@ -38,7 +38,7 @@ describe('createSpreadPoolDirtiness', () => {
     adapters.sharedExternalsRepo.scopeType = vi.fn(() => 'global' as const);
     config.feature.useAutoExternalPooling = true;
 
-    spreadPoolDirtiness = createSpreadPoolDirtiness(config, adapters);
+    markPoolsForReelection = createMarkPoolsForReelection(config, adapters);
   });
 
   const given = (externals: Record<string, SharedExternal>) => {
@@ -56,7 +56,7 @@ describe('createSpreadPoolDirtiness', () => {
       '@scope/c': ext('@scope/c', false),
     });
 
-    await spreadPoolDirtiness();
+    await markPoolsForReelection();
 
     expect(dirt(externals)).toEqual({ '@scope/a': true, '@scope/b': true, '@scope/c': true });
   });
@@ -67,7 +67,7 @@ describe('createSpreadPoolDirtiness', () => {
       '@scope/b': ext('@scope/b', false),
     });
 
-    await spreadPoolDirtiness();
+    await markPoolsForReelection();
 
     expect(dirt(externals)).toEqual({ '@scope/a': false, '@scope/b': false });
   });
@@ -89,7 +89,7 @@ describe('createSpreadPoolDirtiness', () => {
     };
     given({ '@scope/a': watched('@scope/a'), '@scope/b': watched('@scope/b') });
 
-    await spreadPoolDirtiness();
+    await markPoolsForReelection();
 
     expect(reads).toBe(0);
   });
@@ -101,7 +101,7 @@ describe('createSpreadPoolDirtiness', () => {
       '@two/b': ext('@two/b', false),
     });
 
-    await spreadPoolDirtiness();
+    await markPoolsForReelection();
 
     expect(dirt(externals)).toEqual({ '@one/a': true, '@two/b': false });
   });
@@ -109,7 +109,7 @@ describe('createSpreadPoolDirtiness', () => {
   it('never writes — it only mutates the stored records', async () => {
     given({ '@scope/a': ext('@scope/a', true), '@scope/b': ext('@scope/b', false) });
 
-    await spreadPoolDirtiness();
+    await markPoolsForReelection();
 
     expect(adapters.sharedExternalsRepo.addOrUpdate).not.toHaveBeenCalled();
     expect(adapters.sharedExternalsRepo.commit).not.toHaveBeenCalled();
@@ -123,7 +123,7 @@ describe('createSpreadPoolDirtiness', () => {
       '@scope/b': ext('@scope/b', false),
     });
 
-    await spreadPoolDirtiness();
+    await markPoolsForReelection();
 
     expect(dirt(externals)).toEqual({ '@scope/a': true, '@scope/b': false });
   });
@@ -140,7 +140,7 @@ describe('createSpreadPoolDirtiness', () => {
         'pkg-b': ext('pkg-b', false),
       });
 
-      await spreadPoolDirtiness();
+      await markPoolsForReelection();
 
       expect(dirt(externals)).toEqual({ 'pkg-a': true, 'pkg-b': false });
       expect(adapters.sharedExternalsRepo.getFromScope).not.toHaveBeenCalled();
@@ -155,7 +155,7 @@ describe('createSpreadPoolDirtiness', () => {
         'pkg-c': ext('pkg-c', false),
       });
 
-      await spreadPoolDirtiness();
+      await markPoolsForReelection();
 
       expect(dirt(externals)).toEqual({ 'pkg-a': true, 'pkg-b': true, 'pkg-c': false });
     });

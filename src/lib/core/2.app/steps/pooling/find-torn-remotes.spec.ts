@@ -81,7 +81,7 @@ describe('findTornRemotes', () => {
     // The state gate 1 makes impossible and the guard exists for: R is not islanded, but its core copy is
     // in a `scope` row, so it runs its own core@1.0.0 while router still dedups from Q at 2.0.0.
     //
-    // This is the case a checker keyed on `buildInstances` alone cannot see. That map omits `scope` copies,
+    // This is the case a checker keyed on `liveBuilds` alone cannot see. That map omits `scope` copies,
     // so core would either be dropped from the combination or read off the member's basis — both of which
     // make R look coherent when the map hands it a pair nobody built.
     const record = members();

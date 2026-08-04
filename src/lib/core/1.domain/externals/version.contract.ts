@@ -29,6 +29,6 @@ export type SharedVersionMeta = {
   entries: Record<string, string>;
   // The build serving this remote its copy, when pooling assigned it one other than the version's own
   // basis. Lives here rather than on `SharedVersion` because two consumers of the *same tag* can
-  // legitimately take different anchors. Absent means the version's own basis, i.e. today's behaviour.
+  // legitimately take different anchors. Absent means the version's own basis.
   servedBy?: RemoteName;
 };

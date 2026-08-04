@@ -661,7 +661,7 @@ to defer.
 
 Gate 1 reads the `scope` verdicts out of storage, and an island is *also* persisted as `scope` — so the
 two are indistinguishable in the record. What keeps the reading honest is that a pool is re-elected as a
-**unit**: `spread-pool-dirtiness` marks every member of a pool dirty as soon as any one of them is, so the
+**unit**: `mark-pools-for-reelection` marks every member of a pool dirty as soon as any one of them is, so the
 resolver re-elects the whole pool and pooling runs on a pool exactly when every member of it was
 re-elected. Every `scope` gate 1 sees therefore comes from this init's election and describes the current
 portfolio. Without that, a joiner shipping only part of a pool leaves the untouched members carrying the
@@ -1022,7 +1022,7 @@ never *moves* a basis, it only declines to force one.
   applies to the witness: comparing a member's share version cannot fire on a flat member that has none.
 - **Host precedence needed no reconciliation** — resolved 2026-07-31. The worry was that an anchor chosen by
   coverage may not be the host. It cannot arise: consumption is derived from **declarations**
-  (`consumedMembers`, `family-instance.ts`), so a remote consumes exactly the members it declares as shared,
+  (`consumedMembers`, `pool-views.ts`), so a remote consumes exactly the members it declares as shared,
   and the host declares only what it ships. Its family is therefore its own build by construction —
   trivially compliant, never assigned an anchor, and never the remote that self-serves for lack of coverage.
   The two rules also answer different questions: host precedence decides which **version** wins, anchoring
@@ -1192,7 +1192,7 @@ minor line. Holding the line keeps the promise unconditional.
 **What it costs at init.** Timed per pipeline step over the same fixtures, in Node with the network ports
 served from memory, median of 25 runs (ms):
 
-| | getEntries | process | spread | determine | pool | importMap | commit | total |
+| | getEntries | process | mark | determine | pool | importMap | commit | total |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | 7 remotes, cold | 0.45 | 0.46 | 0.29 | 0.30 | 0.67 | 0.37 | 0.58 | **3.32** |
 | 7 remotes, cold, no pooling at all | 0.42 | 0.37 | 0.01 | 0.19 | 0.01 | 0.26 | 0.51 | **1.80** |
@@ -1208,7 +1208,7 @@ pooling step itself is 0.67 and 2.40; the rest is the other steps having more sc
 are set against fetching eleven remote entries over the network, which dominates a cold init by orders of
 magnitude.
 
-That warm figure took a fix. `spread-pool-dirtiness` built the pool graph for every scope and *then*
+That warm figure took a fix. `mark-pools-for-reelection` built the pool graph for every scope and *then*
 discovered nothing was dirty, which cost 0.41 ms of a 1.03 ms warm init — the entire pooling cost of a
 plain reload, and it had grown with the per-remote scope nodes of the auto-pooling rule above. It now
 checks the scope for a dirty external before building anything, which is equivalent (a scope with nothing

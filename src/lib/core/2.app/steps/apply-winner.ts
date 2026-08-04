@@ -35,11 +35,11 @@ export function versionAcceptance(
 
 /**
  * The tail of winner election: derive every other version's verdict from the chosen one, apply the
- * entrypoint coverage policy, clear `dirty`.
+ * entrypoint coverage policy, clear `dirty`. `determine` is the only caller, and passes its memoized
+ * `isCompatible` plus the `acceptance` it already built for the election.
  *
- * `determine` is the only caller — it passes its memoized `isCompatible` and the `acceptance` it already
- * built for the election. Pooling used to call this too, when it re-pointed a winner onto a family
- * instance; that election was reverted, and pooling now rewrites verdicts itself in `rebuildMember`.
+ * A hazard for anyone who ever adds a second caller that re-points a winner: `findTears` keys off
+ * `winner.remotes[0]`, so moving the winner moves the serving basis coverage is measured against.
  */
 export function createApplyWinner(config: LoggingConfig & ModeConfig) {
   return function applyWinner(
