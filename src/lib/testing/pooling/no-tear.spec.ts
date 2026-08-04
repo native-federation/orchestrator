@@ -22,13 +22,17 @@ describe('findIncoherentRemotes', () => {
           tag: '22.0.5',
           host: false,
           action: 'share',
-          remotes: [mockVersionRemote('team/mfe-b', '@angular/core', { requiredVersion: '~22.0.5' })],
+          remotes: [
+            mockVersionRemote('team/mfe-b', '@angular/core', { requiredVersion: '~22.0.5' }),
+          ],
         },
         {
           tag: '22.1.0',
           host: false,
           action: 'skip',
-          remotes: [mockVersionRemote('team/mfe-a', '@angular/core', { requiredVersion: '^22.0.0' })],
+          remotes: [
+            mockVersionRemote('team/mfe-a', '@angular/core', { requiredVersion: '^22.0.0' }),
+          ],
         },
       ],
     },

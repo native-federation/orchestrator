@@ -30,7 +30,13 @@ describe('determine: splitting a version on election', () => {
 
   const version = (
     tag: string,
-    remotes: { remote: string; req: string; strict?: boolean; entries?: Record<string, string> }[],
+    remotes: {
+      remote: string;
+      req: string;
+      strict?: boolean;
+      cached?: boolean;
+      entries?: Record<string, string>;
+    }[],
     o: { host?: boolean } = {}
   ): SharedVersion => ({
     tag,
@@ -40,6 +46,7 @@ describe('determine: splitting a version on election', () => {
       mockVersionRemote(r.remote, 'dep-a', {
         requiredVersion: r.req,
         strictVersion: r.strict ?? true,
+        cached: r.cached ?? false,
         ...(r.entries ? { entries: r.entries } : {}),
       })
     ),
@@ -54,7 +61,8 @@ describe('determine: splitting a version on election', () => {
 
   const rows = () =>
     adapters.sharedExternalsRepo
-      .getFromScope(undefined)['dep-a']!.versions.map(
+      .getFromScope(undefined)
+      ['dep-a']!.versions.map(
         v => `${v.tag}:${v.action}:[${v.remotes.map(r => r.name).join(',')}]`
       );
 
@@ -164,7 +172,8 @@ describe('determine: splitting a version on election', () => {
     ]);
 
     const tags = adapters.sharedExternalsRepo
-      .getFromScope(undefined)['dep-a']!.versions.map(v => v.tag);
+      .getFromScope(undefined)
+      ['dep-a']!.versions.map(v => v.tag);
     tags.forEach((tag, i) => {
       if (i > 0) expect(adapters.versionCheck.compare(tags[i - 1]!, tag)).toBeGreaterThanOrEqual(0);
     });
@@ -178,7 +187,11 @@ describe('determine: splitting a version on election', () => {
     seed([
       majority('2.2.0', 4),
       version('2.1.0', [
-        { remote: 'team/mfe-a', req: '^2.1.0', entries: { 'dep-a': 'a.js', 'dep-a/extra': 'x.js' } },
+        {
+          remote: 'team/mfe-a',
+          req: '^2.1.0',
+          entries: { 'dep-a': 'a.js', 'dep-a/extra': 'x.js' },
+        },
         { remote: 'team/mfe-c', req: '~2.1.0' },
       ]),
     ]);
@@ -202,21 +215,100 @@ describe('determine: splitting a version on election', () => {
     await expect(createDetermineSharedExternals(config, adapters)()).rejects.toThrow();
   });
 
-  it('re-elects an already-split record to itself', async () => {
-    // The shape the fix persists, fed back in: two rows at one tag, one `skip`, one `scope`. A later init
-    // re-elects from storage, and nothing merges the halves back, so this has to be a fixed point.
+  // The objective has to price a rejected row at the copies that really self-serve. Charging it for every
+  // copy — which is what a whole-row verdict cost — both overstates candidates and makes the price depend
+  // on whether the record was already split, i.e. on assembly order.
+  describe('pricing the election', () => {
+    // 2.3.0 costs one download (b1 alone keeps its build), 2.1.0 costs two (a1 and a2 both do). Charging
+    // 2.1.0's whole row instead made 2.3.0 look like four and elected 2.1.0 — three downloads for a
+    // portfolio that resolves in two.
+    const flipPortfolio = () => [
+      version('2.3.0', [
+        { remote: 'team/a1', req: '~2.3.0' },
+        { remote: 'team/a2', req: '~2.3.0' },
+      ]),
+      version('2.1.0', [
+        { remote: 'team/b1', req: '~2.1.0' },
+        { remote: 'team/b2', req: '^2.1.0' },
+        { remote: 'team/b3', req: '^2.1.0' },
+        { remote: 'team/b4', req: '^2.1.0' },
+      ]),
+    ];
+
+    it('elects the candidate whose objectors are fewest, not whose rows are smallest', async () => {
+      seed(flipPortfolio());
+
+      await createDetermineSharedExternals(config, adapters)();
+
+      // One shared build plus b1's own: two downloads, where electing 2.1.0 needs three.
+      expect(rows()).toEqual([
+        '2.3.0:share:[team/a1,team/a2]',
+        '2.1.0:skip:[team/b2,team/b3,team/b4]',
+        '2.1.0:scope:[team/b1]',
+      ]);
+    });
+
+    it('charges nothing for an objector that is already downloaded', async () => {
+      seed([
+        version('2.3.0', [{ remote: 'team/a1', req: '~2.3.0' }]),
+        version('2.1.0', [
+          { remote: 'team/b1', req: '~2.1.0', cached: true },
+          { remote: 'team/b2', req: '^2.1.0' },
+        ]),
+      ]);
+
+      await createDetermineSharedExternals(config, adapters)();
+
+      // b1 still scopes — `cached` changes the price, never the verdict.
+      expect(rows()).toEqual([
+        '2.3.0:share:[team/a1]',
+        '2.1.0:skip:[team/b2]',
+        '2.1.0:scope:[team/b1]',
+      ]);
+    });
+
+    it('charges nothing for a non-strict objector, which takes what is shared', async () => {
+      seed([
+        version('2.3.0', [{ remote: 'team/a1', req: '~2.3.0' }]),
+        version('2.1.0', [
+          { remote: 'team/b1', req: '~2.1.0', strict: false },
+          { remote: 'team/b2', req: '~2.1.0', strict: false },
+        ]),
+      ]);
+
+      await createDetermineSharedExternals(config, adapters)();
+
+      expect(rows()).toEqual(['2.3.0:share:[team/a1]', '2.1.0:skip:[team/b1,team/b2]']);
+    });
+  });
+
+  it('re-elects a record it has already split to the same thing', async () => {
+    // Nothing merges the halves back, so a later init elects from a record holding two rows at one tag
+    // where the first init saw one. Cold and warm therefore have to agree — both on the winner and on the
+    // price behind it, which is why the objective counts copies rather than rows.
     seed([
       majority('22.3.0', 3),
-      { ...version('22.2.0', [{ remote: 'team/mfe-a', req: '^22.0.0' }]), action: 'skip' },
-      { ...version('22.2.0', [{ remote: 'team/mfe-c', req: '~22.2.0' }]), action: 'scope' },
+      version('22.2.0', [
+        { remote: 'team/mfe-a', req: '^22.0.0' },
+        { remote: 'team/mfe-c', req: '~22.2.0' },
+      ]),
     ]);
 
     await createDetermineSharedExternals(config, adapters)();
-
-    expect(rows()).toEqual([
+    const cold = rows();
+    expect(cold).toEqual([
       majorityRow('22.3.0', 3),
       '22.2.0:skip:[team/mfe-a]',
       '22.2.0:scope:[team/mfe-c]',
     ]);
+
+    // Exactly what the cold run persisted, handed back as a warm init reads it.
+    const warm = structuredClone(adapters.sharedExternalsRepo.getFromScope(undefined)['dep-a']!);
+    warm.dirty = true;
+    adapters.sharedExternalsRepo.addOrUpdate('dep-a', warm, undefined);
+
+    await createDetermineSharedExternals(config, adapters)();
+
+    expect(rows()).toEqual(cold);
   });
 });

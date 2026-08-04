@@ -166,7 +166,7 @@ describe('pooling: per-copy verdicts (F-F)', () => {
     expect(findIncoherentRemotes({ importMap, members: stored(), scopeUrls: SCOPE })).toEqual([]);
   });
 
-  it('shares the pinner\'s tag with a co-tagged joiner that accepts the winner', async () => {
+  it("shares the pinner's tag with a co-tagged joiner that accepts the winner", async () => {
     // mfe1 and mfe2 are already committed, so 22.1.0 wins on cost and mfe3 joins into mfe2's row.
     // mfe3 ships only `core`, so its "whole family" is one member: this instance separates fix (1)
     // from a gate-1-only fix, which would silence the warning but keep the download.

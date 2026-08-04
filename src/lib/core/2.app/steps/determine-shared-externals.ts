@@ -115,7 +115,7 @@ export function createDetermineSharedExternals(
     }
 
     const acceptance = versionAcceptance(external, isCompatible);
-    const { accepts, demands } = acceptance;
+    const { accepts } = acceptance;
 
     let sharedVersion = external.versions.find(v => v.host);
 
@@ -127,21 +127,38 @@ export function createDetermineSharedExternals(
       // find version with least extra downloads, sorted by SEMVER version (O^2 complexity)
       let leastExtraDownloads = Number.MAX_VALUE;
       let leastTears = Number.MAX_VALUE;
-      // A scoped version serves every remote from its own build, so it costs one download per
-      // uncached copy — not one per version. Precomputed: the selection loop is O(versions²).
-      const scopeCost = new Map<SharedVersion, number>(
-        external.versions.map(v => [v, v.remotes.reduce((n, r) => n + (r.cached ? 0 : 1), 0)])
+      // What a rejected version really costs: `applyWinner` splits it, so only the copies that
+      // themselves reject the winner keep their own build. Grouped by range and counted, because the
+      // selection loop is O(versions²) and must not also scale with remote count — the reason
+      // `versionDemands` dedups. Cached copies are already downloaded, non-strict ones take whatever is
+      // shared, so neither can cost anything.
+      const selfServing = new Map<SharedVersion, { requiredVersion: string; copies: number }[]>(
+        external.versions.map(v => {
+          const groups = new Map<string, { requiredVersion: string; copies: number }>();
+          for (const remote of v.remotes) {
+            if (remote.cached || !remote.strictVersion) continue;
+            const group = groups.get(remote.requiredVersion);
+            if (group) group.copies++;
+            else
+              groups.set(remote.requiredVersion, {
+                requiredVersion: remote.requiredVersion,
+                copies: 1,
+              });
+          }
+          return [v, [...groups.values()]];
+        })
       );
+
+      const costOf = (version: SharedVersion, tag: string) =>
+        selfServing
+          .get(version)!
+          .reduce((n, g) => (isCompatible(tag, g.requiredVersion) ? n : n + g.copies), 0);
+
       external.versions.forEach(vA => {
-        // A version costs extra downloads when one of its remotes pinned a range that vA's
-        // tag does not satisfy and has not been downloaded yet.
         const extraDownloads = external.versions.reduce(
-          (sum, vB) =>
-            demands(vB).some(
-              d => !d.cached && d.strictVersion && !isCompatible(vA.tag, d.requiredVersion)
-            )
-              ? sum + scopeCost.get(vB)!
-              : sum,
+          // A copy of the winner is never redirected, so it never self-serves however its own range
+          // reads — see `applyWinner`, which does not split the winner either.
+          (sum, vB) => (vB === vA ? sum : sum + costOf(vB, vA.tag)),
           0
         );
         // Tiebreak equal-download candidates toward the one that leaves fewest entrypoints

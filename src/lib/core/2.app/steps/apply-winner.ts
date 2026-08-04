@@ -13,8 +13,6 @@ export type VersionAcceptance = {
   // so it keeps its own build instead of being deduped away. One is enough for the message and the
   // strict check; `applyWinner` enumerates the rest itself when it splits the version.
   objector: (version: SharedVersion, tag: string) => SharedVersionMeta | undefined;
-  // For callers asking a question of their own, e.g. the resolver's extra-download count.
-  demands: (version: SharedVersion) => SharedVersionMeta[];
 };
 
 // Every compatibility question is asked of the whole version, not of its basis: see `versionDemands`.
@@ -32,7 +30,6 @@ export function versionAcceptance(
       demands.get(version)!.every(d => isCompatible(tag, d.requiredVersion)),
     objector: (version, tag) =>
       demands.get(version)!.find(d => d.strictVersion && !isCompatible(tag, d.requiredVersion)),
-    demands: version => demands.get(version)!,
   };
 }
 
