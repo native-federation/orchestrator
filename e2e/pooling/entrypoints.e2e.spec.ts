@@ -188,9 +188,19 @@ test.describe('entrypoint coverage: a remote joining an already-resolved version
     expect((await nf.load('team/mfe1')).seen[`${M}/table`]).toBe(build(1, '22.1.0'));
   });
 
-  test('reaches the same verdict incrementally as it does cold', async ({ nf }) => {
-    // The regression itself: joining an existing tag must dirty the external. If it does not, the
-    // incremental portfolio keeps the stale verdict and diverges from the cold one.
+  test('resolves the cold portfolio to an equal-cost winner of its own', async ({ nf }) => {
+    // Same three remotes as the test above, assembled in one go. It used to reach the same verdict, and
+    // that was an artefact of the objective charging a rejected version for every copy: electing 22.1.0
+    // looked like two downloads against 22.0.5's one. Priced per copy — only mfe3 pins — both cost one,
+    // and a genuine tie breaks toward the newest tag.
+    //
+    // Cost is unchanged either way: two builds on the page. Here mfe1 serves its own 22.1.0 with mfe2
+    // deduping onto it (`^22.0.0` accepts it) and mfe3 alone self-serving; incrementally, mfe1's copy is
+    // already downloaded, so giving it up is free and 22.0.5 wins instead. That is the cost model working
+    // as designed — a cached copy costs nothing — not a divergence to fix.
+    //
+    // What the regression above guards is unaffected and still asserted there: joining an existing tag
+    // dirties the external, so the incremental portfolio re-resolves rather than keeping a stale verdict.
     const portfolio = [
       remote('team/mfe1', SCOPE.mfe1, [
         dep(M, '22.1.0', { req: '~22.1.0', entrypoints: ['/table'] }),
@@ -205,7 +215,14 @@ test.describe('entrypoint coverage: a remote joining an already-resolved version
 
     await nf.init(portfolio);
 
-    expect(storedActions(await nf.store(), M)).toEqual(['22.1.0:scope', '22.0.5:share']);
-    expect((await nf.map()).imports[`${M}/table`]).toBe(`${SCOPE.mfe2}${M}/table.js`);
+    // 22.0.5 splits: mfe2 dedups onto the winner, mfe3's pin keeps its own build.
+    expect(storedActions(await nf.store(), M)).toEqual([
+      '22.1.0:share',
+      '22.0.5:skip',
+      '22.0.5:scope',
+    ]);
+    expect((await nf.map()).imports[`${M}/table`]).toBe(`${SCOPE.mfe1}${M}/table.js`);
+    expect((await nf.load('team/mfe2')).seen[`${M}/table`]).toBe(build(1, '22.1.0'));
+    expect((await nf.load('team/mfe3')).seen[`${M}/table`]).toBe(build(3, '22.0.5'));
   });
 });

@@ -8,6 +8,9 @@ import { createSharedExternalsRepository } from 'lib/core/3.adapters/storage/sha
 import { createVersionCheck } from 'lib/core/3.adapters/checks/version.check';
 import { globalThisStorageEntry } from 'lib/core/4.config/storage/global-this.storage';
 import { createDetermineSharedExternals } from './determine-shared-externals';
+import { createProcessRemoteEntries } from './process-remote-entries';
+import { mockRemoteEntry_MFE2 } from 'lib/testing/domain/remote-entry/remote-entry.mock';
+import { mockSharedInfo } from 'lib/testing/domain/remote-entry/shared-info.mock';
 
 /**
  * Verdict granularity: `applyWinner` marks the copies that objected, not the rows they sit in. The whole
@@ -280,6 +283,55 @@ describe('determine: splitting a version on election', () => {
 
       expect(rows()).toEqual(['2.3.0:share:[team/a1]', '2.1.0:skip:[team/b1,team/b2]']);
     });
+  });
+
+  it('routes a joiner at a split tag into the deduping row, then re-splits it', async () => {
+    // `findVersionForTag` prefers the non-`scope` row, so a joiner at a tag that now has two lands in the
+    // one that dedups whatever its own range says. That is only correct because joining dirties the
+    // external: the re-election that follows is what puts it where it belongs.
+    seed([
+      majority('2.2.0', 4),
+      version('2.1.0', [
+        { remote: 'team/mfe-a', req: '^2.1.0' },
+        { remote: 'team/mfe-c', req: '~2.1.0' },
+      ]),
+    ]);
+    await createDetermineSharedExternals(config, adapters)();
+
+    await createProcessRemoteEntries(
+      config,
+      adapters
+    )([
+      mockRemoteEntry_MFE2({
+        shared: [
+          mockSharedInfo('dep-a', {
+            singleton: true,
+            version: '2.1.0',
+            requiredVersion: '~2.1.0', // rejects the 2.2.0 winner, like mfe-c
+            strictVersion: true,
+          }),
+        ],
+      }),
+    ]);
+
+    // Landed in the `skip` row beside a copy whose range accepts the winner, which on its own would have
+    // it dedup onto a tag it rejects.
+    expect(rows()).toEqual([
+      majorityRow('2.2.0', 4),
+      '2.1.0:skip:[team/mfe-a,team/mfe2]',
+      '2.1.0:scope:[team/mfe-c]',
+    ]);
+
+    await createDetermineSharedExternals(config, adapters)();
+
+    // Re-split, and merged with the scope row that was already there rather than left as a second one at
+    // the same tag: `findVersionForTag` and `rebuildMember` both read a tag as at most one row per action.
+    // Within a scope row the order is immaterial — every copy self-serves, so `remotes[0]` is not a basis.
+    expect(rows()).toEqual([
+      majorityRow('2.2.0', 4),
+      '2.1.0:skip:[team/mfe-a]',
+      '2.1.0:scope:[team/mfe2,team/mfe-c]',
+    ]);
   });
 
   it('re-elects a record it has already split to the same thing', async () => {

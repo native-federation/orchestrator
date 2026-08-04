@@ -103,7 +103,21 @@ export function createApplyWinner(config: LoggingConfig & ModeConfig) {
         rebuilt.push({ tag: v.tag, host: false, action: 'scope', remotes: [...objecting] });
       }
 
-      external.versions = rebuilt;
+      // One row per (tag, action). A warm record can already hold a `scope` row at the tag a split
+      // produces — a joiner lands in the deduping row of a split tag and re-splits out of it — and both
+      // `findVersionForTag` and `rebuildMember` read a tag as at most one row per action. Merged after the
+      // loop, not during it: a row's verdict is not final until the winner has been applied to it.
+      const merged = new Map<string, SharedVersion>();
+      external.versions = rebuilt.filter(v => {
+        const first = merged.get(`${v.tag}|${v.action}`);
+        if (!first) {
+          merged.set(`${v.tag}|${v.action}`, v);
+          return true;
+        }
+        first.remotes.push(...v.remotes);
+        first.host ||= v.host;
+        return false;
+      });
     }
 
     winner.action = 'share';

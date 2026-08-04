@@ -11,6 +11,7 @@ import { globalThisStorageEntry } from 'lib/core/4.config/storage/global-this.st
 import { createDetermineSharedExternals } from '../determine-shared-externals';
 import { createPoolSharedExternals } from './pool-shared-externals';
 import { createGenerateImportMap } from '../generate-import-map';
+import { findIncoherentRemotes } from 'lib/testing/pooling/no-tear';
 
 /**
  * Permanent regression guard for #63, end to end through determine → pooling → import map.
@@ -87,10 +88,24 @@ describe('pooling: family coherence', () => {
       undefined
     );
 
+  // Every fixture in this file has to satisfy I3, so it is asserted here rather than test by test: no
+  // non-host remote may resolve a combination of tags that no single build shipped. `team/host` is the
+  // only exemption, since a host cannot be repointed onto another build.
   const runInit = async () => {
     const touched = await createDetermineSharedExternals(config, adapters)();
     await createPoolSharedExternals(config, adapters)(touched);
-    return createGenerateImportMap(config, adapters)();
+    const importMap = await createGenerateImportMap(config, adapters)();
+
+    expect(
+      findIncoherentRemotes({
+        importMap,
+        members: adapters.sharedExternalsRepo.getFromScope(undefined),
+        scopeUrls: SCOPE,
+        hosts: ['team/host'],
+      })
+    ).toEqual([]);
+
+    return importMap;
   };
 
   it('islands the remote that would mix builds when a strict pin drags one member down', async () => {

@@ -21,6 +21,7 @@ import { createUpdateCache } from '../update-cache';
 import { createPoolDynamicExternals } from './pool-dynamic-externals';
 import { createConvertToImportMap } from '../convert-to-import-map';
 import { committedView } from './anchoring';
+import { findIncoherentRemotes } from 'lib/testing/pooling/no-tear';
 
 /**
  * End-to-end coherence through determine → pooling → import map. Pooling does not make a family resolve
@@ -88,10 +89,22 @@ describe('pooling (integration)', () => {
     );
 
   // Threads determine's touched-externals signal into pooling exactly as init.flow does.
+  // I3 holds for every fixture here too, so it is asserted centrally: no remote may resolve a combination
+  // of tags that no single build shipped. None of these portfolios has a host.
   const runInit = async () => {
     const touched = await createDetermineSharedExternals(config, adapters)();
     await createPoolSharedExternals(config, adapters)(touched);
-    return createGenerateImportMap(config, adapters)();
+    const importMap = await createGenerateImportMap(config, adapters)();
+
+    expect(
+      findIncoherentRemotes({
+        importMap,
+        members: adapters.sharedExternalsRepo.getFromScope(undefined),
+        scopeUrls: SCOPE,
+      })
+    ).toEqual([]);
+
+    return importMap;
   };
 
   it('keeps an entire compatible @framework family on a single remote build', async () => {
