@@ -300,8 +300,8 @@
   ],
   "exposes": [
     {
-      "key": "./Component",
-      "outFileName": "Component-GNXCPTEB.js"
+      "key": "./comp-a",
+      "outFileName": "comp-a.js"
     }
   ]
 }

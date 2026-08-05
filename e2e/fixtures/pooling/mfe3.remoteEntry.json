@@ -2,8 +2,8 @@
   "name": "team/mfe3",
   "exposes": [
     {
-      "key": "./Component",
-      "outFileName": "Component-L9TQ4WBX.js"
+      "key": "./comp-a",
+      "outFileName": "comp-a.js"
     }
   ],
   "shared": [

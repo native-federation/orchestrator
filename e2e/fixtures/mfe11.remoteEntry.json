@@ -189,12 +189,12 @@
   ],
   "exposes": [
     {
-      "key": "./shell",
-      "outFileName": "shell-NW0J6Y5T.js"
+      "key": "./comp-a",
+      "outFileName": "comp-a.js"
     },
     {
-      "key": "nav-contribution",
-      "outFileName": "nav-contribution-JFA0_U1_.js"
+      "key": "./comp-b",
+      "outFileName": "comp-b.js"
     }
   ],
   "chunks": {

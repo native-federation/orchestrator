@@ -143,13 +143,13 @@
   ],
   "exposes": [
     {
-      "key": "./tokens",
-      "outFileName": "tokens-RLI8LDC5.js"
+      "key": "./comp-a",
+      "outFileName": "comp-a.js"
     },
     {
-      "key": "ds-button",
-      "outFileName": "ds-button-LBAMQKOM.js",
-      "element": "ds-button"
+      "key": "./comp-b",
+      "outFileName": "comp-b.js",
+      "element": "comp-b"
     }
   ],
   "chunks": {

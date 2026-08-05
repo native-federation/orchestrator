@@ -118,12 +118,12 @@
   ],
   "exposes": [
     {
-      "key": "./mutations",
-      "outFileName": "mutations-7NKMUZ5W.js"
+      "key": "./comp-a",
+      "outFileName": "comp-a.js"
     },
     {
-      "key": "./actions",
-      "outFileName": "actions-LNTRUZZD.js"
+      "key": "./comp-b",
+      "outFileName": "comp-b.js"
     }
   ],
   "chunks": {

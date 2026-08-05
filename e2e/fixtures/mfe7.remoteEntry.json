@@ -94,8 +94,8 @@
   ],
   "exposes": [
     {
-      "key": "support-widget",
-      "outFileName": "support-widget-U7BLZHSK.js"
+      "key": "./comp-a",
+      "outFileName": "comp-a.js"
     }
   ],
   "chunks": {
@@ -112,9 +112,6 @@
     "browser-rxjs": [
       "chunk-64WOUHHJ.js"
     ],
-    "mapping-or-exposed": [
-      "ubuntu-v15-latin-regular.woff2",
-      "ubuntu-v15-latin-500.woff2"
-    ]
+    "mapping-or-exposed": []
   }
 }

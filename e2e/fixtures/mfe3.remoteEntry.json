@@ -129,12 +129,12 @@
   ],
   "exposes": [
     {
-      "key": "./settings",
-      "outFileName": "settings-DE7ZHDAS.js"
+      "key": "./comp-a",
+      "outFileName": "comp-a.js"
     },
     {
-      "key": "./actions",
-      "outFileName": "actions-5X22VHSJ.js"
+      "key": "./comp-b",
+      "outFileName": "comp-b.js"
     }
   ],
   "chunks": {

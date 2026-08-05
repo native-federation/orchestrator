@@ -94,8 +94,8 @@
   ],
   "exposes": [
     {
-      "key": "./tag-picker",
-      "outFileName": "tag-picker-ZN44DAGS.js"
+      "key": "./comp-a",
+      "outFileName": "comp-a.js"
     }
   ],
   "chunks": {

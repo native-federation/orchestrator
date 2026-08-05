@@ -2,8 +2,8 @@
   "name": "team/mfe1",
   "exposes": [
     {
-      "key": "./Component",
-      "outFileName": "Component-QWMB3H7L.js"
+      "key": "./comp-a",
+      "outFileName": "comp-a.js"
     }
   ],
   "shared": [

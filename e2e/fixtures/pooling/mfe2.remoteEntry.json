@@ -2,8 +2,8 @@
   "name": "team/mfe2",
   "exposes": [
     {
-      "key": "./Component",
-      "outFileName": "Component-Z3NF8KDR.js"
+      "key": "./comp-a",
+      "outFileName": "comp-a.js"
     }
   ],
   "shared": [

@@ -84,8 +84,8 @@
   ],
   "exposes": [
     {
-      "key": "./pinned-form",
-      "outFileName": "pinned-form-SKQ_C3WD.js"
+      "key": "./comp-a",
+      "outFileName": "comp-a.js"
     }
   ],
   "chunks": {

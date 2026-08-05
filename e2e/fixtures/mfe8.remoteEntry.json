@@ -145,8 +145,8 @@
   ],
   "exposes": [
     {
-      "key": "./widget",
-      "outFileName": "widget-3RZSHEJW.js"
+      "key": "./comp-a",
+      "outFileName": "comp-a.js"
     }
   ],
   "chunks": {

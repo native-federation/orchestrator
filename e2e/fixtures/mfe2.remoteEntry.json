@@ -184,16 +184,16 @@
   ],
   "exposes": [
     {
-      "key": "approval-status",
-      "outFileName": "approval-status-AVLQIABR.js"
+      "key": "./comp-a",
+      "outFileName": "comp-a.js"
     },
     {
-      "key": "submit-for-approval",
-      "outFileName": "submit-for-approval-OH54GS2H.js"
+      "key": "./comp-b",
+      "outFileName": "comp-b.js"
     },
     {
-      "key": "nav-contribution",
-      "outFileName": "nav-contribution-WJJZDQ5I.js"
+      "key": "./comp-c",
+      "outFileName": "comp-c.js"
     }
   ],
   "chunks": {

@@ -21,7 +21,10 @@ sees exactly the input it saw in production.
 - The one private package family became `@acme/shell/*`. A scoped name was replaced by another scoped
   name on purpose: auto-pooling groups on the npm scope (`/^@([^/]+)\//`), so flattening it would have
   changed pool membership.
-- Product-specific `exposes` keys and `outFileName`s became generic equivalents, content hashes kept.
+- Product-specific `exposes` keys and `outFileName`s became positional placeholders — `./comp-a`,
+  `comp-a.js`, `./comp-b`, … in every remote. Nothing reads an exposed key or file name (the harness
+  loads `exposes[0].key`, and no `integrity` or `chunks` entry points at an exposed bundle), so the
+  original names and their content hashes carried no signal worth keeping.
 
 `@internal/events` and `@nf-internal/chunk-*` were already generic and are unchanged.
 
