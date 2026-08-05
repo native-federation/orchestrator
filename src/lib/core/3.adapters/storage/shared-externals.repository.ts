@@ -56,7 +56,10 @@ const createSharedExternalsRepository = (config: StorageConfig): ForSharedExtern
           let removedCopy = false;
 
           for (let i = external.versions.length - 1; i >= 0; i--) {
-            const remotes = external.versions[i]!.remotes;
+            const version = external.versions[i]!;
+            const remotes = version.remotes;
+            // The host is `remotes[0]` of a flagged version, and the filter below is about to move it.
+            const host = version.host ? remotes[0]?.name : undefined;
 
             let keep = 0;
             for (let r = 0; r < remotes.length; r++) {
@@ -67,6 +70,8 @@ const createSharedExternalsRepository = (config: StorageConfig): ForSharedExtern
               remotes.length = keep;
               removedCopy = true;
               _dirty = true;
+              // Or `determine` keeps granting host precedence to a tag the host has left.
+              if (host !== undefined && remoteNames.has(host)) version.host = false;
             }
 
             if (remotes.length === 0) {

@@ -140,6 +140,44 @@ describe('createChunkRepository', () => {
     });
   });
 
+  describe('remove', () => {
+    // The whole remote goes, not just the bundles the replacement entry redeclares: a rebuild that
+    // stops chunking a bundle omits its key, so `addOrReplace` alone can never clear it.
+    it('should drop every bundle of the remote', () => {
+      const { chunksRepo, mockStorage } = setupWithCache({
+        'team/mfe1': {
+          'shared-browser': ['chunk-ABC.js'],
+          'mapping-or-exposed': ['chunk-DEF.js'],
+        },
+        'team/mfe2': { 'shared-browser': ['chunk-GHI.js'] },
+      });
+
+      chunksRepo.remove('team/mfe1');
+      chunksRepo.commit();
+
+      expect(mockStorage['shared-chunks']).toEqual({
+        'team/mfe2': { 'shared-browser': ['chunk-GHI.js'] },
+      });
+    });
+
+    it('should not persist anything when the remote has no chunks', () => {
+      const { entry, chunksRepo } = setupWithCache({
+        'team/mfe1': { 'shared-browser': ['chunk-ABC.js'] },
+      });
+
+      chunksRepo.remove('team/mfe2');
+      chunksRepo.commit();
+
+      expect(entry.set).not.toHaveBeenCalled();
+    });
+
+    it('should return the repository instance for chaining', () => {
+      const { chunksRepo } = setupWithCache({});
+
+      expect(chunksRepo.remove('team/mfe1')).toBe(chunksRepo);
+    });
+  });
+
   describe('commit', () => {
     it('should persist the cache after a mutation', () => {
       const { entry, chunksRepo } = setupWithCache({});

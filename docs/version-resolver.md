@@ -1484,7 +1484,8 @@ When a remote is marked for override by the orchestrator (`override: true`), the
 ```mermaid
 flowchart TD
     A[Remote marked as override] --> B[Remove from RemoteInfo cache]
-    B --> C[Remove from ScopedExternals cache]
+    B --> B2[Remove from SharedChunks cache]
+    B2 --> C[Remove from ScopedExternals cache]
     C --> D[Remove from SharedExternals cache (all scopes)]
     D --> E[Add new RemoteInfo to cache]
     E --> F[Process new externals normally]
@@ -1493,6 +1494,14 @@ flowchart TD
     G -->|singleton: true| H[Add to SharedExternals]
     G -->|singleton: false| I[Add to ScopedExternals]
 ```
+
+Each of those is a whole-remote removal, never a merge with what the replacement declares — a build that
+stops chunking a bundle omits the key rather than sending an empty list, so a per-bundle replace would
+leave the old chunk files mapped.
+
+Removing the host's copy also clears `SharedVersion.host`. On a flagged version `remotes[0]` is the host's
+copy, which is both what the import map publishes and what gives the version precedence; leaving the flag
+behind would let a tag the host has moved off outrank the one it now declares.
 
 ## Configuration
 

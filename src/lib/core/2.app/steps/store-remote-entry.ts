@@ -27,7 +27,10 @@ export type RemoveCachedRemoteEntries = (remoteNames: ReadonlySet<RemoteName>) =
  * pipeline evicts its whole override set at once, the dynamic pipeline passes a single name.
  */
 export function createRemoveCachedRemoteEntries(
-  ports: Pick<DrivingContract, 'remoteInfoRepo' | 'scopedExternalsRepo' | 'sharedExternalsRepo'>
+  ports: Pick<
+    DrivingContract,
+    'remoteInfoRepo' | 'scopedExternalsRepo' | 'sharedExternalsRepo' | 'sharedChunksRepo'
+  >
 ): RemoveCachedRemoteEntries {
   return remoteNames => {
     if (remoteNames.size === 0) return;
@@ -35,6 +38,7 @@ export function createRemoveCachedRemoteEntries(
     for (const remoteName of remoteNames) {
       ports.remoteInfoRepo.remove(remoteName);
       ports.scopedExternalsRepo.remove(remoteName);
+      ports.sharedChunksRepo.remove(remoteName);
     }
     ports.sharedExternalsRepo.removeFromAllScopes(remoteNames);
   };
