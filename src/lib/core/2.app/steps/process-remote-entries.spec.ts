@@ -41,6 +41,7 @@ describe('createProcessRemoteEntries', () => {
 
       expect(adapters.remoteInfoRepo.remove).toHaveBeenCalledWith('team/mfe1');
       expect(adapters.scopedExternalsRepo.remove).toHaveBeenCalledWith('team/mfe1');
+      expect(adapters.sharedChunksRepo.remove).toHaveBeenCalledWith('team/mfe1');
       expect(adapters.sharedExternalsRepo.removeFromAllScopes).toHaveBeenCalledWith(
         new Set(['team/mfe1'])
       );
@@ -98,6 +99,7 @@ describe('createProcessRemoteEntries', () => {
 
       expect(adapters.remoteInfoRepo.remove).not.toHaveBeenCalled();
       expect(adapters.scopedExternalsRepo.remove).not.toHaveBeenCalled();
+      expect(adapters.sharedChunksRepo.remove).not.toHaveBeenCalled();
       expect(adapters.sharedExternalsRepo.removeFromAllScopes).not.toHaveBeenCalled();
     });
 
@@ -108,6 +110,7 @@ describe('createProcessRemoteEntries', () => {
 
       expect(adapters.remoteInfoRepo.remove).not.toHaveBeenCalled();
       expect(adapters.scopedExternalsRepo.remove).not.toHaveBeenCalled();
+      expect(adapters.sharedChunksRepo.remove).not.toHaveBeenCalled();
       expect(adapters.sharedExternalsRepo.removeFromAllScopes).not.toHaveBeenCalled();
     });
   });

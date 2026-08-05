@@ -516,6 +516,62 @@ describe('createSharedExternalsRepository', () => {
       });
     });
 
+    // `determine` grants a version with `host: true` precedence over every other version of the external,
+    // and `hostRemotes` reads it to decide who pooling may never repoint. Both then take `remotes[0]` for
+    // the host — so leaving the flag on a version the host just left hands both to whoever moved up, and a
+    // host that moved to another tag loses to the tag it abandoned.
+    it('should clear the host flag when the leading copy is evicted', () => {
+      const version = mockVersion.shared(v2_1_2, 'dep-a', { remotes: ['host', 'team/mfe1'] });
+
+      const { externalsRepo } = setupWithCache({
+        [GLOBAL_SCOPE]: { 'dep-a': { dirty: false, versions: [version] } },
+      });
+
+      externalsRepo.removeFromAllScopes(new Set(['host']));
+
+      const external = externalsRepo.tryGet('dep-a').get()!;
+      expect(external.versions[0]!.remotes.map(r => r.name)).toEqual(['team/mfe1']);
+      expect(external.versions[0]!.host).toBe(false);
+    });
+
+    it('should keep the host flag when a trailing copy is evicted', () => {
+      const version = mockVersion.shared(v2_1_2, 'dep-a', { remotes: ['host', 'team/mfe1'] });
+
+      const { externalsRepo } = setupWithCache({
+        [GLOBAL_SCOPE]: { 'dep-a': { dirty: false, versions: [version] } },
+      });
+
+      externalsRepo.removeFromAllScopes(new Set(['team/mfe1']));
+
+      expect(externalsRepo.tryGet('dep-a').get()!.versions[0]!.host).toBe(true);
+    });
+
+    it('should leave the host flag of a version that keeps every copy', () => {
+      const hostVersion = mockVersion.shared(v2_1_2, 'dep-a', { remotes: ['host'] });
+      const otherVersion = mockVersion.shared(v2_1_1, 'dep-a', { remotes: ['team/mfe1'] });
+
+      const { externalsRepo } = setupWithCache({
+        [GLOBAL_SCOPE]: { 'dep-a': { dirty: false, versions: [hostVersion, otherVersion] } },
+      });
+
+      externalsRepo.removeFromAllScopes(new Set(['team/mfe1']));
+
+      expect(externalsRepo.tryGet('dep-a').get()!.versions[0]!.host).toBe(true);
+    });
+
+    // A non-host version is untouched: the rule only reads `remotes[0]` where the flag says it is the host.
+    it('should not flag a version that never had a host', () => {
+      const version = mockVersion.shared(v2_1_2, 'dep-a', { remotes: ['team/mfe1', 'team/mfe2'] });
+
+      const { externalsRepo } = setupWithCache({
+        [GLOBAL_SCOPE]: { 'dep-a': { dirty: false, versions: [version] } },
+      });
+
+      externalsRepo.removeFromAllScopes(new Set(['team/mfe1']));
+
+      expect(externalsRepo.tryGet('dep-a').get()!.versions[0]!.host).toBe(false);
+    });
+
     it('should remove a batch of remotes in one traversal', () => {
       const versionA1 = mockVersion.shared(v2_1_2, 'dep-a', {
         remotes: ['team/mfe1', 'team/mfe2', 'team/mfe3'],

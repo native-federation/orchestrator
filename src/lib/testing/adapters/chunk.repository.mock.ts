@@ -4,6 +4,7 @@ import { Optional } from 'lib/utils/optional';
 
 export const mockChunkRepository = (): Mocked<ForSharedChunksStorage> => ({
   addOrReplace: vi.fn(),
+  remove: vi.fn(),
   commit: vi.fn(),
   tryGet: vi.fn((_a, _b) => Optional.empty<string[]>()),
 });

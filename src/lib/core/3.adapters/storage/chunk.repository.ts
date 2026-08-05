@@ -19,6 +19,14 @@ const createChunkRepository = (config: StorageConfig): ForSharedChunksStorage =>
       _dirty = true;
       return this;
     },
+    // Whole-remote: a build that stops chunking a bundle omits the key, so `addOrReplace` cannot clear it.
+    remove: function (remoteName: string) {
+      if (remoteName in _cache) {
+        delete _cache[remoteName];
+        _dirty = true;
+      }
+      return this;
+    },
     tryGet: function (remoteName: string, bundleName: string) {
       return Optional.of(_cache[remoteName]?.[bundleName]);
     },
