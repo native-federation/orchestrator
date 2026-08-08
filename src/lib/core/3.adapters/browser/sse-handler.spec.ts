@@ -51,6 +51,8 @@ describe('createSSEHandler', () => {
   });
 
   afterEach(() => {
+    // Unbinds the window listeners; handlers left bound would react to later tests' events.
+    sseHandler.closeAll();
     vi.restoreAllMocks();
     delete (window as any).EventSource;
   });
@@ -165,6 +167,199 @@ describe('createSSEHandler', () => {
       mockEventSource.onmessage!(event);
 
       expect(config.log.debug).toHaveBeenCalledWith(0, '[SSE] Rebuild completed, reloading...');
+      expect(config.reloadBrowserFn).toHaveBeenCalled();
+    });
+
+    it('should open only one EventSource per endpoint', () => {
+      const endpoint = 'https://example.com/sse-endpoint';
+
+      sseHandler.watchRemoteBuilds(endpoint);
+      sseHandler.watchRemoteBuilds(endpoint);
+      sseHandler.watchRemoteBuilds(endpoint);
+
+      expect(eventSourceConstructorSpy).toHaveBeenCalledTimes(1);
+      expect(config.log.debug).toHaveBeenCalledWith(0, `[SSE] Already watching '${endpoint}'`);
+    });
+  });
+
+  describe('closeAll', () => {
+    it('should close every open EventSource', () => {
+      sseHandler.watchRemoteBuilds('https://example.com/a');
+      sseHandler.watchRemoteBuilds('https://example.com/b');
+
+      sseHandler.closeAll();
+
+      expect(mockEventSource.close).toHaveBeenCalledTimes(2);
+    });
+
+    it('should allow an endpoint to be watched again afterwards', () => {
+      const endpoint = 'https://example.com/sse-endpoint';
+
+      sseHandler.watchRemoteBuilds(endpoint);
+      sseHandler.closeAll();
+      sseHandler.watchRemoteBuilds(endpoint);
+
+      expect(eventSourceConstructorSpy).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  describe('back/forward cache', () => {
+    // The handler reads `persisted` to tell a frozen page from an unloading one.
+    function firePageEvent(type: 'pagehide' | 'pageshow', persisted: boolean) {
+      const event = new Event(type);
+      Object.defineProperty(event, 'persisted', { value: persisted });
+      window.dispatchEvent(event);
+    }
+
+    it('should close the stream when the page is frozen into the cache', () => {
+      sseHandler.watchRemoteBuilds('https://example.com/sse-endpoint');
+
+      firePageEvent('pagehide', true);
+
+      expect(mockEventSource.close).toHaveBeenCalledTimes(1);
+    });
+
+    it('should leave an unloading page alone', () => {
+      sseHandler.watchRemoteBuilds('https://example.com/sse-endpoint');
+
+      firePageEvent('pagehide', false);
+
+      expect(mockEventSource.close).not.toHaveBeenCalled();
+    });
+
+    it('should reopen the stream when a cached page is restored', () => {
+      const endpoint = 'https://example.com/sse-endpoint';
+      sseHandler.watchRemoteBuilds(endpoint);
+
+      firePageEvent('pagehide', true);
+      firePageEvent('pageshow', true);
+
+      expect(eventSourceConstructorSpy).toHaveBeenCalledTimes(2);
+      expect(eventSourceConstructorSpy).toHaveBeenNthCalledWith(2, endpoint);
+    });
+
+    it('should not reopen a stream that was never watched', () => {
+      firePageEvent('pageshow', true);
+
+      expect(eventSourceConstructorSpy).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('leader election', () => {
+    // Mirrors the constant in sse-handler.ts.
+    const RELAY_CHANNEL = 'native-federation-sse';
+    const endpoint = 'https://example.com/sse-endpoint';
+
+    let pendingLocks: { name: string; grant: () => unknown }[];
+    let leaderHandler: ForSSE;
+    let probe: BroadcastChannel | undefined;
+
+    // Stands in for navigator.locks, which jsdom does not implement. A request stays
+    // queued until the test calls grant(), the way a lock held by another tab would.
+    beforeEach(() => {
+      pendingLocks = [];
+      const locks = {
+        request: vi.fn(
+          (name: string, options: { signal: AbortSignal }, callback: () => unknown) => {
+            pendingLocks.push({ name, grant: callback });
+            return new Promise((_resolve, reject) => {
+              options.signal.addEventListener('abort', () => reject(new Error('AbortError')));
+            });
+          }
+        ),
+        query: vi.fn(),
+      };
+
+      Object.defineProperty(navigator, 'locks', { value: locks, configurable: true });
+      leaderHandler = createSSEHandler(config);
+    });
+
+    afterEach(() => {
+      leaderHandler.closeAll();
+      probe?.close();
+      probe = undefined;
+      delete (navigator as any).locks;
+    });
+
+    const tick = () => new Promise(resolve => setTimeout(resolve, 0));
+
+    it('should request one lock per endpoint', () => {
+      leaderHandler.watchRemoteBuilds(endpoint);
+      leaderHandler.watchRemoteBuilds('https://example.com/other');
+
+      expect(pendingLocks.map(lock => lock.name)).toEqual([
+        `native-federation-sse:${endpoint}`,
+        'native-federation-sse:https://example.com/other',
+      ]);
+    });
+
+    it('should not open a stream while another tab holds the lock', () => {
+      leaderHandler.watchRemoteBuilds(endpoint);
+
+      expect(eventSourceConstructorSpy).not.toHaveBeenCalled();
+    });
+
+    it('should open the stream once the lock is granted', () => {
+      leaderHandler.watchRemoteBuilds(endpoint);
+
+      pendingLocks[0]!.grant();
+
+      expect(eventSourceConstructorSpy).toHaveBeenCalledWith(endpoint);
+      expect(config.log.debug).toHaveBeenCalledWith(
+        0,
+        `[SSE] Holding the connection for '${endpoint}'`
+      );
+    });
+
+    it('should withdraw a queued lock request on closeAll', async () => {
+      leaderHandler.watchRemoteBuilds(endpoint);
+
+      leaderHandler.closeAll();
+      await tick();
+
+      expect(config.log.debug).toHaveBeenCalledWith(
+        0,
+        `[SSE] Released the connection for '${endpoint}'`
+      );
+    });
+
+    it('should not open a stream for a lock granted after closeAll', () => {
+      leaderHandler.watchRemoteBuilds(endpoint);
+      leaderHandler.closeAll();
+
+      pendingLocks[0]!.grant();
+
+      expect(eventSourceConstructorSpy).not.toHaveBeenCalled();
+    });
+
+    it('should tell the other tabs to reload when the build completes', async () => {
+      const received = vi.fn();
+      probe = new BroadcastChannel(RELAY_CHANNEL);
+      probe.onmessage = received;
+
+      leaderHandler.watchRemoteBuilds(endpoint);
+      pendingLocks[0]!.grant();
+
+      mockEventSource.onmessage!({
+        data: JSON.stringify({ type: BuildNotificationType.COMPLETED }),
+      } as MessageEvent);
+      await tick();
+
+      expect(received).toHaveBeenCalledTimes(1);
+      expect(received.mock.calls[0]![0].data).toEqual({ endpoint });
+    });
+
+    it('should reload when another tab reports a completed build', async () => {
+      leaderHandler.watchRemoteBuilds(endpoint);
+
+      probe = new BroadcastChannel(RELAY_CHANNEL);
+      probe.postMessage({ endpoint });
+      await tick();
+
+      expect(config.log.debug).toHaveBeenCalledWith(
+        0,
+        '[SSE] Rebuild completed in another tab, reloading...'
+      );
       expect(config.reloadBrowserFn).toHaveBeenCalled();
     });
   });
