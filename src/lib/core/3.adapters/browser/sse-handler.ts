@@ -12,14 +12,6 @@ type Subscription = {
   releaseLock?: () => void;
 };
 
-/**
- * Watches for federation build completion events and automatically reloads the page.
- *
- * This function establishes a Server-Sent Events (SSE) connection to listen for
- * 'federation-rebuild-complete' notifications. When a build completes successfully,
- * it triggers a page reload to reflect the latest changes.
- * @param endpoint - The SSE endpoint URL to watch for build notifications.
- */
 const createSSEHandler = (config: ImportMapConfig & LoggingConfig): ForSSE => {
   const subscriptions = new Map<string, Subscription>();
 
