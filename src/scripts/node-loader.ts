@@ -41,6 +41,8 @@ const baseURL = (() => {
 
 let activeMap: ImportMap = EMPTY_MAP;
 let hostInstanceKeys: HostInstanceKeys = Object.create(null);
+// Fallback parent when context.parentURL arrives empty (seen under module.register()'s worker-thread hook).
+let lastRemoteBaseURL: string | undefined;
 
 export function initialize(data: InitData = {}): void {
   if (data.initialImportMap) {
@@ -74,7 +76,30 @@ export async function resolve(
   if (Object.prototype.hasOwnProperty.call(hostInstanceKeys, specifier)) {
     return { url: HOST_PREFIX + encodeURIComponent(specifier), shortCircuit: true };
   }
-  const mapped = resolveSpecifier(activeMap, specifier, context.parentURL);
+  // context.parentURL can be an empty string (not just missing) here; treat it as absent.
+  const effectiveParent = context.parentURL || lastRemoteBaseURL;
+  let mapped = resolveSpecifier(activeMap, specifier, effectiveParent);
+
+  // Not every relative/absolute specifier has an import-map entry (e.g. a sibling chunk); resolve those directly.
+  if (!mapped) {
+    const isRelative =
+      specifier.startsWith('/') || specifier.startsWith('./') || specifier.startsWith('../');
+    try {
+      if (isRelative && effectiveParent) {
+        mapped = new URL(specifier, effectiveParent).href;
+      } else if (/^https?:\/\//.test(specifier)) {
+        mapped = specifier;
+      }
+    } catch {
+      // fall through to nextResolve, which will surface the original error
+    }
+  }
+
+  // nextResolve() can't handle absolute http(s) URLs (throws ERR_INVALID_URL); short-circuit like load() does.
+  if (mapped && (mapped.startsWith('http://') || mapped.startsWith('https://'))) {
+    return { url: mapped, format: 'module', shortCircuit: true };
+  }
+
   return nextResolve(mapped ?? specifier, context);
 }
 
@@ -83,6 +108,7 @@ type LoadResult = {
   format: string;
   source?: string | ArrayBuffer | Uint8Array;
   shortCircuit?: boolean;
+  responseURL?: string;
 };
 type NextLoad = (url: string, context?: LoadContext) => Promise<LoadResult>;
 
@@ -100,12 +126,13 @@ export async function load(
     };
   }
   if (url.startsWith('http://') || url.startsWith('https://')) {
+    lastRemoteBaseURL = url;
     const res = await fetch(url);
     if (!res.ok) {
       throw new Error(`Failed to fetch module from ${url}: ${res.status} ${res.statusText}`);
     }
     const source = await res.text();
-    return { shortCircuit: true, format: 'module', source };
+    return { shortCircuit: true, format: 'module', source, responseURL: url };
   }
   if (!url.startsWith('node:')) {
     context.format = 'module';

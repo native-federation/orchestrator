@@ -164,6 +164,61 @@ describe('node-loader hooks', () => {
         parentURL: 'file:///apps/b/entry.mjs',
       });
     });
+
+    it('short-circuits an http(s) mapped specifier instead of handing it to nextResolve', async () => {
+      const loader = await freshLoader();
+      loader.initialize({
+        initialImportMap: { imports: { remote: 'https://host/remote/remoteEntry.mjs' } },
+      });
+      const next = vi.fn();
+
+      const result = await loader.resolve('remote', {}, next);
+
+      expect(result).toEqual({
+        url: 'https://host/remote/remoteEntry.mjs',
+        format: 'module',
+        shortCircuit: true,
+      });
+      expect(next).not.toHaveBeenCalled();
+    });
+
+    it('resolves a relative sibling-chunk specifier against parentURL without an import-map entry', async () => {
+      const loader = await freshLoader();
+      const next = vi.fn();
+
+      const result = await loader.resolve(
+        './chunk-abc.js',
+        { parentURL: 'https://host/remote/entry.js' },
+        next
+      );
+
+      expect(result).toEqual({
+        url: 'https://host/remote/chunk-abc.js',
+        format: 'module',
+        shortCircuit: true,
+      });
+      expect(next).not.toHaveBeenCalled();
+    });
+
+    it('falls back to the last loaded remote URL when parentURL arrives empty', async () => {
+      const loader = await freshLoader();
+      global.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        text: () => Promise.resolve('export {};'),
+      } as unknown as Response);
+      // Simulate resolve() receiving an empty parentURL after load() recorded the remote base.
+      await loader.load('https://host/remote/entry.js', {}, vi.fn());
+      const next = vi.fn();
+
+      const result = await loader.resolve('./chunk-abc.js', { parentURL: '' }, next);
+
+      expect(result).toEqual({
+        url: 'https://host/remote/chunk-abc.js',
+        format: 'module',
+        shortCircuit: true,
+      });
+      expect(next).not.toHaveBeenCalled();
+    });
   });
 
   describe('host instances', () => {
@@ -258,6 +313,7 @@ describe('node-loader hooks', () => {
         shortCircuit: true,
         format: 'module',
         source: 'export const x = 1;',
+        responseURL: 'http://example.com/m.mjs',
       });
       expect(next).not.toHaveBeenCalled();
     });
