@@ -38,7 +38,7 @@ const createSSEHandler = (config: ImportMapConfig & LoggingConfig): ForSSE => {
     config.reloadBrowserFn();
   }
 
-  function openEventSource(endpoint: string): EventSource {
+  function openEventSource(endpoint: string, subscription: Subscription): EventSource {
     const eventSource = new EventSource(endpoint);
 
     eventSource.onmessage = function (event) {
@@ -51,6 +51,12 @@ const createSSEHandler = (config: ImportMapConfig & LoggingConfig): ForSSE => {
 
     eventSource.onerror = function (event) {
       config.log.error(0, '[SSE] Connection error:', event);
+
+      // A CLOSED stream will not reconnect on its own. Holding the lock on it would leave the
+      // endpoint unwatched in every tab, so hand it back and let another tab try.
+      if (eventSource.readyState !== eventSource.CLOSED) return;
+      config.log.debug(0, `[SSE] Stream for '${endpoint}' will not reopen, releasing the lock`);
+      disconnect(subscription);
     };
 
     return eventSource;
@@ -58,7 +64,7 @@ const createSSEHandler = (config: ImportMapConfig & LoggingConfig): ForSSE => {
 
   function connect(endpoint: string, subscription: Subscription): void {
     if (!locks) {
-      subscription.source = openEventSource(endpoint);
+      subscription.source = openEventSource(endpoint, subscription);
       return;
     }
 
@@ -73,7 +79,7 @@ const createSSEHandler = (config: ImportMapConfig & LoggingConfig): ForSSE => {
         if (abort.signal.aborted) return;
 
         config.log.debug(0, `[SSE] Holding the connection for '${endpoint}'`);
-        subscription.source = openEventSource(endpoint);
+        subscription.source = openEventSource(endpoint, subscription);
         return held;
       })
       .catch(() => {

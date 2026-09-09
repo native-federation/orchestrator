@@ -20,6 +20,8 @@ type Net = {
 
 const ENDPOINT = '/events';
 const OTHER_ENDPOINT = '/events-other';
+/** Answers 404, which an EventSource treats as fatal: it closes rather than reconnecting. */
+const DEAD_ENDPOINT = '/dead';
 
 const startNet = async (boot: string): Promise<Net> => {
   let streams: { path: string; res: ServerResponse }[] = [];
@@ -27,6 +29,13 @@ const startNet = async (boot: string): Promise<Net> => {
 
   const server: Server = createServer((req, res) => {
     const path = (req.url ?? '/').split('?')[0]!;
+
+    if (path === DEAD_ENDPOINT) {
+      attempts.set(path, (attempts.get(path) ?? 0) + 1);
+      res.writeHead(404);
+      res.end('no such stream');
+      return;
+    }
 
     if (path.startsWith('/events')) {
       attempts.set(path, (attempts.get(path) ?? 0) + 1);
@@ -201,4 +210,19 @@ test('the broadcast lands even though the leader reloads itself', async ({ net, 
 
   await navigated;
   await expect.poll(() => reloads(follower)).toBe(1);
+});
+
+// Before the election every tab had its own stream, so one dead connection cost one tab. A leader
+// that kept the lock on a dead stream would cost every tab, including ones opened afterwards.
+test('a leader whose stream will not reopen lets another tab try', async ({ net, tab }) => {
+  const leader = await tab();
+  await watch(leader, net.port, DEAD_ENDPOINT);
+  await expect.poll(() => holding(leader)).toBe(true);
+
+  const follower = await tab();
+  await watch(follower, net.port, DEAD_ENDPOINT);
+
+  // The follower fails and releases in turn; that it got a turn at all is the point.
+  await expect.poll(() => net.attempts(DEAD_ENDPOINT)).toBe(2);
+  await expect.poll(() => holding(follower)).toBe(true);
 });

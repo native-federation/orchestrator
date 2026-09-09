@@ -323,6 +323,34 @@ describe('createSSEHandler', () => {
       );
     });
 
+    // An EventSource that reaches CLOSED never reconnects. Whoever holds the lock would keep the
+    // endpoint unwatched in every tab, including tabs opened later.
+    it('should release the lock when the stream will not reopen', async () => {
+      leaderHandler.watchRemoteBuilds(endpoint);
+      pendingLocks[0]!.grant();
+
+      mockEventSource.readyState = mockEventSource.CLOSED;
+      mockEventSource.onerror!(new Event('error'));
+      await tick();
+
+      expect(mockEventSource.close).toHaveBeenCalled();
+      expect(config.log.debug).toHaveBeenCalledWith(
+        0,
+        `[SSE] Stream for '${endpoint}' will not reopen, releasing the lock`
+      );
+    });
+
+    it('should keep the lock while the stream is still reconnecting', async () => {
+      leaderHandler.watchRemoteBuilds(endpoint);
+      pendingLocks[0]!.grant();
+
+      mockEventSource.readyState = mockEventSource.CONNECTING;
+      mockEventSource.onerror!(new Event('error'));
+      await tick();
+
+      expect(mockEventSource.close).not.toHaveBeenCalled();
+    });
+
     it('should not open a stream for a lock granted after closeAll', () => {
       leaderHandler.watchRemoteBuilds(endpoint);
       leaderHandler.closeAll();
