@@ -24,7 +24,7 @@
     "node": ">=24.16.0"
   },
   "devDependencies": {
-    "@playwright/test": "1.62.0",
+    "@playwright/test": "1.63.0",
     "@softarc/native-federation": "^4.3.2",
     "@types/node": "^24.13.2",
     "@types/semver": "^7.7.0",
