@@ -19,7 +19,7 @@ importers:
         specifier: 1.62.0
         version: 1.62.0
       '@softarc/native-federation':
-        specifier: ^4.3.2
+        specifier: ^4.4.0
         version: 4.4.0(typescript@6.0.3)
       '@types/node':
         specifier: ^24.13.2
