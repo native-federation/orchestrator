@@ -362,5 +362,17 @@ describe('createSSEHandler', () => {
       );
       expect(config.reloadBrowserFn).toHaveBeenCalled();
     });
+
+    // The channel is shared by every tab on the origin, so a tab hears about endpoints it never
+    // asked for — a sibling tab on a route that lazily loaded a different remote.
+    it('should ignore a completed build for an endpoint it does not watch', async () => {
+      leaderHandler.watchRemoteBuilds(endpoint);
+
+      probe = new BroadcastChannel(RELAY_CHANNEL);
+      probe.postMessage({ endpoint: 'https://example.com/some-other-remote' });
+      await tick();
+
+      expect(config.reloadBrowserFn).not.toHaveBeenCalled();
+    });
   });
 });

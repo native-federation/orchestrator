@@ -13,10 +13,7 @@ const debugs: string[] = [];
 let handler: ForSSE | undefined;
 
 const api = {
-  /**
-   * `real: true` wires the library's own reload (`window.location.reload`) instead of the counting
-   * stub, so a test can check what survives the leader navigating away in the same turn.
-   */
+  // `real: true` swaps in the library's own `window.location.reload`.
   create: (real = false) => {
     handler = createSSEHandler({
       log: {
@@ -38,7 +35,7 @@ const api = {
   closeAll: () => handler!.closeAll(),
   reloads: () => reloads.length,
 
-  /** Whether this tab won the election. The adapter announces it and nothing else does. */
+  /** Whether this tab won the election; the adapter's debug line is the only signal of it. */
   holding: () => debugs.some(msg => msg.startsWith('[SSE] Holding the connection')),
 };
 

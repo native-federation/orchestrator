@@ -110,7 +110,11 @@ const createSSEHandler = (config: ImportMapConfig & LoggingConfig): ForSSE => {
 
     if (canRelay) {
       relay = new BroadcastChannel(RELAY_CHANNEL);
-      relay.onmessage = () => reload('Rebuild completed in another tab');
+      // The channel is per origin, not per endpoint: tabs that lazily loaded a different set of
+      // remotes hear about rebuilds they have no stake in.
+      relay.onmessage = event => {
+        if (subscriptions.has(event.data?.endpoint)) reload('Rebuild completed in another tab');
+      };
     }
 
     if (typeof window !== 'undefined') {
