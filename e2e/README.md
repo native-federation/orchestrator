@@ -81,4 +81,22 @@ Two blocks are **characterisations**, not requirements — they pin current beha
 imperfect and reference the follow-up that owns it. A failure there is probably good news; read the
 comment before "fixing" it.
 
+## `sse/` — the build-notification stream
+
+A second, self-contained group. It exercises `createSSEHandler` rather than `initFederation`, so it
+does not use `harness/` and brings its own HTTP server: the federation harness serves remote entries,
+not event streams.
+
+Hot reload opens an SSE stream per remote, and the per-origin connection cap is browser-global rather
+than per-tab, so the adapter elects one tab per endpoint with a Web Lock and relays the reload to the
+rest over a `BroadcastChannel`. Web Locks, `BroadcastChannel` and `EventSource` are all browser
+primitives a mocked `LockManager` cannot stand in for, and the claim being made is a negative one —
+a second tab opens **no connection at all** — which is only visible as the server's count of requests
+for the stream. A tab that dials and hangs up has already spent the slot the fix exists to save.
+
+`sse/boot.ts` runs the real adapter in the page. Only `reloadBrowserFn` is stubbed, and only so that a
+reload can be counted instead of wiping the page counting it; one test opts back in to the library's
+real `window.location.reload`, because the leader broadcasts and navigates away in the same turn and a
+stub would hide whether the message still lands.
+
 Step-level guards live next to the steps under `src/lib/core/2.app/steps/`.
