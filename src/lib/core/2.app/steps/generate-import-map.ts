@@ -537,25 +537,47 @@ export function createGenerateImportMap(
     return chunkBundles;
   }
 
+  /**
+   * Step 4.5: the chunks behind the bundles mapped above. A chunk id goes into the global imports
+   * from the first remote that publishes it with a hash, and a later copy with the same hash is
+   * the same module, so it is left to resolve there. A copy that hashes differently, or one that
+   * carries no hash to compare, stays in its remote's scope: two applications can emit different
+   * bytes under one chunk name, and a name alone cannot tell them apart.
+   */
   function addChunkImports(importMap: ImportMap, chunkBundles: Record<string, Set<string>>) {
+    const served = new Map<string, string>();
+
     Object.entries(chunkBundles).forEach(([remoteName, bundles]) => {
       const baseUrl = getScope('CHUNKS', remoteName);
+      const scoped: Imports = {};
 
-      const imports = Array.from(bundles).reduce((_imports, bundleName) => {
+      for (const bundleName of bundles) {
         ports.sharedChunksRepo.tryGet(remoteName, bundleName).ifPresent(files => {
-          files.forEach(file => {
+          for (const file of files) {
+            const chunkId = toChunkImport(file);
             const url = _path.join(baseUrl, file);
-            _imports[toChunkImport(file)] = url;
-            addIntegrity(importMap, url, remoteName, file);
-          });
-        });
-        return _imports;
-      }, {} as Imports);
+            const hash = integrityOf(remoteName, file);
 
-      if (Object.keys(imports).length > 0) addToScope(importMap, baseUrl, imports);
+            if (hash && served.get(chunkId) === hash) continue;
+            if (hash && !served.has(chunkId) && !importMap.imports[chunkId]) {
+              served.set(chunkId, hash);
+              importMap.imports[chunkId] = url;
+            } else {
+              scoped[chunkId] = url;
+            }
+            addIntegrity(importMap, url, remoteName, file);
+          }
+        });
+      }
+
+      if (Object.keys(scoped).length > 0) addToScope(importMap, baseUrl, scoped);
     });
 
     return importMap;
+  }
+
+  function integrityOf(remoteName: RemoteName, file: string): string | undefined {
+    return ports.remoteInfoRepo.tryGet(remoteName).get()?.integrity?.[file];
   }
 
   function addIntegrity(
@@ -564,7 +586,7 @@ export function createGenerateImportMap(
     remoteName: RemoteName,
     file: string
   ): void {
-    const hash = ports.remoteInfoRepo.tryGet(remoteName).get()?.integrity?.[file];
+    const hash = integrityOf(remoteName, file);
     if (!hash) return;
     if (!importMap.integrity) importMap.integrity = {};
     importMap.integrity[url] = hash;

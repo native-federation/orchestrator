@@ -254,7 +254,7 @@ The `chunks` map on the remoteEntry.json links a logical **bundle name** (e.g. `
 }
 ```
 
-Each shared external that belongs to a bundle references it through its `bundle` property (e.g. `"bundle": "browser-angular_common"`). During import-map generation the orchestrator looks up the chunk files for every bundle referenced by a shared or scoped external on that remote and adds them to the remote's scope as `@nf-internal/<chunk-name>` entries, so the bundled code can resolve its internal imports against the remote that actually served them.
+Each shared external that belongs to a bundle references it through its `bundle` property (e.g. `"bundle": "browser-angular_common"`). During import-map generation the orchestrator looks up the chunk files for every bundle referenced by a shared or scoped external on that remote and publishes them as `@nf-internal/<chunk-name>` entries. A chunk that carries an `integrity` hash goes into the global `imports` from the first remote that publishes it, and a later remote whose copy hashes the same resolves it there, so a module split into a chunk is instantiated once rather than once per remote. A copy with a different hash, or one without a hash to compare, is added to that remote's scope instead, so the bundled code resolves its internal imports against the remote that actually served them.
 
 The `mapping-or-exposed` bundle is always implicitly registered for every remote, it contains chunks shared between the exposed modules and the mappings (shared externals) of a single remote.
 

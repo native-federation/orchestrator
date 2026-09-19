@@ -165,6 +165,100 @@ describe('createGenerateImportMap (chunk-imports)', () => {
     });
   });
 
+  describe('chunks published by more than one remote', () => {
+    const HASH_A = 'sha384-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+    const HASH_B = 'sha384-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
+
+    const withIntegrity = (
+      mfe1?: Record<string, string>,
+      mfe2?: Record<string, string>
+    ): void => {
+      adapters.remoteInfoRepo.tryGet = vi.fn(remote => {
+        if (remote === 'team/mfe1')
+          return Optional.of({ ...mockRemoteInfo_MFE1({ exposes: [] }), integrity: mfe1 });
+        if (remote === 'team/mfe2')
+          return Optional.of({ ...mockRemoteInfo_MFE2({ exposes: [] }), integrity: mfe2 });
+        return Optional.empty<RemoteInfo>();
+      });
+    };
+
+    beforeEach(() => {
+      adapters.sharedExternalsRepo.getFromScope = vi.fn(() => ({
+        'dep-a': mockExternal_A({
+          dirty: false,
+          versions: [
+            mockVersion_A.v2_1_2({
+              action: 'share',
+              remotes: { 'team/mfe1': { bundle: 'shared' } },
+            }),
+            mockVersion_A.v2_1_1({
+              action: 'scope',
+              remotes: { 'team/mfe2': { bundle: 'shared' } },
+            }),
+          ],
+        }),
+      }));
+      adapters.sharedChunksRepo.tryGet = vi.fn((remote, bundle) => {
+        if (bundle === 'shared' && (remote === 'team/mfe1' || remote === 'team/mfe2')) {
+          return Optional.of(['chunk-a.js']);
+        }
+        return Optional.empty();
+      });
+    });
+
+    it('should serve a chunk both remotes publish with the same hash from the first one only', async () => {
+      withIntegrity({ 'chunk-a.js': HASH_A }, { 'chunk-a.js': HASH_A });
+
+      const actual = await generateImportMap();
+
+      expect(actual.imports['@nf-internal/chunk-a']).toBe(mockScopeUrl_MFE1({ file: 'chunk-a.js' }));
+      expect(actual.scopes?.[mockScopeUrl_MFE1()]?.['@nf-internal/chunk-a']).toBeUndefined();
+      expect(actual.scopes?.[mockScopeUrl_MFE2()]?.['@nf-internal/chunk-a']).toBeUndefined();
+      expect(actual.integrity).toEqual({
+        [mockScopeUrl_MFE1({ file: 'chunk-a.js' })]: HASH_A,
+      });
+    });
+
+    it('should keep a chunk scoped when the hashes differ', async () => {
+      withIntegrity({ 'chunk-a.js': HASH_A }, { 'chunk-a.js': HASH_B });
+
+      const actual = await generateImportMap();
+
+      expect(actual.imports['@nf-internal/chunk-a']).toBe(mockScopeUrl_MFE1({ file: 'chunk-a.js' }));
+      expect(actual.scopes?.[mockScopeUrl_MFE2()]?.['@nf-internal/chunk-a']).toBe(
+        mockScopeUrl_MFE2({ file: 'chunk-a.js' })
+      );
+      expect(actual.integrity).toEqual({
+        [mockScopeUrl_MFE1({ file: 'chunk-a.js' })]: HASH_A,
+        [mockScopeUrl_MFE2({ file: 'chunk-a.js' })]: HASH_B,
+      });
+    });
+
+    it('should keep a chunk scoped when a remote publishes no hash for it', async () => {
+      withIntegrity(undefined, { 'chunk-a.js': HASH_A });
+
+      const actual = await generateImportMap();
+
+      expect(actual.scopes?.[mockScopeUrl_MFE1()]?.['@nf-internal/chunk-a']).toBe(
+        mockScopeUrl_MFE1({ file: 'chunk-a.js' })
+      );
+      expect(actual.imports['@nf-internal/chunk-a']).toBe(mockScopeUrl_MFE2({ file: 'chunk-a.js' }));
+      expect(actual.scopes?.[mockScopeUrl_MFE2()]?.['@nf-internal/chunk-a']).toBeUndefined();
+    });
+
+    it('should keep every copy scoped when no remote publishes hashes', async () => {
+      const actual = await generateImportMap();
+
+      expect(actual.imports['@nf-internal/chunk-a']).toBeUndefined();
+      expect(actual.scopes?.[mockScopeUrl_MFE1()]?.['@nf-internal/chunk-a']).toBe(
+        mockScopeUrl_MFE1({ file: 'chunk-a.js' })
+      );
+      expect(actual.scopes?.[mockScopeUrl_MFE2()]?.['@nf-internal/chunk-a']).toBe(
+        mockScopeUrl_MFE2({ file: 'chunk-a.js' })
+      );
+    });
+  });
+
   it('should handle chunk files with .mjs extension', async () => {
     adapters.sharedExternalsRepo.getFromScope = vi.fn(() => ({
       'dep-a': mockExternal_A({
