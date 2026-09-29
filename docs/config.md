@@ -276,3 +276,31 @@ initFederation('http://example.org/manifest.json', {
   storage: sessionStorageEntry,
 });
 ```
+
+### Discovering the storage from tools
+
+Every `initFederation` call publishes a frozen, read-only descriptor on `globalThis.__NF_ORCHESTRATOR__`, so devtools, extensions and debug scripts can find the cached state without knowing the host's config:
+
+```javascript
+globalThis.__NF_ORCHESTRATOR__ = {
+  version: '4.6.1',
+  storage: {
+    // keyed by storageNamespace; multiple namespaces on one page are all listed
+    __NATIVE_FEDERATION__: {
+      type: 'localStorage', // 'globalThis' | 'localStorage' | 'sessionStorage' | 'custom'
+      namespace: '__NATIVE_FEDERATION__',
+      keys: ['remotes', 'shared-externals', 'scoped-externals', 'shared-chunks'],
+    },
+  },
+};
+```
+
+Where each key lives depends on `type`:
+
+| type                              | Location of `<key>`                                    |
+| --------------------------------- | ------------------------------------------------------ |
+| `globalThis`                      | `globalThis[namespace][key]`                           |
+| `localStorage` / `sessionStorage` | `localStorage.getItem(\`${namespace}.${key}\`)` (JSON) |
+| `custom`                          | Defined by your own `StorageEntryCreator`              |
+
+A custom `StorageEntryCreator` reports `'custom'` unless you tag it with a `type` property (e.g. `myStorage.type = 'localStorage'` when it wraps localStorage with the same key layout). The published object is typed as `NFOrchestratorGlobal` (exported from `@softarc/native-federation-orchestrator/sdk`).

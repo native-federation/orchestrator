@@ -32,4 +32,6 @@ const globalThisStorageEntry: StorageEntryCreator =
     return entry;
   };
 
+globalThisStorageEntry.type = 'globalThis';
+
 export { globalThisStorageEntry };

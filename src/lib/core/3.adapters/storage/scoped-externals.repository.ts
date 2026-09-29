@@ -1,11 +1,15 @@
 import type { ScopedExternals } from 'lib/core/1.domain/externals/external.contract';
-import type { StorageConfig, StorageEntry } from 'lib/core/2.app/config/storage.contract';
+import {
+  STORAGE_KEYS,
+  type StorageConfig,
+  type StorageEntry,
+} from 'lib/core/2.app/config/storage.contract';
 import type { ForScopedExternalsStorage } from 'lib/core/2.app/driving-ports/for-scoped-externals-storage.port';
 import type { RemoteName, ScopedVersion } from 'lib/core/1.domain';
 import { Optional } from 'lib/utils/optional';
 
 const createScopedExternalsRepository = (config: StorageConfig): ForScopedExternalsStorage => {
-  const STORAGE: StorageEntry<ScopedExternals> = config.storage('scoped-externals', {});
+  const STORAGE: StorageEntry<ScopedExternals> = config.storage(STORAGE_KEYS.scopedExternals, {});
 
   if (config.clearStorage) STORAGE.clear();
 

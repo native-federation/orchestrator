@@ -31,6 +31,7 @@ const logger = {
 
 const createBaseConfig = () => ({
   platform: 'browser',
+  define: { __NF_ORCHESTRATOR_VERSION__: JSON.stringify(require('./package.json').version) },
   format: 'esm',
   resolveExtensions: ['.ts', '.js'],
   minify: false,

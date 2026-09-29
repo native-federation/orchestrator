@@ -22,4 +22,6 @@ const sessionStorageEntry: StorageEntryCreator =
     return entry;
   };
 
+sessionStorageEntry.type = 'sessionStorage';
+
 export { sessionStorageEntry };

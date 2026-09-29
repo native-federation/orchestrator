@@ -6,7 +6,20 @@ type StorageEntry<TValue> = {
 
 type StorageEntryKey = number | symbol | string;
 
-type StorageEntryCreator = (namespace: string) => StorageEntryHandler;
+type StorageType = 'globalThis' | 'localStorage' | 'sessionStorage' | 'custom';
+
+// `type` is only read to describe the storage on globalThis.__NF_ORCHESTRATOR__; untagged creators report 'custom'.
+type StorageEntryCreator = {
+  (namespace: string): StorageEntryHandler;
+  type?: StorageType;
+};
+
+const STORAGE_KEYS = {
+  remotes: 'remotes',
+  sharedExternals: 'shared-externals',
+  scopedExternals: 'scoped-externals',
+  sharedChunks: 'shared-chunks',
+} as const;
 
 type StorageEntryHandler = <TValue>(key: string, initialValue: TValue) => StorageEntry<TValue>;
 
@@ -28,4 +41,6 @@ export {
   StorageConfig,
   StorageOptions,
   StorageEntryCreator,
+  StorageType,
+  STORAGE_KEYS,
 };

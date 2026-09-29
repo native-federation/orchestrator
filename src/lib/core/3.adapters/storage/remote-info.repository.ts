@@ -1,11 +1,15 @@
 import type { RemoteInfo, RemoteName, Remotes } from 'lib/core/1.domain';
-import type { StorageConfig, StorageEntry } from 'lib/core/2.app/config/storage.contract';
+import {
+  STORAGE_KEYS,
+  type StorageConfig,
+  type StorageEntry,
+} from 'lib/core/2.app/config/storage.contract';
 import type { ForRemoteInfoStorage } from 'lib/core/2.app/driving-ports/for-remote-info-storage.port';
 import * as _path from 'lib/utils/path';
 import { Optional } from 'lib/utils/optional';
 
 const createRemoteInfoRepository = (config: StorageConfig): ForRemoteInfoStorage => {
-  const STORAGE: StorageEntry<Remotes> = config.storage('remotes', {});
+  const STORAGE: StorageEntry<Remotes> = config.storage(STORAGE_KEYS.remotes, {});
   if (config.clearStorage) STORAGE.clear();
 
   const _cache: Remotes = STORAGE.get() ?? {};

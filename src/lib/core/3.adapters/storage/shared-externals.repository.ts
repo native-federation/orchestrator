@@ -4,13 +4,17 @@ import {
   GLOBAL_SCOPE,
   STRICT_SCOPE,
 } from 'lib/core/1.domain/externals/external.contract';
-import type { StorageConfig, StorageEntry } from 'lib/core/2.app/config/storage.contract';
+import {
+  STORAGE_KEYS,
+  type StorageConfig,
+  type StorageEntry,
+} from 'lib/core/2.app/config/storage.contract';
 import type { ForSharedExternalsStorage } from 'lib/core/2.app/driving-ports/for-shared-externals-storage.port';
 import { Optional } from 'lib/utils/optional';
 
 const createSharedExternalsRepository = (config: StorageConfig): ForSharedExternalsStorage => {
   const STORAGE: StorageEntry<SharedExternals> = config.storage<SharedExternals>(
-    'shared-externals',
+    STORAGE_KEYS.sharedExternals,
     { [GLOBAL_SCOPE]: {} }
   );
 

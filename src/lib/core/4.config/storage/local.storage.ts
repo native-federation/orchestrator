@@ -22,4 +22,6 @@ const localStorageEntry: StorageEntryCreator =
     return entry;
   };
 
+localStorageEntry.type = 'localStorage';
+
 export { localStorageEntry };
