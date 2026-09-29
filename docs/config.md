@@ -303,12 +303,13 @@ There are two ways to read the state:
 - **`get(key)`** works for every storage, including custom ones. It returns a copy of the last committed value (in-progress work is only written to storage when a flow commits it), or `undefined` for a key that isn't in `keys`. Nothing on the descriptor can write to the storage. For the built-in storages this exposes nothing new, but a custom storage that keeps its state in a closure becomes readable by any page script; pass `exposeStorageGetter: false` to prevent that.
 - **Reading the location directly** is for tools that must not call page functions, such as a passive devtools probe. `type` tells you where each key lives:
 
-| type                              | Location of `<key>`                                    |
-| --------------------------------- | ------------------------------------------------------ |
-| `globalThis`                      | `globalThis[namespace][key]`                           |
-| `localStorage` / `sessionStorage` | `localStorage.getItem(\`${namespace}.${key}\`)` (JSON) |
-| `custom`                          | Not directly readable; use `get(key)`                  |
+| type             | Location of `<key>`                                      |
+| ---------------- | -------------------------------------------------------- |
+| `globalThis`     | `globalThis[namespace][key]`                             |
+| `localStorage`   | `localStorage.getItem(\`${namespace}.${key}\`)` (JSON)   |
+| `sessionStorage` | `sessionStorage.getItem(\`${namespace}.${key}\`)` (JSON) |
+| `custom`         | Not directly readable; use `get(key)`                    |
 
 Each namespace carries its own `version`, because separate orchestrator bundles on one page can publish side by side. Publishing never fails `initFederation`: if the global can't be written, the descriptor is simply missing.
 
-A custom `StorageEntryCreator` reports `'custom'` unless you tag it with a `type` property (e.g. `myStorage.type = 'localStorage'` when it wraps localStorage with the same key layout). The published object is typed as `NFOrchestratorGlobal` (exported from `@softarc/native-federation-orchestrator/sdk`).
+A custom `StorageEntryCreator` reports `'custom'` unless you tag it with a `type` property (e.g. `myStorage.type = 'localStorage'` when it wraps localStorage with the same key layout). The published object is typed as `NFOrchestratorGlobal` (exported from `@softarc/native-federation-orchestrator/options`).
