@@ -23,5 +23,6 @@ const sessionStorageEntry: StorageEntryCreator =
   };
 
 sessionStorageEntry.type = 'sessionStorage';
+Object.freeze(sessionStorageEntry);
 
 export { sessionStorageEntry };

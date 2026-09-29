@@ -13,6 +13,7 @@ export {
   StorageEntryKey,
   StorageConfig,
   StorageType,
+  StorageKey,
 } from './storage.contract';
 export { NFOrchestratorGlobal, NFOrchestratorStorageInfo } from './orchestrator-global.contract';
 export { ModeOptions, ModeConfig } from './mode.contract';

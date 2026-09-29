@@ -6,7 +6,12 @@ export const createStorageConfig = (override: StorageOptions): StorageConfig => 
   const creator = override.storage ?? globalThisStorageEntry;
   const namespace = override.storageNamespace ?? '__NATIVE_FEDERATION__';
   const storage = creator(namespace);
-  publishStorageInfo(creator.type ?? 'custom', namespace, storage);
+  publishStorageInfo({
+    type: creator.type ?? 'custom',
+    namespace,
+    storage,
+    exposeGetter: override.exposeStorageGetter ?? true,
+  });
 
   return {
     storage,

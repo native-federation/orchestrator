@@ -21,6 +21,8 @@ const STORAGE_KEYS = {
   sharedChunks: 'shared-chunks',
 } as const;
 
+type StorageKey = (typeof STORAGE_KEYS)[keyof typeof STORAGE_KEYS];
+
 type StorageEntryHandler = <TValue>(key: string, initialValue: TValue) => StorageEntry<TValue>;
 
 type StorageConfig = {
@@ -32,6 +34,7 @@ type StorageOptions = {
   storage?: StorageEntryCreator;
   clearStorage?: boolean;
   storageNamespace?: string;
+  exposeStorageGetter?: boolean;
 };
 
 export {
@@ -42,5 +45,6 @@ export {
   StorageOptions,
   StorageEntryCreator,
   StorageType,
+  StorageKey,
   STORAGE_KEYS,
 };

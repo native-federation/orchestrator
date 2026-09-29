@@ -33,5 +33,6 @@ const globalThisStorageEntry: StorageEntryCreator =
   };
 
 globalThisStorageEntry.type = 'globalThis';
+Object.freeze(globalThisStorageEntry);
 
 export { globalThisStorageEntry };

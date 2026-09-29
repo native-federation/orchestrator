@@ -23,5 +23,6 @@ const localStorageEntry: StorageEntryCreator =
   };
 
 localStorageEntry.type = 'localStorage';
+Object.freeze(localStorageEntry);
 
 export { localStorageEntry };
