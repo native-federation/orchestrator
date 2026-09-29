@@ -5,10 +5,11 @@ import { publishStorageInfo } from './publish-storage-info';
 export const createStorageConfig = (override: StorageOptions): StorageConfig => {
   const creator = override.storage ?? globalThisStorageEntry;
   const namespace = override.storageNamespace ?? '__NATIVE_FEDERATION__';
-  publishStorageInfo(creator, namespace);
+  const storage = creator(namespace);
+  publishStorageInfo(creator.type ?? 'custom', namespace, storage);
 
   return {
-    storage: creator(namespace),
+    storage,
     clearStorage: override.clearStorage ?? false,
   };
 };

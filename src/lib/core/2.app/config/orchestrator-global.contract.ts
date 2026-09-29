@@ -4,6 +4,8 @@ type NFOrchestratorStorageInfo = Readonly<{
   type: StorageType;
   namespace: string;
   keys: readonly string[];
+  // Returns a copy of the committed value, undefined for unknown keys.
+  get: (key: string) => unknown;
 }>;
 
 type NFOrchestratorGlobal = Readonly<{

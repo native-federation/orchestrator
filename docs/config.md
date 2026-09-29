@@ -290,17 +290,21 @@ globalThis.__NF_ORCHESTRATOR__ = {
       type: 'localStorage', // 'globalThis' | 'localStorage' | 'sessionStorage' | 'custom'
       namespace: '__NATIVE_FEDERATION__',
       keys: ['remotes', 'shared-externals', 'scoped-externals', 'shared-chunks'],
+      get: key => {}, // a copy of the stored value, read through the configured storage
     },
   },
 };
 ```
 
-Where each key lives depends on `type`:
+There are two ways to read the state:
+
+- **`get(key)`** works for every storage, including custom ones. It returns a copy of the last committed value (in-progress work is only written to storage when a flow commits it), or `undefined` for a key that isn't in `keys`. Nothing on the descriptor can write to the storage.
+- **Reading the location directly** is for tools that must not call page functions, such as a passive devtools probe. `type` tells you where each key lives:
 
 | type                              | Location of `<key>`                                    |
 | --------------------------------- | ------------------------------------------------------ |
 | `globalThis`                      | `globalThis[namespace][key]`                           |
 | `localStorage` / `sessionStorage` | `localStorage.getItem(\`${namespace}.${key}\`)` (JSON) |
-| `custom`                          | Defined by your own `StorageEntryCreator`              |
+| `custom`                          | Not directly readable; use `get(key)`                  |
 
 A custom `StorageEntryCreator` reports `'custom'` unless you tag it with a `type` property (e.g. `myStorage.type = 'localStorage'` when it wraps localStorage with the same key layout). The published object is typed as `NFOrchestratorGlobal` (exported from `@softarc/native-federation-orchestrator/sdk`).
