@@ -914,6 +914,12 @@ have to re-derive them. Every field is omitted when it does not apply.
 | `SharedVersionMeta` | `servedBy` | the build this copy dedups onto, where it is not the version's own basis |
 | `SharedVersionMeta` | `poolCause` | why pooling made this copy serve itself: `incompatible` (gate 1), `uncovered` (gate 2), `torn` (the no-tear check), `unshared` (its member lost every provider to an island) |
 
+Only pooling writes these, so an external in no pool any more has nothing left to explain: when a pool dissolves
+— the remote whose tag formed it redeployed without it, say — `mark-pools-for-reelection` drops `poolName`,
+`servedBy` and `poolCause` from its former members before `determine` runs, and re-elects them. A leftover
+`servedBy` would otherwise keep mapping that copy onto a build nothing chose any more, and `determine` exempts an
+anchored copy from the entrypoint coverage policy.
+
 `poolCause` is the one thing the `scope` action cannot say on its own: a copy scoped for a range violation and
 one scoped because no build covers it look identical otherwise. The detail behind it — the gap, the closest
 build — is in the matching `warn` line only. Membership is kept apart from the tags on purpose: pooling

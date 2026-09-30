@@ -117,6 +117,15 @@ describe('createSharedExternalsRepository', () => {
       expect(externalsRepo.hasPoolState()).toBe(true);
     });
 
+    // Records written before `poolName` existed, or whose names were already cleared, can still carry an
+    // anchor; only pooling sets one, so the scope must be visited to drop it.
+    it('reports a stored anchor with no tag or name left', () => {
+      const external = taggedExternal();
+      external.versions[0]!.remotes[0]!.servedBy = 'team/mfe2';
+      const { externalsRepo } = setupWithCache({ [GLOBAL_SCOPE]: { 'dep-a': external } });
+      expect(externalsRepo.hasPoolState()).toBe(true);
+    });
+
     it('ignores a blank tag', () => {
       const { externalsRepo } = setupWithCache({
         [GLOBAL_SCOPE]: { 'dep-a': taggedExternal('  ') },

@@ -133,6 +133,67 @@ describe('createMarkPoolsForReelection', () => {
     expect(dirt(externals)).toEqual({ '@scope/a': true, '@scope/b': false });
   });
 
+  // Pool state outside a pool is stale by definition — only pooling writes it — and pooling never visits an
+  // external it does not pool, so this step, which runs before `determine`, is the one that can drop it.
+  // Regression for a leftover `servedBy` pointing a copy at a build after its pool had dissolved
+  // (e2e/pooling/lifecycle.e2e.spec.ts, "drops a stale anchor").
+  describe('clears pool state off an external that left every pool', () => {
+    const withState = (external: SharedExternal): SharedExternal => {
+      external.poolName = 'framework';
+      external.versions[0]!.remotes[0]!.servedBy = 'team/mfe2';
+      external.versions[0]!.remotes[0]!.poolCause = 'uncovered';
+      return external;
+    };
+
+    it('drops servedBy, poolCause and poolName, and marks the external for re-election', async () => {
+      const externals = given({
+        '@scope/a': ext('@scope/a', true, null),
+        '@scope/b': withState(ext('@scope/b', false, null)),
+      });
+
+      await markPoolsForReelection();
+
+      const b = externals['@scope/b']!;
+      expect(b.poolName).toBeUndefined();
+      expect(b.versions[0]!.remotes[0]!.servedBy).toBeUndefined();
+      expect(b.versions[0]!.remotes[0]!.poolCause).toBeUndefined();
+      // Re-elected, since `determine` treated the anchored copy as exempt from the coverage policy.
+      expect(b.dirty).toBe(true);
+    });
+
+    it('keeps the state of an external that is still pooled', async () => {
+      const externals = given({
+        '@scope/a': ext('@scope/a', true),
+        '@scope/b': withState(ext('@scope/b', false)),
+      });
+
+      await markPoolsForReelection();
+
+      expect(externals['@scope/b']!.versions[0]!.remotes[0]!.servedBy).toBe('team/mfe2');
+      expect(externals['@scope/b']!.poolName).toBe('framework');
+    });
+
+    it('leaves a clean unpooled external alone', async () => {
+      const externals = given({
+        '@scope/a': ext('@scope/a', true, null),
+        rxjs: ext('rxjs', false, null),
+      });
+
+      await markPoolsForReelection();
+
+      expect(externals['rxjs']!.dirty).toBe(false);
+    });
+
+    it('does nothing on a warm init, however stale the record', async () => {
+      const externals = given({ '@scope/b': withState(ext('@scope/b', false, null)) });
+
+      await markPoolsForReelection();
+
+      expect(externals['@scope/b']!.versions[0]!.remotes[0]!.servedBy).toBe('team/mfe2');
+      expect(externals['@scope/b']!.dirty).toBe(false);
+    });
+  });
+
   describe('scope gating on stored pool state', () => {
     it('does nothing when no stored remote carries a pool tag', async () => {
       adapters.sharedExternalsRepo.hasPoolState = vi.fn(() => false);

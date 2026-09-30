@@ -100,6 +100,42 @@ test.describe('lifecycle: the warm start', () => {
     expect(nf.downloads()).toHaveLength(4);
   });
 
+  test('drops a stale anchor when the pool that granted it dissolves', async ({ nf }) => {
+    // Only mfe1 tags the family, so its tag alone forms the pool (explicit tags only, no scope tags).
+    // mfe3 cannot take the global core@22.0.9 beside the shared router@22.0.6 — nothing built that pair —
+    // so pooling anchors it on mfe1's build and records `servedBy: team/mfe1` on its copies.
+    const mfe1 = (at: string, pool?: string) =>
+      remote('team/mfe1', at, [
+        dep('@angular/core', '22.0.6', { req: '^22.0.0', ...(pool && { pool }) }),
+        dep('@angular/router', '22.0.6', { req: '^22.0.0', ...(pool && { pool }) }),
+      ]);
+    const others = () => [
+      remote('team/mfe2', SCOPE.mfe2, [dep('@angular/core', '22.0.9', { req: '^22.0.0' })]),
+      remote('team/mfe4', SCOPE.mfe4, [dep('@angular/core', '22.0.9', { req: '^22.0.0' })]),
+      remote('team/mfe3', SCOPE.mfe3, [
+        dep('@angular/core', '22.0.6', { req: '^22.0.0' }),
+        dep('@angular/router', '22.0.6', { req: '^22.0.0' }),
+      ]),
+    ];
+    const anchorsOf = async (name: string) =>
+      (await nf.store())['__GLOBAL__']![name]!.versions.flatMap(v =>
+        v.remotes.filter(r => r.servedBy).map(r => `${r.name}>${r.servedBy}`)
+      );
+
+    await nf.init([mfe1(SCOPE.mfe1, 'ng'), ...others()], { pooling: false });
+    expect(await anchorsOf('@angular/core')).toContain('team/mfe3>team/mfe1');
+
+    // mfe1 redeploys at a new URL without its tag. Only mfe1 is refetched; mfe3 stays cached, and the
+    // pool is gone. Its anchor used to survive, pointing mfe3's core at mfe1's *new* build beside mfe3's
+    // own router — a pair neither pooling nor plain resolution would hand it.
+    await nf.init([mfe1(SCOPE.mfe5), ...others()], { pooling: false });
+
+    expect(await anchorsOf('@angular/core')).toEqual([]);
+    expect(await anchorsOf('@angular/router')).toEqual([]);
+    expect((await nf.map()).scopes?.[SCOPE.mfe3]).toBeUndefined();
+    expect((await nf.load('team/mfe3')).seen['@angular/core']).toBe('mfe2|@angular/core@22.0.9');
+  });
+
   test('keeps an island out of the shared set it was islanded from', async ({ nf }) => {
     // What "the verdicts survive" means concretely: after the round-trip the islanded remote's copies
     // are stored as `scope` and its sole-provided member has no shared version, so no later pass can
