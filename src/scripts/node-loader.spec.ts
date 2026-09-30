@@ -221,6 +221,52 @@ describe('node-loader hooks', () => {
     });
   });
 
+  // #79: only federated file:// modules are forced to ESM; host dependencies keep Node's format.
+  describe('module format', () => {
+    it('marks an import-map target as ESM', async () => {
+      const loader = await freshLoader();
+      loader.initialize({ initialImportMap: { imports: { rxjs: 'file:///dist/rxjs.js' } } });
+      const next = vi.fn().mockResolvedValue({ url: 'file:///dist/rxjs.js', format: 'commonjs' });
+
+      const result = await loader.resolve('rxjs', {}, next);
+
+      expect(result).toEqual({ url: 'file:///dist/rxjs.js', format: 'module' });
+    });
+
+    it('marks a relative chunk of a federated module as ESM', async () => {
+      const loader = await freshLoader();
+      loader.initialize({ initialImportMap: { imports: { mfe: 'file:///dist/mfe/entry.js' } } });
+      await loader.resolve('mfe', {}, vi.fn().mockResolvedValue({ url: 'file:///dist/mfe/entry.js' }));
+      const next = vi.fn().mockResolvedValue({ url: 'file:///dist/mfe/chunk-a.js', format: null });
+
+      const result = await loader.resolve(
+        './chunk-a.js',
+        { parentURL: 'file:///dist/mfe/entry.js' },
+        next
+      );
+
+      expect(result).toEqual({ url: 'file:///dist/mfe/chunk-a.js', format: 'module' });
+    });
+
+    it("keeps nextResolve's format for an unmapped bare specifier", async () => {
+      const loader = await freshLoader();
+      const resolved = { url: 'file:///node_modules/rxjs/dist/cjs/index.js', format: 'commonjs' };
+      const next = vi.fn().mockResolvedValue(resolved);
+
+      await expect(loader.resolve('rxjs', {}, next)).resolves.toBe(resolved);
+    });
+
+    it("keeps nextResolve's format for a relative import from a non-federated parent", async () => {
+      const loader = await freshLoader();
+      const resolved = { url: 'file:///node_modules/pkg/util.js', format: 'commonjs' };
+      const next = vi.fn().mockResolvedValue(resolved);
+
+      await expect(
+        loader.resolve('./util.js', { parentURL: 'file:///node_modules/pkg/index.mjs' }, next)
+      ).resolves.toBe(resolved);
+    });
+  });
+
   describe('host instances', () => {
     const withHostInstances = async (keys: Record<string, string[]>): Promise<LoaderModule> => {
       const loader = await freshLoader();
@@ -344,15 +390,16 @@ describe('node-loader hooks', () => {
       );
     });
 
-    it('sets context.format = "module" for non-node-non-http URLs and falls through', async () => {
+    // #79: forcing ESM on every file:// URL broke npm packages that resolve to CJS (rxjs 7).
+    it('leaves context.format to Node for file URLs', async () => {
       const loader = await freshLoader();
       const ctx: { format?: string | null } = {};
-      const next = vi.fn().mockResolvedValue({ url: 'x', format: 'module' });
+      const next = vi.fn().mockResolvedValue({ url: 'x', format: 'commonjs' });
 
-      await loader.load('file:///foo.mjs', ctx, next);
+      await loader.load('file:///node_modules/rxjs/dist/cjs/index.js', ctx, next);
 
-      expect(ctx.format).toBe('module');
-      expect(next).toHaveBeenCalledWith('file:///foo.mjs', ctx);
+      expect(ctx.format).toBeUndefined();
+      expect(next).toHaveBeenCalledWith('file:///node_modules/rxjs/dist/cjs/index.js', ctx);
     });
 
     it('does not touch context.format for node: URLs', async () => {
