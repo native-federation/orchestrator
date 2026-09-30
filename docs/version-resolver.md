@@ -603,33 +603,26 @@ resolver's output but emits no new versions and elects no tag of its own.
 
 ### Enabling pooling
 
-Pooling is opt-in and inert by default. An external joins a pool in one of two ways:
+Pooling is opt-in and inert by default. An external joins a pool through a `pool` tag on its shared
+external in `remoteEntry.json` (mirrors `shareScope`), set per external in the federation config at build
+time:
 
-- **Auto (by npm scope).** Set `useAutoExternalPooling: true` in the mode `feature` block. Scoped packages
-  are grouped by their scope — `@framework/core`, `@framework/common` → pool `framework`. Unscoped
-  packages (`utils`, `tslib`) are never auto-pooled. An auto-pool is **per remote**: the scope edge is
-  contributed by each remote that declares the external, so a pool forms only once some remote declares
-  members from both sides. Two remotes that share no member do not pool, and need not — neither is in a
-  position to run an incoherent pair. A remote that has **tagged** any member of a scope contributes no
-  auto edge for that scope, so one tag on a design-system package does not drag every unrelated package of
-  the same scope in behind it.
-- **Remote-declared tag.** A remote adds an optional `pool` field to a shared external in its
-  `remoteEntry.json` (mirrors `shareScope`). A tag is **remote-local**: it groups only the externals
-  that _one_ remote tags together. This is how a transitive coupling is expressed — auto-pooling groups
-  by scope and can never connect `@design-system/ui` to `@framework/core`, so the remote co-tags both
-  (see below).
-
-```ts
-initFederation(manifest, {
-  feature: { useAutoExternalPooling: true },
-});
+```json
+// In remoteEntry.json
+{ "packageName": "@framework/core", "version": "22.0.5", "requiredVersion": "^22.0.0", "pool": "framework" }
 ```
+
+A tag is **remote-local**: it groups only the externals that _one_ remote tags together, so a pool forms only
+once some remote declares members from both sides. Two remotes that share no member do not pool, and need
+not — neither is in a position to run an incoherent pair. Tagging every package of an npm scope with that
+scope (`@framework/core`, `@framework/common` → `framework`) is the usual way to pool a framework family; a
+transitive coupling (`@design-system/ui` built against `@framework/core`) is expressed by tagging across
+scopes (see below).
 
 **Membership is by shared members, not by name.** Pool identity is not a string that remotes must agree
 on — it is the **connected component** of a graph. Each external is a node, joined by an edge to each
-`(remote, scope)` that declares it (auto-pooling) and to each `(remote, tag)` that declares it (explicit
-tags). **Every edge is remote-local**, so two remotes' groups merge only when they **share a member**,
-never because they chose the same tag string or happen to publish under one npm scope. Drift is therefore
+`(remote, tag)` that declares it. **Every edge is remote-local**, so two remotes' groups merge only when they **share a member**,
+never because they chose the same tag string. Drift is therefore
 harmless: mfe-A calling a group `"angular"` and mfe-B calling it `"design-system"` still pool together when
 they overlap on one external, while two unrelated groups reusing a label stay separate.
 
@@ -637,14 +630,17 @@ One edge is **not** remote-local: a secondary entrypoint is always joined to its
 (`@framework/core/testing` → `@framework/core`), whoever declares either. A package and its entrypoints
 are one artefact, so they must not be separable — they genuinely tear when they are, with one remote's
 `@framework/forms` served beside another's `@framework/forms/signals`. The edge is not itself a reason to
-pool: with pooling inert, a package and its entrypoints form no pool.
+pool: with no tag, a package and its entrypoints form no pool.
 
-Because a tag is remote-local, it does **not** merge with a same-named auto scope by string. To pull a
-cross-scope sibling into a family, co-tag a **bridge member**: tagging both `@design-system/ui` and
-`@framework/core` with one label joins them through the shared `@framework/core` node. A member carrying an
-explicit tag that pools with nothing is almost always a typo or a missing sibling, so it is logged;
-auto-scope singletons are normal and stay silent. Each pool is named by its smallest member, for stable,
-reload-safe logging. (A coupling no single remote witnesses — where no remote ships both members — cannot
+To pull a cross-scope sibling into a family, co-tag a **bridge member**: tagging both `@design-system/ui` and
+`@framework/core` with one label joins them through the shared `@framework/core` node. A member carrying a
+tag that pools with nothing is almost always a typo or a missing sibling, so it is logged.
+
+**A pool is named after the tag most of its copies declare** (ties break alphabetically), so a family tagged
+`framework` logs and stores as `framework` whatever else some remote called it. Because tags are remote-local,
+two unrelated pools can end up with the same tag; the one whose smallest member sorts first keeps it and the
+others are suffixed `framework~2`, `framework~3`. The name is derived, not declared: a new remote that merges two
+pools renames one of them, so treat it as a label to group by, not a key to keep. (A coupling no single remote witnesses — where no remote ships both members — cannot
 be expressed; this is rare and by design.)
 
 ### How pooling resolves
@@ -766,8 +762,8 @@ its versions is wrong, so a coverage gap must not turn a strict portfolio into a
 > unaffected in every measure — same downloads, same chunks, same shared tags, byte-identical import map —
 > while an eleven-remote portfolio costs +23.6%, essentially all of it the single remote that ships the
 > widest family and can therefore be covered by nobody. A warm init pays nothing: with no member re-elected,
-> pooling does no work and writes nothing. The escape hatch is to not pool the family (auto-pooling off, no
-> `pool` tag), not a per-portfolio knob. `e2e/pooling/capture.e2e.spec.ts` reproduces the figures.
+> pooling does no work and writes nothing. The escape hatch is to not pool the family (no `pool` tag), not a
+> per-portfolio knob. `e2e/pooling/capture.e2e.spec.ts` reproduces the figures.
 
 #### How the verdicts land in the record and the map
 
@@ -849,28 +845,17 @@ the version `scope`, and **gate 1** then islands the remote before any coverage 
 difference is which verdict the portfolio owner sees, and how early: a range violation is a version problem
 with a name, while a coverage self-serve is a statement about what nobody built.
 
-**A tag is all-or-nothing per npm scope: tag the whole family, or none of it.** Tagging any member of a
-scope switches that remote's auto-pooling off for the *whole* scope (see "Enabling pooling"), while the
-tag itself only groups what you actually tagged — plus each tagged member's own package, since entrypoints
-follow their package. Tag one member of `@framework/*` and the rest of your `@framework` externals
-therefore contribute nothing to the graph from your remote: they pool only if some *other* remote declares
-two of them untagged and holds the scope open. Partial tagging can consequently make coverage **worse**
-than not tagging at all, and the failure is quiet — the members that fall out are still shared, just no
-longer coordinated with the family. Two habits avoid it:
-
-- If you tag, tag **every** member of that scope you declare, secondary entrypoints included. A build
-  that emits flat entries makes this easy to get wrong: `@framework/core` and
-  `@framework/core/primitives/di` are two externals, and tagging only the first leaves the second
-  relying on the package edge rather than on your tag.
-- Reach for a tag to express a coupling auto-pooling **cannot see** — a cross-scope sibling, or an
-  unscoped lockstep pair. For a coupling inside one npm scope, auto-pooling already has it, and a tag can
-  only narrow what it covers.
+**Tag the whole family.** A remote's tag only groups what that remote tagged — plus each tagged member's own
+package, since entrypoints follow their package. A member left untagged pools only if some *other* remote
+tags it, and the failure is quiet: the member is still shared, just no longer coordinated with the family.
+A build that emits flat entries makes this easy to get wrong — `@framework/core` and
+`@framework/core/primitives/di` are two externals, and tagging only the first leaves the second relying on
+the package edge rather than on your tag.
 
 #### Unscoped lockstep families (react/react-dom)
 
-Auto-pooling groups by npm scope, so it only ever matches `@scope/…` names. A lockstep pair with no
-scope — `react` + `react-dom`, `vue` + `vue-router` — is never auto-pooled, and the coupling cannot be
-inferred: a remote entry carries no `peerDependencies`. Declare it with a tag:
+A lockstep pair with no npm scope — `react` + `react-dom`, `vue` + `vue-router` — cannot be grouped by scope,
+and the coupling cannot be inferred: a remote entry carries no `peerDependencies`. Declare it with a tag:
 
 ```json
 // In remoteEntry.json
@@ -914,7 +899,29 @@ later is exactly the consumer that bridges two builds the portfolio had delibera
 | `warn` | `'<remote>' serves its own family: no committed build offers every entrypoint it imports at a version it accepts — '<gap>' is the gap, closest is '<build>'. All N members it imports are scoped for it.` | Dynamic init only (step 8) — the same finding read off the committed record: the remote just loaded would have bridged builds that shipped none of each other's members. |
 | `warn` | `'<remote>' serves its own family: the mapping would have handed it <specifier>@<tag>, …, which no build shipped together, so all N members it imports are scoped for it.` | The no-tear check caught a combination nothing built. No portfolio is known to reach this; if you see it, the record disagrees with the gates and it is worth reporting with the line. |
 | `warn` | `'<member>' is scoped-only — no coherent shared build provides it; N remotes download their own copy.` | Sharing was possible and was lost. Counts only the copies that really self-serve: a copy anchored elsewhere still dedups. Suppressed when an island in the same pass took the member's last provider — that island's warning already named the cause. |
-| `debug` | `[pool:<name>] N members across M remotes, incompatible={…}` | Pool formation, for confirming membership came out as intended. The set is gate 1's, listed before the coverage gate runs. |
+| `debug` | `[pool:<name>] N members across M remotes, incompatible={…}` | Pool formation, for confirming membership came out as intended. `<name>` is the pool's name as stored (see "What pooling stores"), and prefixes every line in this table. The set is gate 1's, listed before the coverage gate runs. |
+
+#### What pooling stores
+
+Pooling's results live in the shared-externals record next to the verdicts they explain, so a tool reading
+the storage (see [`globalThis.__NF_ORCHESTRATOR__`](./config.md#discovering-the-storage-from-tools)) does not
+have to re-derive them. Every field is omitted when it does not apply.
+
+| where | field | meaning |
+| --- | --- | --- |
+| `SharedExternal` | `poolName` | the pool this external resolves in, named as above |
+| `SharedVersionMeta` | `pool` | the `pool` tag this remote declared — pooling's input, never rewritten |
+| `SharedVersionMeta` | `servedBy` | the build this copy dedups onto, where it is not the version's own basis |
+| `SharedVersionMeta` | `poolCause` | why pooling made this copy serve itself: `incompatible` (gate 1), `uncovered` (gate 2), `torn` (the no-tear check), `unshared` (its member lost every provider to an island) |
+
+`poolCause` is the one thing the `scope` action cannot say on its own: a copy scoped for a range violation and
+one scoped because no build covers it look identical otherwise. The detail behind it — the gap, the closest
+build — is in the matching `warn` line only. Membership is kept apart from the tags on purpose: pooling
+recomputes pools from the copies' `pool` tags every time it runs, so writing its own result back into its input would keep a
+pool alive after the remote that formed it had left.
+
+On the dynamic path only `poolName` is written. The loaded remote's verdicts are applied to its import-map
+actions, not to the record, so its copies carry no `poolCause`.
 
 ### Scope and dynamic init
 
@@ -1414,8 +1421,8 @@ dedup for a download they never make, and can prefer a candidate that is dearer 
 > own download out, so two candidates differing only in whether their copies are already cached score the
 > same; adding that term would start deciding ties that currently go to the newest tag.
 
-> **Known limitation.** The objective is exact per external, but it is evaluated *per external*. With
-> `useAutoExternalPooling` enabled, two members of one pool whose remote-count majorities sit on different
+> **Known limitation.** The objective is exact per external, but it is evaluated *per external*. Once pooled,
+> two members of one pool whose remote-count majorities sit on different
 > version lines elect opposite winners, and pooling amplifies that split into islanded families. Making the
 > election pool-aware is the fix and is not implemented.
 

@@ -18,9 +18,7 @@ export function createMarkPoolsForReelection(
    * docs/version-resolver.md §"How pooling resolves".
    */
   return () => {
-    const { useAutoExternalPooling, scopes } = poolableScopes(config, ports.sharedExternalsRepo);
-
-    for (const scope of scopes) {
+    for (const scope of poolableScopes(ports.sharedExternalsRepo)) {
       const sharedExternals = ports.sharedExternalsRepo.getFromScope(scope);
 
       // Nothing dirty in the scope ⇒ no pool has a dirty member ⇒ nothing to spread, so skip before
@@ -31,7 +29,7 @@ export function createMarkPoolsForReelection(
 
       // Mutates the stored records in place; nothing is written, so a scope with nothing dirty stays
       // untouched and `commit()` has no reason to fire.
-      for (const [, members] of buildPools(sharedExternals, useAutoExternalPooling)) {
+      for (const [, members] of buildPools(sharedExternals)) {
         if (!members.some(m => m.external.dirty)) continue;
         for (const member of members)
           if (!member.external.dirty) {

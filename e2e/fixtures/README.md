@@ -19,7 +19,7 @@ sees exactly the input it saw in production.
 
 - Remote names became `team/mfe<n>`.
 - The one private package family became `@acme/shell/*`. A scoped name was replaced by another scoped
-  name on purpose: auto-pooling groups on the npm scope (`/^@([^/]+)\//`), so flattening it would have
+  name on purpose: scope tagging groups on the npm scope, so flattening it would have
   changed pool membership.
 - Product-specific `exposes` keys and `outFileName`s became positional placeholders — `./comp-a`,
   `comp-a.js`, `./comp-b`, … in every remote. Nothing reads an exposed key or file name (the harness

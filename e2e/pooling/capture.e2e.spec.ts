@@ -244,7 +244,7 @@ test.describe('capture: the synthetic siblings', () => {
   test('shares a cross-scope design system and an unscoped lockstep pair', async ({ nf }) => {
     // `mfe10` is the awkward one: its `@acme/design-system*` packages carry `pool: ng-core`,
     // which joins a different npm scope to the Angular family at a completely different version line
-    // (4.2.0 beside 22.0.x); it pairs `react` + `react-dom` under `pool: react`, a family auto-pooling
+    // (4.2.0 beside 22.0.x); it pairs `react` + `react-dom` under `pool: react`, a family scope tagging
     // can never group because the names are unscoped; and one of its entrypoints lives in a non-global
     // share scope. Nothing here conflicts, so nothing new islands — pools of unrelated version lines
     // are not a coherence problem by themselves.

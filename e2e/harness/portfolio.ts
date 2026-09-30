@@ -51,7 +51,7 @@ export type DepOptions = {
   strict?: boolean;
   /** `singleton`, default true — false means the external is scoped per remote, never shared. */
   singleton?: boolean;
-  /** Explicit `pool` tag; joins this external to a family without auto-pooling. */
+  /** Explicit `pool` tag; joins this external to a family without the harness scope tags. */
   pool?: string;
   shareScope?: string;
   /** Extra entrypoints of the same package, e.g. `['/http']` for `@angular/common/http`. */

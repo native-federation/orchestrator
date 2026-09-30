@@ -36,6 +36,5 @@ export const mockConfig = (): ConfigContract => ({
   },
   feature: {
     convertFlatSharedInfo: false,
-    useAutoExternalPooling: false,
   },
 });

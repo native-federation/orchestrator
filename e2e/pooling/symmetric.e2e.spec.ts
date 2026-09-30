@@ -156,7 +156,7 @@ test.describe('symmetric: an island takes the whole family', () => {
     // resolver granted mfe2 that dedup — but taking it would load the shared ui built against framework
     // 18 inside a remote running framework 17. The whole family is scoped for mfe2 instead.
     //
-    // Membership here is by declared `pool` tag, with auto-pooling off: a design system opting into being
+    // Membership here is by declared `pool` tag, with scope tagging off: a design system opting into being
     // coupled to the framework it is built against. The tag mechanism is `membership.e2e.spec.ts`; that
     // the flag does not change this verdict is `flag.e2e.spec.ts`.
     const tagged = (pkg: string, version: string, req: string) =>

@@ -32,9 +32,10 @@ import {
   type Acceptance,
 } from './anchoring';
 import { buildPools } from './pool-graph';
-import { lazy, poolableScopes, remotesInPool } from './pool.util';
+import { lazy, poolableScopes, remotesInPool, syncPoolNames } from './pool.util';
 import type { Islanded, PoolMember, PoolName, Specifier } from './pool.types';
 
+// `kind` is what lands on each of the remote's copies as `poolCause`.
 type IslandCause =
   // determine marked one of its versions `scope`: a genuine range violation.
   | { kind: 'incompatible'; member: ExternalName; tag: VersionName }
@@ -114,11 +115,15 @@ function servedPerRemote(
   return served;
 }
 
-// Whether the stored record still names an anchor for anybody. A pool that needs no anchor this election is
-// only a no-op if the record agrees: a `servedBy` from an earlier portfolio would keep pointing the map at a
-// build gate 2 did not choose this time, and `rebuildMember` is what clears it.
-const anyAnchorStored = (members: PoolMember[]): boolean =>
-  members.some(m => m.external.versions.some(v => v.remotes.some(r => r.servedBy !== undefined)));
+// Whether the stored record still carries a verdict from an earlier portfolio. A pool that needs none this
+// election is only a no-op if the record agrees: a stale `servedBy` would keep pointing the map at a build
+// gate 2 did not choose this time, a stale `poolCause` would misreport why, and `rebuildMember` clears both.
+const anyVerdictStored = (members: PoolMember[]): boolean =>
+  members.some(m =>
+    m.external.versions.some(v =>
+      v.remotes.some(r => r.servedBy !== undefined || r.poolCause !== undefined)
+    )
+  );
 
 /**
  * The no-tear guarantee, checked on what is about to be written rather than argued from the gates: every
@@ -279,23 +284,20 @@ export function createPoolSharedExternals(
    * gate 1 sound.
    */
   return (touched?: TouchedExternals) => {
-    const { useAutoExternalPooling, scopes } = poolableScopes(config, ports.sharedExternalsRepo);
-
-    for (const scope of scopes) {
+    for (const scope of poolableScopes(ports.sharedExternalsRepo)) {
       const touchedInScope = touched?.get(scope);
       if (touched && !touchedInScope) continue;
 
       const sharedExternals = ports.sharedExternalsRepo.getFromScope(scope);
 
       try {
-        for (const [poolName, members] of buildPools(
-          sharedExternals,
-          useAutoExternalPooling,
-          config.log
-        )) {
+        const pools = buildPools(sharedExternals, config.log);
+        const rebuilt = new Set<PoolName>();
+        for (const [poolName, members] of pools) {
           if (touchedInScope && !members.some(m => touchedInScope.has(m.name))) continue;
-          poolFamily(poolName, members, scope);
+          if (poolFamily(poolName, members, scope)) rebuilt.add(poolName);
         }
+        syncPoolNames(sharedExternals, pools, ports.sharedExternalsRepo, scope, rebuilt);
       } catch (error) {
         if (error instanceof NFError) return Promise.reject(error);
         config.log.error(3, `[${scope}] failed to pool shared externals.`, {
@@ -310,13 +312,14 @@ export function createPoolSharedExternals(
     return Promise.resolve();
   };
 
-  function poolFamily(poolName: PoolName, members: PoolMember[], scope: string): void {
+  // Whether it rewrote the members, `poolName` included; otherwise `syncPoolNames` names them.
+  function poolFamily(poolName: PoolName, members: PoolMember[], scope: string): boolean {
     // Below 2 members across 2 remotes there is nothing to coordinate; the per-external result is already
     // coherent.
-    if (members.length < 2) return;
+    if (members.length < 2) return false;
 
     const allRemotes = remotesInPool(members);
-    if (allRemotes.length < 2) return;
+    if (allRemotes.length < 2) return false;
 
     const islanded = islandedRemotes(members);
     const consumed = consumedMembers(members);
@@ -345,9 +348,9 @@ export function createPoolSharedExternals(
     let { serving, basis, served } = assign();
 
     // Nothing to island and nothing reassigned: determine's verdicts already stand for every member, so
-    // rebuilding them would write back what storage holds — unless the record still carries an anchor this
-    // election did not grant, which has to be cleared or the map keeps honouring it.
-    if (islanded.size === 0 && serving.size === 0 && !anyAnchorStored(members)) return;
+    // rebuilding them would write back what storage holds — unless the record still carries a verdict this
+    // election did not reach, which has to be cleared or the map keeps honouring it.
+    if (islanded.size === 0 && serving.size === 0 && !anyVerdictStored(members)) return false;
 
     // A torn remote is islanded — self-serving a whole family is always coherent — and the assignment redone,
     // since taking a build away can move everyone who was deduping onto it. Terminates for the same reason
@@ -382,10 +385,11 @@ export function createPoolSharedExternals(
     }
 
     for (const member of members) {
-      const rebuilt = rebuildMember(member, islanded, served, basis.get(member.name));
+      const rebuilt = rebuildMember(poolName, member, islanded, served, basis.get(member.name));
       warnIfScopedOnly(poolName, member, rebuilt, islanded, scope);
       ports.sharedExternalsRepo.addOrUpdate(member.name, rebuilt, scope);
     }
+    return true;
   }
 
   /**
@@ -504,8 +508,9 @@ export function createPoolSharedExternals(
   // `basis` is the copy the global mapping publishes; `undefined` means none is left and the member leaves
   // the shared set (constraint 15).
   function rebuildMember(
+    poolName: PoolName,
     member: PoolMember,
-    islanded: Islanded,
+    islanded: Map<RemoteName, IslandCause>,
     served: Served,
     basis: RemoteName | undefined
   ): SharedExternal {
@@ -542,6 +547,7 @@ export function createPoolSharedExternals(
       const build = served.get(entry.remote)?.get(member.name);
       if (build !== undefined) entry.meta.servedBy = build;
       else delete entry.meta.servedBy;
+      delete entry.meta.poolCause;
     }
 
     // No basis left: nothing publishes this member, so a copy that was resolving through the global mapping
@@ -553,6 +559,10 @@ export function createPoolSharedExternals(
         .filter(e => e.meta.servedBy !== undefined)
         .map(e => ({ ...e, action: 'skip' as const }));
     }
+
+    // Every scoped copy's remote is islanded unless the sweep above took it, which is what `unshared` is.
+    for (const entry of scoped)
+      entry.meta.poolCause = islanded.get(entry.remote)?.kind ?? 'unshared';
 
     // Basis first: `remotes[0]` is what the global mapping and a later re-election read as the serving copy,
     // and only a copy that runs its own build may be it.
@@ -591,6 +601,7 @@ export function createPoolSharedExternals(
     // re-elects this record without `commit()` ever passing over it again.
     return {
       dirty: false,
+      poolName,
       versions: [
         ...shareVersion,
         ...byTag(

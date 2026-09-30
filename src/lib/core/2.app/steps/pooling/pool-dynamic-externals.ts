@@ -17,7 +17,7 @@ import {
   consumedSpecifiers,
   hostRemotes,
 } from './pool-views';
-import { lazy } from './pool.util';
+import { lazy, syncPoolNames } from './pool.util';
 import {
   acceptanceTable,
   acceptsAll,
@@ -49,8 +49,6 @@ export function createPoolDynamicExternals(
    * See docs/version-resolver.md.
    */
   return ({ entry, actions }) => {
-    const { useAutoExternalPooling } = config.feature;
-
     // The poolable singletons this entry declares, per share scope — what it may have its actions rewritten
     // for. Membership is decided below, off the committed record rather than off this list.
     const declared = new Map<string, Set<ExternalName>>();
@@ -72,16 +70,19 @@ export function createPoolDynamicExternals(
     };
 
     for (const [shareScope, names] of declared) {
-      // With auto-pooling off, a tag anywhere in the committed scope forms pools this entry is subject to —
-      // its own tag is not required. A tag is remote-local for *membership* only; the pool it forms then
+      // A tag anywhere in the committed scope forms pools this entry is subject to — its own tag is not
+      // required. A tag is remote-local for *membership* only; the pool it forms then
       // operates on the whole external, this entry's copies included (see docs/version-resolver.md
       // §"Unscoped lockstep families"). Reading only this entry's tags is what let an untagged remote
       // bridge two builds the portfolio had deliberately pooled apart.
-      if (!useAutoExternalPooling && !ports.sharedExternalsRepo.hasPoolTag(shareScope)) continue;
+      if (!ports.sharedExternalsRepo.hasPoolState(shareScope)) continue;
 
       const committed = ports.sharedExternalsRepo.getFromScope(shareScope);
+      const pools = buildPools(committed);
+      // Names only: the loaded remote's own verdicts live in `actions`, not in the record.
+      syncPoolNames(committed, pools, ports.sharedExternalsRepo, shareScope);
 
-      for (const pool of buildPools(committed, useAutoExternalPooling).values()) {
+      for (const pool of pools.values()) {
         // Only the members this entry declares have an action to rewrite; the rest of the pool is context —
         // its builds are candidates and its committed tags are what the gate reads.
         const mine = pool.filter(member => names.has(member.name));

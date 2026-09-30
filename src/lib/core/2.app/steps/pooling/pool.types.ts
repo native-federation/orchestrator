@@ -1,5 +1,6 @@
 import type { ExternalName, RemoteName, SharedExternal, VersionName } from 'lib/core/1.domain';
 
+// Unique per share scope: the most-declared tag, suffixed `~2`, `~3`… where two pools share one.
 export type PoolName = string;
 
 /** An entrypoint as a consumer imports it. Nothing is keyed by external name — see `pool-views.ts`. */

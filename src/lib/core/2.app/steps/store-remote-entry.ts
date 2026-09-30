@@ -173,7 +173,7 @@ export function createStoreRemoteEntry(
 
     const cached: SharedExternal = ports.sharedExternalsRepo
       .tryGet(sharedInfo.packageName, sharedInfo.shareScope)
-      .orElse({ dirty: false, versions: [] });
+      .get() ?? { dirty: false, versions: [] };
 
     return {
       tag,
@@ -201,6 +201,7 @@ export function createStoreRemoteEntry(
           sharedInfo.packageName,
           {
             dirty: cached.dirty,
+            ...(cached.poolName !== undefined && { poolName: cached.poolName }),
             versions: cached.versions.sort((a, b) => ports.versionCheck.compare(b.tag, a.tag)),
           },
           sharedInfo.shareScope

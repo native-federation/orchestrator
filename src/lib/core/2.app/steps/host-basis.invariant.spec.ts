@@ -11,6 +11,7 @@ import { createStorageHandlerMock } from 'lib/testing/handlers/storage.mock';
 import { mockConfig } from 'lib/testing/config.mock';
 import type { DrivingContract } from '../driving-ports/driving.contract';
 import type { RemoteEntry } from 'lib/core/1.domain';
+import { tagSharedInfoByNpmScope } from 'lib/testing/pooling/tag-by-npm-scope';
 
 /**
  * On a version flagged `host`, `remotes[0]` is the host's copy — what the import map publishes and what
@@ -56,16 +57,23 @@ function setup(pooling: boolean) {
     versionCheck: createVersionCheck(),
   } as unknown as DrivingContract;
   const config = mockConfig();
-  config.feature.useAutoExternalPooling = pooling;
 
   ports.remoteInfoRepo.addOrUpdate('host', { scopeUrl: 'http://host/', exposes: [] });
   for (const n of ['team/mfe1', 'team/mfe2', 'team/mfe3']) {
     ports.remoteInfoRepo.addOrUpdate(n, { scopeUrl: `http://${n.replace('/', '-')}/`, exposes: [] });
   }
 
+  const processEntries = createProcessRemoteEntries(config, ports);
+
   return {
     ports,
-    process: createProcessRemoteEntries(config, ports),
+    // With pooling, entries arrive tagged by npm scope — the build's default for scoped packages.
+    process: (entries: RemoteEntry[]) =>
+      processEntries(
+        pooling
+          ? entries.map(e => ({ ...e, shared: tagSharedInfoByNpmScope(e.shared ?? []) }))
+          : entries
+      ),
     mark: createMarkPoolsForReelection(config, ports),
     determine: createDetermineSharedExternals(config, ports),
     pool: createPoolSharedExternals(config, ports),

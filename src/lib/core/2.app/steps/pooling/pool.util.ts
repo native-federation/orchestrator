@@ -1,7 +1,6 @@
-import type { RemoteName } from 'lib/core/1.domain';
+import type { ExternalName, RemoteName, shareScope } from 'lib/core/1.domain';
 import type { ForSharedExternalsStorage } from '../../driving-ports/for-shared-externals-storage.port';
-import type { ModeConfig } from '../../config/mode.contract';
-import type { PoolMember } from './pool.types';
+import type { PoolMember, PoolName } from './pool.types';
 
 // A projection built at most once, and only if a gate gets far enough to ask for it. Both pooling steps
 // iterate to a fixed point over views that do not change between rounds.
@@ -17,26 +16,54 @@ export function remotesInPool(members: PoolMember[]): RemoteName[] {
 }
 
 /**
- * The scopes either pooling step has anything to do in. With auto-pooling off only a scope that carries a
- * `pool` tag of its own can pool anything, and a pool never spans share scopes — so one tag must not put
- * every other scope through a graph build. Auto-pooling on must never early-out, since any scoped package is
- * potentially poolable. The `strict` scope is never pooled.
+ * The scopes either pooling step has anything to do in. A pool never spans share scopes, so one tag must
+ * not put every other scope through a graph build. The `strict` scope is never pooled.
  *
  * Names only, so a caller that decides to skip a scope never reads it out of storage.
  */
 export function poolableScopes(
-  config: ModeConfig,
-  repo: Pick<ForSharedExternalsStorage, 'getScopes' | 'scopeType' | 'hasPoolTag'>
-): { useAutoExternalPooling: boolean; scopes: string[] } {
-  const { useAutoExternalPooling } = config.feature;
+  repo: Pick<ForSharedExternalsStorage, 'getScopes' | 'scopeType' | 'hasPoolState'>
+): string[] {
+  return repo
+    .getScopes()
+    .filter(scope => repo.scopeType(scope) !== 'strict' && repo.hasPoolState(scope));
+}
 
-  return {
-    useAutoExternalPooling,
-    scopes: repo
-      .getScopes()
-      .filter(
-        scope =>
-          repo.scopeType(scope) !== 'strict' && (useAutoExternalPooling || repo.hasPoolTag(scope))
-      ),
-  };
+/**
+ * Write `poolName` onto every external of the scope that is in a pool under a different name, and clear it —
+ * with every copy's `poolCause` — off one that is in none any more. Names are per scope (a suffix
+ * disambiguates two pools sharing a tag), so a pool nobody re-elected can still be renamed by another.
+ * `skip` names pools whose members the caller is rebuilding itself.
+ */
+export function syncPoolNames(
+  sharedExternals: shareScope,
+  pools: Map<PoolName, PoolMember[]>,
+  repo: Pick<ForSharedExternalsStorage, 'addOrUpdate'>,
+  scope: string,
+  skip: ReadonlySet<PoolName> = new Set()
+): void {
+  const named = new Map<ExternalName, PoolName>();
+  for (const [name, members] of pools) for (const member of members) named.set(member.name, name);
+
+  for (const [name, external] of Object.entries(sharedExternals)) {
+    const pool = named.get(name);
+    if (pool !== undefined && skip.has(pool)) continue;
+    if (external.poolName === pool) continue;
+
+    // A fresh record rather than a mutation: the dynamic path must leave committed versions untouched.
+    const { poolName: _stale, ...rest } = external;
+    repo.addOrUpdate(
+      name,
+      pool !== undefined
+        ? { ...rest, poolName: pool }
+        : {
+            ...rest,
+            versions: external.versions.map(v => ({
+              ...v,
+              remotes: v.remotes.map(({ poolCause: _cause, ...meta }) => meta),
+            })),
+          },
+      scope
+    );
+  }
 }

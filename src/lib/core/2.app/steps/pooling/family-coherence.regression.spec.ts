@@ -12,6 +12,7 @@ import { createDetermineSharedExternals } from '../determine-shared-externals';
 import { createPoolSharedExternals } from './pool-shared-externals';
 import { createGenerateImportMap } from '../generate-import-map';
 import { findIncoherentRemotes } from 'lib/testing/pooling/no-tear';
+import { tagStoredByNpmScope } from 'lib/testing/pooling/tag-by-npm-scope';
 
 /**
  * Permanent regression guard for #63, end to end through determine → pooling → import map.
@@ -44,8 +45,6 @@ describe('pooling: family coherence', () => {
 
   beforeEach(() => {
     config = mockConfig();
-    config.feature.useAutoExternalPooling = true;
-
     adapters = mockAdapters();
     adapters.versionCheck = createVersionCheck();
     adapters.sharedExternalsRepo = createSharedExternalsRepository({
@@ -84,7 +83,10 @@ describe('pooling: family coherence', () => {
   const seed = (name: string, versions: SharedVersion[]) =>
     adapters.sharedExternalsRepo.addOrUpdate(
       name,
-      { dirty: true, versions: newestFirst(versions, adapters.versionCheck.compare) },
+      // The build tags every scoped package with its npm scope by default; `tagStoredByNpmScope` stands in.
+      tagStoredByNpmScope({
+        [name]: { dirty: true, versions: newestFirst(versions, adapters.versionCheck.compare) },
+      })[name]!,
       undefined
     );
 

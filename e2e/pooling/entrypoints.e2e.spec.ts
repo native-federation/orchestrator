@@ -18,7 +18,7 @@ import { dep, remote, SCOPE } from '../harness/portfolio';
  * **This is a resolver policy, not a pooling one.** Coverage is decided per external in `determine`
  * and `generate-import-map`; the portfolios below hold a single external, so its pool has one member
  * and the gates have nothing to coordinate. Every case here behaves identically with
- * `useAutoExternalPooling` off, which `flag.e2e.spec.ts` pins — it matters because self-fill makes one
+ * `pooling: false`, which `flag.e2e.spec.ts` pins — it matters because self-fill makes one
  * remote draw a package from two builds, the very shape gate 2 reacts to when the builds belong to a
  * *family*. What happens when the ragged package belongs to a family whose remote is islanded is in
  * `asymmetric.e2e.spec.ts`; how the same subsets look in the flat remoteEntry shape, where the whole

@@ -235,7 +235,7 @@ test.describe('provenance: the dynamic path mirrors it', () => {
 test.describe('provenance: the cases no tag comparison can reach', () => {
   test('makes a declared bridge-tag coupling constrain what the tagger runs', async ({ nf }) => {
     // Case 5. `docs/version-resolver.md` §"Declare the coupling you actually have" recommends co-tagging a
-    // bridge member to express a coupling auto-pooling cannot see. Under the old promise the tag bought
+    // bridge member to express a coupling scope tagging cannot see. Under the old promise the tag bought
     // gate 1 only: a design-system remote ships design-system packages and a shell ships framework ones,
     // so the two serving builds are disjoint *by construction* and gate 2 could never fire on them — the
     // declaration was honoured by grouping the members and then ignored.
@@ -281,7 +281,7 @@ test.describe('provenance: the cases no tag comparison can reach', () => {
     // cdk, is in neither build. Coverage asks a different question and reaches it.
     // **Delta: +2 downloads** (3 → 5).
     //
-    // material and cdk are one npm scope, so auto-pooling groups them, and they are a vendor lockstep
+    // material and cdk are one npm scope, so scope tagging groups them, and they are a vendor lockstep
     // pair: 22.0.5 against 22.1.0 is a combination the vendor never shipped.
     await nf.init([
       remote('team/mfe1', SCOPE.mfe1, [
@@ -303,11 +303,11 @@ test.describe('provenance: the cases no tag comparison can reach', () => {
     ]);
 
     // Coverage is not a verdict and would have moved mfe3 onto its own build in silence; the warning is
-    // what makes the promise's main cost auditable. Note the pool key: material, cdk and core are one
-    // auto-pool, but only the two members mfe3 imports are scoped for it.
+    // what makes the promise's main cost auditable. Note the pool name: material, cdk and core are one
+    // pool tagged `angular`, but only the two members mfe3 imports are scoped for it.
     expect(await nf.warns()).toEqual([
       expect.stringContaining(
-        "[pool:@angular/cdk] 'team/mfe3' serves its own family: no shared build offers every entrypoint it imports at a version it accepts — '@angular/material' is the gap, closest is 'team/mfe2'. All 2 members it imports are scoped for it."
+        "[pool:angular] 'team/mfe3' serves its own family: no shared build offers every entrypoint it imports at a version it accepts — '@angular/material' is the gap, closest is 'team/mfe2'. All 2 members it imports are scoped for it."
       ),
     ]);
 

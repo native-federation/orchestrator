@@ -5,11 +5,11 @@ import { dep, remote, SCOPE } from '../harness/portfolio';
  * Which externals a `remoteEntry` puts in the same family.
  *
  * Membership is the connected component of a graph with two kinds of edge: the npm scope of a package
- * name (auto-pooling, portfolio-global) and a declared `pool` tag (remote-local for membership, but
+ * name (scope tagging, portfolio-global) and a declared `pool` tag (remote-local for membership, but
  * the gates then operate on the whole external). Everything else — how many builds a family may draw
  * on, who islands — only ever applies *within* one pool.
  *
- * Every case here varies one field of the declaration and nothing else. Several run with auto-pooling
+ * Every case here varies one field of the declaration and nothing else. Several run with scope tagging
  * **off**, because that is how a `pool` tag is shown to form a family by itself — not a test of the flag,
  * which is `flag.e2e.spec.ts`. What the family then does with its version lines is `symmetric` and
  * `asymmetric`.
@@ -74,7 +74,7 @@ test.describe('membership: npm scope', () => {
     expect(await nf.islands()).toEqual([]);
   });
 
-  test('an unscoped name is not auto-pooled, so its family can mix majors', async ({ nf }) => {
+  test('an unscoped name is not scope-tagged, so its family can mix majors', async ({ nf }) => {
     // The status quo the `pool` tag exists to fix: with no tag and no npm scope, react and react-dom
     // are unrelated externals. mfe2 scopes the react it rejects and dedups react-dom@18.2.0 — react 17
     // against react-dom 18, which is exactly the split-family shape, just outside pooling's reach.
@@ -120,7 +120,7 @@ test.describe('membership: the `pool` tag', () => {
 
   test('pools an unscoped lockstep family portfolio-wide from one remote’s tag', async ({ nf }) => {
     // The react/react-dom recipe. Auto-scoping only matches scoped npm names, so react can never be
-    // auto-pooled — but a `pool` tag is remote-local for *membership* only, while the gates operate on
+    // scope-tagged — but a `pool` tag is remote-local for *membership* only, while the gates operate on
     // the whole external. One remote declaring `pool: 'react'` on both packages therefore pools the
     // family for every remote, including mfe2 which declared nothing.
     const react = tagged('react');
@@ -212,9 +212,7 @@ test.describe('membership: shareScope and singleton', () => {
     });
 
     // The warning is tagged with the shareScope it happened in.
-    expect(await nf.warns()).toContainEqual(
-      expect.stringContaining('[widgets][pool:@angular/core]')
-    );
+    expect(await nf.warns()).toContainEqual(expect.stringContaining('[widgets][pool:angular]'));
 
     // A named share scope is served entirely through import-map scopes, so a remote outside it must
     // resolve nothing — mfe3 dedups mfe1's build, but only because it declared the same scope.
