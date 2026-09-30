@@ -296,53 +296,54 @@ test.describe('lifecycle: the dynamic path', () => {
   });
 
   /**
-   * CHARACTERISATION — a defect found while writing this suite, not a documented decision.
+   * Formerly a characterised defect: `pool-dynamic-externals` decided `scope` only in the *actions* it hands
+   * to the import-map builder, while the store kept what `update-cache` had written — the loaded remote's
+   * sole-provided member as `share`, its refused dedup as `skip`. The delta was right, but the next init
+   * that did not re-elect this pool (a plain reload) rebuilt the map from the store and published that
+   * member globally beside the committed family: #63's crash shape re-entering through the dynamic path.
    *
-   * `pool-dynamic-externals` decides `scope` in the *actions* it hands to the import-map builder, but
-   * the store has already been written by `update-cache`: the loaded remote's sole-provided member is
-   * committed as `share` from its own build. The delta the browser receives is correct, so nothing is
-   * broken in this session — but the persisted state disagrees with it, and the next init that does not
-   * re-elect this pool (a plain reload, where nothing is dirty and pooling is skipped) rebuilds the map
-   * from the store and publishes that member globally, with the disagreeing dedup restored.
-   *
-   * That is #63's crash shape re-entering through the dynamic path. Fixing it means recording the
-   * island in the store — pooling's init path does exactly that in `rebuildMember`.
+   * The dynamic step now writes the loaded remote's verdicts into the record, as `rebuildMember` does on
+   * the init path, so the store says what the delta did.
    */
-  test.describe('known defect: the dynamic island is not persisted', () => {
+  test.describe('the dynamic island is persisted', () => {
     const late = () =>
       remote('team/mfe4', SCOPE.mfe4, [
         dep('@angular/router', '22.0.5', { req: '^22.0.0' }),
         dep('@angular/forms', '22.0.5', { req: '^22.0.0' }),
       ]);
 
-    test('commits the sole-provided member as shared even though it was scoped', async ({ nf }) => {
+    test('records the sole-provided member and the refused dedup as scoped', async ({ nf }) => {
       await nf.init([anchor()], { unlisted: [late()] });
       await nf.initRemoteEntry(late().url);
 
-      // The map served mfe4 its own forms (asserted above), but the store says it is shared globally.
       const store = await nf.store();
-      expect(storedActions(store, '@angular/forms')).toEqual(['22.0.5:share']);
-      // ...and the dedup pooling refused is still recorded as a plain `skip`, not a `scope`.
-      expect(storedActions(store, '@angular/router')).toEqual(['22.1.0:share', '22.0.5:skip']);
+      // Nothing publishes forms any more — the delta served mfe4 its own — and the dedup pooling
+      // refused is a `scope` beside the committed share, not a `skip`.
+      expect(storedActions(store, '@angular/forms')).toEqual(['22.0.5:scope']);
+      expect(storedActions(store, '@angular/router')).toEqual(['22.1.0:share', '22.0.5:scope']);
+
+      const causes = store['__GLOBAL__']!['@angular/forms']!.versions.flatMap(v =>
+        v.remotes.map(r => r.poolCause)
+      );
+      expect(causes).toEqual(['uncovered']);
     });
 
-    test('resurrects the incoherent map on the next reload', async ({ nf }) => {
+    test('reproduces the delta on the next reload', async ({ nf }) => {
       await nf.init([anchor()], { unlisted: [late()] });
       await nf.initRemoteEntry(late().url);
 
       // A reload: same manifest, everything cached, so nothing is dirty and pooling is skipped.
       await nf.init([anchor()], { unlisted: [late()] });
 
-      // forms@22.0.5 is now global beside router@22.1.0, and mfe4 has no scope of its own — the exact
-      // mix the dynamic gate refused one page load earlier.
+      // mfe4 keeps its own family under its own scope, and nothing leaks into the global `imports`.
       const map = await nf.map();
-      expect(map.imports['@angular/forms']).toBe('http://mfe4/@angular/forms.js');
+      expect(map.imports['@angular/forms']).toBeUndefined();
       expect(map.imports['@angular/router']).toBe('http://mfe1/@angular/router.js');
-      expect(map.scopes).toBeUndefined();
-
-      // And it is reachable: any remote's code now resolves the mixed pair.
-      expect(await nf.resolve('@angular/forms', SCOPE.mfe1)).toBe('mfe4|@angular/forms@22.0.5');
-      expect(await nf.resolve('@angular/router', SCOPE.mfe1)).toBe('mfe1|@angular/router@22.1.0');
+      expect((await nf.load('team/mfe4')).seen).toEqual({
+        '@angular/router': 'mfe4|@angular/router@22.0.5',
+        '@angular/forms': 'mfe4|@angular/forms@22.0.5',
+      });
+      expect(await nf.resolve('@angular/forms', SCOPE.mfe1)).toContain('UNRESOLVED');
     });
   });
 });

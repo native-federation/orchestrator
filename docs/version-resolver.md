@@ -920,8 +920,11 @@ build — is in the matching `warn` line only. Membership is kept apart from the
 recomputes pools from the copies' `pool` tags every time it runs, so writing its own result back into its input would keep a
 pool alive after the remote that formed it had left.
 
-On the dynamic path only `poolName` is written. The loaded remote's verdicts are applied to its import-map
-actions, not to the record, so its copies carry no `poolCause`.
+The dynamic path writes the same fields, for the loaded remote's copies only: a copy it scopes moves into a
+`scope` version at its own tag with its `poolCause` (a `share` version only that copy held leaves with it), and
+a copy it redirects keeps its place with a `servedBy`. Without that, the record would keep `update-cache`'s
+verdicts, and a reload — which rebuilds the map from the record without re-electing anything — would publish
+the combination the delta had refused.
 
 ### Scope and dynamic init
 
@@ -933,7 +936,7 @@ Because the import map is immutable once committed, the dynamic pass is **additi
 newly loaded remote, never retro-corrects committed remotes, and coordinates each shareScope
 independently. Membership comes from the committed record, so the loaded remote is subject to every pool the
 portfolio has — including one formed by another remote's `pool` tag — and only the members it declares itself
-can have their verdict rewritten. It reads the record *after* `update-cache` stored the loaded remote's own copies, which is
+can have their verdict rewritten — in its actions and, for its own copies, in the record (see "What pooling stores"). It reads the record *after* `update-cache` stored the loaded remote's own copies, which is
 what lets both paths share one implementation. Both gates are mirrored, in the same order:
 
 1. **The witness.** May the remote resolve through the committed `imports` as they stand — did some build

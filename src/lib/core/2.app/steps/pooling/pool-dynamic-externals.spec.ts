@@ -349,7 +349,7 @@ describe('createPoolDynamicExternals', () => {
     expect(result.actions['@framework/cdk']).toEqual({ action: 'scope' });
   });
 
-  it('never mutates a committed version, whatever it decides', async () => {
+  it("never touches another remote's copy, whatever it decides", async () => {
     const externals = {
       '@framework/forms': committed(
         '@framework/forms',
@@ -375,11 +375,14 @@ describe('createPoolDynamicExternals', () => {
     });
 
     expect(JSON.stringify(externals)).toBe(snapshot);
-    // The only write is the pool's name, onto a fresh record carrying the committed versions as they were.
-    for (const [name, written] of vi.mocked(adapters.sharedExternalsRepo.addOrUpdate).mock.calls) {
-      expect(written.versions).toBe(externals[name as keyof typeof externals].versions);
-      expect(written.poolName).toBe('framework');
-    }
+    // Whatever it writes back is the loaded remote's own copies: every other remote's copy is exactly as
+    // the committed map was built from it — same version, same action, same meta.
+    const others = (external: SharedExternal) =>
+      external.versions.flatMap(v =>
+        v.remotes.filter(r => r.name !== 'mfe').map(r => ({ tag: v.tag, action: v.action, r }))
+      );
+    for (const [name, written] of vi.mocked(adapters.sharedExternalsRepo.addOrUpdate).mock.calls)
+      expect(others(written)).toEqual(others(externals[name as keyof typeof externals]));
   });
 
   it('leaves a whole-pool-introducing remote (all share) untouched', async () => {
@@ -543,6 +546,181 @@ describe('createPoolDynamicExternals', () => {
     expect(result.actions['@framework/common']).toEqual({
       action: 'skip',
       override: 'http://host/common.js',
+    });
+  });
+
+  // The delta decides in `actions`; these pin that the record agrees, because a plain reload rebuilds the
+  // map from the record alone. Before this, the record kept `update-cache`'s verdicts and a reload served
+  // the combination the delta had refused (e2e/pooling/lifecycle.e2e.spec.ts, "the dynamic island").
+  describe('verdicts in the record', () => {
+    // The mock's `compare` ties everything; the record is written newest first, as `commit()` does.
+    beforeEach(() => {
+      adapters.versionCheck.compare = vi.fn((a: string, b: string) =>
+        a.localeCompare(b, undefined, { numeric: true })
+      );
+    });
+
+    // Last write wins: the name sync may write a member again after its verdict.
+    const writtenFor = (name: string): SharedExternal | undefined =>
+      vi
+        .mocked(adapters.sharedExternalsRepo.addOrUpdate)
+        .mock.calls.filter(c => c[0] === name)
+        .at(-1)?.[1];
+
+    const copies = (external: SharedExternal | undefined) =>
+      (external?.versions ?? []).map(v => [
+        `${v.tag}:${v.action}`,
+        v.remotes.map(r => ({
+          name: r.name,
+          ...(r.poolCause && { poolCause: r.poolCause }),
+          ...(r.servedBy && { servedBy: r.servedBy }),
+        })),
+      ]);
+
+    it('moves an islanded remote out of the shared version into a scope version', async () => {
+      const entry = entryWith(shared('@framework/core'), shared('@framework/common'));
+      givenCommitted({
+        '@framework/core': committed('@framework/core', {
+          tag: '17.0.0',
+          remotes: ['host', 'mfe'],
+        }),
+        '@framework/common': committed('@framework/common', {
+          tag: '17.0.0',
+          remotes: ['host', 'mfe'],
+        }),
+      });
+
+      await poolDynamicExternals({
+        entry,
+        actions: {
+          '@framework/core': { action: 'skip' },
+          '@framework/common': { action: 'scope' },
+        },
+      });
+
+      // Both members, the matching one included: the island is the whole family.
+      for (const name of ['@framework/core', '@framework/common']) {
+        expect(copies(writtenFor(name))).toEqual([
+          ['17.0.0:share', [{ name: 'host' }]],
+          ['17.0.0:scope', [{ name: 'mfe', poolCause: 'incompatible' }]],
+        ]);
+        expect(writtenFor(name)!.poolName).toBe('framework');
+      }
+    });
+
+    it('records a coverage self-serve as uncovered, and drops a share only it provided', async () => {
+      adapters.versionCheck.isCompatible = acceptsSameMajor();
+      givenCommitted({
+        '@framework/forms': committed(
+          '@framework/forms',
+          { tag: '22.0.8', remotes: ['team/a', 'mfe'] },
+          { tag: '21.2.18', remotes: ['team/legacy'] }
+        ),
+        '@framework/forms/signals': committed(
+          '@framework/forms/signals',
+          { tag: '21.2.18', remotes: ['team/legacy'] },
+          { tag: '22.0.8', remotes: ['mfe'] }
+        ),
+        // `update-cache` made mfe the sole provider of a member nobody had shared yet.
+        '@framework/animations': committed('@framework/animations', {
+          tag: '22.0.8',
+          remotes: ['mfe'],
+        }),
+      });
+      const entry = entryWith(
+        shared('@framework/forms'),
+        shared('@framework/forms/signals'),
+        shared('@framework/animations')
+      );
+
+      await poolDynamicExternals({
+        entry,
+        actions: {
+          '@framework/forms': { action: 'skip' },
+          '@framework/forms/signals': { action: 'skip' },
+          '@framework/animations': { action: 'share' },
+        },
+      });
+
+      expect(copies(writtenFor('@framework/forms'))).toEqual([
+        ['22.0.8:share', [{ name: 'team/a' }]],
+        ['22.0.8:scope', [{ name: 'mfe', poolCause: 'uncovered' }]],
+        ['21.2.18:skip', [{ name: 'team/legacy' }]],
+      ]);
+      expect(copies(writtenFor('@framework/forms/signals'))).toEqual([
+        ['22.0.8:scope', [{ name: 'mfe', poolCause: 'uncovered' }]],
+        ['21.2.18:share', [{ name: 'team/legacy' }]],
+      ]);
+      // The delta never published it globally, so the record must not either: it is scope-only now.
+      expect(copies(writtenFor('@framework/animations'))).toEqual([
+        ['22.0.8:scope', [{ name: 'mfe', poolCause: 'uncovered' }]],
+      ]);
+    });
+
+    it('records the anchor a redirected copy dedups onto', async () => {
+      adapters.versionCheck.isCompatible = acceptsSameMajor();
+      adapters.remoteInfoRepo.tryGet = vi.fn(name =>
+        name === 'team/legacy'
+          ? Optional.of({ scopeUrl: 'http://legacy/', exposes: [] } as RemoteInfo)
+          : Optional.empty<RemoteInfo>()
+      );
+      givenCommitted({
+        '@framework/core': committed(
+          '@framework/core',
+          { tag: '22.0.8', remotes: ['team/a'] },
+          { tag: '21.2.18', remotes: ['team/legacy'], action: 'scope' },
+          { tag: '21.2.18', remotes: ['mfe'] }
+        ),
+        '@framework/cdk': committed(
+          '@framework/cdk',
+          { tag: '22.0.6', remotes: ['team/b'] },
+          { tag: '21.2.18', remotes: ['team/legacy'], action: 'scope' },
+          { tag: '21.2.18', remotes: ['mfe'] }
+        ),
+      });
+      const entry = entryWith(shared('@framework/core'), shared('@framework/cdk'));
+
+      await poolDynamicExternals({
+        entry,
+        actions: { '@framework/core': { action: 'skip' }, '@framework/cdk': { action: 'skip' } },
+      });
+
+      expect(copies(writtenFor('@framework/core'))).toEqual([
+        ['22.0.8:share', [{ name: 'team/a' }]],
+        ['21.2.18:scope', [{ name: 'team/legacy' }]],
+        ['21.2.18:skip', [{ name: 'mfe', servedBy: 'team/legacy' }]],
+      ]);
+      expect(writtenFor('@framework/cdk')!.versions[2]!.remotes[0]!.servedBy).toBe('team/legacy');
+    });
+
+    it('writes no verdict for a witnessed remote', async () => {
+      givenCommitted({
+        '@framework/forms': committed('@framework/forms', {
+          tag: '22.0.8',
+          remotes: ['team/a', 'mfe'],
+        }),
+        '@framework/forms/signals': committed('@framework/forms/signals', {
+          tag: '22.0.8',
+          remotes: ['team/a', 'mfe'],
+        }),
+      });
+      const entry = entryWith(shared('@framework/forms'), shared('@framework/forms/signals'));
+
+      await poolDynamicExternals({
+        entry,
+        actions: {
+          '@framework/forms': { action: 'skip' },
+          '@framework/forms/signals': { action: 'skip' },
+        },
+      });
+
+      // Only the name sync writes, onto the committed versions untouched.
+      for (const [name, written] of vi.mocked(adapters.sharedExternalsRepo.addOrUpdate).mock.calls)
+        expect(written.versions).toEqual(
+          tagStoredByNpmScope({
+            [name]: committed(name, { tag: '22.0.8', remotes: ['team/a', 'mfe'] }),
+          })[name]!.versions
+        );
     });
   });
 
