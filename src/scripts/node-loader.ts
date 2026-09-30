@@ -43,6 +43,9 @@ let activeMap: ImportMap = EMPTY_MAP;
 let hostInstanceKeys: HostInstanceKeys = Object.create(null);
 // Fallback parent when context.parentURL arrives empty (seen under module.register()'s worker-thread hook).
 let lastRemoteBaseURL: string | undefined;
+// Federated file:// modules (import-map targets and their relative chunks). Only these are forced to
+// ESM; everything else keeps Node's own format detection, since npm packages may resolve to CJS (#79).
+const federatedURLs = new Set<string>();
 
 export function initialize(data: InitData = {}): void {
   if (data.initialImportMap) {
@@ -79,6 +82,7 @@ export async function resolve(
   // context.parentURL can be an empty string (not just missing) here; treat it as absent.
   const effectiveParent = context.parentURL || lastRemoteBaseURL;
   let mapped = resolveSpecifier(activeMap, specifier, effectiveParent);
+  let federated = mapped !== null;
 
   // Not every relative/absolute specifier has an import-map entry (e.g. a sibling chunk); resolve those directly.
   if (!mapped) {
@@ -87,6 +91,7 @@ export async function resolve(
     try {
       if (isRelative && effectiveParent) {
         mapped = new URL(specifier, effectiveParent).href;
+        federated = federatedURLs.has(effectiveParent);
       } else if (/^https?:\/\//.test(specifier)) {
         mapped = specifier;
       }
@@ -100,7 +105,10 @@ export async function resolve(
     return { url: mapped, format: 'module', shortCircuit: true };
   }
 
-  return nextResolve(mapped ?? specifier, context);
+  const result = await nextResolve(mapped ?? specifier, context);
+  if (!federated) return result;
+  federatedURLs.add(result.url);
+  return { ...result, format: 'module' };
 }
 
 type LoadContext = { format?: string | null };
@@ -133,9 +141,6 @@ export async function load(
     }
     const source = await res.text();
     return { shortCircuit: true, format: 'module', source, responseURL: url };
-  }
-  if (!url.startsWith('node:')) {
-    context.format = 'module';
   }
   return nextLoad(url, context);
 }
