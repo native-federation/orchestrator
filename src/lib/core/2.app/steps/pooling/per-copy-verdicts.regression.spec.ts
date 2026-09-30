@@ -12,6 +12,7 @@ import { globalThisStorageEntry } from 'lib/core/4.config/storage/global-this.st
 import { createDetermineSharedExternals } from '../determine-shared-externals';
 import { createPoolSharedExternals } from './pool-shared-externals';
 import { createGenerateImportMap } from '../generate-import-map';
+import { tagStoredByNpmScope } from 'lib/testing/pooling/tag-by-npm-scope';
 
 /**
  * Permanent guard for `F-F-per-version-verdicts.md`: a verdict belongs to the copy that objected, not to
@@ -44,8 +45,6 @@ describe('pooling: per-copy verdicts (F-F)', () => {
 
   beforeEach(() => {
     config = mockConfig();
-    config.feature.useAutoExternalPooling = true;
-
     adapters = mockAdapters();
     adapters.versionCheck = createVersionCheck();
     adapters.sharedExternalsRepo = createSharedExternalsRepository({
@@ -83,7 +82,10 @@ describe('pooling: per-copy verdicts (F-F)', () => {
   const seed = (name: string, versions: SharedVersion[]) =>
     adapters.sharedExternalsRepo.addOrUpdate(
       name,
-      { dirty: true, versions: newestFirst(versions, adapters.versionCheck.compare) },
+      // The build tags every scoped package with its npm scope by default; `tagStoredByNpmScope` stands in.
+      tagStoredByNpmScope({
+        [name]: { dirty: true, versions: newestFirst(versions, adapters.versionCheck.compare) },
+      })[name]!,
       undefined
     );
 

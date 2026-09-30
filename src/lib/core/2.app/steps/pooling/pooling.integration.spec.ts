@@ -22,6 +22,7 @@ import { createPoolDynamicExternals } from './pool-dynamic-externals';
 import { createConvertToImportMap } from '../convert-to-import-map';
 import { committedView } from './pool-views';
 import { findIncoherentRemotes } from 'lib/testing/pooling/no-tear';
+import { tagSharedInfoByNpmScope, tagStoredByNpmScope } from 'lib/testing/pooling/tag-by-npm-scope';
 
 /**
  * End-to-end coherence through determine → pooling → import map. Pooling does not make a family resolve
@@ -46,8 +47,6 @@ describe('pooling (integration)', () => {
 
   beforeEach(() => {
     config = mockConfig();
-    config.feature.useAutoExternalPooling = true;
-
     adapters = mockAdapters();
     adapters.versionCheck = createVersionCheck();
     adapters.sharedExternalsRepo = createSharedExternalsRepository({
@@ -84,7 +83,10 @@ describe('pooling (integration)', () => {
   const seed = (name: string, versions: SharedVersion[]) =>
     adapters.sharedExternalsRepo.addOrUpdate(
       name,
-      { dirty: true, versions: newestFirst(versions, adapters.versionCheck.compare) },
+      // The build tags every scoped package with its npm scope by default; `tagStoredByNpmScope` stands in.
+      tagStoredByNpmScope({
+        [name]: { dirty: true, versions: newestFirst(versions, adapters.versionCheck.compare) },
+      })[name]!,
       undefined
     );
 
@@ -233,6 +235,24 @@ describe('pooling (integration)', () => {
     const bScope = importMap.scopes?.[SCOPE['team/mfe-b']];
     expect(bScope?.['@framework/core']).toContain(SCOPE['team/mfe-b']);
     expect(bScope?.['@design-system/ui']).toContain(SCOPE['team/mfe-b']);
+
+    // The committed record says so too: both members carry the pool's name (the one tag every copy
+    // declared), and each of mfe-b's copies records why it self-serves. mfe-a's copies carry no cause.
+    const record = adapters.sharedExternalsRepo.getFromScope();
+    const causes = (name: string) =>
+      Object.fromEntries(
+        record[name]!.versions.flatMap(v => v.remotes.map(r => [r.name, r.poolCause]))
+      );
+    expect(record['@framework/core']!.poolName).toBe('framework');
+    expect(record['@design-system/ui']!.poolName).toBe('framework');
+    expect(causes('@framework/core')).toEqual({
+      'team/mfe-a': undefined,
+      'team/mfe-b': 'incompatible',
+    });
+    expect(causes('@design-system/ui')).toEqual({
+      'team/mfe-a': undefined,
+      'team/mfe-b': 'incompatible',
+    });
   });
 
   it('shares a single-provider member while an incompatible remote scopes its whole family', async () => {
@@ -324,7 +344,8 @@ describe('pooling (integration)', () => {
       name: 'team/mfe-c',
       url: 'http://mfe-c/remoteEntry.json',
       exposes: [],
-      shared: [
+      // Tagged by npm scope, as the build does by default.
+      shared: tagSharedInfoByNpmScope([
         mockSharedInfo('@framework/core', {
           requiredVersion: '^18.0.0',
           version: '18.0.0',
@@ -337,7 +358,7 @@ describe('pooling (integration)', () => {
           singleton: true,
           strictVersion: true,
         }),
-      ],
+      ]),
     } as RemoteEntry;
 
     const updated = await createUpdateCache(config, adapters)(entryC);
@@ -395,7 +416,8 @@ describe('pooling (integration)', () => {
       name: 'team/mfe-c',
       url: 'http://mfe-c/remoteEntry.json',
       exposes: [],
-      shared: [
+      // Tagged by npm scope, as the build does by default.
+      shared: tagSharedInfoByNpmScope([
         mockSharedInfo('@framework/core', {
           requiredVersion: '^17.0.0',
           version: '17.0.0',
@@ -408,7 +430,7 @@ describe('pooling (integration)', () => {
           singleton: true,
           strictVersion: false,
         }),
-      ],
+      ]),
     } as RemoteEntry;
 
     const updated = await createUpdateCache(config, adapters)(entryC);

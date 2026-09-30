@@ -10,6 +10,7 @@ import { createVersionCheck } from 'lib/core/3.adapters/checks/version.check';
 import { globalThisStorageEntry } from 'lib/core/4.config/storage/global-this.storage';
 import { createDetermineSharedExternals } from '../determine-shared-externals';
 import { createPoolSharedExternals } from './pool-shared-externals';
+import { tagStoredByNpmScope } from 'lib/testing/pooling/tag-by-npm-scope';
 
 /**
  * **The islanding cascade**: adding one previous-major remote to a healthy portfolio
@@ -44,8 +45,6 @@ describe('pooling: islanding cascade', () => {
 
   beforeEach(() => {
     config = mockConfig();
-    config.feature.useAutoExternalPooling = true;
-
     adapters = mockAdapters();
     adapters.versionCheck = createVersionCheck();
     adapters.sharedExternalsRepo = createSharedExternalsRepository({
@@ -77,7 +76,10 @@ describe('pooling: islanding cascade', () => {
   const seed = (name: string, versions: SharedVersion[]) =>
     adapters.sharedExternalsRepo.addOrUpdate(
       name,
-      { dirty: true, versions: newestFirst(versions, adapters.versionCheck.compare) },
+      // The build tags every scoped package with its npm scope by default; `tagStoredByNpmScope` stands in.
+      tagStoredByNpmScope({
+        [name]: { dirty: true, versions: newestFirst(versions, adapters.versionCheck.compare) },
+      })[name]!,
       undefined
     );
 

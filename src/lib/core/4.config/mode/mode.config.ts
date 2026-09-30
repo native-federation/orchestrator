@@ -27,7 +27,6 @@ export const createModeConfig = (override: ModeOptions): ModeConfig => {
     profile: { ...defaultProfile, ...(override.profile ?? {}) },
     feature: {
       convertFlatSharedInfo: override.feature?.convertFlatSharedInfo ?? false,
-      useAutoExternalPooling: override.feature?.useAutoExternalPooling ?? false,
     },
   };
 };

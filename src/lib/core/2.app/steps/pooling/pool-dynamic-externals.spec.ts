@@ -11,6 +11,7 @@ import type {
 } from 'lib/core/1.domain';
 import { mockSharedInfo } from 'lib/testing/domain/remote-entry/shared-info.mock';
 import { mockVersionRemote } from 'lib/testing/domain/externals/version.mock';
+import { tagStoredByNpmScope } from 'lib/testing/pooling/tag-by-npm-scope';
 import { mockAdapters } from 'lib/testing/adapters.mock';
 import { Optional } from 'lib/utils/optional';
 import type { RemoteInfo } from 'lib/core/1.domain';
@@ -76,13 +77,15 @@ describe('createPoolDynamicExternals', () => {
       (tag: string, range: string) => tag.split('.')[0] === range.replace(/^\^/, '').split('.')[0]
     );
 
+  // Scoped packages are tagged by their npm scope, as the build tags them by default; explicit tags win.
   const givenCommitted = (externals: Record<string, SharedExternal>) => {
+    // Tagged up front, so a spec snapshotting `externals` sees the record as the step reads it.
+    tagStoredByNpmScope(externals);
     adapters.sharedExternalsRepo.getFromScope = vi.fn(() => externals);
   };
 
   beforeEach(() => {
     config = mockConfig();
-    config.feature.useAutoExternalPooling = true;
     adapters = mockAdapters();
     adapters.sharedExternalsRepo.getFromScope = vi.fn(() => ({}));
     poolDynamicExternals = createPoolDynamicExternals(config, adapters);
@@ -346,7 +349,7 @@ describe('createPoolDynamicExternals', () => {
     expect(result.actions['@framework/cdk']).toEqual({ action: 'scope' });
   });
 
-  it('never mutates a committed version, whatever it decides', async () => {
+  it("never touches another remote's copy, whatever it decides", async () => {
     const externals = {
       '@framework/forms': committed(
         '@framework/forms',
@@ -372,7 +375,14 @@ describe('createPoolDynamicExternals', () => {
     });
 
     expect(JSON.stringify(externals)).toBe(snapshot);
-    expect(adapters.sharedExternalsRepo.addOrUpdate).not.toHaveBeenCalled();
+    // Whatever it writes back is the loaded remote's own copies: every other remote's copy is exactly as
+    // the committed map was built from it — same version, same action, same meta.
+    const others = (external: SharedExternal) =>
+      external.versions.flatMap(v =>
+        v.remotes.filter(r => r.name !== 'mfe').map(r => ({ tag: v.tag, action: v.action, r }))
+      );
+    for (const [name, written] of vi.mocked(adapters.sharedExternalsRepo.addOrUpdate).mock.calls)
+      expect(others(written)).toEqual(others(externals[name as keyof typeof externals]));
   });
 
   it('leaves a whole-pool-introducing remote (all share) untouched', async () => {
@@ -390,8 +400,7 @@ describe('createPoolDynamicExternals', () => {
     });
   });
 
-  it('does nothing when auto-pooling is off and there are no pool tags', async () => {
-    config.feature.useAutoExternalPooling = false;
+  it('does nothing when the committed record has no pools', async () => {
     const entry = entryWith(shared('@framework/core'), shared('@framework/common'));
     const actions: SharedInfoActions = {
       '@framework/core': { action: 'skip' },
@@ -407,8 +416,8 @@ describe('createPoolDynamicExternals', () => {
   });
 
   it('bridges a cross-scope tagged sibling into the family via a co-tagged member', async () => {
-    // The tag "framework" does not merge with the auto scope by name; ui joins only because
-    // @framework/core is co-tagged, bridging the groups. ui is incompatible, so the family scopes.
+    // ui joins the family only because the same remote tags it with a member of it, bridging the
+    // groups. ui is incompatible, so the family scopes.
     const entry = entryWith(
       shared('@framework/core', { pool: 'framework' }),
       shared('@design-system/ui', { pool: 'framework' })
@@ -436,30 +445,7 @@ describe('createPoolDynamicExternals', () => {
     expect(result.actions['@design-system/ui']).toEqual({ action: 'scope' });
   });
 
-  it('does NOT bridge a tagged sibling without a co-tagged member (strict, no merge by name)', async () => {
-    // ui tags "framework" but no framework member is co-tagged, so the label alone must not pull ui
-    // into the auto-scoped family — ui keeps its own action.
-    const entry = entryWith(
-      shared('@framework/core'),
-      shared('@framework/common'),
-      shared('@design-system/ui', { pool: 'framework' })
-    );
-    const actions: SharedInfoActions = {
-      '@framework/core': { action: 'skip', override: 'http://host/core.js' },
-      '@framework/common': { action: 'skip', override: 'http://host/common.js' },
-      '@design-system/ui': { action: 'skip', override: 'http://host/ui.js' },
-    };
-
-    const result = await poolDynamicExternals({ entry, actions });
-
-    expect(result.actions['@design-system/ui']).toEqual({
-      action: 'skip',
-      override: 'http://host/ui.js',
-    });
-  });
-
-  it('pools via an explicit pool tag even when auto-pooling is off', async () => {
-    config.feature.useAutoExternalPooling = false;
+  it('pools unscoped packages through an explicit pool tag', async () => {
     const entry = entryWith(shared('foo', { pool: 'grp' }), shared('bar', { pool: 'grp' }));
     givenCommitted({
       foo: committed('foo', { tag: '17.0.0', remotes: ['mfe'], pool: 'grp' }),
@@ -476,11 +462,10 @@ describe('createPoolDynamicExternals', () => {
     expect(result.actions.bar).toEqual({ action: 'scope' });
   });
 
-  it('has-pool early-out: nothing pools when auto-pooling is off and the scope carries no tag at all', async () => {
-    // Auto-pooling off and no `pool` tag anywhere in the committed scope → no pool, so determine's actions
-    // pass through even though the family is right there in the record.
-    config.feature.useAutoExternalPooling = false;
-    adapters.sharedExternalsRepo.hasPoolTag = vi.fn(() => false);
+  it('has-pool early-out: nothing pools when the scope carries no pool state at all', async () => {
+    // No `pool` tag or stored pool anywhere in the committed scope → no pool, so determine's actions pass
+    // through even though the family is right there in the record.
+    adapters.sharedExternalsRepo.hasPoolState = vi.fn(() => false);
     const entry = entryWith(shared('@framework/core'), shared('@framework/common'));
     givenCommitted({
       '@framework/core': committed('@framework/core', { tag: '17.0.0', remotes: ['host', 'mfe'] }),
@@ -509,7 +494,6 @@ describe('createPoolDynamicExternals', () => {
     // tagged the lockstep pair at init; this entry declares neither tag nor a shared npm scope, and is
     // still subject to the family's coherence rules — previously it slipped through untouched and could
     // bridge two builds the portfolio had deliberately pooled apart.
-    config.feature.useAutoExternalPooling = false;
     const entry = entryWith(shared('foo'), shared('bar'));
     givenCommitted({
       foo: committed('foo', { tag: '17.0.0', remotes: ['team/a', 'mfe'], pool: 'grp' }),
@@ -562,6 +546,255 @@ describe('createPoolDynamicExternals', () => {
     expect(result.actions['@framework/common']).toEqual({
       action: 'skip',
       override: 'http://host/common.js',
+    });
+  });
+
+  // The delta decides in `actions`; these pin that the record agrees, because a plain reload rebuilds the
+  // map from the record alone. Before this, the record kept `update-cache`'s verdicts and a reload served
+  // the combination the delta had refused (e2e/pooling/lifecycle.e2e.spec.ts, "the dynamic island").
+  describe('verdicts in the record', () => {
+    // The mock's `compare` ties everything; the record is written newest first, as `commit()` does.
+    beforeEach(() => {
+      adapters.versionCheck.compare = vi.fn((a: string, b: string) =>
+        a.localeCompare(b, undefined, { numeric: true })
+      );
+    });
+
+    // Last write wins: the name sync may write a member again after its verdict.
+    const writtenFor = (name: string): SharedExternal | undefined =>
+      vi
+        .mocked(adapters.sharedExternalsRepo.addOrUpdate)
+        .mock.calls.filter(c => c[0] === name)
+        .at(-1)?.[1];
+
+    const copies = (external: SharedExternal | undefined) =>
+      (external?.versions ?? []).map(v => [
+        `${v.tag}:${v.action}`,
+        v.remotes.map(r => ({
+          name: r.name,
+          ...(r.poolCause && { poolCause: r.poolCause }),
+          ...(r.servedBy && { servedBy: r.servedBy }),
+        })),
+      ]);
+
+    it('moves an islanded remote out of the shared version into a scope version', async () => {
+      const entry = entryWith(shared('@framework/core'), shared('@framework/common'));
+      givenCommitted({
+        '@framework/core': committed('@framework/core', {
+          tag: '17.0.0',
+          remotes: ['host', 'mfe'],
+        }),
+        '@framework/common': committed('@framework/common', {
+          tag: '17.0.0',
+          remotes: ['host', 'mfe'],
+        }),
+      });
+
+      await poolDynamicExternals({
+        entry,
+        actions: {
+          '@framework/core': { action: 'skip' },
+          '@framework/common': { action: 'scope' },
+        },
+      });
+
+      // Both members, the matching one included: the island is the whole family.
+      for (const name of ['@framework/core', '@framework/common']) {
+        expect(copies(writtenFor(name))).toEqual([
+          ['17.0.0:share', [{ name: 'host' }]],
+          ['17.0.0:scope', [{ name: 'mfe', poolCause: 'incompatible' }]],
+        ]);
+        expect(writtenFor(name)!.poolName).toBe('framework');
+      }
+    });
+
+    it('records a coverage self-serve as uncovered, and drops a share only it provided', async () => {
+      adapters.versionCheck.isCompatible = acceptsSameMajor();
+      givenCommitted({
+        '@framework/forms': committed(
+          '@framework/forms',
+          { tag: '22.0.8', remotes: ['team/a', 'mfe'] },
+          { tag: '21.2.18', remotes: ['team/legacy'] }
+        ),
+        '@framework/forms/signals': committed(
+          '@framework/forms/signals',
+          { tag: '21.2.18', remotes: ['team/legacy'] },
+          { tag: '22.0.8', remotes: ['mfe'] }
+        ),
+        // `update-cache` made mfe the sole provider of a member nobody had shared yet.
+        '@framework/animations': committed('@framework/animations', {
+          tag: '22.0.8',
+          remotes: ['mfe'],
+        }),
+      });
+      const entry = entryWith(
+        shared('@framework/forms'),
+        shared('@framework/forms/signals'),
+        shared('@framework/animations')
+      );
+
+      await poolDynamicExternals({
+        entry,
+        actions: {
+          '@framework/forms': { action: 'skip' },
+          '@framework/forms/signals': { action: 'skip' },
+          '@framework/animations': { action: 'share' },
+        },
+      });
+
+      expect(copies(writtenFor('@framework/forms'))).toEqual([
+        ['22.0.8:share', [{ name: 'team/a' }]],
+        ['22.0.8:scope', [{ name: 'mfe', poolCause: 'uncovered' }]],
+        ['21.2.18:skip', [{ name: 'team/legacy' }]],
+      ]);
+      expect(copies(writtenFor('@framework/forms/signals'))).toEqual([
+        ['22.0.8:scope', [{ name: 'mfe', poolCause: 'uncovered' }]],
+        ['21.2.18:share', [{ name: 'team/legacy' }]],
+      ]);
+      // The delta never published it globally, so the record must not either: it is scope-only now.
+      expect(copies(writtenFor('@framework/animations'))).toEqual([
+        ['22.0.8:scope', [{ name: 'mfe', poolCause: 'uncovered' }]],
+      ]);
+    });
+
+    it('records the anchor a redirected copy dedups onto', async () => {
+      adapters.versionCheck.isCompatible = acceptsSameMajor();
+      adapters.remoteInfoRepo.tryGet = vi.fn(name =>
+        name === 'team/legacy'
+          ? Optional.of({ scopeUrl: 'http://legacy/', exposes: [] } as RemoteInfo)
+          : Optional.empty<RemoteInfo>()
+      );
+      givenCommitted({
+        '@framework/core': committed(
+          '@framework/core',
+          { tag: '22.0.8', remotes: ['team/a'] },
+          { tag: '21.2.18', remotes: ['team/legacy'], action: 'scope' },
+          { tag: '21.2.18', remotes: ['mfe'] }
+        ),
+        '@framework/cdk': committed(
+          '@framework/cdk',
+          { tag: '22.0.6', remotes: ['team/b'] },
+          { tag: '21.2.18', remotes: ['team/legacy'], action: 'scope' },
+          { tag: '21.2.18', remotes: ['mfe'] }
+        ),
+      });
+      const entry = entryWith(shared('@framework/core'), shared('@framework/cdk'));
+
+      await poolDynamicExternals({
+        entry,
+        actions: { '@framework/core': { action: 'skip' }, '@framework/cdk': { action: 'skip' } },
+      });
+
+      expect(copies(writtenFor('@framework/core'))).toEqual([
+        ['22.0.8:share', [{ name: 'team/a' }]],
+        ['21.2.18:scope', [{ name: 'team/legacy' }]],
+        ['21.2.18:skip', [{ name: 'mfe', servedBy: 'team/legacy' }]],
+      ]);
+      expect(writtenFor('@framework/cdk')!.versions[2]!.remotes[0]!.servedBy).toBe('team/legacy');
+    });
+
+    it('writes no verdict for a witnessed remote', async () => {
+      givenCommitted({
+        '@framework/forms': committed('@framework/forms', {
+          tag: '22.0.8',
+          remotes: ['team/a', 'mfe'],
+        }),
+        '@framework/forms/signals': committed('@framework/forms/signals', {
+          tag: '22.0.8',
+          remotes: ['team/a', 'mfe'],
+        }),
+      });
+      const entry = entryWith(shared('@framework/forms'), shared('@framework/forms/signals'));
+
+      await poolDynamicExternals({
+        entry,
+        actions: {
+          '@framework/forms': { action: 'skip' },
+          '@framework/forms/signals': { action: 'skip' },
+        },
+      });
+
+      // Only the name sync writes, onto the committed versions untouched.
+      for (const [name, written] of vi.mocked(adapters.sharedExternalsRepo.addOrUpdate).mock.calls)
+        expect(written.versions).toEqual(
+          tagStoredByNpmScope({
+            [name]: committed(name, { tag: '22.0.8', remotes: ['team/a', 'mfe'] }),
+          })[name]!.versions
+        );
+    });
+  });
+
+  describe('pool names in the record', () => {
+    const namesWritten = () =>
+      Object.fromEntries(
+        vi
+          .mocked(adapters.sharedExternalsRepo.addOrUpdate)
+          .mock.calls.map(([name, external]) => [name, external.poolName])
+      );
+
+    it('writes the committed pool name onto a member that has none', async () => {
+      const entry = entryWith(shared('@framework/core'), shared('@framework/common'));
+      givenCommitted({
+        '@framework/core': committed('@framework/core', {
+          tag: '17.0.0',
+          remotes: ['host', 'mfe'],
+        }),
+        '@framework/common': committed('@framework/common', {
+          tag: '17.0.0',
+          remotes: ['host', 'mfe'],
+        }),
+      });
+      const actions: SharedInfoActions = {
+        '@framework/core': { action: 'skip', override: 'http://host/core.js' },
+        '@framework/common': { action: 'skip', override: 'http://host/common.js' },
+      };
+
+      const result = await poolDynamicExternals({ entry, actions });
+
+      expect(namesWritten()).toEqual({
+        '@framework/core': 'framework',
+        '@framework/common': 'framework',
+      });
+      // Names only: the loaded remote's verdicts are untouched by the write.
+      expect(result.actions['@framework/core']).toEqual({
+        action: 'skip',
+        override: 'http://host/core.js',
+      });
+    });
+
+    it('writes nothing for a member already carrying its name', async () => {
+      const entry = entryWith(shared('@framework/core'), shared('@framework/common'));
+      givenCommitted({
+        '@framework/core': {
+          ...committed('@framework/core', { tag: '17.0.0', remotes: ['host', 'mfe'] }),
+          poolName: 'framework',
+        },
+        '@framework/common': {
+          ...committed('@framework/common', { tag: '17.0.0', remotes: ['host', 'mfe'] }),
+          poolName: 'framework',
+        },
+      });
+      const actions: SharedInfoActions = {
+        '@framework/core': { action: 'skip' },
+        '@framework/common': { action: 'skip' },
+      };
+
+      await poolDynamicExternals({ entry, actions });
+
+      expect(adapters.sharedExternalsRepo.addOrUpdate).not.toHaveBeenCalled();
+    });
+
+    it('clears a stale pool name off an external that is in no pool any more', async () => {
+      // `rxjs` is untagged and alone, yet the record still names a pool for it from an earlier portfolio.
+      const entry = entryWith(shared('rxjs'));
+      givenCommitted({
+        rxjs: { ...committed('rxjs', { tag: '7.0.0', remotes: ['host', 'mfe'] }), poolName: 'old' },
+      });
+
+      await poolDynamicExternals({ entry, actions: { rxjs: { action: 'skip' } } });
+
+      expect(adapters.sharedExternalsRepo.addOrUpdate).toHaveBeenCalledOnce();
+      expect(namesWritten()).toEqual({ rxjs: undefined });
     });
   });
 });

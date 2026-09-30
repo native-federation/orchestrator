@@ -6,6 +6,7 @@ import type { ConfigContract } from 'lib/core/2.app/config';
 import { mockConfig } from 'lib/testing/config.mock';
 import { GLOBAL_SCOPE, STRICT_SCOPE, type SharedExternal } from 'lib/core/1.domain';
 import { mockVersionRemote } from 'lib/testing/domain/externals/version.mock';
+import { npmScope } from 'lib/testing/pooling/tag-by-npm-scope';
 
 /**
  * A pool is one unit of state, so `determine` has to re-elect it as one — otherwise pooling reads its own
@@ -14,14 +15,19 @@ import { mockVersionRemote } from 'lib/testing/domain/externals/version.mock';
  * was re-elected". See docs/version-resolver.md §"How pooling resolves".
  */
 
-const ext = (name: string, dirty: boolean, pool?: string): SharedExternal => ({
+// Tagged by npm scope unless told otherwise, as the build tags them by default. Pass `null` for no tag.
+const ext = (
+  name: string,
+  dirty: boolean,
+  pool: string | null = npmScope(name) ?? null
+): SharedExternal => ({
   dirty,
   versions: [
     {
       tag: '17.0.0',
       host: false,
       action: 'share',
-      remotes: [mockVersionRemote('team/mfe1', name, { pool })],
+      remotes: [mockVersionRemote('team/mfe1', name, { pool: pool ?? undefined })],
     },
   ],
 });
@@ -36,7 +42,6 @@ describe('createMarkPoolsForReelection', () => {
     adapters = mockAdapters();
     adapters.sharedExternalsRepo.getScopes = vi.fn(() => [GLOBAL_SCOPE]);
     adapters.sharedExternalsRepo.scopeType = vi.fn(() => 'global' as const);
-    config.feature.useAutoExternalPooling = true;
 
     markPoolsForReelection = createMarkPoolsForReelection(config, adapters);
   });
@@ -128,13 +133,70 @@ describe('createMarkPoolsForReelection', () => {
     expect(dirt(externals)).toEqual({ '@scope/a': true, '@scope/b': false });
   });
 
-  describe('when auto-pooling is off', () => {
-    beforeEach(() => {
-      config.feature.useAutoExternalPooling = false;
+  // Pool state outside a pool is stale by definition — only pooling writes it — and pooling never visits an
+  // external it does not pool, so this step, which runs before `determine`, is the one that can drop it.
+  // Regression for a leftover `servedBy` pointing a copy at a build after its pool had dissolved
+  // (e2e/pooling/lifecycle.e2e.spec.ts, "drops a stale anchor").
+  describe('clears pool state off an external that left every pool', () => {
+    const withState = (external: SharedExternal): SharedExternal => {
+      external.poolName = 'framework';
+      external.versions[0]!.remotes[0]!.servedBy = 'team/mfe2';
+      external.versions[0]!.remotes[0]!.poolCause = 'uncovered';
+      return external;
+    };
+
+    it('drops servedBy, poolCause and poolName, and marks the external for re-election', async () => {
+      const externals = given({
+        '@scope/a': ext('@scope/a', true, null),
+        '@scope/b': withState(ext('@scope/b', false, null)),
+      });
+
+      await markPoolsForReelection();
+
+      const b = externals['@scope/b']!;
+      expect(b.poolName).toBeUndefined();
+      expect(b.versions[0]!.remotes[0]!.servedBy).toBeUndefined();
+      expect(b.versions[0]!.remotes[0]!.poolCause).toBeUndefined();
+      // Re-elected, since `determine` treated the anchored copy as exempt from the coverage policy.
+      expect(b.dirty).toBe(true);
     });
 
+    it('keeps the state of an external that is still pooled', async () => {
+      const externals = given({
+        '@scope/a': ext('@scope/a', true),
+        '@scope/b': withState(ext('@scope/b', false)),
+      });
+
+      await markPoolsForReelection();
+
+      expect(externals['@scope/b']!.versions[0]!.remotes[0]!.servedBy).toBe('team/mfe2');
+      expect(externals['@scope/b']!.poolName).toBe('framework');
+    });
+
+    it('leaves a clean unpooled external alone', async () => {
+      const externals = given({
+        '@scope/a': ext('@scope/a', true, null),
+        rxjs: ext('rxjs', false, null),
+      });
+
+      await markPoolsForReelection();
+
+      expect(externals['rxjs']!.dirty).toBe(false);
+    });
+
+    it('does nothing on a warm init, however stale the record', async () => {
+      const externals = given({ '@scope/b': withState(ext('@scope/b', false, null)) });
+
+      await markPoolsForReelection();
+
+      expect(externals['@scope/b']!.versions[0]!.remotes[0]!.servedBy).toBe('team/mfe2');
+      expect(externals['@scope/b']!.dirty).toBe(false);
+    });
+  });
+
+  describe('scope gating on stored pool state', () => {
     it('does nothing when no stored remote carries a pool tag', async () => {
-      adapters.sharedExternalsRepo.hasPoolTag = vi.fn(() => false);
+      adapters.sharedExternalsRepo.hasPoolState = vi.fn(() => false);
       const externals = given({
         'pkg-a': ext('pkg-a', true),
         'pkg-b': ext('pkg-b', false),
@@ -151,7 +213,7 @@ describe('createMarkPoolsForReelection', () => {
     it('reads only the scopes that carry a pool tag', async () => {
       adapters.sharedExternalsRepo.getScopes = vi.fn(() => [GLOBAL_SCOPE, 'team-a', 'team-b']);
       adapters.sharedExternalsRepo.scopeType = vi.fn(() => 'shareScope' as const);
-      adapters.sharedExternalsRepo.hasPoolTag = vi.fn(scope => scope === 'team-a');
+      adapters.sharedExternalsRepo.hasPoolState = vi.fn(scope => scope === 'team-a');
       given({ 'pkg-a': ext('pkg-a', true, 'grp'), 'pkg-b': ext('pkg-b', false, 'grp') });
 
       await markPoolsForReelection();
@@ -162,11 +224,11 @@ describe('createMarkPoolsForReelection', () => {
 
     // The tag lives in storage, so a warm init that merged nothing still pools.
     it('spreads across a tag-formed pool when storage carries the tag', async () => {
-      adapters.sharedExternalsRepo.hasPoolTag = vi.fn(() => true);
+      adapters.sharedExternalsRepo.hasPoolState = vi.fn(() => true);
       const externals = given({
         'pkg-a': ext('pkg-a', true, 'grp'),
         'pkg-b': ext('pkg-b', false, 'grp'),
-        'pkg-c': ext('pkg-c', false),
+        'pkg-c': ext('pkg-c', false, null),
       });
 
       await markPoolsForReelection();

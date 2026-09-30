@@ -10,6 +10,8 @@ export const STRICT_SCOPE = 'strict';
 
 export type SharedExternal = {
   dirty: boolean;
+  // The pool this external resolves in, as pooling last computed it; absent when it is in none.
+  poolName?: string;
   versions: SharedVersion[];
 };
 

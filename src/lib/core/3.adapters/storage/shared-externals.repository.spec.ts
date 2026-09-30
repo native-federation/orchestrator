@@ -34,9 +34,10 @@ describe('createSharedExternalsRepository', () => {
   };
 
   /**
-   * `hasPoolTag()` reads the cache, not a flag set while this init's entries were merged. That is the
-   * whole point: with auto-pooling off, a warm init whose tagged remotes are all cached merges nothing,
-   * and pooling still has to coordinate their pool — see docs/version-resolver.md §"How pooling resolves".
+   * `hasPoolState()` reads the cache, not a flag set while this init's entries were merged. That is the
+   * whole point: a warm init whose tagged remotes are all cached merges nothing, and pooling still has to
+   * coordinate their pool — see docs/version-resolver.md §"How pooling resolves". A stored pool name counts
+   * as state too, so a scope whose last tag left is still visited to clear it.
    *
    * It answers per share scope, defaulting to the global one like every other read on this repository. A
    * pool never spans share scopes, so a tag elsewhere is no reason to pool here — that is what keeps one
@@ -57,7 +58,7 @@ describe('createSharedExternalsRepository', () => {
               strictVersion: true,
               cached: false,
               entries: { 'dep-a': 'dep-a.js' },
-              ...(pool ? { pool } : {}),
+              ...(pool ? { pool: pool } : {}),
             },
           ],
         },
@@ -66,12 +67,12 @@ describe('createSharedExternalsRepository', () => {
 
     it('reports none on a fresh repository', () => {
       const { externalsRepo } = setupWithCache();
-      expect(externalsRepo.hasPoolTag()).toBe(false);
+      expect(externalsRepo.hasPoolState()).toBe(false);
     });
 
     it('reports none when no stored remote carries a tag', () => {
       const { externalsRepo } = setupWithCache({ [GLOBAL_SCOPE]: { 'dep-a': taggedExternal() } });
-      expect(externalsRepo.hasPoolTag()).toBe(false);
+      expect(externalsRepo.hasPoolState()).toBe(false);
     });
 
     // The regression: nothing was merged this init, the tag exists only in storage.
@@ -79,7 +80,7 @@ describe('createSharedExternalsRepository', () => {
       const { externalsRepo } = setupWithCache({
         [GLOBAL_SCOPE]: { 'dep-a': taggedExternal('grp') },
       });
-      expect(externalsRepo.hasPoolTag()).toBe(true);
+      expect(externalsRepo.hasPoolState()).toBe(true);
     });
 
     it('finds a tag in a non-global share scope too', () => {
@@ -87,7 +88,7 @@ describe('createSharedExternalsRepository', () => {
         [GLOBAL_SCOPE]: { 'dep-a': taggedExternal() },
         'team-a': { 'dep-b': taggedExternal('grp') },
       });
-      expect(externalsRepo.hasPoolTag('team-a')).toBe(true);
+      expect(externalsRepo.hasPoolState('team-a')).toBe(true);
     });
 
     // The narrowing itself: `team-a`'s tag cannot form a pool in the global scope, so it must not report
@@ -97,22 +98,39 @@ describe('createSharedExternalsRepository', () => {
         [GLOBAL_SCOPE]: { 'dep-a': taggedExternal() },
         'team-a': { 'dep-b': taggedExternal('grp') },
       });
-      expect(externalsRepo.hasPoolTag(GLOBAL_SCOPE)).toBe(false);
-      expect(externalsRepo.hasPoolTag()).toBe(false);
+      expect(externalsRepo.hasPoolState(GLOBAL_SCOPE)).toBe(false);
+      expect(externalsRepo.hasPoolState()).toBe(false);
     });
 
     it('reports none for a scope that does not exist', () => {
       const { externalsRepo } = setupWithCache({
         [GLOBAL_SCOPE]: { 'dep-a': taggedExternal('grp') },
       });
-      expect(externalsRepo.hasPoolTag('team-unknown')).toBe(false);
+      expect(externalsRepo.hasPoolState('team-unknown')).toBe(false);
+    });
+
+    // The tags are gone but the record still names a pool: pooling has to visit the scope to clear it.
+    it('reports a stored pool name with no tag left', () => {
+      const { externalsRepo } = setupWithCache({
+        [GLOBAL_SCOPE]: { 'dep-a': { ...taggedExternal(), poolName: 'grp' } },
+      });
+      expect(externalsRepo.hasPoolState()).toBe(true);
+    });
+
+    // Records written before `poolName` existed, or whose names were already cleared, can still carry an
+    // anchor; only pooling sets one, so the scope must be visited to drop it.
+    it('reports a stored anchor with no tag or name left', () => {
+      const external = taggedExternal();
+      external.versions[0]!.remotes[0]!.servedBy = 'team/mfe2';
+      const { externalsRepo } = setupWithCache({ [GLOBAL_SCOPE]: { 'dep-a': external } });
+      expect(externalsRepo.hasPoolState()).toBe(true);
     });
 
     it('ignores a blank tag', () => {
       const { externalsRepo } = setupWithCache({
         [GLOBAL_SCOPE]: { 'dep-a': taggedExternal('  ') },
       });
-      expect(externalsRepo.hasPoolTag()).toBe(false);
+      expect(externalsRepo.hasPoolState()).toBe(false);
     });
   });
 

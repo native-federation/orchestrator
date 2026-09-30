@@ -229,7 +229,7 @@ test.describe('shapes: flat externals and `convertFlatSharedInfo`', () => {
 
     await nf.loadAll();
     expect(await originsServing(nf, M)).toEqual(['mfe1', 'mfe3']);
-    // And no gate reacts: the entrypoints are separate members of one auto-pool, agreeing on one tag.
+    // And no gate reacts: the entrypoints are separate members of one scope-tagged pool, agreeing on one tag.
     expect(await nf.islands()).toEqual([]);
   });
 
@@ -403,7 +403,7 @@ test.describe('shapes: flat chunking maps a chunk per declaring remote', () => {
   });
 
   test('never lets a chunk pseudo-external join a pool', async ({ nf }) => {
-    // `@nf-internal` looks exactly like an npm scope, so auto-pooling would group a build's chunks into a
+    // `@nf-internal` looks exactly like an npm scope, so scope tagging would group a build's chunks into a
     // family of their own if they ever reached the shared-externals repo. They cannot: a non-singleton
     // external is scoped per remote and never shareable, so `buildPools` never sees one.
     await nf.init(
@@ -427,7 +427,7 @@ test.describe('shapes: flat chunking maps a chunk per declaring remote', () => {
 
     // The Angular family is pooled — so the walk did run — and no pool was formed for the chunks.
     const pools = (await nf.debugs()).filter(msg => msg.includes('[pool:'));
-    expect(pools.some(msg => msg.includes('[pool:@angular/core]'))).toBe(true);
+    expect(pools.some(msg => msg.includes('[pool:angular]'))).toBe(true);
     expect(pools.some(msg => msg.includes('@nf-internal'))).toBe(false);
 
     // Nor is a chunk anywhere in the committed shared set.

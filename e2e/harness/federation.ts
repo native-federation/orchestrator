@@ -4,6 +4,7 @@ import { resolve } from 'node:path';
 import type { ImportMap, RemoteEntry, SharedExternals } from 'lib/core/1.domain';
 import { compile, startServer, MANIFEST_URL, PAGE_HOST, type Harness } from './server';
 import type { BootOptions, Session } from './boot';
+import { tagSharedInfoByNpmScope } from 'lib/testing/pooling/tag-by-npm-scope';
 
 /**
  * The test fixture. `nf.init` is one page load: the browser fetches the manifest and the remote
@@ -27,6 +28,11 @@ const bundleBoot = async () => {
 };
 
 export type InitOptions = Omit<BootOptions, 'host' | 'manifestUrl'> & {
+  /**
+   * Tag every untagged scoped external with its npm scope before serving, as the build does by default
+   * (see `tagSharedInfoByNpmScope`). `false` serves the entries exactly as written: explicit tags only.
+   */
+  pooling?: boolean;
   /** Served as the host remote entry and left out of the manifest. */
   hostEntry?: RemoteEntry;
   /** Fetchable but not listed in the manifest — the dynamic path loads these by URL. */
@@ -142,12 +148,16 @@ export const test = base.extend<{ nf: Federation }, Worker>({
     let mark = 0;
 
     const boot = async (remotes: RemoteEntry[], opts: InitOptions) => {
-      const { hostEntry, unlisted, manifestFromUrl, ...bootOptions } = opts;
+      const { hostEntry, unlisted, manifestFromUrl, pooling = true, ...bootOptions } = opts;
+      const built = (entry: RemoteEntry): RemoteEntry =>
+        pooling && entry.shared
+          ? { ...entry, shared: tagSharedInfoByNpmScope(entry.shared) }
+          : entry;
       shim = opts.shim ?? false;
       listed = remotes;
       mark = harness.requests.length;
-      harness.serve(compile([...remotes, ...(hostEntry ? [hostEntry] : [])]));
-      if (unlisted?.length) harness.add(unlisted);
+      harness.serve(compile([...remotes, ...(hostEntry ? [hostEntry] : [])].map(built)));
+      if (unlisted?.length) harness.add(unlisted.map(built));
 
       await page.goto(`http://${PAGE_HOST}/${shim ? '?shim=1' : ''}`);
       if (shim)

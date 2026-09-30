@@ -3,16 +3,18 @@ import { dep, remote, SCOPE, fixture, CAPTURED_SEVEN } from '../harness/portfoli
 import { angularLinesPerRemote, angularTags, splitPackages } from '../harness/coherence';
 
 /**
- * `feature.useAutoExternalPooling` — the only file that switches it.
+ * The harness `pooling` option — the only file that switches it. It stands in for the build's default of
+ * tagging every scoped external with its npm scope (the runtime `useAutoExternalPooling` flag it replaced
+ * is gone); `pooling: false` serves the entries exactly as written.
  *
- * Everywhere else in this folder pooling is on (or a `pool` tag forms the family regardless) and the
- * question is which verdict a portfolio gets. Here the portfolio is held fixed and the flag moves, so
- * every assertion is about the difference the feature makes: what breaks without it, what it costs, and
- * which behaviour it is *not* responsible for.
+ * Everywhere else in this folder the scope tags are on (or an explicit `pool` tag forms the family
+ * regardless) and the question is which verdict a portfolio gets. Here the portfolio is held fixed and the
+ * tags move, so every assertion is about the difference pooling makes: what breaks without it, what it
+ * costs, and which behaviour it is *not* responsible for.
  *
- * The flag only governs **auto-pooling** — grouping externals by npm scope. A declared `pool` tag forms a
- * family with the flag off, and the gates then apply to it exactly the same; that boundary is the second
- * block below, and it is why other files may legitimately run with `pooling: false`.
+ * An explicit `pool` tag forms a family without the scope tags, and the gates then apply to it exactly the
+ * same; that boundary is the second block below, and it is why other files may legitimately run with
+ * `pooling: false`.
  */
 
 /**
@@ -285,12 +287,13 @@ test.describe('the flag: what it does not change', () => {
     expect(await nf.map()).toEqual(pooled);
   });
 
-  test('leaves a hand-tagged portfolio with the gaps auto-pooling closes', async ({ nf }) => {
-    // The argument for auto-pooling, on the production capture. Three of the seven remotes tag their
-    // Angular packages `pool: ng-core`; the cross-major remote tags nothing. With auto-pooling off the
+  test('leaves a hand-tagged portfolio with the gaps scope tagging closes', async ({ nf }) => {
+    // The argument for scope tagging, on the production capture. Three of the seven remotes tag their
+    // Angular packages `pool: ng-core`; the cross-major remote tags nothing. With scope tagging off the
     // family is therefore whatever those tags happen to cover.
     //
-    // REWRITTEN for the per-remote auto-pool rule. This used to assert that partial tagging left
+    // REWRITTEN for the per-remote auto-pool rule, itself since replaced by build-time scope tags. This
+    // used to assert that partial tagging left
     // `@angular/forms` and `@angular/platform-browser` each published at *two* tags. It no longer does,
     // and the reason is the entrypoint rule: the tagging remotes tag every Angular external they
     // declare, flat secondary entrypoints included, and an entrypoint now carries its package into
@@ -300,7 +303,7 @@ test.describe('the flag: what it does not change', () => {
     //
     // What partial tagging still leaves is the gap below: the shared set straddles two majors, with
     // four members published on the previous line beside the rest on the current one. Any consumer that
-    // binds a 21 member against a 22 one gets a mixed runtime, which is what auto-pooling closes.
+    // binds a 21 member against a 22 one gets a mixed runtime, which is what scope tagging closes.
     await nf.init(CAPTURED_SEVEN.map(fixture), { pooling: false, namespace: 'partial' });
 
     expect(await splitPackages(nf, 'partial')).toEqual({});
@@ -329,7 +332,7 @@ test.describe('the flag: what it does not change', () => {
     // for one of them — host code, or a remote that does not declare the whole family — gets the mix.
     // The reachable version of that crash is the fourth test in the block above.
     //
-    // With auto-pooling on, the same portfolio publishes one major: the four 21-line members leave the
+    // With scope tagging on, the same portfolio publishes one major: the four 21-line members leave the
     // shared set with the islanded remote that solely provided them, rather than staying shareable
     // beside a 22 family.
     await nf.init(CAPTURED_SEVEN.map(fixture), { namespace: 'auto' });

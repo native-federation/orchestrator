@@ -9,7 +9,6 @@ export type ModeProfileConfig = {
 
 export type ModeFeatureConfig = {
   convertFlatSharedInfo: boolean;
-  useAutoExternalPooling: boolean;
 };
 
 export type ModeStrictnessConfig = {

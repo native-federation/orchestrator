@@ -5,9 +5,12 @@ import type { DrivingContract } from '../../driving-ports/driving.contract';
 import {
   type ExternalName,
   GLOBAL_SCOPE,
+  type PoolCause,
   type RemoteName,
   STRICT_SCOPE,
+  type SharedExternal,
   type SharedInfoActions,
+  type SharedVersionMeta,
 } from 'lib/core/1.domain';
 import { buildPools } from './pool-graph';
 import {
@@ -17,7 +20,7 @@ import {
   consumedSpecifiers,
   hostRemotes,
 } from './pool-views';
-import { lazy } from './pool.util';
+import { lazy, syncPoolNames } from './pool.util';
 import {
   acceptanceTable,
   acceptsAll,
@@ -28,6 +31,9 @@ import {
 } from './anchoring';
 import type { CommittedView, PoolMember, Specifier } from './pool.types';
 import * as _path from 'lib/utils/path';
+
+// What the gate decided for the loaded remote's copy of one member, as the record must keep it.
+type Verdict = { cause: PoolCause } | { servedBy: RemoteName };
 
 // One pool as both gates read it, for the remote being loaded.
 type GateViews = {
@@ -44,13 +50,11 @@ export function createPoolDynamicExternals(
 ): ForPoolingDynamicExternals {
   /**
    * Dynamic-init counterpart of pool-shared-externals. The committed import map is immutable, so
-   * this step is strictly additive: it only adjusts the newly loaded remote's own actions, never
-   * the existing shared versions (host precedence was already applied when those were elected).
-   * See docs/version-resolver.md.
+   * this step is strictly additive: it only adjusts the newly loaded remote's own actions and its own
+   * copies in the record, never another remote's (host precedence was already applied when those were
+   * elected). See docs/version-resolver.md.
    */
   return ({ entry, actions }) => {
-    const { useAutoExternalPooling } = config.feature;
-
     // The poolable singletons this entry declares, per share scope — what it may have its actions rewritten
     // for. Membership is decided below, off the committed record rather than off this list.
     const declared = new Map<string, Set<ExternalName>>();
@@ -66,22 +70,29 @@ export function createPoolDynamicExternals(
     }
     if (declared.size === 0) return Promise.resolve({ entry, actions });
 
-    const scope = (name: string) => {
+    // Per share scope, the loaded remote's verdicts to write back, so a reload rebuilds the map this
+    // delta publishes rather than the one `update-cache` recorded.
+    let verdicts = new Map<ExternalName, Verdict>();
+
+    const scope = (name: string, cause: PoolCause) => {
       actions[name]!.action = 'scope';
       delete actions[name]!.override;
+      verdicts.set(name, { cause });
     };
 
     for (const [shareScope, names] of declared) {
-      // With auto-pooling off, a tag anywhere in the committed scope forms pools this entry is subject to —
-      // its own tag is not required. A tag is remote-local for *membership* only; the pool it forms then
+      // A tag anywhere in the committed scope forms pools this entry is subject to — its own tag is not
+      // required. A tag is remote-local for *membership* only; the pool it forms then
       // operates on the whole external, this entry's copies included (see docs/version-resolver.md
       // §"Unscoped lockstep families"). Reading only this entry's tags is what let an untagged remote
       // bridge two builds the portfolio had deliberately pooled apart.
-      if (!useAutoExternalPooling && !ports.sharedExternalsRepo.hasPoolTag(shareScope)) continue;
+      if (!ports.sharedExternalsRepo.hasPoolState(shareScope)) continue;
 
       const committed = ports.sharedExternalsRepo.getFromScope(shareScope);
+      const pools = buildPools(committed);
+      verdicts = new Map();
 
-      for (const pool of buildPools(committed, useAutoExternalPooling).values()) {
+      for (const pool of pools.values()) {
         // Only the members this entry declares have an action to rewrite; the rest of the pool is context —
         // its builds are candidates and its committed tags are what the gate reads.
         const mine = pool.filter(member => names.has(member.name));
@@ -91,7 +102,7 @@ export function createPoolDynamicExternals(
         // same-version sibling would bridge the foreign build). A `share`+`skip` mix is a coverage
         // gap, not a conflict, so the gate below decides it on coverage.
         if (mine.some(member => actions[member.name]!.action === 'scope')) {
-          mine.forEach(member => scope(member.name));
+          mine.forEach(member => scope(member.name, 'incompatible'));
           continue;
         }
 
@@ -108,12 +119,20 @@ export function createPoolDynamicExternals(
             8,
             `[${shareScope}] '${entry.name}' serves its own family: no committed build offers every entrypoint it imports at a version it accepts — '${reason.gap}' is the gap, ${closest}. All ${mine.length} members it imports are scoped for it.`
           );
-          mine.forEach(member => scope(member.name));
+          mine.forEach(member => scope(member.name, 'uncovered'));
           continue;
         }
 
-        redirect(entry.name, anchor, pool, asked.view, actions, shareScope);
+        for (const name of redirect(entry.name, anchor, pool, asked.view, actions, shareScope))
+          verdicts.set(name, { servedBy: anchor });
       }
+
+      const written: Record<string, SharedExternal> = {};
+      for (const [name, verdict] of verdicts) {
+        written[name] = recordVerdict(committed[name]!, entry.name, verdict);
+        ports.sharedExternalsRepo.addOrUpdate(name, written[name], shareScope);
+      }
+      syncPoolNames({ ...committed, ...written }, pools, ports.sharedExternalsRepo, shareScope);
     }
 
     return Promise.resolve({ entry, actions });
@@ -219,6 +238,8 @@ export function createPoolDynamicExternals(
    * `covered` is set for every member either way: it is per external, so a specifier the anchor serves as an
    * entry of a *different* member would otherwise be self-filled from the loaded remote's own build — one
    * file from a second build, which is the whole thing being prevented.
+   *
+   * Returns the members whose copy now dedups onto a build other than the one the global mapping publishes.
    */
   function redirect(
     remote: RemoteName,
@@ -227,7 +248,7 @@ export function createPoolDynamicExternals(
     view: CommittedView,
     actions: SharedInfoActions,
     shareScope: string
-  ): void {
+  ): ExternalName[] {
     const files = view.builds.get(anchor)!.coverage;
     const scopeUrl = ports.remoteInfoRepo.tryGet(anchor).get()?.scopeUrl;
     if (!scopeUrl) {
@@ -235,8 +256,11 @@ export function createPoolDynamicExternals(
         8,
         `[${shareScope}][${remote}] '${anchor}' is not in the cache, so its files cannot be mapped.`
       );
-      return;
+      return [];
     }
+
+    const basis = basisPerMember(pool);
+    const served: ExternalName[] = [];
 
     for (const member of pool) {
       const action = actions[member.name];
@@ -257,6 +281,57 @@ export function createPoolDynamicExternals(
 
       action.covered = specifiers;
       if (Object.keys(override).length > 0) action.override = override;
+      if (basis.get(member.name) !== anchor) served.push(member.name);
     }
+    return served;
+  }
+
+  /**
+   * The member's record with the loaded remote's copy moved to where the delta put it: into a `scope`
+   * version at its own tag, or kept in place with the anchor it dedups onto. A fresh record — the other
+   * remotes' copies are the committed map's and stay exactly as they are.
+   */
+  function recordVerdict(
+    external: SharedExternal,
+    remote: RemoteName,
+    verdict: Verdict
+  ): SharedExternal {
+    if ('servedBy' in verdict) {
+      return {
+        ...external,
+        versions: external.versions.map(v => ({
+          ...v,
+          remotes: v.remotes.map(r =>
+            r.name === remote ? { ...r, servedBy: verdict.servedBy } : r
+          ),
+        })),
+      };
+    }
+
+    const moved: { tag: string; meta: SharedVersionMeta }[] = [];
+    const versions = external.versions
+      .map(v => {
+        const own = v.remotes.find(r => r.name === remote);
+        if (!own) return v;
+        const { servedBy: _anchor, ...rest } = own;
+        const meta = { ...rest, cached: true, poolCause: verdict.cause };
+        if (v.action === 'scope')
+          return { ...v, remotes: v.remotes.map(r => (r === own ? meta : r)) };
+        moved.push({ tag: v.tag, meta });
+        return { ...v, remotes: v.remotes.filter(r => r !== own) };
+      })
+      // A version only the loaded remote held — a `share` it introduced — leaves with it.
+      .filter(v => v.remotes.length > 0);
+
+    for (const { tag, meta } of moved) {
+      const at = versions.findIndex(v => v.tag === tag && v.action === 'scope');
+      if (at >= 0) versions[at] = { ...versions[at]!, remotes: [...versions[at]!.remotes, meta] };
+      else versions.push({ tag, action: 'scope', host: false, remotes: [meta] });
+    }
+
+    return {
+      ...external,
+      versions: versions.sort((a, b) => ports.versionCheck.compare(b.tag, a.tag)),
+    };
   }
 }

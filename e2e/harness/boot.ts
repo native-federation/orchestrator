@@ -12,7 +12,6 @@ import type { NativeFederationResult } from 'lib/core/init-federation.contract';
  */
 
 export type BootOptions = {
-  pooling?: boolean;
   /**
    * `feature.convertFlatSharedInfo`: regroup a flat `shared` array back into one external per package
    * (`densifyExternals`) instead of leaving one external per entrypoint. No effect on a dense entry.
@@ -57,7 +56,6 @@ const options = (o: BootOptions) => ({
   },
   logLevel: 'debug' as const,
   feature: {
-    useAutoExternalPooling: o.pooling ?? true,
     convertFlatSharedInfo: o.flatSharedInfo ?? false,
   },
   ...(o.shim ? useShimImportMap({ shimMode: true }) : {}),
