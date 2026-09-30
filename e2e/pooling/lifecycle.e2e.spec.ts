@@ -136,6 +136,50 @@ test.describe('lifecycle: the warm start', () => {
     expect((await nf.load('team/mfe3')).seen['@angular/core']).toBe('mfe2|@angular/core@22.0.9');
   });
 
+  test('drops a stale anchor when every other remote leaves a pool that survives', async ({ nf }) => {
+    // As above, but mfe3 tags the family too, so the pool outlives mfe1's departure with mfe3 as its
+    // only remote. A one-remote pool used to return before rebuilding its members, so mfe3 stayed
+    // anchored on a build that no longer ships the family.
+    const anchorsOf = async (name: string) =>
+      (await nf.store())['__GLOBAL__']![name]!.versions.flatMap(v =>
+        v.remotes.filter(r => r.servedBy).map(r => `${r.name}>${r.servedBy}`)
+      );
+    const mfe3 = remote('team/mfe3', SCOPE.mfe3, [
+      dep('@angular/core', '22.0.6', { req: '^22.0.0', pool: 'ng' }),
+      dep('@angular/router', '22.0.6', { req: '^22.0.0', pool: 'ng' }),
+    ]);
+
+    await nf.init(
+      [
+        remote('team/mfe1', SCOPE.mfe1, [
+          dep('@angular/core', '22.0.6', { req: '^22.0.0', pool: 'ng' }),
+          dep('@angular/router', '22.0.6', { req: '^22.0.0', pool: 'ng' }),
+        ]),
+        remote('team/mfe2', SCOPE.mfe2, [dep('@angular/core', '22.0.9', { req: '^22.0.0' })]),
+        mfe3,
+      ],
+      { pooling: false }
+    );
+    expect(await anchorsOf('@angular/core')).toContain('team/mfe3>team/mfe1');
+
+    // mfe1 and mfe2 redeploy at new URLs without the family; only mfe3's copies remain, still tagged.
+    await nf.init(
+      [
+        remote('team/mfe1', SCOPE.mfe5, [dep('rxjs', '7.8.1')]),
+        remote('team/mfe2', SCOPE.mfe4, [dep('rxjs', '7.8.1')]),
+        mfe3,
+      ],
+      { pooling: false }
+    );
+
+    expect(await anchorsOf('@angular/core')).toEqual([]);
+    expect(await anchorsOf('@angular/router')).toEqual([]);
+    expect((await nf.load('team/mfe3')).seen).toEqual({
+      '@angular/core': 'mfe3|@angular/core@22.0.6',
+      '@angular/router': 'mfe3|@angular/router@22.0.6',
+    });
+  });
+
   test('keeps an island out of the shared set it was islanded from', async ({ nf }) => {
     // What "the verdicts survive" means concretely: after the round-trip the islanded remote's copies
     // are stored as `scope` and its sole-provided member has no shared version, so no later pass can

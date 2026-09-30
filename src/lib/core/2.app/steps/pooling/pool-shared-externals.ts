@@ -319,7 +319,19 @@ export function createPoolSharedExternals(
     if (members.length < 2) return false;
 
     const allRemotes = remotesInPool(members);
-    if (allRemotes.length < 2) return false;
+    if (allRemotes.length < 2) {
+      // A pool that shrank to one remote still carries the verdicts of the pool it was, e.g. a `servedBy`
+      // naming a build that left, and the map would keep honouring them.
+      if (!anyVerdictStored(members)) return false;
+      const basis = basisFor(members, new Map(), new Map());
+      for (const member of members)
+        ports.sharedExternalsRepo.addOrUpdate(
+          member.name,
+          rebuildMember(poolName, member, new Map(), new Map(), basis.get(member.name)),
+          scope
+        );
+      return true;
+    }
 
     const islanded = islandedRemotes(members);
     const consumed = consumedMembers(members);

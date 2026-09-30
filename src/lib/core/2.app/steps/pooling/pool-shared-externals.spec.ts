@@ -1011,6 +1011,29 @@ describe('createPoolSharedExternals', () => {
       expect(namesOf(rebuiltFor('@framework/core')!, 'share')).toEqual(['mfe1', 'mfe2']);
     });
 
+    it('clears a stale anchor and poolCause off a pool that shrank to one remote', async () => {
+      // H redeployed without the family, so only R is left. R's copies still carry the verdicts the
+      // two-remote pool gave them: an anchor on H (whose files are gone) and an island cause.
+      givenExternals({
+        '@framework/core': external([
+          sharedVersion('17', [{ ...meta('R'), servedBy: 'H' }], { action: 'share' }),
+        ]),
+        '@framework/common': external([
+          sharedVersion('17', [{ ...meta('R'), poolCause: 'uncovered' }], { action: 'share' }),
+        ]),
+      });
+
+      await poolSharedExternals();
+
+      const core = rebuiltFor('@framework/core')!;
+      const common = rebuiltFor('@framework/common')!;
+      expect(servedByOf(core)).toEqual({});
+      expect(causeOf(common, 'R')).toBeUndefined();
+      expect(namesOf(core, 'share')).toEqual(['R']);
+      expect(namesOf(common, 'share')).toEqual(['R']);
+      expect(core.poolName).toBe('framework');
+    });
+
     it('writes nothing for a healthy re-election whose stored names already match', async () => {
       givenExternals({
         '@framework/core': {
