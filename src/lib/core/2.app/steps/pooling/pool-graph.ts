@@ -45,17 +45,15 @@ function createDSU() {
   };
 }
 
-// Namespaced node keys, NUL-separated so no kind or `(remote, …)` pair can alias another. Tag nodes are
-// per remote, so every edge is remote-local and pools merge only through a shared member.
+// Namespaced node keys, NUL-separated so a name can never alias an external. A name is one node across every
+// remote: the name is the pool's identity, and names that share an external are one pool.
 const extNode = (name: ExternalName): string => `ext\x00${name}`;
-const tagNode = (remote: string, tag: string): string => `tag\x00${remote}\x00${tag}`;
+const nameNode = (tag: string): string => `name\x00${tag}`;
 
-export type PoolEdge = { remote: string; tag: string };
-
-// A poolable external's declared `tags`. `value` is the payload returned per member.
+// A poolable external's declared `tags`, one per declaring copy. `value` is the payload returned per member.
 export type PoolCandidate<T> = {
   name: ExternalName;
-  tags: readonly PoolEdge[];
+  tags: readonly string[];
   value: T;
 };
 
@@ -74,13 +72,12 @@ export function owningPackage(name: ExternalName): ExternalName | undefined {
 }
 
 /**
- * Group one shareScope's candidates into pools by shared membership: pool = connected component of a
- * graph whose edges are all remote-local — `external -> tag@remote` for each declared tag — plus an
- * unconditional `entrypoint -> package` edge. See docs/version-resolver.md.
+ * Group one shareScope's candidates into pools by name: pool = connected component of a graph with an
+ * `external -> name` edge per declared tag, whichever remote declared it, plus an unconditional
+ * `entrypoint -> package` edge. See docs/version-resolver.md.
  *
  * Returns only real pools (>=2 members), keyed by `poolName` and iterated in order of their smallest
- * member, which is what keeps the names reload-stable. A tagged member that pooled with nothing is warned
- * (likely typo or missing sibling).
+ * member. A tagged member that pooled with nothing is warned (likely typo or missing sibling).
  */
 export function groupByMembership<T>(
   candidates: readonly PoolCandidate<T>[],
@@ -90,8 +87,8 @@ export function groupByMembership<T>(
   const tagged = new Set<ExternalName>();
 
   for (const candidate of candidates) {
-    for (const edge of candidate.tags) {
-      dsu.union(extNode(candidate.name), tagNode(edge.remote, edge.tag));
+    for (const tag of candidate.tags) {
+      dsu.union(extNode(candidate.name), nameNode(tag));
       tagged.add(candidate.name);
     }
   }
@@ -134,24 +131,21 @@ export function groupByMembership<T>(
 
   pools.sort((a, b) => a[0]!.name.localeCompare(b[0]!.name));
 
+  // Unique without suffixing: a name belongs to exactly one component, so two pools never pick the same one.
   const named = new Map<PoolName, T[]>();
-  for (const members of pools) {
-    const label = mostDeclaredTag(members) ?? members[0]!.name;
-    let name = label;
-    for (let n = 2; named.has(name); n++) name = `${label}~${n}`;
+  for (const members of pools)
     named.set(
-      name,
+      mostDeclaredTag(members) ?? members[0]!.name,
       members.map(m => m.value)
     );
-  }
   return named;
 }
 
-// Tags are remote-local, so unrelated pools can share one: `poolName` makes the name unique per scope.
+// A pool merged from several names is named after the one most copies declare.
 function mostDeclaredTag(members: readonly PoolCandidate<unknown>[]): string | undefined {
   const counts = new Map<string, number>();
   for (const member of members)
-    for (const edge of member.tags) counts.set(edge.tag, (counts.get(edge.tag) ?? 0) + 1);
+    for (const tag of member.tags) counts.set(tag, (counts.get(tag) ?? 0) + 1);
 
   let best: string | undefined;
   for (const [tag, count] of counts) {
@@ -172,7 +166,7 @@ export function buildPools(
       tags: external.versions.flatMap(v =>
         v.remotes.flatMap(r => {
           const tag = r.pool?.trim();
-          return tag ? [{ remote: r.name, tag }] : [];
+          return tag ? [tag] : [];
         })
       ),
       value: { name, external },

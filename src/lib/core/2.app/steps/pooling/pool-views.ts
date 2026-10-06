@@ -142,7 +142,7 @@ export function consumedMembers(members: PoolMember[]): Map<RemoteName, External
   return consumed;
 }
 
-/** `consumedMembers` in specifier space. */
+// `consumedMembers` in specifier space.
 export function consumedSpecifiers(members: PoolMember[]): Map<RemoteName, Set<Specifier>> {
   const consumed = new Map<RemoteName, Set<Specifier>>();
 
@@ -240,10 +240,7 @@ export function basisPerMember(
   return basis;
 }
 
-/**
- * The host, when it ships anything in this pool. A host-contributed version carries `host: true` and
- * basis precedence puts the host's own copy first on it, so `remotes[0]` of such a version is the host.
- */
+// Basis precedence puts the host's own copy first on a `host: true` version, so its `remotes[0]` is the host.
 export function hostRemotes(members: PoolMember[]): Set<RemoteName> {
   const hosts = new Set<RemoteName>();
 

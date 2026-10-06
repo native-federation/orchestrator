@@ -24,18 +24,19 @@ const shape = (pools: Map<PoolName, PoolMember[]>): [PoolName, string[]][] =>
   [...pools.entries()].map(([name, members]) => [name, members.map(m => m.name)]);
 
 describe('buildPools', () => {
-  // Formerly "auto-pooling (by npm scope, per declaring remote)". The build now writes the scope as an
-  // explicit tag, so the same portfolios are expressed with `pool: 'ng'` on every copy; the per-remote
-  // property they pinned is simply the remote-locality of tag nodes.
+  // The build writes the npm scope as an explicit tag by default, so these portfolios carry `pool: 'ng'` on
+  // every copy. A name is a pool's identity across remotes, not a per-remote label.
   describe('scope-derived tags (what the build emits by default)', () => {
-    it('does NOT pool one tag across remotes that share no member', () => {
+    it('pools one name across remotes even when they share no member', () => {
+      // Formerly no pool: tag nodes were per remote, so a and b each held a lone member. The name now says
+      // core and common belong together whoever declared it.
       const pools = buildPools(
         scope({
           '@ng/core': [{ remote: 'a', pool: 'ng' }],
           '@ng/common': [{ remote: 'b', pool: 'ng' }],
         })
       );
-      expect(pools.size).toBe(0);
+      expect(shape(pools)).toEqual([['ng', ['@ng/common', '@ng/core']]]);
     });
 
     it('pools as soon as one remote declares two tagged members', () => {
@@ -48,9 +49,7 @@ describe('buildPools', () => {
       expect(shape(pools)).toEqual([['ng', ['@ng/common', '@ng/core']]]);
     });
 
-    // The witness need not consume the whole pool: one remote bridging a pair is enough to pull in
-    // every other remote's copies of those members.
-    it('pulls other remotes in through the member a witness shares with them', () => {
+    it('pulls every remote declaring the name into one pool', () => {
       const pools = buildPools(
         scope({
           '@ng/core': [
@@ -61,8 +60,8 @@ describe('buildPools', () => {
           '@ng/forms': [{ remote: 'c', pool: 'ng' }],
         })
       );
-      // b declares core+common, so those pool; c's forms sits alone on its own `(c, ng)` node.
-      expect(shape(pools)).toEqual([['ng', ['@ng/common', '@ng/core']]]);
+      // c's forms joins too: it declares the same name. Formerly it sat alone on a per-remote `(c, ng)` node.
+      expect(shape(pools)).toEqual([['ng', ['@ng/common', '@ng/core', '@ng/forms']]]);
     });
 
     it('is inert without tags', () => {
@@ -73,7 +72,7 @@ describe('buildPools', () => {
     });
   });
 
-  describe('explicit tags (remote-local, bridge by shared member)', () => {
+  describe('explicit tags (one pool per name, names merge through a shared member)', () => {
     it('merges tag groups with different labels through a shared member', () => {
       // mfe1 tags {core, ui}="ng"; mfe2 tags {ui, forms}="ds". ui bridges them despite the labels differing.
       const pools = buildPools(
@@ -90,9 +89,8 @@ describe('buildPools', () => {
       expect(shape(pools)).toEqual([['ds', ['@x/core', '@x/forms', '@x/ui']]]);
     });
 
-    it('does NOT merge same-labelled groups that share no member', () => {
-      // Both remotes use the label "x", but the member sets are disjoint — identical labels are not evidence.
-      // They still need distinct names, so the pool with the larger smallest member is suffixed.
+    it('pools disjoint member sets that declare the same name', () => {
+      // Formerly two pools, `x` and `x~2`: identical labels were not evidence. The name is the identity now.
       const pools = buildPools(
         scope({
           core: [{ remote: 'mfe1', pool: 'x' }],
@@ -101,10 +99,7 @@ describe('buildPools', () => {
           bar: [{ remote: 'mfe2', pool: 'x' }],
         })
       );
-      expect(shape(pools)).toEqual([
-        ['x', ['bar', 'forms']],
-        ['x~2', ['core', 'ui']],
-      ]);
+      expect(shape(pools)).toEqual([['x', ['bar', 'core', 'forms', 'ui']]]);
     });
 
     it('bridges a co-tagged cross-scope member into the family', () => {
@@ -155,8 +150,8 @@ describe('buildPools', () => {
       expect([...pools.keys()]).toEqual(['alpha']);
     });
 
-    // The suffix order follows each pool's smallest member, not input order, so it is reload-stable.
-    it('suffixes pools sharing a tag in order of their smallest member, whatever the input order', () => {
+    // Formerly `ng`, `ng~2`, `ng~3`: one per remote that declared the name on its own members.
+    it('keeps one pool per name, whatever the input order', () => {
       const members = {
         '@ng/router': [{ remote: 'b', pool: 'ng' }],
         '@ng/forms': [{ remote: 'b', pool: 'ng' }],
@@ -166,9 +161,7 @@ describe('buildPools', () => {
         '@ng/zone': [{ remote: 'c', pool: 'ng' }],
       };
       const expected = [
-        ['ng', ['@ng/animations', '@ng/zone']],
-        ['ng~2', ['@ng/common', '@ng/core']],
-        ['ng~3', ['@ng/forms', '@ng/router']],
+        ['ng', ['@ng/animations', '@ng/common', '@ng/core', '@ng/forms', '@ng/router', '@ng/zone']],
       ];
       expect(shape(buildPools(scope(members)))).toEqual(expected);
 
