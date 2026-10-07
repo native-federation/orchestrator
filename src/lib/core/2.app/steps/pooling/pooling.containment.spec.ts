@@ -126,6 +126,8 @@ describe('pooling contains a failure to the pool it happened in', () => {
       ['16.0.0:scope', ['team/c(uncovered)']],
     ]);
     expect(record('@broken/core').poolName).toBe('broken');
+    // An emergency placement is no election: it must not break the next healthy election's tie.
+    expect(record('@broken/core').poolWinner).toBeUndefined();
     expect(config.log.error).toHaveBeenCalledWith(
       3,
       "[__GLOBAL__][pool:broken] could not elect the pool; only 'team/a' resolves globally, every other remote serves its own family.",

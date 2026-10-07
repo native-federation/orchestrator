@@ -25,6 +25,7 @@ import { acceptanceTable, acceptsAll, covers, type Acceptance } from './subpool-
 import type { CommittedView, PoolMember, Specifier } from './pool.types';
 import * as _path from 'lib/utils/path';
 import { type AcceptsTag, acceptsTag } from 'lib/core/1.domain/externals/basis';
+import { compareStrings } from 'lib/utils/compare-strings';
 
 // What the gate decided for the loaded remote's copy of one member, as the record must keep it.
 type Verdict = { cause: PoolCause } | { servedBy: RemoteName };
@@ -259,7 +260,7 @@ export function createPoolDynamicExternals(
 
     const rank = (build: RemoteName) => (serving.has(build) ? 0 : hosts.has(build) ? 1 : 2);
 
-    return [...view.builds.keys()].sort((a, b) => rank(a) - rank(b) || a.localeCompare(b));
+    return [...view.builds.keys()].sort((a, b) => rank(a) - rank(b) || compareStrings(a, b));
   }
 
   // Every copy the build holds is a basis, `scope`, or served by itself; any other copy binds its modules to

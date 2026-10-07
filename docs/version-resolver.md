@@ -878,13 +878,14 @@ have to re-derive them. Every field is omitted when it does not apply.
 | where | field | meaning |
 | --- | --- | --- |
 | `SharedExternal` | `poolName` | the pool this external resolves in: the most-declared name of the merged pool |
+| `SharedExternal` | `poolWinner` | the round-1 winner of the pool's last election; a rename keeps it, the failure fallback stores none |
 | `SharedVersionMeta` | `pool` | the `pool` tag this remote declared — pooling's input, never rewritten |
 | `SharedVersionMeta` | `servedBy` | the build of the subpool this copy runs in — the remote itself on its own build's copies |
 | `SharedVersionMeta` | `poolCause` | why pooling made this copy serve itself: `incompatible` (a range rejects a tag of the elected build) or `uncovered` (the elected build does not serve every specifier it imports) |
 
 Only pooling writes these, so an external in no pool any more has nothing left to explain: when a pool dissolves
 — the remote whose tag formed it redeployed without it, say — `mark-pools-for-reelection` drops `poolName`,
-`servedBy` and `poolCause` from its former members before `determine` runs, and re-elects them. A leftover
+`poolWinner`, `servedBy` and `poolCause` from its former members before `determine` runs, and re-elects them. A leftover
 `servedBy` would otherwise keep mapping that copy onto a build nothing chose any more.
 
 `poolCause` is the one thing the `scope` action cannot say on its own: a copy scoped for a range violation and
@@ -893,8 +894,10 @@ build — is in the matching `warn` line only. Membership is kept apart from the
 recomputes pools from the copies' `pool` tags every time it runs, so writing its own result back into its
 input would keep a pool alive after the remote that formed it had left.
 
-The stored election is also an input: the round-1 winner is read back as the build that is the basis of the
-most `share` versions, and keeps an otherwise exact tie (rank 4 above).
+The stored election is also an input: `poolWinner` keeps an otherwise exact tie (rank 4 above), unless two
+members store different ones or it ships no member any more; a member that joined since stores none yet. It is
+stored rather than inferred from the `share` rows: every package the winner does not ship itself is published
+from another build, so counting bases can name the wrong one.
 
 The dynamic path writes the same fields, for the loaded remote's copies only: a copy it scopes moves into a
 `scope` version at its own tag with its `poolCause` (a `share` version only that copy held leaves with it), and

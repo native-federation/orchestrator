@@ -1,5 +1,6 @@
 import type { ExternalName, shareScope } from 'lib/core/1.domain';
 import type { ForSharedExternalsStorage } from '../../driving-ports/for-shared-externals-storage.port';
+import { withoutPoolResults } from 'lib/core/1.domain/pooling/pool-state';
 import type { PoolMember, PoolName } from './pool.types';
 
 // A projection built at most once, and only if the decision gets far enough to ask for it.
@@ -22,7 +23,7 @@ export function poolableScopes(
     .filter(scope => repo.scopeType(scope) !== 'strict' && repo.hasPoolState(scope));
 }
 
-// Writes each external's current `poolName`, and clears it with every `poolCause` off one in no pool any more;
+// Writes each external's current `poolName`, and clears every pool result off one in no pool any more;
 // a pool nobody re-elected can still be renamed by another. `skip` names pools the caller rebuilds itself.
 export function syncPoolNames(
   sharedExternals: shareScope,
@@ -39,19 +40,9 @@ export function syncPoolNames(
     if (pool !== undefined && skip.has(pool)) continue;
     if (external.poolName === pool) continue;
 
-    // A fresh record rather than a mutation: the dynamic path must leave committed versions untouched.
-    const { poolName: _stale, ...rest } = external;
     repo.addOrUpdate(
       name,
-      pool !== undefined
-        ? { ...rest, poolName: pool }
-        : {
-            ...rest,
-            versions: external.versions.map(v => ({
-              ...v,
-              remotes: v.remotes.map(({ poolCause: _cause, ...meta }) => meta),
-            })),
-          },
+      pool !== undefined ? { ...external, poolName: pool } : withoutPoolResults(external),
       scope
     );
   }

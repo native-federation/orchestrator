@@ -155,12 +155,13 @@ describe('createMarkPoolsForReelection', () => {
   describe('clears pool state off an external that left every pool', () => {
     const withState = (external: SharedExternal): SharedExternal => {
       external.poolName = 'framework';
+      external.poolWinner = 'team/mfe1';
       external.versions[0]!.remotes[0]!.servedBy = 'team/mfe2';
       external.versions[0]!.remotes[0]!.poolCause = 'uncovered';
       return external;
     };
 
-    it('drops servedBy, poolCause and poolName, and marks the external for re-election', async () => {
+    it('drops servedBy, poolCause, poolName and poolWinner, and marks the external for re-election', async () => {
       const externals = given({
         '@scope/a': ext('@scope/a', true, null),
         '@scope/b': withState(ext('@scope/b', false, null)),
@@ -170,6 +171,7 @@ describe('createMarkPoolsForReelection', () => {
 
       const b = externals['@scope/b']!;
       expect(b.poolName).toBeUndefined();
+      expect(b.poolWinner).toBeUndefined();
       expect(b.versions[0]!.remotes[0]!.servedBy).toBeUndefined();
       expect(b.versions[0]!.remotes[0]!.poolCause).toBeUndefined();
       // Re-elected, since `determine` treated the subpool copy as exempt from the coverage policy.
@@ -186,6 +188,7 @@ describe('createMarkPoolsForReelection', () => {
 
       expect(externals['@scope/b']!.versions[0]!.remotes[0]!.servedBy).toBe('team/mfe2');
       expect(externals['@scope/b']!.poolName).toBe('framework');
+      expect(externals['@scope/b']!.poolWinner).toBe('team/mfe1');
     });
 
     it('leaves a clean unpooled external alone', async () => {

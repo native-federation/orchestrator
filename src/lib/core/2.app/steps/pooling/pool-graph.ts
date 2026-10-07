@@ -1,6 +1,7 @@
 import type { ExternalName, shareScope, VersionName } from 'lib/core/1.domain';
 import type { LogHandler } from '../../config/log.contract';
 import type { PoolMember, PoolName, Specifier } from './pool.types';
+import { compareStrings } from 'lib/utils/compare-strings';
 
 // Disjoint-set union (union by size + iterative path halving — loop-based to avoid stack growth in
 // the browser). String node keys are interned to integers so the hot path indexes plain arrays.
@@ -138,7 +139,7 @@ export function groupByMembership<T>(
     // with the package that does.
     if (!members.some(m => tagged.has(m.name))) continue;
 
-    members.sort((a, b) => a.name.localeCompare(b.name));
+    members.sort((a, b) => compareStrings(a.name, b.name));
     if (members.length < 2) {
       const only = members[0]!;
       if (tagged.has(only.name)) {
@@ -152,7 +153,8 @@ export function groupByMembership<T>(
     pools.push(members);
   }
 
-  pools.sort((a, b) => a[0]!.name.localeCompare(b[0]!.name));
+  // Pools come back in order of their smallest member; the election's determinism relies on it.
+  pools.sort((a, b) => compareStrings(a[0]!.name, b[0]!.name));
 
   // Unique without suffixing: a name belongs to exactly one component, so two pools never pick the same one.
   const named = new Map<PoolName, T[]>();
@@ -173,7 +175,7 @@ function mostDeclaredTag(members: readonly PoolCandidate<unknown>[]): string | u
   let best: string | undefined;
   for (const [tag, count] of counts) {
     const top = best === undefined ? 0 : counts.get(best)!;
-    if (count > top || (count === top && tag.localeCompare(best!) < 0)) best = tag;
+    if (count > top || (count === top && compareStrings(tag, best!) < 0)) best = tag;
   }
   return best;
 }

@@ -210,6 +210,7 @@ export function createStoreRemoteEntry(
           {
             dirty: cached.dirty,
             ...(cached.poolName !== undefined && { poolName: cached.poolName }),
+            ...(cached.poolWinner !== undefined && { poolWinner: cached.poolWinner }),
             versions: cached.versions.sort((a, b) => ports.versionCheck.compare(b.tag, a.tag)),
           },
           sharedInfo.shareScope

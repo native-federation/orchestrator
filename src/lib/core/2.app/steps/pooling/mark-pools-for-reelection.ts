@@ -5,22 +5,10 @@ import type {
 import type { DrivingContract } from '../../driving-ports/driving.contract';
 import type { LoggingConfig } from '../../config/log.contract';
 import type { ModeConfig } from '../../config/mode.contract';
-import type { ExternalName, SharedExternal } from 'lib/core/1.domain';
+import type { ExternalName } from 'lib/core/1.domain';
+import { hasPoolResults, withoutPoolResults } from 'lib/core/1.domain/pooling/pool-state';
 import { buildPools } from './pool-graph';
 import { poolableScopes } from './pool.util';
-
-// Everything pooling persists on a record. Only pooling sets any of it, so outside a pool it is stale.
-function clearPoolState(external: SharedExternal): boolean {
-  let cleared = external.poolName !== undefined;
-  delete external.poolName;
-  for (const version of external.versions)
-    for (const meta of version.remotes) {
-      if (meta.servedBy !== undefined || meta.poolCause !== undefined) cleared = true;
-      delete meta.servedBy;
-      delete meta.poolCause;
-    }
-  return cleared;
-}
 
 export function createMarkPoolsForReelection(
   config: LoggingConfig & ModeConfig,
@@ -66,8 +54,11 @@ export function createMarkPoolsForReelection(
       }
 
       for (const [name, external] of Object.entries(sharedExternals)) {
-        if (pooled.has(name) || !clearPoolState(external)) continue;
-        external.dirty = true;
+        if (pooled.has(name) || !hasPoolResults(external)) continue;
+        const cleared = withoutPoolResults(external);
+        for (const key of Object.keys(external))
+          if (!(key in cleared)) Reflect.deleteProperty(external, key);
+        Object.assign(external, cleared, { dirty: true });
         unpooled++;
       }
 

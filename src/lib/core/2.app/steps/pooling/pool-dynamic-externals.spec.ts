@@ -717,12 +717,13 @@ describe('createPoolDynamicExternals', () => {
         { tag: '18.0.0', remotes: ['mfe'], action: 'scope' },
         { tag: '17.0.0', remotes: ['host'], action: 'share' }
       );
+      // The init election's winner: the dynamic path never re-elects, so it must survive the write.
       givenCommitted({
-        '@framework/core': committed('@framework/core', {
-          tag: '17.0.0',
-          remotes: ['host', 'mfe'],
-        }),
-        '@framework/common': common,
+        '@framework/core': {
+          ...committed('@framework/core', { tag: '17.0.0', remotes: ['host', 'mfe'] }),
+          poolWinner: 'host',
+        },
+        '@framework/common': { ...common, poolWinner: 'host' },
       });
 
       await poolDynamicExternals({
@@ -742,8 +743,10 @@ describe('createPoolDynamicExternals', () => {
         ['18.0.0:scope', [{ name: 'mfe', poolCause: 'incompatible' }]],
         ['17.0.0:share', [{ name: 'host' }]],
       ]);
-      for (const name of ['@framework/core', '@framework/common'])
+      for (const name of ['@framework/core', '@framework/common']) {
         expect(writtenFor(name)!.poolName).toBe('framework');
+        expect(writtenFor(name)!.poolWinner).toBe('host');
+      }
       expect(config.log.warn).toHaveBeenCalledWith(
         8,
         expect.stringContaining("'mfe' is islanded: its range rejects '@framework/common@17.0.0'")

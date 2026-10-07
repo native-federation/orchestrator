@@ -138,14 +138,18 @@ export function createPoolSharedExternals(
     for (const member of members) {
       ports.sharedExternalsRepo.addOrUpdate(
         member.name,
-        rebuildMember(poolName, member, election, routes, misses, hosts),
+        {
+          ...rebuildMember(poolName, member, election, routes, misses, hosts),
+          poolWinner: election.winner,
+        },
         scope
       );
     }
   }
 
   // A failure elects one pool by the one placement that cannot tear: the host's build, else the first
-  // arrival's, stays global and every other remote serves its whole family itself.
+  // arrival's, stays global and every other remote serves its whole family itself. It stores no `poolWinner`:
+  // it was not an election, so it must not break the next one's tie.
   function placeSafely(poolName: PoolName, members: PoolMember[], scope: string, error: unknown) {
     const hosts = hostRemotes(members);
     const remotes = [...arrivalOrder(members).keys()];
@@ -257,17 +261,15 @@ export function createPoolSharedExternals(
   }
 }
 
-// The round-1 winner of the last election, as the stored record shows it: the basis of the most `share` rows.
+// A member that joined since carries no winner yet; only two stored winners that conflict void it.
 function previousWinner(members: PoolMember[]): RemoteName | undefined {
-  const counts = new Map<RemoteName, number>();
-  for (const member of members) {
-    const basis = member.external.versions.find(v => v.action === 'share')?.remotes[0];
-    if (basis && basis.servedBy === undefined && basis.poolCause === undefined)
-      counts.set(basis.name, (counts.get(basis.name) ?? 0) + 1);
-  }
-  let best: RemoteName | undefined;
-  for (const [remote, count] of counts) if (!best || count > counts.get(best)!) best = remote;
-  return best;
+  const winners = new Set(members.flatMap(m => m.external.poolWinner ?? []));
+  const [winner] = winners;
+  if (winners.size !== 1) return undefined;
+  const ships = members.some(m =>
+    m.external.versions.some(v => v.remotes.some(r => r.name === winner))
+  );
+  return ships ? winner : undefined;
 }
 
 function missWarning(

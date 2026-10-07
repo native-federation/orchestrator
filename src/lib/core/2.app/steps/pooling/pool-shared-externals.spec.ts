@@ -149,10 +149,12 @@ describe('createPoolSharedExternals', () => {
         '@framework/core': {
           ...external([sharedVersion('17', [meta('mfe1')], { action: 'share' })]),
           poolName: 'framework',
+          poolWinner: 'mfe1',
         },
         '@framework/common': {
           ...external([sharedVersion('17', [meta('mfe1')], { action: 'share' })]),
           poolName: 'framework',
+          poolWinner: 'mfe1',
         },
       });
 
@@ -410,23 +412,60 @@ describe('createPoolSharedExternals', () => {
       expect(shareOf('@framework/common')).toMatchObject({ tag: '17.0.0', host: true });
     });
 
+    // Two builds that each serve only themselves and agree with nobody; a arrives first and is newer.
+    const tied = (winners: { core?: string; common?: string }) => ({
+      '@framework/core': {
+        ...external([
+          sharedVersion('18.0.0', [meta('a', { req: '~18.0.0' })]),
+          sharedVersion('17.0.0', [meta('b', { req: '~17.0.0' })], { action: 'share' }),
+        ]),
+        poolWinner: winners.core,
+      },
+      '@framework/common': {
+        ...external([
+          sharedVersion('18.0.0', [meta('a', { req: '~18.0.0' })]),
+          sharedVersion('17.0.0', [meta('b', { req: '~17.0.0' })], { action: 'share' }),
+        ]),
+        poolWinner: winners.common,
+      },
+    });
+
     it('keeps the stored winner on a tie (D2)', async () => {
-      // Two builds that each serve only themselves and agree with nobody: b won last time, so b keeps it,
-      // although a is the newer build.
-      givenExternals({
-        '@framework/core': external([
-          sharedVersion('18.0.0', [meta('a', { req: '~18.0.0' })]),
-          sharedVersion('17.0.0', [meta('b', { req: '~17.0.0' })], { action: 'share' }),
-        ]),
-        '@framework/common': external([
-          sharedVersion('18.0.0', [meta('a', { req: '~18.0.0' })]),
-          sharedVersion('17.0.0', [meta('b', { req: '~17.0.0' })], { action: 'share' }),
-        ]),
-      });
+      // b won last time, so b keeps it, although a is the newer build.
+      givenExternals(tied({ core: 'b', common: 'b' }));
 
       await poolSharedExternals();
 
       expect(shareOf('@framework/core')!.tag).toBe('17.0.0');
+      expect(rebuiltFor('@framework/core')!.poolWinner).toBe('b');
+    });
+
+    it('ignores a stored winner the members disagree on', async () => {
+      givenExternals(tied({ core: 'b', common: 'a' }));
+
+      await poolSharedExternals();
+
+      // No previous winner, so arrival order breaks the tie.
+      expect(shareOf('@framework/core')!.tag).toBe('18.0.0');
+      expect(rebuiltFor('@framework/common')!.poolWinner).toBe('a');
+    });
+
+    it('keeps the stored winner when a member that joined since carries none', async () => {
+      givenExternals(tied({ core: 'b' }));
+
+      await poolSharedExternals();
+
+      expect(shareOf('@framework/core')!.tag).toBe('17.0.0');
+      expect(rebuiltFor('@framework/common')!.poolWinner).toBe('b');
+    });
+
+    it('ignores a stored winner that ships no member any more', async () => {
+      givenExternals(tied({ core: 'gone', common: 'gone' }));
+
+      await poolSharedExternals();
+
+      expect(shareOf('@framework/core')!.tag).toBe('18.0.0');
+      expect(rebuiltFor('@framework/core')!.poolWinner).toBe('a');
     });
 
     it('takes the newest build first under latestSharedExternal (D3)', async () => {
@@ -1013,13 +1052,17 @@ describe('createPoolSharedExternals', () => {
       autoTag = true;
     });
 
-    it('writes the pool name onto every rebuilt member', async () => {
+    it('writes the pool name and round-1 winner onto every rebuilt member', async () => {
+      adapters.versionCheck = createVersionCheck();
+      poolSharedExternals = createPoolSharedExternals(config, adapters);
       givenExternals(islanding());
 
       await poolSharedExternals();
 
       expect(rebuiltFor('@framework/core')!.poolName).toBe('framework');
       expect(rebuiltFor('@framework/common')!.poolName).toBe('framework');
+      expect(rebuiltFor('@framework/core')!.poolWinner).toBe('mfe1');
+      expect(rebuiltFor('@framework/common')!.poolWinner).toBe('mfe1');
     });
 
     it("marks every copy of an islanded remote 'incompatible', and no clean copy", async () => {
@@ -1095,10 +1138,12 @@ describe('createPoolSharedExternals', () => {
         '@framework/core': {
           ...external([sharedVersion('17', [meta('mfe1'), meta('mfe2')], { action: 'share' })]),
           poolName: 'framework',
+          poolWinner: 'mfe1',
         },
         '@framework/common': {
           ...external([sharedVersion('17', [meta('mfe1'), meta('mfe2')], { action: 'share' })]),
           poolName: 'framework',
+          poolWinner: 'mfe1',
         },
       });
 
@@ -1110,17 +1155,20 @@ describe('createPoolSharedExternals', () => {
     });
 
     it('renames an untouched pool whose stored name differs, without rebuilding it', async () => {
-      const externals = islanding();
-      for (const stored of Object.values(externals)) stored.poolName = 'old-name';
+      const externals: Record<string, SharedExternal> = islanding();
+      for (const stored of Object.values(externals)) {
+        stored.poolName = 'old-name';
+        stored.poolWinner = 'mfe1';
+      }
       givenExternals(externals);
 
       // The scope is touched, the pool is not: its verdicts stand, only the name is brought up to date.
       await poolSharedExternals(new Map([[GLOBAL_SCOPE, new Set(['unrelated-dep'])]]));
 
       expect(rebuilds()).toEqual([]);
-      expect(nameWrites().map(c => [c[0], c[1].poolName])).toEqual([
-        ['@framework/core', 'framework'],
-        ['@framework/common', 'framework'],
+      expect(nameWrites().map(c => [c[0], c[1].poolName, c[1].poolWinner])).toEqual([
+        ['@framework/core', 'framework', 'mfe1'],
+        ['@framework/common', 'framework', 'mfe1'],
       ]);
     });
 
@@ -1133,6 +1181,7 @@ describe('createPoolSharedExternals', () => {
           }),
         ]),
         poolName: 'framework',
+        poolWinner: 'mfe1',
       };
       givenExternals({ ...islanding(), lonely });
 
@@ -1141,6 +1190,7 @@ describe('createPoolSharedExternals', () => {
       const written = writes().find(c => c[0] === 'lonely')?.[1];
       expect(written).toBeDefined();
       expect(written!.poolName).toBeUndefined();
+      expect(written!.poolWinner).toBeUndefined();
       expect(causeOf(written!, 'mfe1')).toBeUndefined();
     });
   });

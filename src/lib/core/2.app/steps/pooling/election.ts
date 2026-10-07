@@ -2,6 +2,7 @@ import type { ExternalName, RemoteName, VersionName } from 'lib/core/1.domain';
 import type { AcceptsTag } from 'lib/core/1.domain/externals/basis';
 import { owningPackage, SpecifierTags } from './pool-graph';
 import type { PoolMember, Specifier } from './pool.types';
+import { compareStrings } from 'lib/utils/compare-strings';
 
 // Who serves each remote of one pool, keyed by specifier; pure, `pool-shared-externals.ts` turns it into
 // verdicts. See docs/version-resolver.md §"How pooling resolves".
@@ -177,7 +178,7 @@ export function electVariants(input: ElectionInput): Election {
 
   const byArrival = (a: RemoteName, b: RemoteName) =>
     (arrival.get(a) ?? Number.MAX_SAFE_INTEGER) - (arrival.get(b) ?? Number.MAX_SAFE_INTEGER) ||
-    a.localeCompare(b);
+    compareStrings(a, b);
   const remotes = [...own.keys()].sort(byArrival);
 
   type Candidate = { variant: Variant; served: RemoteName[] };
