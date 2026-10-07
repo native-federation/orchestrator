@@ -263,8 +263,8 @@ export function createGenerateImportMap(
    * Where a build serves a specifier from, per remote — built only when some copy carries a `servedBy`,
    * so an unpooled portfolio allocates nothing. Pool-wide rather than per-external on purpose: the
    * specifier a subpool member runs may be an *entry* of a different external of the serving build,
-   * which is the whole reason coverage is keyed by specifier (see docs/version-resolver.md §"The
-   * provenance promise").
+   * which is the whole reason coverage is keyed by specifier (see docs/version-resolver.md §"How pooling
+   * resolves", "Coverage is keyed by specifier").
    */
   type ServedSource = { file: string; bundle?: string; meta: SharedVersionMeta };
 
@@ -296,7 +296,7 @@ export function createGenerateImportMap(
   }
 
   // A cross-build scope entry, held back until every global mapping is in place so that a scope which
-  // would merely repeat `imports` can be dropped (Performance §9).
+  // would merely repeat `imports` can be dropped.
   type ServedScope = { scope: string; specifier: string; source: ServedSource; from: RemoteName };
 
   function collectServed(

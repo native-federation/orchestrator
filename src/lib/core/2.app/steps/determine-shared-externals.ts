@@ -5,12 +5,17 @@ import {
   type SharedExternal,
   type SharedVersion,
 } from 'lib/core/1.domain';
-import { countUncoveredEntrypoints, versionEntries } from 'lib/core/1.domain/externals/basis';
+import {
+  type AcceptsTag,
+  acceptsTag as createAcceptsTag,
+  countUncoveredEntrypoints,
+  versionEntries,
+} from 'lib/core/1.domain/externals/basis';
 import { NFError } from 'lib/core/native-federation.error';
 import type { DrivingContract } from '../driving-ports/driving.contract';
 import type { LoggingConfig } from '../config/log.contract';
 import type { ModeConfig } from '../config/mode.contract';
-import { createApplyWinner, type IsCompatible, versionAcceptance } from './apply-winner';
+import { createApplyWinner, memoizeCompatibility, versionAcceptance } from './apply-winner';
 
 export function createDetermineSharedExternals(
   config: LoggingConfig & ModeConfig,
@@ -40,19 +45,11 @@ export function createDetermineSharedExternals(
    * @returns the externals it re-elected or left to pooling, per scope — pooling's signal for what changed.
    */
   return pooled => {
-    // The selection loop asks this O(versions² × demands) times but has only
-    // (candidate tag × distinct requiredVersion) distinct questions to ask. Scoped to one resolve,
-    // so the map needs no bound.
-    const memo = new Map<string, boolean>();
-    const isCompatible: IsCompatible = (tag, requiredVersion) => {
-      const key = `${tag}|${requiredVersion}`;
-      let hit = memo.get(key);
-      if (hit === undefined) {
-        hit = ports.versionCheck.isCompatible(tag, requiredVersion);
-        memo.set(key, hit);
-      }
-      return hit;
-    };
+    // The selection loop asks this O(versions² × demands) times.
+    const acceptsTag = createAcceptsTag(
+      memoizeCompatibility(ports.versionCheck.isCompatible),
+      ports.versionCheck.compare
+    );
 
     const touched = new Map<string, Set<ExternalName>>();
 
@@ -71,7 +68,7 @@ export function createDetermineSharedExternals(
             if (leftToPooling?.has(name)) return;
             ports.sharedExternalsRepo.addOrUpdate(
               name,
-              setVersionActions(name, external, isCompatible),
+              setVersionActions(name, external, acceptsTag),
               shareScope
             );
           });
@@ -118,13 +115,13 @@ export function createDetermineSharedExternals(
   function setVersionActions(
     externalName: string,
     external: SharedExternal,
-    isCompatible: IsCompatible
+    acceptsTag: AcceptsTag
   ) {
     if (external.versions.length === 1) {
-      return applyWinner(externalName, external, external.versions[0]!, isCompatible);
+      return applyWinner(externalName, external, external.versions[0]!, acceptsTag);
     }
 
-    const acceptance = versionAcceptance(external, isCompatible);
+    const acceptance = versionAcceptance(external, acceptsTag);
     const { accepts } = acceptance;
 
     let sharedVersion = external.versions.find(v => v.host);
@@ -161,13 +158,14 @@ export function createDetermineSharedExternals(
       const costOf = (version: SharedVersion, tag: string) =>
         selfServing
           .get(version)!
-          .reduce((n, g) => (isCompatible(tag, g.requiredVersion) ? n : n + g.copies), 0);
+          .reduce(
+            (n, g) => (acceptsTag(tag, version.tag, g.requiredVersion) ? n : n + g.copies),
+            0
+          );
 
       external.versions.forEach(vA => {
         const extraDownloads = external.versions.reduce(
-          // A copy of the winner is never redirected, so it never self-serves however its own range
-          // reads — see `applyWinner`, which does not split the winner either.
-          (sum, vB) => (vB === vA ? sum : sum + costOf(vB, vA.tag)),
+          (sum, vB) => sum + costOf(vB, vA.tag),
           0
         );
         // Tiebreak equal-download candidates toward the one that leaves fewest entrypoints
@@ -193,6 +191,6 @@ export function createDetermineSharedExternals(
     }
 
     // Determine action of other versions based on chosen sharedVersion
-    return applyWinner(externalName, external, sharedVersion, isCompatible, acceptance);
+    return applyWinner(externalName, external, sharedVersion, acceptsTag, acceptance);
   }
 }

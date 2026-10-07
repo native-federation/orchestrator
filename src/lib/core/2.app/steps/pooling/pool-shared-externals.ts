@@ -12,6 +12,7 @@ import { NFError } from 'lib/core/native-federation.error';
 import type { DrivingContract } from '../../driving-ports/driving.contract';
 import type { LoggingConfig } from '../../config/log.contract';
 import type { ModeConfig } from '../../config/mode.contract';
+import { acceptsTag } from 'lib/core/1.domain/externals/basis';
 import { arrivalOrder, hostRemotes } from './pool-views';
 import { electVariants, type Election } from './election';
 import { buildPools } from './pool-graph';
@@ -66,7 +67,7 @@ export function createPoolSharedExternals(
     const hosts = hostRemotes(members);
     const election = electVariants({
       members,
-      isCompatible: memoized(ports.versionCheck.isCompatible),
+      acceptsTag: acceptsTag(ports.versionCheck.isCompatible, ports.versionCheck.compare),
       hosts,
       arrival: arrivalOrder(members),
       compare: ports.versionCheck.compare,
@@ -206,16 +207,6 @@ export function createPoolSharedExternals(
 
     return { dirty: false, poolName, versions };
   }
-}
-
-function memoized(isCompatible: (tag: VersionName, range: string) => boolean) {
-  const memo = new Map<string, boolean>();
-  return (tag: VersionName, range: string) => {
-    const key = `${tag}|${range}`;
-    let hit = memo.get(key);
-    if (hit === undefined) memo.set(key, (hit = isCompatible(tag, range)));
-    return hit;
-  };
 }
 
 // The round-1 winner of the last election, as the stored record shows it: the basis of the most `share` rows.

@@ -3,6 +3,8 @@ import { mockVersionRemote } from 'lib/testing/domain/externals/version.mock';
 import { acceptanceTable, acceptsAll, covers } from './subpool-fit';
 import { committedView, consumedMembers, consumedSpecifiers } from './pool-views';
 import type { PoolMember } from './pool.types';
+import { acceptsTag } from 'lib/core/1.domain/externals/basis';
+import { createVersionCheck } from 'lib/core/3.adapters/checks/version.check';
 
 /**
  * The checks a remote loaded at runtime is held to before it may take a committed build — coverage and
@@ -51,8 +53,11 @@ const disjointProviders = (): PoolMember[] => [
   ]),
 ];
 
-const isCompatible = (tag: string, range: string) =>
-  range === '^22.0.0' ? tag.startsWith('22.') : tag === range.replace('^', '');
+const accepts = acceptsTag(
+  (tag: string, range: string) =>
+    range === '^22.0.0' ? tag.startsWith('22.') : tag === range.replace('^', ''),
+  createVersionCheck().compare
+);
 
 describe('coverage is what fails on the defect portfolios', () => {
   it('gives the consumer of two disjoint providers no covering build but itself', () => {
@@ -107,7 +112,7 @@ describe('coverage is what fails on the defect portfolios', () => {
 
 describe('acceptance', () => {
   it('records every tag a remote’s own range accepts, per member', () => {
-    const table = acceptanceTable(disjointProviders(), isCompatible);
+    const table = acceptanceTable(disjointProviders(), accepts);
 
     expect([...table.get('mfe3')!.get('@ng/router')!]).toEqual(['22.1.0', '22.0.5']);
     // mfe2 pinned ^22.1.0, so 22.0.5 is not acceptable to it.
@@ -116,7 +121,7 @@ describe('acceptance', () => {
 
   it('refuses a build that offers a member at a tag the consumer’s range rejects', () => {
     const members = disjointProviders();
-    const table = acceptanceTable(members, isCompatible);
+    const table = acceptanceTable(members, accepts);
     const builds = committedView(members).builds;
     const consumed = consumedMembers(members);
 
@@ -130,7 +135,7 @@ describe('acceptance', () => {
 
   it('refuses a build that does not offer a consumed member at all', () => {
     const members = disjointProviders();
-    const table = acceptanceTable(members, isCompatible);
+    const table = acceptanceTable(members, accepts);
 
     expect(
       acceptsAll(table, committedView(members).builds.get('mfe1')!.instance, 'mfe3', [
@@ -143,7 +148,7 @@ describe('acceptance', () => {
   // A remote absent from the table declared nothing in this pool, so it accepts nothing from it.
   it('refuses a consumer it holds no ranges for', () => {
     const members = disjointProviders();
-    const table = acceptanceTable(members, isCompatible);
+    const table = acceptanceTable(members, accepts);
 
     expect(
       acceptsAll(table, committedView(members).builds.get('mfe1')!.instance, 'stranger', [

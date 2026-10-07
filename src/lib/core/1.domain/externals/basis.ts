@@ -45,6 +45,18 @@ export function versionDemands(version: SharedVersion): SharedVersionMeta[] {
   return Array.from(distinct.values());
 }
 
+export type AcceptsTag = (offered: string, ownTag: string, requiredVersion: string) => boolean;
+
+// A copy runs the build it ships whatever its range says, so a range that excludes its own version (one
+// drifted from the lockfile) never rejects that version. Semver-equal, not string-equal: `v1.0.0` is `1.0.0`.
+export function acceptsTag(
+  isCompatible: (tag: string, requiredVersion: string) => boolean,
+  compare: (a: string, b: string) => number
+): AcceptsTag {
+  return (offered, ownTag, requiredVersion) =>
+    isCompatible(offered, requiredVersion) || offered === ownTag || compare(offered, ownTag) === 0;
+}
+
 // Coverage enforcement can leave a `scope` version beside a shareable one at the same tag.
 export function findVersionForTag(
   versions: SharedVersion[],
@@ -88,9 +100,9 @@ export function committedEntries(version: SharedVersion): Map<string, SharedVers
  * ask which build a consumer lands on, per specifier — reads the `servedBy` rule from here instead of
  * restating it. It deliberately does not dedup: the callers do, and this way the walk allocates nothing.
  *
- * `accepts` is for a caller with a further reason to discount a copy (pooling islands one, so it
- * self-serves). Filtering the *result* is not the same thing — that drops the specifier instead of letting
- * the next copy claim it.
+ * `accepts` is for a caller with a further reason to discount a copy (`committedEntries`: one the committed
+ * map does not publish). Filtering the *result* is not the same thing — that drops the specifier instead of
+ * letting the next copy claim it.
  */
 export function forEachVersionEntry(
   version: SharedVersion,

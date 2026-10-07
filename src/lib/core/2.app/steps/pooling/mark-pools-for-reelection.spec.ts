@@ -93,7 +93,7 @@ describe('createMarkPoolsForReelection', () => {
   });
 
   it('does not even read a clean scope versions — no pool graph on a warm init', async () => {
-    // Performance §8, and it was measured: building the graph and then discovering nothing was dirty
+    // Measured: building the graph and then discovering nothing was dirty
     // was the entire pooling cost of a warm init. `buildPools` has to walk every external's versions to
     // find its remotes and tags, so counting reads of `versions` is exactly "was the graph built".
     let reads = 0;

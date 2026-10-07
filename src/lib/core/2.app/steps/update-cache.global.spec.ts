@@ -1,3 +1,4 @@
+import { createVersionCheck } from 'lib/core/3.adapters/checks/version.check';
 import { DrivingContract } from '../driving-ports/driving.contract';
 import { LoggingConfig } from '../config/log.contract';
 import { Optional } from 'lib/utils/optional';
@@ -167,6 +168,8 @@ describe('createProcessDynamicRemoteEntry - scoped', () => {
 
   it('should add and scope shared external to list with incompatible version and strictVersion', async () => {
     adapters.versionCheck.isCompatible = vi.fn(() => false);
+    // Tags differ, so the range decides: a copy only accepts its own version regardless of range.
+    adapters.versionCheck.compare = vi.fn(createVersionCheck().compare);
     config.strict.strictExternalCompatibility = false;
     adapters.sharedExternalsRepo.tryGet = vi.fn(
       (): Optional<SharedExternal> =>
@@ -212,6 +215,8 @@ describe('createProcessDynamicRemoteEntry - scoped', () => {
 
   it('should throw an error when shared external with incompatible version and strictVersion and strict', async () => {
     adapters.versionCheck.isCompatible = vi.fn(() => false);
+    // Tags differ, so the range decides: a copy only accepts its own version regardless of range.
+    adapters.versionCheck.compare = vi.fn(createVersionCheck().compare);
     config.strict.strictExternalCompatibility = true;
     adapters.sharedExternalsRepo.tryGet = vi.fn(
       (): Optional<SharedExternal> =>

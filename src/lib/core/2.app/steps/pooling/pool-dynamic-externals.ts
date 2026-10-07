@@ -24,6 +24,7 @@ import { lazy, syncPoolNames } from './pool.util';
 import { acceptanceTable, acceptsAll, covers, type Acceptance } from './subpool-fit';
 import type { CommittedView, PoolMember, Specifier } from './pool.types';
 import * as _path from 'lib/utils/path';
+import { type AcceptsTag, acceptsTag } from 'lib/core/1.domain/externals/basis';
 
 // What the gate decided for the loaded remote's copy of one member, as the record must keep it.
 type Verdict = { cause: PoolCause } | { servedBy: RemoteName };
@@ -44,6 +45,9 @@ export function createPoolDynamicExternals(
   config: LoggingConfig & ModeConfig,
   ports: Pick<DrivingContract, 'sharedExternalsRepo' | 'remoteInfoRepo' | 'versionCheck'>
 ): ForPoolingDynamicExternals {
+  const accepts: AcceptsTag = (offered, ownTag, range) =>
+    acceptsTag(ports.versionCheck.isCompatible, ports.versionCheck.compare)(offered, ownTag, range);
+
   // The committed map is immutable, so this only rewrites the loaded remote's own actions and copies, never
   // another remote's. See docs/version-resolver.md §"Scope and dynamic init".
   return ({ entry, actions }) => {
@@ -129,7 +133,7 @@ export function createPoolDynamicExternals(
       view: committedView(withoutRemote(pool, remote)),
       wants: consumedMembers(pool).get(remote) ?? [],
       specifiers: consumedSpecifiers(pool).get(remote) ?? new Set<Specifier>(),
-      acceptance: lazy(() => acceptanceTable(pool, ports.versionCheck.isCompatible)),
+      acceptance: lazy(() => acceptanceTable(pool, accepts)),
     };
   }
 
@@ -180,7 +184,7 @@ export function createPoolDynamicExternals(
           for (const s in meta.entries) {
             const global = view.global.get(s);
             if (global === undefined) missing ??= s;
-            else if (!ports.versionCheck.isCompatible(global.tag, meta.requiredVersion))
+            else if (!accepts(global.tag, version.tag, meta.requiredVersion))
               rejected ??= `${s}@${global.tag}`;
             const tag = globalTags.tagOf(s);
             if (tag !== undefined && tag !== version.tag) agrees = false;

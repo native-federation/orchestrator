@@ -104,7 +104,7 @@ export const remote = (name: string, scopeUrl: string, shared: DenseSharedInfo[]
       if (!declared.has(peer))
         throw new Error(
           `${name} declares no '${peer}', so '${entry.packageName}' cannot import it as a peer. ` +
-            `See docs/version-resolver.md §"The provenance promise", the "Done when" bullet on peer edges.`
+            `See docs/version-resolver.md §"How pooling resolves".`
         );
 
   return {

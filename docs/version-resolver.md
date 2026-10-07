@@ -556,8 +556,15 @@ So a version that fails G2 is **split**: the rejecting copies become a `scope` v
 rest stay `skip` and dedup. A tag can therefore hold two versions in the record, one `skip` and one
 `scope` — at most one of each, and both sorted where that tag belongs. Three consequences worth knowing:
 
-- **The winner is never split.** Its copies are never really asked to accept its own tag, and host
-  precedence makes the host's version the winner, so a host copy never lands in a `scope` version.
+- **A copy always accepts its own version.** A copy runs the build it ships whatever its range says, so a
+  range that excludes its own version (one drifted from the lockfile, `~19.1.0` shipping 19.2.15) never
+  rejects it — in determine, in pooling and on the dynamic path alike. Versions compare by semver, so
+  `v19.2.15` is `19.2.15`. The drift is logged as a warning when the remote is stored.
+- **Prereleases follow semver.** A range admits a prerelease only on its own `major.minor.patch`
+  (`^20.0.0-rc.1` takes `20.0.0-rc.2`; `>=19.2.0` takes no `20.0.0-rc.x`), so a remote on a release range is
+  incompatible with a prerelease build, and pooling islands it — unless that prerelease is its own version.
+- **The winner is never split.** Its copies all accept its tag, as above, and host precedence makes the
+  host's version the winner, so a host copy never lands in a `scope` version.
 - **A copy declaring `strictVersion: false` dedups** even where its own range rejects the shared version —
   that is what the flag asks for — rather than being carried into a strict sibling's `scope`.
 - **The objective prices the split**, not the version: see
@@ -731,7 +738,9 @@ islands; the host never gives way.
 
 **Strict compatibility.** Under [`strict.strictExternalCompatibility`](./config.md#modeConfig) init throws when
 a `strictVersion` range rejects a tag of the elected build — the same incompatibility the per-external resolver
-refuses. A remote that misses round 1 only for **coverage** never throws: nothing about its versions is wrong,
+refuses. A tag the copy ships itself is never a rejection
+([A verdict belongs to the copy](#a-verdict-belongs-to-the-copy-not-the-version)). A remote that misses round 1
+only for **coverage** never throws: nothing about its versions is wrong,
 so a gap in what other builds ship must not fail a strict portfolio.
 
 **Coverage is keyed by specifier.** `generate-import-map` fills an entrypoint the shared version lacks from the
@@ -989,7 +998,7 @@ Each new dependency gets one of these actions during dynamic init:
 | --------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **SKIP**  | Version already exists or use existing shared version. In a shareScope context this action is used for overriding by skipping the provided external and loading a compatible cached version instead. |
 | **SHARE** | No compatible version exists (yet), become the shared version for this scope                                                                                                                         |
-| **SCOPE** | A copy whose own range rejects the shared version while `strictVersion: true`, or (under `scopeUncoveredEntrypoints`) one **on another tag** whose entrypoints the shared winner cannot cover — served coherently from its own build. Per copy, not per version: co-tagged copies that accept the shared version keep deduping, and a copy of the shared tag merges its extra entrypoints in, serving them from its own build. |
+| **SCOPE** | A copy whose own range rejects the shared version while `strictVersion: true` (never when the shared version is the copy's own), or (under `scopeUncoveredEntrypoints`) one **on another tag** whose entrypoints the shared winner cannot cover — served coherently from its own build. Per copy, not per version: co-tagged copies that accept the shared version keep deduping, and a copy of the shared tag merges its extra entrypoints in, serving them from its own build. |
 
 ### Example: Dynamic Loading Scenario
 

@@ -1,4 +1,5 @@
 import type { ExternalName, RemoteName, VersionName } from 'lib/core/1.domain';
+import type { AcceptsTag } from 'lib/core/1.domain/externals/basis';
 import { owningPackage, SpecifierTags } from './pool-graph';
 import type { PoolMember, Specifier } from './pool.types';
 
@@ -25,7 +26,7 @@ type Variant = {
 
 export type ElectionInput = {
   members: PoolMember[];
-  isCompatible: (tag: VersionName, range: string) => boolean;
+  acceptsTag: AcceptsTag;
   hosts: ReadonlySet<RemoteName>;
   arrival: ReadonlyMap<RemoteName, number>;
   compare: (a: VersionName, b: VersionName) => number;
@@ -68,7 +69,7 @@ export type Election = {
 };
 
 export function electVariants(input: ElectionInput): Election {
-  const { members, isCompatible, hosts, arrival, compare } = input;
+  const { members, acceptsTag, hosts, arrival, compare } = input;
 
   const own = new Map<RemoteName, Copy[]>();
   for (const member of members)
@@ -142,7 +143,7 @@ export function electVariants(input: ElectionInput): Election {
     own.get(remote)!.every(copy =>
       copy.specifiers.every(s => {
         const tag = variant.tags.get(s);
-        return tag !== undefined && isCompatible(tag, copy.requiredVersion);
+        return tag !== undefined && acceptsTag(tag, copy.tag, copy.requiredVersion);
       })
     );
 
@@ -181,14 +182,17 @@ export function electVariants(input: ElectionInput): Election {
 
   type Candidate = { variant: Variant; served: RemoteName[] };
   // Highest first on every key, then the newer build; the input is in arrival order and the sort is stable.
-  const rank = (candidates: Candidate[], keys: ((c: Candidate) => number)[]) =>
-    [...candidates].sort((a, b) => {
-      for (const key of keys) {
-        const d = key(b) - key(a);
+  const rank = (candidates: Candidate[], keys: ((c: Candidate) => number)[]) => {
+    const scored = candidates.map(c => ({ c, k: keys.map(key => key(c)) }));
+    scored.sort((a, b) => {
+      for (let i = 0; i < keys.length; i++) {
+        const d = b.k[i]! - a.k[i]!;
         if (d !== 0) return d;
       }
-      return newer(b.variant, a.variant);
-    })[0];
+      return newer(b.c.variant, a.c.variant);
+    });
+    return scored[0]?.c;
+  };
 
   const coverage = new SpecifierTags();
   const election: Election = {
@@ -203,7 +207,7 @@ export function electVariants(input: ElectionInput): Election {
       for (const copy of own.get(remote) ?? [])
         for (const s of copy.specifiers) {
           const tag = coverage.get(s);
-          if (tag === undefined || isCompatible(tag, copy.requiredVersion)) continue;
+          if (tag === undefined || acceptsTag(tag, copy.tag, copy.requiredVersion)) continue;
           if (copy.strict) return { rejected: { member: copy.member, tag, strict: true } };
           rejected ??= { member: copy.member, tag, strict: false };
         }
@@ -228,8 +232,10 @@ export function electVariants(input: ElectionInput): Election {
   const newerThan = (c: Candidate) => round1.filter(o => newer(c.variant, o.variant) > 0).length;
   // Remotes that agree without being served still take this build's files (rule 5): when no build serves
   // more than itself, that is what separates a build its peers share from an outlier.
-  const agreeing = (c: Candidate) =>
-    remotes.filter(r => !c.served.includes(r) && agrees(r, c.variant.tags)).length;
+  const agreeing = (c: Candidate) => {
+    const served = new Set(c.served);
+    return remotes.filter(r => !served.has(r) && agrees(r, c.variant.tags)).length;
+  };
   const first = rank(round1, [
     ...(input.latestFirst ? [newerThan] : []),
     c => c.served.length,

@@ -8,6 +8,7 @@ import {
   GLOBAL_SCOPE,
 } from 'lib/core/1.domain';
 import {
+  acceptsTag,
   addRemoteToVersion,
   committedEntries,
   uncoveredEntrypoints,
@@ -93,7 +94,12 @@ export function createUpdateCache(
 
     const sharedVersion = cached.versions.find(c => c.action === 'share');
     const isCompatible =
-      !sharedVersion || ports.versionCheck.isCompatible(sharedVersion.tag, remote.requiredVersion);
+      !sharedVersion ||
+      acceptsTag(ports.versionCheck.isCompatible, ports.versionCheck.compare)(
+        sharedVersion.tag,
+        tag,
+        remote.requiredVersion
+      );
 
     if (action === 'skip' && !isCompatible && remote.strictVersion) {
       action = 'scope';

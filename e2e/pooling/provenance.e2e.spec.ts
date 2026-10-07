@@ -3,7 +3,7 @@ import { dep, remote, SCOPE, HOST_NAME } from '../harness/portfolio';
 import type { RemoteEntry } from 'lib/core/1.domain';
 
 /**
- * **The provenance promise, as it now holds.** `docs/version-resolver.md` §"The provenance promise".
+ * **The provenance promise, as it now holds.** `docs/version-resolver.md` §"How pooling resolves".
  *
  * Six portfolios in which a remote was served a coupled family assembled from builds that never shipped
  * it together — not islanded, nothing logged — plus two shapes that generalize them: the second hop (a
@@ -337,7 +337,7 @@ test.describe('provenance: the cases no tag comparison can reach', () => {
  * passed green. `dep(..., { peers })` gives an external real imports, and `nf.bindings()` reports what
  * they bound to. Measured independently with handcrafted import maps in Chromium: a scope entry pointing
  * at another origin's build does beat the global `imports` for importers under that prefix, so the fix is
- * the subpool build's self-scope of `docs/version-resolver.md` §"The provenance promise" and not a change to
+ * the subpool build's self-scope of `docs/version-resolver.md` §"How pooling resolves" and not a change to
  * `ImportMap`.
  */
 test.describe('provenance: the second hop', () => {

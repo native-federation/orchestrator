@@ -1,5 +1,6 @@
 import type { SharedExternal, SharedVersion, SharedVersionMeta } from 'lib/core/1.domain';
 import {
+  type AcceptsTag,
   uncoveredEntrypoints,
   versionDemands,
   versionEntries,
@@ -9,6 +10,18 @@ import type { LoggingConfig } from '../config/log.contract';
 import type { ModeConfig } from '../config/mode.contract';
 
 export type IsCompatible = (tag: string, requiredVersion: string) => boolean;
+
+// An election asks far more questions than it has distinct (tag, range) pairs. Scope it to one election, so
+// the cache needs no bound.
+export function memoizeCompatibility(isCompatible: IsCompatible): IsCompatible {
+  const memo = new Map<string, boolean>();
+  return (tag, requiredVersion) => {
+    const key = `${tag}|${requiredVersion}`;
+    let hit = memo.get(key);
+    if (hit === undefined) memo.set(key, (hit = isCompatible(tag, requiredVersion)));
+    return hit;
+  };
+}
 
 export type VersionAcceptance = {
   // A version can only be redirected to `tag` if none of its remotes rejects that tag.
@@ -23,7 +36,7 @@ export type VersionAcceptance = {
 // Computed once per external, since the selection loop is O(versions²).
 export function versionAcceptance(
   external: SharedExternal,
-  isCompatible: IsCompatible
+  acceptsTag: AcceptsTag
 ): VersionAcceptance {
   const demands = new Map<SharedVersion, SharedVersionMeta[]>(
     external.versions.map(v => [v, versionDemands(v)])
@@ -31,16 +44,18 @@ export function versionAcceptance(
 
   return {
     accepts: (version, tag) =>
-      demands.get(version)!.every(d => isCompatible(tag, d.requiredVersion)),
+      demands.get(version)!.every(d => acceptsTag(tag, version.tag, d.requiredVersion)),
     objector: (version, tag) =>
-      demands.get(version)!.find(d => d.strictVersion && !isCompatible(tag, d.requiredVersion)),
+      demands
+        .get(version)!
+        .find(d => d.strictVersion && !acceptsTag(tag, version.tag, d.requiredVersion)),
   };
 }
 
 /**
  * The tail of winner election: derive every other version's verdict from the chosen one, apply the
  * entrypoint coverage policy, clear `dirty`. `determine` is the only caller, and passes its memoized
- * `isCompatible` plus the `acceptance` it already built for the election.
+ * `acceptsTag` plus the `acceptance` it already built for the election.
  *
  * A hazard for anyone who ever adds a second caller that re-points a winner: `findTears` keys off the
  * winner's merged entries, so moving the winner moves the surface coverage is measured against.
@@ -50,13 +65,12 @@ export function createApplyWinner(config: LoggingConfig & ModeConfig) {
     externalName: string,
     external: SharedExternal,
     winner: SharedVersion,
-    isCompatible: IsCompatible,
+    acceptsTag: AcceptsTag,
     acceptance?: VersionAcceptance
   ): SharedExternal {
-    // A lone version has nothing to redirect, so it is never asked a compatibility question — which
-    // is also why it is never strict-checked against its own tag.
+    // Every copy accepts its own tag, so a lone version, like the winner, is never redirected or split.
     if (external.versions.length > 1) {
-      const { accepts, objector } = acceptance ?? versionAcceptance(external, isCompatible);
+      const { accepts, objector } = acceptance ?? versionAcceptance(external, acceptsTag);
 
       const rebuilt: SharedVersion[] = [];
 
@@ -79,11 +93,6 @@ export function createApplyWinner(config: LoggingConfig & ModeConfig) {
           throw new NFError(`External ${externalName}@${v.tag} could not be shared.`);
         }
 
-        // The winner is never redirected, so its copies are never really asked to accept its own tag;
-        // its verdict is `winner.action` below. Splitting it would scope copies that dedup today. Covers
-        // the host row too, which host precedence always makes the winner.
-        if (v === winner) continue;
-
         if (!strict) {
           v.action = 'skip';
           continue;
@@ -92,7 +101,9 @@ export function createApplyWinner(config: LoggingConfig & ModeConfig) {
         // `accepts` aggregates over the whole version because one version is one file served from one
         // basis — but only the copies that themselves reject the winner have to keep their own build.
         const objecting = new Set(
-          v.remotes.filter(r => r.strictVersion && !isCompatible(winner.tag, r.requiredVersion))
+          v.remotes.filter(
+            r => r.strictVersion && !acceptsTag(winner.tag, v.tag, r.requiredVersion)
+          )
         );
 
         if (objecting.size === v.remotes.length) {

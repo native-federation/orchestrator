@@ -710,9 +710,13 @@ describe('createPoolDynamicExternals', () => {
 
     it('moves an islanded remote out of the shared version into a scope version', async () => {
       const entry = entryWith(shared('@framework/core'), shared('@framework/common'));
-      const common = committed('@framework/common', { tag: '17.0.0', remotes: ['host', 'mfe'] });
-      // The resolver scopes a copy only for a reason: here mfe's strict common range rejects the shared 17.
-      common.versions[0]!.remotes[1]!.requiredVersion = '^18.0.0';
+      // The resolver scopes a copy only for a reason: here mfe ships common 18, whose range rejects the
+      // shared 17. (A range rejecting its own tag would be no reason: a copy always accepts what it ships.)
+      const common = committed(
+        '@framework/common',
+        { tag: '18.0.0', remotes: ['mfe'], action: 'scope' },
+        { tag: '17.0.0', remotes: ['host'], action: 'share' }
+      );
       givenCommitted({
         '@framework/core': committed('@framework/core', {
           tag: '17.0.0',
@@ -730,13 +734,16 @@ describe('createPoolDynamicExternals', () => {
       });
 
       // Both members, the matching one included: the island is the whole family.
-      for (const name of ['@framework/core', '@framework/common']) {
-        expect(copies(writtenFor(name))).toEqual([
-          ['17.0.0:share', [{ name: 'host' }]],
-          ['17.0.0:scope', [{ name: 'mfe', poolCause: 'incompatible' }]],
-        ]);
+      expect(copies(writtenFor('@framework/core'))).toEqual([
+        ['17.0.0:share', [{ name: 'host' }]],
+        ['17.0.0:scope', [{ name: 'mfe', poolCause: 'incompatible' }]],
+      ]);
+      expect(copies(writtenFor('@framework/common'))).toEqual([
+        ['18.0.0:scope', [{ name: 'mfe', poolCause: 'incompatible' }]],
+        ['17.0.0:share', [{ name: 'host' }]],
+      ]);
+      for (const name of ['@framework/core', '@framework/common'])
         expect(writtenFor(name)!.poolName).toBe('framework');
-      }
       expect(config.log.warn).toHaveBeenCalledWith(
         8,
         expect.stringContaining("'mfe' is islanded: its range rejects '@framework/common@17.0.0'")
