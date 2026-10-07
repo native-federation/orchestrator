@@ -1,31 +1,40 @@
 import type { RemoteEntry, RemoteInfo } from 'lib/core/1.domain';
 import { Optional } from 'lib/utils/optional';
-import { createUpdateCache } from 'lib/core/2.app/steps/update-cache';
-import { createPoolDynamicExternals } from './pool-dynamic-externals';
 import { mockSharedInfo } from 'lib/testing/domain/remote-entry/shared-info.mock';
 import { portfolio } from 'lib/testing/pooling/portfolio';
 import { tagSharedInfoByNpmScope, tagStoredByNpmScope } from 'lib/testing/pooling/tag-by-npm-scope';
 
 /**
  * The ONE place pooling's warn wording is pinned, word for word: every init sentence (`missWarning` with
- * each of its endings, and the keeps-subpool line in `pool-shared-externals.ts`) and every dynamic one
- * (`selfServeWarning` and the cache miss in `pool-dynamic-externals.ts`). These sentences are for humans.
- * Every other test, unit or e2e, reads islands from the stored record (`poolCause` / `servedBy`), never
- * from this text (plan D4).
+ * each of its endings and its witness-miss form, and the keeps-subpool line in `pool-shared-externals.ts`)
+ * and every dynamic one (`selfServeWarning` and the cache miss in `pool-dynamic-externals.ts`). These
+ * sentences are for humans. Every other test, unit or e2e, reads islands from the stored record
+ * (`poolCause` / `servedBy`), never from this text.
  *
  * The record stores no gap, so this spec is also the ONLY guard for gap selection: which `member@tag` or
  * specifier a warning names, and which build it calls elected or closest. A change to how pooling picks
  * the gap must update the expectations here deliberately.
  *
- * A failure here means the wording or the gap changed. If that was deliberate, update the expectation below and
- * nothing else; if a second test starts failing with it, that test is parsing the log and should read
- * the record instead.
+ * A failure here means the wording or the gap changed. If that was deliberate, update the expectation
+ * below and nothing else; if a second test starts failing with it, that test is parsing the log and should
+ * read the record instead.
  */
 describe('island warnings (contract)', () => {
   const SCOPE = Object.fromEntries(
-    ['host', 'mfe-a', 'mfe-b', 'mfe-c', 'mfe-d', 'mfe-e', 'mfe-f', 'legacy-a', 'legacy-b'].map(
-      n => [`team/${n}`, `http://${n}/`]
-    )
+    [
+      'host',
+      'mfe-a',
+      'mfe-b',
+      'mfe-c',
+      'mfe-d',
+      'mfe-e',
+      'mfe-f',
+      'legacy-a',
+      'legacy-b',
+      'r0',
+      'r1',
+      'r2',
+    ].map(n => [`team/${n}`, `http://${n}/`])
   );
 
   let p: ReturnType<typeof portfolio>;
@@ -182,6 +191,28 @@ describe('island warnings (contract)', () => {
       expect(warnings()).toEqual([
         "[__GLOBAL__][pool:framework] 'team/mfe-e' keeps subpool 'team/mfe-e': the elected build would serve it, but 1 other remote(s) in it need its build.",
         "[__GLOBAL__][pool:framework] 'team/mfe-f' is islanded: its range rejects '@framework/core@17.0.0' of the elected build 'team/mfe-a'. It runs in subpool 'team/mfe-e': all 2 members it imports come from that build.",
+      ]);
+    });
+
+    it('witness miss: no build shipped the pair the extended coverage would serve', async () => {
+      // pooling.regression.spec.ts, "extension witness", first case. r0 accepts every tag the map
+      // publishes, so the sentence names the unwitnessed pair rather than a version it rejects.
+      const caret = (tag: string, external: string, remote: string) =>
+        p.version(tag, external, [{ remote, req: `^${tag}`, strict: false }]);
+      p.seed('@lib/m0', [
+        caret('18.0.0', '@lib/m0', 'team/r0'),
+        caret('18.0.1', '@lib/m0', 'team/r1'),
+      ]);
+      p.seed('@lib/m1', [
+        caret('18.0.0', '@lib/m1', 'team/r0'),
+        caret('18.0.1', '@lib/m1', 'team/r2'),
+      ]);
+
+      await p.runInit();
+
+      expect(p.islands()).toEqual({ 'team/r0': 'uncovered' });
+      expect(warnings()).toEqual([
+        "[__GLOBAL__][pool:lib] 'team/r0' serves its own family: no build shipped '@lib/m0@18.0.1' together with '@lib/m1@18.0.1' — '@lib/m1' is the gap, closest is 'team/r1'. All 2 members it imports are scoped for it.",
       ]);
     });
   });
@@ -386,10 +417,7 @@ describe('island warnings (contract)', () => {
       );
 
       // Driven step by step: `runDynamic` first regenerates the committed map, which needs legacy-a's scope.
-      const updated = await createUpdateCache(
-        p.config,
-        p.adapters
-      )(
+      const updated = await p.drivers.updateCache(
         entry(
           'team/legacy-b',
           [
@@ -399,7 +427,7 @@ describe('island warnings (contract)', () => {
           false
         )
       );
-      await createPoolDynamicExternals(p.config, p.adapters)(updated);
+      await p.drivers.poolDynamicExternals(updated);
 
       expect(p.islands()).toEqual({
         'team/legacy-a': 'incompatible',

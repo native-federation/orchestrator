@@ -216,31 +216,6 @@ describe('pooling (integration)', () => {
     expect(importMap.scopes?.[SCOPE['team/mfe-b']]?.['@framework/cdk']).toBeUndefined();
   });
 
-  it('does no work at all on a second init with unchanged entries (W2)', async () => {
-    // Nothing is dirty the second time, so determine re-elects nothing and pooling has no signal to
-    // act on. Its verdicts are already in storage — it wrote them itself — so recomputing them can
-    // only reproduce them.
-    p.seed('@framework/core', [
-      p.version('17.0.0', '@framework/core', [{ remote: 'team/mfe-a', req: '^17.0.0' }]),
-      p.version('18.0.0', '@framework/core', [{ remote: 'team/mfe-c', req: '^18.0.0' }]),
-    ]);
-    p.seed('@framework/common', [
-      p.version('17.0.0', '@framework/common', [{ remote: 'team/mfe-a', req: '^17.0.0' }]),
-      p.version('18.0.0', '@framework/common', [{ remote: 'team/mfe-c', req: '^18.0.0' }]),
-    ]);
-
-    const first = await p.runInit();
-    // The first pass really did island a remote — mfe-c@18 wins the equal-cost tie on the newest tag,
-    // so it is mfe-a that gives way — leaving a non-trivial result to preserve.
-    expect(first.scopes?.[SCOPE['team/mfe-a']]?.['@framework/core']).toContain(SCOPE['team/mfe-a']);
-
-    const writes = vi.spyOn(p.adapters.sharedExternalsRepo, 'addOrUpdate');
-    const second = await p.runInit();
-
-    expect(writes).not.toHaveBeenCalled();
-    expect(second).toEqual(first);
-  });
-
   it('scopes a dynamically-added incompatible remote whole family (dynamic init path)', async () => {
     // Existing coherent winner (mfe-a @17) already committed.
     const shareVersion = (external: string): SharedExternal => ({

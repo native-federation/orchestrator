@@ -166,11 +166,47 @@ export const portfolio = (
 
   const record = (name: string): SharedExternal => stored()[name]!;
 
+  // With real repositories the remotes are whatever the flows stored, not the constructor's `scopeUrls`.
+  const knownScopeUrls = (): Record<RemoteName, string> =>
+    realRepositories
+      ? Object.fromEntries(
+          Object.entries(adapters.remoteInfoRepo.getAll()).map(([name, info]) => [
+            name,
+            info.scopeUrl,
+          ])
+        )
+      : scopeUrls;
+
   const assertNoTear = (importMap: ImportMap) => {
     if (!checkTear) return;
-    expect(tearsByPool({ importMap, externals: { [scope]: stored() }, scopeUrls, hosts })).toEqual(
-      []
-    );
+    expect(
+      tearsByPool({
+        importMap,
+        externals: { [scope]: stored() },
+        scopeUrls: knownScopeUrls(),
+        hosts,
+      })
+    ).toEqual([]);
+  };
+
+  // A bare specifier the map leaves unmapped fails to import, whatever the oracle says about the rest: every
+  // specifier a pooled copy ships must map, in its remote's scope or in `imports`.
+  const assertResolves = (importMap: ImportMap) => {
+    const unresolved: string[] = [];
+    for (const external of Object.values(stored())) {
+      if (external.poolName === undefined) continue;
+      for (const version of external.versions)
+        for (const meta of version.remotes) {
+          const scopeUrl = adapters.remoteInfoRepo.tryGet(meta.name).get()?.scopeUrl;
+          for (const specifier of Object.keys(meta.entries)) {
+            const own =
+              scopeUrl === undefined ? undefined : importMap.scopes?.[scopeUrl]?.[specifier];
+            if (own === undefined && importMap.imports[specifier] === undefined)
+              unresolved.push(`${meta.name}|${specifier}`);
+          }
+        }
+    }
+    expect(unresolved).toEqual([]);
   };
 
   /**
@@ -190,6 +226,7 @@ export const portfolio = (
     await createInitFlow({ flow: drivers, adapters, config })(manifest);
     const importMap = installed!;
     assertNoTear(importMap);
+    assertResolves(importMap);
     return importMap;
   };
 
@@ -205,6 +242,7 @@ export const portfolio = (
     const importMap: ImportMap = installed;
     const merged = addToImportMap(committed, importMap);
     assertNoTear(merged);
+    assertResolves(merged);
     return { actions, importMap, merged };
   };
 
@@ -265,6 +303,7 @@ export const portfolio = (
     seed,
     stored,
     record,
+    scopeUrls: knownScopeUrls,
     runInit,
     runDynamic,
     islands,

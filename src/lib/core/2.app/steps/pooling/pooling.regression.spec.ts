@@ -1,3 +1,4 @@
+import type { DenseSharedInfo, ImportMap, RemoteEntry, SharedVersion } from 'lib/core/1.domain';
 import { portfolio } from 'lib/testing/pooling/portfolio';
 
 /**
@@ -445,6 +446,436 @@ describe('pooling regressions', () => {
 
       // The pinner is the only remote off the elected build; mfe3 is not.
       expect(p.islands()).toEqual({ 'team/mfe2': 'incompatible' });
+    });
+  });
+
+  /**
+   * Found by the no-tear property (pooling.property.init.spec.ts). Round 1's winner lacked a package, and the
+   * extension published it from another build that agrees with the winner; every remote the extended coverage
+   * then served moved onto the global map. One shipping both packages at an older tag resolved the winner's
+   * `m0@18.0.1` beside the other build's `m1@18.0.1`: a pair no build shipped.
+   *
+   * The extension may still publish the package, but a remote moves onto it only when one build witnesses
+   * the combination it would resolve; otherwise it serves itself, `uncovered`.
+   *
+   * Shrunk from the property suite (POOLING_PROPERTY_SEED=1..3, SCALE=5); every range is the caret of its own
+   * tag unless a case says otherwise, and `@lib/*` shares one npm-scope tag.
+   */
+  describe('extension witness: a remote moves onto the extended coverage only when one build shipped it', () => {
+    const SCOPE = {
+      'team/r0': 'http://r0/',
+      'team/r1': 'http://r1/',
+      'team/r2': 'http://r2/',
+      'team/r3': 'http://r3/',
+      'team/r4': 'http://r4/',
+      'team/r5': 'http://r5/',
+      'team/r6': 'http://r6/',
+    } as const;
+    const M0 = '@lib/m0';
+    const M1 = '@lib/m1';
+
+    let p: ReturnType<typeof portfolio>;
+    beforeEach(() => {
+      p = portfolio(SCOPE, { storage: 'nf-regression-extension-witness' });
+    });
+
+    const version = (
+      tag: string,
+      external: string,
+      remotes: string[],
+      o: { host?: boolean; req?: Record<string, string> } = {}
+    ): SharedVersion => ({
+      ...p.version(
+        tag,
+        external,
+        remotes.map(remote => ({ remote, req: o.req?.[remote] ?? `^${tag}`, strict: false }))
+      ),
+      host: o.host ?? false,
+    });
+
+    const copyOf = (external: string, remote: string) =>
+      p
+        .record(external)
+        .versions.flatMap(v =>
+          v.remotes
+            .filter(r => r.name === remote)
+            .map(r => ({ ...r, action: v.action, tag: v.tag }))
+        )[0]!;
+
+    const ownFiles = (remote: keyof typeof SCOPE) => ({
+      [M0]: `${SCOPE[remote]}@lib/m0.js`,
+      [M1]: `${SCOPE[remote]}@lib/m1.js`,
+    });
+
+    it('keeps a remote off a pair two agreeing builds publish but none shipped together', async () => {
+      // r1 and r2's `^18.0.1` reject r0's 18.0.0, so r0's build serves only itself and no subpool forms; r1
+      // wins round 1 with m0@18.0.1 (r2 agrees with it), and the extension publishes m1@18.0.1 from r2.
+      p.seed(M0, [version('18.0.0', M0, ['team/r0']), version('18.0.1', M0, ['team/r1'])]);
+      p.seed(M1, [version('18.0.0', M1, ['team/r0']), version('18.0.1', M1, ['team/r2'])]);
+
+      // The harness asserts no-tear on this map: r0 used to resolve {m0@18.0.1, m1@18.0.1}, a
+      // combination r1 (m0 only) and r2 (m1 only) each ship half of.
+      const importMap = await p.runInit();
+
+      expect(importMap.imports).toEqual({
+        [M0]: 'http://r1/@lib/m0.js',
+        [M1]: 'http://r2/@lib/m1.js',
+      });
+      // r0 accepts every tag the map publishes, so it serves its own family as `uncovered`.
+      expect(importMap.scopes?.[SCOPE['team/r0']]).toEqual(ownFiles('team/r0'));
+      for (const name of [M0, M1])
+        expect(copyOf(name, 'team/r0')).toMatchObject({ action: 'scope', poolCause: 'uncovered' });
+      expect(p.islands()).toEqual({ 'team/r0': 'uncovered' });
+    });
+
+    // The positive control: an over-strict gate would still pass the case above. r1 is the host so it wins
+    // round 1 although r3 serves everyone; otherwise r3 wins outright and the extension never runs. r3 runs a
+    // subpool over r0 and r2 until the extension publishes m1@18.0.1, after which r3's own build witnesses
+    // r0's pair: every remote moves onto the global map.
+    it('moves a remote onto the global map when one build shipped its combination', async () => {
+      p.seed(M0, [
+        version('18.0.0', M0, ['team/r0'], { req: { 'team/r0': '^18.0.0' } }),
+        version('18.0.1', M0, ['team/r1', 'team/r3'], { host: true }),
+      ]);
+      p.seed(M1, [
+        version('18.0.0', M1, ['team/r0'], { req: { 'team/r0': '^18.0.0' } }),
+        version('18.0.1', M1, ['team/r2', 'team/r3']),
+      ]);
+
+      const importMap = await p.runInit();
+
+      expect(importMap.imports).toEqual({
+        [M0]: 'http://r1/@lib/m0.js',
+        [M1]: 'http://r2/@lib/m1.js',
+      });
+      expect(importMap.scopes ?? {}).toEqual({});
+      for (const name of [M0, M1]) expect(copyOf(name, 'team/r0').poolCause).toBeUndefined();
+      expect(p.islands()).toEqual({});
+    });
+
+    // A subpool member the gate holds back. The host r1 wins round 1 with m0@18.0.1, r0 and r4 (one build)
+    // form a subpool, and r2 contributes m1@18.0.1. r4 accepts both 18.0.1s but no build shipped them
+    // together, so it stays in r0's subpool rather than moving — and the subpool keeps two members.
+    it('keeps a subpool member in its subpool when the extended coverage is unwitnessed', async () => {
+      const req = { 'team/r0': '^18.0.0', 'team/r4': '^18.0.0' };
+      p.seed(M0, [
+        version('18.0.0', M0, ['team/r0', 'team/r4'], { req }),
+        version('18.0.1', M0, ['team/r1'], { host: true }),
+      ]);
+      p.seed(M1, [
+        version('18.0.0', M1, ['team/r0', 'team/r4'], { req }),
+        version('18.0.1', M1, ['team/r2']),
+      ]);
+
+      const importMap = await p.runInit();
+
+      expect(importMap.imports).toEqual({
+        [M0]: 'http://r1/@lib/m0.js',
+        [M1]: 'http://r2/@lib/m1.js',
+      });
+      expect(importMap.scopes?.[SCOPE['team/r0']]).toEqual(ownFiles('team/r0'));
+      expect(importMap.scopes?.[SCOPE['team/r4']]).toEqual(ownFiles('team/r0'));
+      for (const name of [M0, M1]) {
+        // A subpool is recorded as `servedBy` its build, the build's own copies included; neither carries a cause.
+        for (const remote of ['team/r0', 'team/r4'])
+          expect(copyOf(name, remote)).toMatchObject({ action: 'skip', servedBy: 'team/r0' });
+      }
+      expect(p.islands()).toEqual({ 'team/r0': 'subpool team/r0', 'team/r4': 'subpool team/r0' });
+    });
+
+    // A dissolving subpool's build the gate leaves alone. The host r1 ships m0@18.0.0; r5 (m0+m1@18.0.1)
+    // runs a subpool over r6 (m1@18.0.1), winning the tie against r2's build on being newer — r2's exact
+    // `18.0.0` keeps it out of r5's. The extension publishes r2's m1@18.0.0, which r6 shipped next to nothing
+    // else, so r6 moves; r5 is left alone and would resolve m0@18.0.0 + m1@18.0.0, a pair no build shipped.
+    it("leaves a dissolving subpool's build alone when the extended coverage is unwitnessed", async () => {
+      p.seed(M0, [
+        version('18.0.0', M0, ['team/r1'], { host: true }),
+        version('18.0.1', M0, ['team/r5'], { req: { 'team/r5': '^18.0.0' } }),
+      ]);
+      p.seed(M1, [
+        version('18.0.0', M1, ['team/r2'], { req: { 'team/r2': '18.0.0' } }),
+        version('18.0.1', M1, ['team/r5', 'team/r6'], {
+          req: { 'team/r5': '^18.0.0', 'team/r6': '^18.0.0' },
+        }),
+      ]);
+
+      const importMap = await p.runInit();
+
+      expect(importMap.imports).toEqual({
+        [M0]: 'http://r1/@lib/m0.js',
+        [M1]: 'http://r2/@lib/m1.js',
+      });
+      expect(importMap.scopes?.[SCOPE['team/r6']]).toBeUndefined();
+      expect(importMap.scopes?.[SCOPE['team/r5']]).toEqual(ownFiles('team/r5'));
+      expect(copyOf(M1, 'team/r6').poolCause).toBeUndefined();
+      for (const name of [M0, M1])
+        expect(copyOf(name, 'team/r5')).toMatchObject({ action: 'scope', poolCause: 'uncovered' });
+      expect(p.islands()).toEqual({ 'team/r5': 'uncovered' });
+    });
+  });
+
+  /**
+   * Found by the property suite: a warm re-election must keep a tied round-1 winner. The tie rule
+   * prefers the previous winner, which used to be inferred from the basis of the stored `share` rows. Rows
+   * the winner's peers took over by rule 5 have a lender as their basis, so a lender with more such rows than
+   * the winner has own rows was read as the previous winner and the election flipped. The winner is now
+   * stored as `poolWinner`.
+   *
+   * r0 ships m0 and m4; r1 ships m1..m4; all at 18.1.1. Neither build serves the other, both agree, so the
+   * election ties and arrival order elects r0.
+   */
+  describe('re-election keeps a tied winner', () => {
+    let p: ReturnType<typeof portfolio>;
+    beforeEach(() => {
+      p = portfolio({ r0: 'http://r0/', r1: 'http://r1/' }, { storage: 'nf-regression-tie' });
+    });
+
+    const seed = (name: string, remotes: string[]) =>
+      p.seed(name, [
+        p.version(
+          '18.1.1',
+          name,
+          remotes.map(remote => ({ remote, req: '^18.1.1' }))
+        ),
+      ]);
+
+    const seedTiedPool = () => {
+      seed('@fam/m0', ['r0']);
+      seed('@fam/m1', ['r1']);
+      seed('@fam/m2', ['r1']);
+      seed('@fam/m3', ['r1']);
+      seed('@fam/m4', ['r0', 'r1']);
+    };
+
+    it('elects the same winner when every member is marked dirty again', async () => {
+      seedTiedPool();
+      const coldMap = await p.runInit();
+      const coldRecord = structuredClone(p.stored());
+      expect(coldMap.imports['@fam/m4']).toBe('http://r0/@fam/m4.js');
+
+      for (const [name, external] of Object.entries(p.stored()))
+        p.adapters.sharedExternalsRepo.addOrUpdate(name, { ...external, dirty: true }, undefined);
+      const warmMap = await p.runInit();
+
+      expect(p.stored()).toEqual(coldRecord);
+      expect(warmMap).toEqual(coldMap);
+    });
+
+    it('keeps the winner when a newly tagged member joins the tied pool', async () => {
+      seedTiedPool();
+      const coldMap = await p.runInit();
+      const coldM4 = structuredClone(p.record('@fam/m4'));
+
+      // r1 starts shipping '@fam/a'. Members are ordered by name, so it now arrives first: the tie still
+      // holds, and only the stored winner keeps it from flipping to r1. The joiner has no `poolWinner` yet.
+      seed('@fam/a', ['r1']);
+      const warmMap = await p.runInit();
+
+      expect(p.record('@fam/m4')).toEqual(coldM4);
+      expect(warmMap.imports['@fam/m4']).toBe(coldMap.imports['@fam/m4']);
+      expect(Object.values(p.stored()).map(e => e.poolWinner)).toEqual(Array(6).fill('r0'));
+    });
+  });
+
+  /**
+   * D16, dynamic init. `update-cache` filed a runtime-loaded copy into whatever row `findVersionForTag`
+   * returned for its tag, which falls back to a `scope` row, and joined a `skip` row even when nothing shared
+   * the external. Both left the record disagreeing with the map the page was handed.
+   *
+   * Every page below is a real one: the init and the load register remote entries, `reload` opens the next
+   * page over what the last committed, and the warm init skips every remote it has cached, as
+   * get-remote-entries does, so it runs mark → determine → pool → import map over the record the load left.
+   */
+  const shared = (
+    packageName: string,
+    version: string,
+    requiredVersion: string,
+    strictVersion = true
+  ): DenseSharedInfo =>
+    ({
+      packageName,
+      version,
+      requiredVersion,
+      singleton: true,
+      strictVersion,
+      pool: 'fw',
+      entries: { [packageName]: `${packageName.slice(1).replace('/', '_')}.js` },
+    }) as DenseSharedInfo;
+
+  const entry = (name: string, ...sharedInfo: DenseSharedInfo[]): RemoteEntry =>
+    ({
+      name,
+      url: `http://${name.split('/')[1]}/remoteEntry.json`,
+      exposes: [],
+      shared: sharedInfo,
+    }) as unknown as RemoteEntry;
+
+  const file = (remote: string, packageName: string) =>
+    `http://${remote.split('/')[1]}/${packageName.slice(1).replace('/', '_')}.js`;
+
+  // What a remote resolves a specifier to: its own scope first, then `imports`, as the browser does.
+  const resolves = (importMap: ImportMap, remote: string, specifier: string) =>
+    importMap.scopes?.[`http://${remote.split('/')[1]}/`]?.[specifier] ??
+    importMap.imports[specifier];
+
+  const rows = (p: ReturnType<typeof portfolio>, external: string) =>
+    p
+      .record(external)
+      .versions.map(v => `${v.tag}:${v.action}:[${v.remotes.map(r => r.name).join(',')}]`);
+
+  /**
+   * Finding 1. mfe-b pins core to exactly 17.1.0 and mfe-a's `~17.1.1` rejects it, so the newer 17.1.1 is
+   * shared and 17.1.0's only row is mfe-b's `scope` row. mfe-c, loaded at runtime with 17.1.0 under `^17.1.0`, accepts the shared 17.1.1
+   * and the page maps it onto `imports`. Filed into mfe-b's `scope` row, the next page scoped it to its own
+   * 17.1.0 instead: a tear beside anything it shares with mfe-a, and a page that differs across a reload.
+   */
+  describe('a dynamically loaded copy never joins an island row at its tag', () => {
+    let p: ReturnType<typeof portfolio>;
+    beforeEach(() => {
+      p = portfolio({}, { storage: 'nf-regression-d16-island', realRepositories: true });
+    });
+
+    it('keeps the shared build for the loaded remote on the page, after a reload and a warm init', async () => {
+      const remotes = [
+        entry('team/mfe-a', shared('@fw/core', '17.1.1', '~17.1.1')),
+        entry('team/mfe-b', shared('@fw/core', '17.1.0', '17.1.0')),
+      ];
+      const loaded = entry('team/mfe-c', shared('@fw/core', '17.1.0', '^17.1.0', false));
+
+      await p.runInit(remotes);
+      expect(rows(p, '@fw/core')).toEqual([
+        '17.1.1:share:[team/mfe-a]',
+        '17.1.0:scope:[team/mfe-b]',
+      ]);
+
+      p.reload();
+      const { actions, merged } = await p.runDynamic(loaded);
+      expect(actions['@fw/core']).toEqual({ action: 'skip', covered: ['@fw/core'] });
+      expect(resolves(merged, 'team/mfe-c', '@fw/core')).toBe(file('team/mfe-a', '@fw/core'));
+
+      // Its own `skip` row beside the island, so the record rebuilds what the page ran.
+      expect(rows(p, '@fw/core')).toEqual([
+        '17.1.1:share:[team/mfe-a]',
+        '17.1.0:scope:[team/mfe-b]',
+        '17.1.0:skip:[team/mfe-c]',
+      ]);
+
+      p.reload();
+      const warm = await p.runInit([...remotes, loaded]);
+      expect(resolves(warm, 'team/mfe-c', '@fw/core')).toBe(file('team/mfe-a', '@fw/core'));
+      expect(warm.scopes?.['http://mfe-c/']).toBeUndefined();
+    });
+  });
+
+  /**
+   * Finding 2, and the architect's two follow-ups on the same state. The host mfe-a runs 19.2.0; mfe-b and
+   * mfe-c pin 19.1.0 exactly, so they run mfe-b's build as a subpool. anim then has no `share` row: both
+   * copies `skip` onto mfe-b through per-consumer overrides, and `imports` never names it. mfe-d, loaded with
+   * only anim@19.1.0, joined that `skip` row and got `skip` with nothing `covered`: an unmapped bare
+   * specifier. It now shares its own copy.
+   */
+  describe('a dynamically loaded copy of a member nothing shares still resolves', () => {
+    let p: ReturnType<typeof portfolio>;
+    beforeEach(() => {
+      p = portfolio(
+        {},
+        { hosts: ['team/mfe-a'], storage: 'nf-regression-d16-unshared', realRepositories: true }
+      );
+    });
+
+    const remotes = [
+      entry(
+        'team/mfe-a',
+        shared('@fw/core', '19.2.0', '^19.2.0'),
+        shared('@fw/common', '19.2.0', '^19.2.0')
+      ),
+      entry(
+        'team/mfe-b',
+        shared('@fw/core', '19.1.0', '19.1.0'),
+        shared('@fw/anim', '19.1.0', '19.1.0')
+      ),
+      entry(
+        'team/mfe-c',
+        shared('@fw/core', '19.1.0', '19.1.0'),
+        shared('@fw/anim', '19.1.0', '19.1.0')
+      ),
+    ];
+
+    const initSubpool = async () => {
+      const committed = await p.runInit(remotes);
+      expect(p.islands()).toEqual({
+        'team/mfe-b': 'subpool team/mfe-b',
+        'team/mfe-c': 'subpool team/mfe-b',
+      });
+      expect(committed.imports['@fw/anim']).toBeUndefined();
+      expect(rows(p, '@fw/anim')).toEqual(['19.1.0:skip:[team/mfe-b,team/mfe-c]']);
+      p.reload();
+    };
+
+    // Every remote and specifier the portfolio ships, and what each resolves to on one map.
+    const page = (importMap: ImportMap, loaded: RemoteEntry[]) =>
+      Object.fromEntries(
+        [...remotes, ...loaded].flatMap(e =>
+          e.shared.map(s => [
+            `${e.name}|${s.packageName}`,
+            resolves(importMap, e.name, s.packageName),
+          ])
+        )
+      );
+
+    it('shares the loaded copy, on the page and after a reload and a warm init', async () => {
+      await initSubpool();
+      const mfeD = entry('team/mfe-d', shared('@fw/anim', '19.1.0', '^19.1.0'));
+
+      const { actions, merged } = await p.runDynamic(mfeD);
+      expect(actions['@fw/anim']!.action).toBe('share');
+      expect(resolves(merged, 'team/mfe-d', '@fw/anim')).toBe(file('team/mfe-d', '@fw/anim'));
+
+      p.reload();
+      const warm = await p.runInit([...remotes, mfeD]);
+      expect(resolves(warm, 'team/mfe-d', '@fw/anim')).toBe(file('team/mfe-d', '@fw/anim'));
+      expect(page(warm, [mfeD])).toEqual(page(merged, [mfeD]));
+    });
+
+    it('resolves a second loaded copy of that tag to the same build on every page', async () => {
+      await initSubpool();
+      const mfeD = entry('team/mfe-d', shared('@fw/anim', '19.1.0', '^19.1.0'));
+      const mfeE = entry('team/mfe-e', shared('@fw/anim', '19.1.0', '^19.1.0'));
+      await p.runDynamic(mfeD);
+      p.reload();
+
+      const { merged } = await p.runDynamic(mfeE);
+      expect(resolves(merged, 'team/mfe-e', '@fw/anim')).toBe(file('team/mfe-d', '@fw/anim'));
+
+      p.reload();
+      const reloaded = await p.drivers.generateImportMap();
+      expect(page(reloaded, [mfeD, mfeE])).toEqual(page(merged, [mfeD, mfeE]));
+
+      p.reload();
+      const warm = await p.runInit([...remotes, mfeD, mfeE]);
+      expect(page(warm, [mfeD, mfeE])).toEqual(page(merged, [mfeD, mfeE]));
+    });
+
+    it('keeps a loaded remote redirected onto the subpool build on every page', async () => {
+      await initSubpool();
+      const mfeD = entry(
+        'team/mfe-d',
+        shared('@fw/core', '19.1.0', '^19.1.0'),
+        shared('@fw/anim', '19.1.0', '^19.1.0')
+      );
+
+      const { merged } = await p.runDynamic(mfeD);
+      expect(p.islands()['team/mfe-d']).toBe('subpool team/mfe-b');
+      expect(resolves(merged, 'team/mfe-d', '@fw/core')).toBe(file('team/mfe-b', '@fw/core'));
+      expect(resolves(merged, 'team/mfe-d', '@fw/anim')).toBe(file('team/mfe-b', '@fw/anim'));
+
+      p.reload();
+      const reloaded = await p.drivers.generateImportMap();
+      expect(page(reloaded, [mfeD])).toEqual(page(merged, [mfeD]));
+
+      p.reload();
+      const warm = await p.runInit([...remotes, mfeD]);
+      expect(page(warm, [mfeD])).toEqual(page(merged, [mfeD]));
     });
   });
 });

@@ -16,6 +16,7 @@ import { mockAdapters } from 'lib/testing/adapters.mock';
 import { Optional } from 'lib/utils/optional';
 import type { RemoteInfo } from 'lib/core/1.domain';
 import type { DrivingContract } from '../../driving-ports/driving.contract';
+import { createVersionCheck } from 'lib/core/3.adapters/checks/version.check';
 
 // A committed external: the first version is the `share` one, i.e. `remotes[0]` of it is the build
 // serving that member. Later versions are copies other builds hold.
@@ -69,14 +70,6 @@ describe('createPoolDynamicExternals', () => {
   let config: ConfigContract;
   let adapters: DrivingContract;
 
-  // The `committed` helper derives every range from its own version tag, so "same major" is exactly the
-  // acceptance a real portfolio has here — and the coverage gate needs it to be real, since a subpool build
-  // that offers a version the loaded remote rejects has to fail on versions rather than on coverage.
-  const acceptsSameMajor = () =>
-    vi.fn(
-      (tag: string, range: string) => tag.split('.')[0] === range.replace(/^\^/, '').split('.')[0]
-    );
-
   // Scoped packages are tagged by their npm scope, as the build tags them by default; explicit tags win.
   const givenCommitted = (externals: Record<string, SharedExternal>) => {
     // Tagged up front, so a spec snapshotting `externals` sees the record as the step reads it.
@@ -88,8 +81,8 @@ describe('createPoolDynamicExternals', () => {
     config = mockConfig();
     adapters = mockAdapters();
     adapters.sharedExternalsRepo.getFromScope = vi.fn(() => ({}));
-    // The decision asks every range whether it takes what the committed map serves.
-    adapters.versionCheck.isCompatible = acceptsSameMajor();
+    // Real semver: the gate's newest-first record order and its v-prefixed tags go through it too.
+    adapters.versionCheck = createVersionCheck();
     poolDynamicExternals = createPoolDynamicExternals(config, adapters);
   });
 
@@ -202,7 +195,6 @@ describe('createPoolDynamicExternals', () => {
     // to bridge them, running forms from one build and signals from another. Comparing the two committed
     // builds with each other would be version arithmetic; what counts is whether *any* build shipped the
     // pair, and none did.
-    adapters.versionCheck.isCompatible = acceptsSameMajor();
     givenCommitted({
       '@framework/forms': committed(
         '@framework/forms',
@@ -267,7 +259,6 @@ describe('createPoolDynamicExternals', () => {
     // its own scope. mfe ships the same previous-major family, which the committed 22 winner cannot serve,
     // so instead of downloading its own it takes legacy's — through a per-consumer override, because the
     // global `imports` names the 22 build.
-    adapters.versionCheck.isCompatible = acceptsSameMajor();
     adapters.remoteInfoRepo.tryGet = vi.fn(name =>
       name === 'team/legacy'
         ? Optional.of({ scopeUrl: 'http://legacy/', exposes: [] } as RemoteInfo)
@@ -399,6 +390,39 @@ describe('createPoolDynamicExternals', () => {
     ]);
   });
 
+  it('accepts the committed tag as its own when its copy ships it v-prefixed, whatever its range', async () => {
+    // A copy is never incompatible with its own version, compared by semver (`v17.0.0` is `17.0.0`).
+    // mfe's ranges drifted to ~16 and exclude the committed 17.0.0, which is still its own build.
+    const record = {
+      '@framework/core': committed(
+        '@framework/core',
+        { tag: '17.0.0', remotes: ['team/a'] },
+        { tag: 'v17.0.0', remotes: ['mfe'] }
+      ),
+      '@framework/common': committed(
+        '@framework/common',
+        { tag: '17.0.0', remotes: ['team/a'] },
+        { tag: 'v17.0.0', remotes: ['mfe'] }
+      ),
+    };
+    for (const external of Object.values(record))
+      external.versions[1]!.remotes[0]!.requiredVersion = '~16.0.0';
+    givenCommitted(record);
+    const entry = entryWith(shared('@framework/core'), shared('@framework/common'));
+    const actions: SharedInfoActions = {
+      '@framework/core': { action: 'skip' },
+      '@framework/common': { action: 'skip' },
+    };
+
+    const result = await poolDynamicExternals({ entry, actions });
+
+    expect(result.actions).toEqual({
+      '@framework/core': { action: 'skip' },
+      '@framework/common': { action: 'skip' },
+    });
+    expect(verdictsWritten()).toEqual([]);
+  });
+
   it("joins a committed subpool: its build's copies name itself and run its own family", async () => {
     // The committed map is 22; team/legacy-a runs a 21 subpool (its copies name it) with legacy-b in it.
     // mfe is 21 too, so it joins the subpool rather than downloading a third 21 build.
@@ -448,7 +472,6 @@ describe('createPoolDynamicExternals', () => {
     // family resolves through the committed 22.0.8 winner, so its modules are already bound to that copy.
     // A consumer deduping onto it would inherit the tear one hop in, and no additive map can repair it —
     // so mfe serves its own family instead.
-    adapters.versionCheck.isCompatible = vi.fn(() => true);
     givenCommitted({
       '@framework/core': committed(
         '@framework/core',
@@ -476,7 +499,6 @@ describe('createPoolDynamicExternals', () => {
     // The committed map serves core@22.0.8 from team/a and cdk@22.0.6 from team/b; mfe imports both. The
     // two sit on one minor line, but no build shipped that pair, so mfe serves its own family and pays the
     // download. team/b runs no subpool either: it does not win core (constraint 9).
-    adapters.versionCheck.isCompatible = vi.fn(() => true);
     givenCommitted({
       '@framework/core': committed(
         '@framework/core',
@@ -615,31 +637,26 @@ describe('createPoolDynamicExternals', () => {
     expect(result.actions.bar).toEqual({ action: 'scope' });
   });
 
-  it('has-pool early-out: nothing pools when the scope carries no pool state at all', async () => {
-    // No `pool` tag or stored pool anywhere in the committed scope → no pool, so determine's actions pass
-    // through even though the family is right there in the record.
-    adapters.sharedExternalsRepo.hasPoolState = vi.fn(() => false);
-    const entry = entryWith(shared('@framework/core'), shared('@framework/common'));
+  it('passes actions through when the committed scope carries no pool state at all', async () => {
+    // No `pool` tag or stored pool anywhere in the committed scope (unscoped packages carry no npm-scope
+    // tag) → no pool, so update-cache's actions pass through even though the family is right there.
+    const entry = entryWith(shared('foo'), shared('bar'));
     givenCommitted({
-      '@framework/core': committed('@framework/core', { tag: '17.0.0', remotes: ['host', 'mfe'] }),
-      '@framework/common': committed('@framework/common', {
-        tag: '17.0.0',
-        remotes: ['host', 'mfe'],
-      }),
+      foo: committed('foo', { tag: '17.0.0', remotes: ['host', 'mfe'] }),
+      bar: committed('bar', { tag: '17.0.0', remotes: ['host', 'mfe'] }),
     });
     const actions: SharedInfoActions = {
-      '@framework/core': { action: 'skip', override: 'http://host/core.js' },
-      '@framework/common': { action: 'scope' },
+      foo: { action: 'skip', override: 'http://host/foo.js' },
+      bar: { action: 'scope' },
     };
 
     const result = await poolDynamicExternals({ entry, actions });
 
-    expect(result.actions['@framework/core']).toEqual({
-      action: 'skip',
-      override: 'http://host/core.js',
+    expect(result.actions).toEqual({
+      foo: { action: 'skip', override: 'http://host/foo.js' },
+      bar: { action: 'scope' },
     });
-    expect(result.actions['@framework/common']).toEqual({ action: 'scope' });
-    expect(adapters.sharedExternalsRepo.getFromScope).not.toHaveBeenCalled();
+    expect(adapters.sharedExternalsRepo.addOrUpdate).not.toHaveBeenCalled();
   });
 
   it('subjects an untagged entry to a pool another remote tagged', async () => {
@@ -706,13 +723,6 @@ describe('createPoolDynamicExternals', () => {
   // map from the record alone. Before this, the record kept `update-cache`'s verdicts and a reload served
   // the combination the delta had refused (e2e/pooling/lifecycle.e2e.spec.ts, "the dynamic island").
   describe('verdicts in the record', () => {
-    // The mock's `compare` ties everything; the record is written newest first, as `commit()` does.
-    beforeEach(() => {
-      adapters.versionCheck.compare = vi.fn((a: string, b: string) =>
-        a.localeCompare(b, undefined, { numeric: true })
-      );
-    });
-
     const copies = (external: SharedExternal | undefined) =>
       (external?.versions ?? []).map(v => [
         `${v.tag}:${v.action}`,
@@ -806,7 +816,6 @@ describe('createPoolDynamicExternals', () => {
     });
 
     it('records a range rejection as incompatible, and drops a share only it provided', async () => {
-      adapters.versionCheck.isCompatible = acceptsSameMajor();
       givenCommitted({
         '@framework/forms': committed(
           '@framework/forms',
@@ -856,7 +865,6 @@ describe('createPoolDynamicExternals', () => {
     });
 
     it('records the subpool build a redirected copy dedups onto', async () => {
-      adapters.versionCheck.isCompatible = acceptsSameMajor();
       adapters.remoteInfoRepo.tryGet = vi.fn(name =>
         name === 'team/legacy'
           ? Optional.of({ scopeUrl: 'http://legacy/', exposes: [] } as RemoteInfo)
@@ -894,7 +902,6 @@ describe('createPoolDynamicExternals', () => {
     // The same portfolio with team/legacy gone from the remote cache. Its files cannot be mapped, so it is
     // no subpool to join: left on update-cache's actions, mfe would run a member from each build.
     it('serves the remote its whole family when the only fitting build is not in the cache', async () => {
-      adapters.versionCheck.isCompatible = acceptsSameMajor();
       adapters.remoteInfoRepo.tryGet = vi.fn(() => Optional.empty<RemoteInfo>());
       givenCommitted({
         '@framework/core': committed(
