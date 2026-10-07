@@ -230,6 +230,14 @@ export const portfolio = (
     return importMap;
   };
 
+  // A warm init that re-elects every pool: each member is marked dirty first.
+  const reelect = (): Promise<ImportMap> => {
+    for (const [name, external] of Object.entries(stored()))
+      if (external.poolName !== undefined)
+        adapters.sharedExternalsRepo.addOrUpdate(name, { ...external, dirty: true }, scope);
+    return runInit();
+  };
+
   // The dynamic flow for one remote entry, fetched by URL. The committed map is generated from the record as
   // it stood before the load.
   const runDynamic = async (entry: RemoteEntry): Promise<DynamicLoad> => {
@@ -305,6 +313,7 @@ export const portfolio = (
     record,
     scopeUrls: knownScopeUrls,
     runInit,
+    reelect,
     runDynamic,
     islands,
     downloads,

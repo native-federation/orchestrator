@@ -15,7 +15,8 @@ import { portfolio } from './portfolio';
  */
 
 // A deeper local search: POOLING_PROPERTY_SEED=<n> POOLING_PROPERTY_SCALE=<factor> (CI uses the defaults).
-const SEED = Number(process.env['POOLING_PROPERTY_SEED'] ?? 20261007);
+const CI_SEED = 20261007;
+const SEED = Number(process.env['POOLING_PROPERTY_SEED'] ?? CI_SEED);
 const SCALE = Number(process.env['POOLING_PROPERTY_SCALE'] ?? 1);
 const versionCheck = createVersionCheck();
 
@@ -24,16 +25,20 @@ export const TIMEOUT = 10_000 * SCALE;
 
 // Every property passes its own `seedOffset`, so no two replay one stream of portfolios. fast-check stops
 // short of the test timeout so that a failure still reports its counterexample, shrunk as far as it got.
+// `fixed` replays the CI stream whatever the deeper search asks and stops at the first failure unshrunk: for an
+// `it.fails` property, which must keep failing and has nothing to report.
 export const run = <T>(
   seedOffset: number,
   arbitrary: fc.Arbitrary<T>,
   numRuns: number,
-  predicate: (v: T) => Promise<void>
+  predicate: (v: T) => Promise<void>,
+  { fixed = false }: { fixed?: boolean } = {}
 ) =>
   fc.assert(fc.asyncProperty(arbitrary, predicate), {
-    seed: SEED + seedOffset,
-    numRuns: Math.ceil(numRuns * SCALE),
+    seed: (fixed ? CI_SEED : SEED) + seedOffset,
+    numRuns: fixed ? numRuns : Math.ceil(numRuns * SCALE),
     interruptAfterTimeLimit: TIMEOUT * 0.7,
+    endOnFailure: fixed,
   });
 
 export const scopeUrlsOf = (entries: RemoteEntry[]) =>
@@ -141,17 +146,16 @@ export function openPortfolio(o: { host?: string; strict?: boolean } = {}) {
   });
 
   return {
+    // Where each remote is served from, as the flows stored it: a redeployed remote moves.
+    scopeUrls: p.scopeUrls,
     async init(entries: RemoteEntry[]) {
       next();
       return result(await p.runInit(entries));
     },
-    // A warm page that re-elects every pool: each member is marked dirty before the init.
+    // A warm page that re-elects every pool.
     async reelect() {
       next();
-      for (const [name, external] of Object.entries(p.stored()))
-        if (external.poolName !== undefined)
-          p.adapters.sharedExternalsRepo.addOrUpdate(name, { ...external, dirty: true }, undefined);
-      return result(await p.runInit());
+      return result(await p.reelect());
     },
     async load(entry: RemoteEntry) {
       next();
@@ -186,13 +190,19 @@ export async function initOrRefuse(spec: PortfolioSpec) {
 
 // The map and record up to interchangeable providers: which tag each remote runs per specifier it ships, and
 // each copy's verdict. Which of two copies of one tag publishes a file is basis precedence, i.e. arrival.
-export function outcome(importMap: ImportMap, record: shareScope) {
+// `scopeUrls` is needed only once a remote was redeployed to another URL.
+export function outcome(
+  importMap: ImportMap,
+  record: shareScope,
+  scopeUrls: Record<string, string> = {}
+) {
+  const scopeUrl = (remote: string) => scopeUrls[remote] ?? scopeUrlOf(remote);
   const tagOfUrl = new Map<string, string>();
   for (const external of Object.values(record))
     for (const version of external.versions)
       for (const meta of version.remotes)
         for (const file of Object.values(meta.entries))
-          tagOfUrl.set(_path.join(scopeUrlOf(meta.name), file), version.tag);
+          tagOfUrl.set(_path.join(scopeUrl(meta.name), file), version.tag);
 
   const runs: Record<string, string | null> = {};
   const verdicts: Record<string, unknown> = {};
@@ -208,7 +218,7 @@ export function outcome(importMap: ImportMap, record: shareScope) {
         };
         for (const specifier of Object.keys(meta.entries)) {
           const url =
-            importMap.scopes?.[scopeUrlOf(meta.name)]?.[specifier] ?? importMap.imports[specifier];
+            importMap.scopes?.[scopeUrl(meta.name)]?.[specifier] ?? importMap.imports[specifier];
           runs[`${meta.name}|${specifier}`] = url === undefined ? null : (tagOfUrl.get(url) ?? url);
         }
       }
@@ -328,6 +338,24 @@ export function rangeViolations(importMap: ImportMap, record: shareScope, only?:
         if (tag !== undefined && !accepts(tag, copy.tag, copy.range))
           out.push(`${pool}|${copy.remote}|${specifier}: runs ${tag}, range ${copy.range}`);
       }
+    }
+  }
+  return out;
+}
+
+// Pool state that names a remote must name one that ships the pool: each member's `poolWinner`, and the
+// `servedBy` of each copy.
+export function strayNames(record: shareScope): string[] {
+  const out: string[] = [];
+  for (const [pool, members] of pools(record)) {
+    const shippers = new Set(copiesOf(members).map(c => c.remote));
+    for (const [name, external] of Object.entries(members)) {
+      if (external.poolWinner !== undefined && !shippers.has(external.poolWinner))
+        out.push(`${pool}|${name}: poolWinner ${external.poolWinner}`);
+      for (const version of external.versions)
+        for (const meta of version.remotes)
+          if (meta.servedBy !== undefined && !shippers.has(meta.servedBy))
+            out.push(`${pool}|${name}|${meta.name}: servedBy ${meta.servedBy}`);
     }
   }
   return out;

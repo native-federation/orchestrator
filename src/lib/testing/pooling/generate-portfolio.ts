@@ -36,9 +36,16 @@ export type RemotePoolSpec = {
   members: (EntryShape | null)[];
 };
 
+/**
+ * Label noise: the remote labels one member of a pool it ships with another pool's label, which joins the two
+ * pools, or with an alias of its own pool's label. Indices are taken modulo what the remote ships.
+ */
+export type Relabel = { pool: number; member: number; to: number | 'alias' };
+
 export type RemoteSpec = {
   // One per pool: `null` means the remote does not ship that pool at all.
   pools: (RemotePoolSpec | null)[];
+  relabel?: Relabel | null;
   strictVersion: boolean;
   // An unpooled singleton beside the pools, at one of two minors.
   extra: number | null;
@@ -61,6 +68,12 @@ const MAJORS = [17, 18];
 const RANGES: RangeKind[] = ['caret', 'tilde', 'exact', 'drift', 'major'];
 
 const shapeArbitrary = fc.constantFrom<EntryShape>('root', 'root+sub', 'sub');
+
+const relabelArbitrary: fc.Arbitrary<Relabel> = fc.record({
+  pool: fc.nat(),
+  member: fc.nat(),
+  to: fc.oneof(fc.nat(), fc.constant<'alias'>('alias')),
+});
 
 const templateArbitrary = (size: number): fc.Arbitrary<BuildTemplate> =>
   fc
@@ -107,11 +120,12 @@ const freshRemoteArbitrary = (poolSizes: number[]): fc.Arbitrary<RemoteSpec> =>
 /**
  * Each pool has 2-4 builds and a remote that ships the pool mostly runs one of them, declaring its own range
  * and `strictVersion`: real portfolios deploy a few builds many times, which is what makes builds
- * byte-identical (the subpool tie, D10) and lets a remote join another's subpool. One pool in five is a
- * straggler's build of its own, which keeps ragged one-off families in the mix.
+ * byte-identical (the subpool tie) and lets a remote join another's subpool. One pool in five is a
+ * straggler's build of its own, which keeps ragged one-off families in the mix. `labelNoise` has one remote
+ * in five mislabel a member (`Relabel`); off, the portfolios are the ones the seeds have always produced.
  */
 export const portfolioArbitrary = (
-  o: { minRemotes?: number; maxRemotes?: number } = {}
+  o: { minRemotes?: number; maxRemotes?: number; labelNoise?: boolean } = {}
 ): fc.Arbitrary<PortfolioSpec> =>
   fc
     .record({
@@ -152,6 +166,15 @@ export const portfolioArbitrary = (
                     { arbitrary: fc.constant<'tilde'>('tilde'), weight: 1 }
                   )
                 : fc.constant<'tilde'>('tilde'),
+              // Opt-in, so existing seeds are unchanged.
+              ...(o.labelNoise
+                ? {
+                    relabel: fc.oneof(
+                      { arbitrary: fc.constant(null), weight: 4 },
+                      { arbitrary: relabelArbitrary, weight: 1 }
+                    ),
+                  }
+                : {}),
             }),
             { minLength: o.minRemotes ?? 1, maxLength: o.maxRemotes ?? 20 }
           ),
@@ -267,8 +290,75 @@ export const extraRemotesArbitrary = (spec: PortfolioSpec): fc.Arbitrary<RemoteS
       .map(second => (second === null ? [first] : [first, second]))
   );
 
+/**
+ * A remote redeployed between two pages: changed by one or two `RedeployChange`s and served from a new URL, so
+ * a warm page fetches it again and evicts its old copies.
+ */
+export type Redeploy = { remote: number; changes: RedeployChange[] };
+
+// A `Mutation`, or one a redeploy adds: `relabel` sets (or with `to: null` clears) the remote's label noise,
+// `leave` stops shipping one of its pools.
+type RedeployChange = Omit<Mutation, 'kind'> & {
+  kind: Mutation['kind'] | 'relabel' | 'leave';
+  to: number | 'alias' | null;
+};
+
+const redeployChangeArbitrary: fc.Arbitrary<RedeployChange> = fc.record({
+  kind: fc.constantFrom<RedeployChange['kind']>(
+    'range',
+    'strictVersion',
+    'patch',
+    'drop',
+    'add',
+    'shape',
+    'relabel',
+    'leave'
+  ),
+  pool: fc.nat(),
+  member: fc.nat(),
+  shape: shapeArbitrary,
+  range: fc.constantFrom(...RANGES),
+  to: fc.option(fc.oneof(fc.nat(), fc.constant<'alias'>('alias'))),
+});
+
+function redeploy(remote: RemoteSpec, c: RedeployChange): RemoteSpec {
+  if (c.kind === 'relabel')
+    return {
+      ...remote,
+      relabel: c.to === null ? null : { pool: c.pool, member: c.member, to: c.to },
+    };
+  if (c.kind === 'leave') {
+    const shipped = remote.pools.flatMap((pool, p) => (pool ? [p] : []));
+    if (shipped.length === 0) return remote;
+    const p = shipped[c.pool % shipped.length]!;
+    return { ...remote, pools: remote.pools.map((x, i) => (i === p ? null : x)) };
+  }
+  return mutate(remote, { ...c, kind: c.kind });
+}
+
+/** One to three distinct remotes of `spec` redeployed, each with one or two changes. */
+export const redeployArbitrary = (spec: PortfolioSpec): fc.Arbitrary<Redeploy[]> =>
+  fc.uniqueArray(
+    fc.record({
+      remote: fc.nat(spec.remotes.length - 1),
+      changes: fc.array(redeployChangeArbitrary, { minLength: 1, maxLength: 2 }),
+    }),
+    { selector: r => r.remote, minLength: 1, maxLength: Math.min(3, spec.remotes.length) }
+  );
+
+// The portfolio after the redeploys: a redeployed remote at its new URL, every other one as it was.
+export function redeployedEntries(spec: PortfolioSpec, redeploys: Redeploy[]): RemoteEntry[] {
+  return spec.remotes.map((remote, i) => {
+    const changes = redeploys.find(r => r.remote === i)?.changes;
+    return changes
+      ? toRemoteEntry(changes.reduce(redeploy, remote), i, 1)
+      : toRemoteEntry(remote, i);
+  });
+}
+
 export const remoteName = (index: number): string => `r${index}`;
-export const scopeUrlOf = (name: string): string => `http://${name}/`;
+export const scopeUrlOf = (name: string, deploy = 0): string =>
+  deploy === 0 ? `http://${name}/` : `http://${name}/v${deploy}/`;
 
 const versionOf = (p: RemotePoolSpec) =>
   `${MAJORS[p.major]!}.${p.minor}.${p.patch}${p.pre === undefined ? '' : `-rc.${p.pre}`}`;
@@ -292,9 +382,13 @@ function rangeOf(p: RemotePoolSpec): string {
 
 export const memberName = (pool: number, member: number): string => `@p${pool}/m${member}`;
 
-export function toRemoteEntry(spec: RemoteSpec, index: number): RemoteEntry {
+// `deploy` > 0 serves the remote from a new URL (`Redeploy`).
+export function toRemoteEntry(spec: RemoteSpec, index: number, deploy = 0): RemoteEntry {
   const name = remoteName(index);
   const shared: DenseSharedInfo[] = [];
+  const shipped = spec.pools.flatMap((pool, p) => (pool ? [p] : []));
+  const relabelled =
+    spec.relabel && shipped.length > 0 ? shipped[spec.relabel.pool % shipped.length] : -1;
 
   spec.pools.forEach((pool, p) => {
     if (!pool) return;
@@ -302,6 +396,13 @@ export function toRemoteEntry(spec: RemoteSpec, index: number): RemoteEntry {
     const members = pool.members.some(m => m !== null)
       ? pool.members
       : pool.members.map((_, i) => (i === 0 ? 'root' : null));
+    const present = members.flatMap((shape, m) => (shape === null ? [] : [m]));
+    const noisy = p === relabelled ? present[spec.relabel!.member % present.length] : undefined;
+    const labelOf = (m: number) => {
+      if (m !== noisy) return `p${p}`;
+      const to = spec.relabel!.to;
+      return to === 'alias' ? `p${p}-alias` : `p${to % spec.pools.length}`;
+    };
     members.forEach((shape, m) => {
       if (shape === null) return;
       const pkg = memberName(p, m);
@@ -314,7 +415,7 @@ export function toRemoteEntry(spec: RemoteSpec, index: number): RemoteEntry {
         requiredVersion: rangeOf(pool),
         singleton: true,
         strictVersion: spec.strictVersion,
-        pool: `p${p}`,
+        pool: labelOf(m),
         entries,
       } as DenseSharedInfo);
     });
@@ -333,14 +434,14 @@ export function toRemoteEntry(spec: RemoteSpec, index: number): RemoteEntry {
 
   return {
     name,
-    url: `${scopeUrlOf(name)}remoteEntry.json`,
+    url: `${scopeUrlOf(name, deploy)}remoteEntry.json`,
     exposes: [],
     shared,
   } as unknown as RemoteEntry;
 }
 
 export const toRemoteEntries = (spec: PortfolioSpec): RemoteEntry[] =>
-  spec.remotes.map(toRemoteEntry);
+  spec.remotes.map((remote, i) => toRemoteEntry(remote, i));
 
 export const hostOf = (spec: PortfolioSpec): string | undefined =>
   spec.host === null ? undefined : remoteName(spec.host % spec.remotes.length);

@@ -2,6 +2,8 @@ import fc from 'fast-check';
 import {
   hostOf,
   portfolioArbitrary,
+  redeployArbitrary,
+  redeployedEntries,
   scopeUrlOf,
   toRemoteEntries,
   type EntryShape,
@@ -23,6 +25,7 @@ import {
   rangeViolations,
   run,
   scopeUrlsOf,
+  strayNames,
 } from 'lib/testing/pooling/property-harness';
 import * as _path from 'lib/utils/path';
 import { committedView } from 'lib/core/1.domain/pooling/views';
@@ -304,6 +307,75 @@ describe('pooling properties: init (generated portfolios)', { timeout: TIMEOUT }
     ));
 });
 
+/**
+ * A warm page after some remotes were redeployed (one to three, each changed and served from a new URL, so it is
+ * fetched again and its old copies evicted), over portfolios with label noise (`Relabel`): the changes that
+ * split, join or empty a pool. The oracle is the next warm page re-electing every pool of that same state.
+ *
+ * The stray-name property fails today on the partial warm re-elections `pooling.reelection.spec.ts`
+ * reproduces (N3, F3, P1): it is `it.fails` on a fixed seed whose stream reaches P1's form (offset 45, run 61)
+ * until dirt spreads to every external sharing a stored poolName; then it becomes a plain `it` on unfixed
+ * seeds. The re-election property passes on the CI stream only: deeper searches reach N3's and F3's forms
+ * (offsets 77 and 120 at scale 4), so it too stays on a fixed seed until then.
+ */
+describe('pooling properties: redeploys (generated portfolios)', { timeout: TIMEOUT }, () => {
+  const redeploys = () =>
+    portfolioArbitrary({ maxRemotes: 12, labelNoise: true }).chain(spec =>
+      fc.tuple(fc.constant(lenient(spec)), redeployArbitrary(spec))
+    );
+
+  it('stored names: every poolWinner and servedBy names a remote that ships the pool', () =>
+    run(14, portfolioArbitrary({ labelNoise: true }), 200, async spec => {
+      const init = await initOrRefuse(spec);
+      if (!init.ok) return;
+      expect(strayNames(init.result.record)).toEqual([]);
+    }));
+
+  // Not a cold page of the final portfolio: cold breaks ties by arrival where warm keeps the stored winner
+  // instead; that is no partial re-election. `outcome` leaves `poolWinner` out, which a stale election keeps
+  // (P1): on offset 45's stream this fails as the stray-name property below does. Pinned to the CI stream until
+  // dirt spreads to every external sharing a stored poolName.
+  it('redeploy: a warm init runs and places what re-electing every pool of its state does', () =>
+    run(
+      16,
+      redeploys(),
+      100,
+      async ([spec, redeployed]) => {
+        const rig = openPortfolio({ host: hostOf(spec) });
+        await rig.init(toRemoteEntries(spec));
+        const warm = await rig.init(redeployedEntries(spec, redeployed));
+        const reelected = await rig.reelect();
+        const scopeUrls = rig.scopeUrls();
+        const settled = (page: typeof warm) => ({
+          ...outcome(page.importMap, page.record, scopeUrls),
+          winners: Object.fromEntries(
+            Object.entries(page.record).map(([name, external]) => [name, external.poolWinner])
+          ),
+        });
+        expect(settled(warm)).toEqual(settled(reelected));
+      },
+      { fixed: true }
+    ));
+
+  // Shrunk at offset 45 (P1's form): r0 wins pool p1, then redeploys without the label that joined it to
+  // p1's other half; the warm record keeps `poolWinner: r0` on members r0 no longer ships. A throw from the
+  // init would satisfy `it.fails` too.
+  it.fails('redeploy: every poolWinner and servedBy still names a remote that ships the pool', () =>
+    run(
+      45,
+      redeploys(),
+      100,
+      async ([spec, redeployed]) => {
+        const rig = openPortfolio({ host: hostOf(spec) });
+        await rig.init(toRemoteEntries(spec));
+        const warm = await rig.init(redeployedEntries(spec, redeployed));
+        expect(strayNames(warm.record)).toEqual([]);
+      },
+      { fixed: true }
+    )
+  );
+});
+
 // Shrunk counterexamples the properties found. Each is `it.fails` until fixed, so vitest reports the fix, then
 // stays here as a plain `it`; the bug's explicit guard goes in `pooling.regression.spec.ts`.
 describe('pooling properties: shrunk counterexamples', () => {
@@ -365,4 +437,76 @@ describe('pooling properties: shrunk counterexamples', () => {
     expect(again.importMap).toEqual(init.importMap);
     expect(again.record).toEqual(init.record);
   });
+
+  // No-tear (binding) with label noise, found by turning `labelNoise`
+  // on for the init properties (CI seed).
+  // r1 labels its @p0/m0 (only the `/sub` entrypoint, 17.0.1) `p1`, which joins p0 and p1 into one pool
+  // whose builds ship its members at different tags. r1 and r2 are islanded `uncovered` for @p0/m0 alone,
+  // and both ship @p1/m0 17.0.0-rc.0, which `imports` serves from r1's file. r2 runs its own @p0/m0 17.0.0
+  // beside r1's @p1/m0, a file r1's build bound to @p0/m0 17.0.1: a split.
+  it.fails(
+    'no-tear (binding): a partly islanded remote does not take a same-tag file from another build',
+    async () => {
+      const spec: PortfolioSpec = {
+        poolSizes: [5, 3],
+        remotes: [
+          {
+            pools: [
+              {
+                major: 0,
+                minor: 0,
+                patch: 0,
+                range: 'major',
+                members: [null, null, null, null, 'root'],
+              },
+              { major: 0, minor: 0, patch: 0, range: 'major', members: [null, null, 'root'] },
+            ],
+            strictVersion: false,
+            extra: null,
+          },
+          {
+            pools: [
+              {
+                major: 0,
+                minor: 0,
+                patch: 1,
+                range: 'major',
+                members: ['sub', null, 'root', null, null],
+              },
+              { major: 0, minor: 0, patch: 0, pre: 0, range: 'major', members: [null, null, null] },
+            ],
+            strictVersion: false,
+            extra: null,
+            relabel: { pool: 0, member: 0, to: 1 },
+          },
+          {
+            pools: [
+              {
+                major: 0,
+                minor: 0,
+                patch: 0,
+                range: 'major',
+                members: [null, null, null, null, null],
+              },
+              { major: 0, minor: 0, patch: 0, pre: 0, range: 'major', members: [null, null, null] },
+            ],
+            strictVersion: false,
+            extra: null,
+          },
+        ],
+        host: null,
+        strict: true,
+      };
+      const entries = toRemoteEntries(spec);
+      // `it.fails` passes on any throw: only the oracle may throw, so a refusal returns and turns this red.
+      const init = await openPortfolio({ strict: true })
+        .init(entries)
+        .catch(() => undefined);
+      if (!init) return;
+      const split = poolTears(init.importMap, init.record, scopeUrlsOf(entries)).flatMap(
+        t => t.split
+      );
+      expect(split).toEqual([]);
+    }
+  );
 });
