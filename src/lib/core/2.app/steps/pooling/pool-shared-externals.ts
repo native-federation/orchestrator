@@ -15,7 +15,7 @@ import type { ModeConfig } from '../../config/mode.contract';
 import { acceptsTag } from 'lib/core/1.domain/externals/basis';
 import { arrivalOrder, hostRemotes } from './pool-views';
 import { electVariants, type Election } from './election';
-import { buildPools } from './pool-graph';
+import { buildPools, SpecifierTags } from './pool-graph';
 import { poolableScopes, syncPoolNames } from './pool.util';
 import type { PoolMember, PoolName, Specifier } from './pool.types';
 
@@ -45,7 +45,12 @@ export function createPoolSharedExternals(
         const rebuilt = new Set<PoolName>();
         for (const [poolName, members] of pools) {
           if (touchedInScope && !members.some(m => touchedInScope.has(m.name))) continue;
-          electPool(poolName, members, scope);
+          try {
+            electPool(poolName, members, scope);
+          } catch (error) {
+            if (error instanceof NFError) throw error;
+            placeSafely(poolName, members, scope, error);
+          }
           rebuilt.add(poolName);
         }
         syncPoolNames(sharedExternals, pools, ports.sharedExternalsRepo, scope, rebuilt);
@@ -137,6 +142,49 @@ export function createPoolSharedExternals(
         scope
       );
     }
+  }
+
+  // A failure elects one pool by the one placement that cannot tear: the host's build, else the first
+  // arrival's, stays global and every other remote serves its whole family itself.
+  function placeSafely(poolName: PoolName, members: PoolMember[], scope: string, error: unknown) {
+    const hosts = hostRemotes(members);
+    const remotes = [...arrivalOrder(members).keys()];
+    const winner = remotes.find(r => hosts.has(r)) ?? remotes[0];
+    config.log.error(
+      3,
+      `[${scope}][pool:${poolName}] could not elect the pool; only '${winner}' resolves globally, every other remote serves its own family.`,
+      error
+    );
+    if (winner === undefined) return;
+
+    const coverage = new SpecifierTags();
+    for (const member of members)
+      for (const version of member.external.versions)
+        for (const meta of version.remotes)
+          if (meta.name === winner)
+            for (const s in meta.entries) if (!coverage.has(s)) coverage.set(s, version.tag);
+
+    const alone = remotes.filter(r => r !== winner);
+    const election: Election = {
+      winner,
+      coverage,
+      global: new Set([winner]),
+      subpools: [],
+      alone,
+      agreeing: new Set(),
+      tagOf: s => coverage.tagOf(s),
+      missOf: () => undefined,
+    };
+    const routes = routesOf(election);
+    const misses = new Map<RemoteName, Miss>(
+      alone.map(r => [r, { cause: 'uncovered', gap: '', strict: false }])
+    );
+    for (const member of members)
+      ports.sharedExternalsRepo.addOrUpdate(
+        member.name,
+        rebuildMember(poolName, member, election, routes, misses, hosts),
+        scope
+      );
   }
 
   function routesOf(election: Election): Map<RemoteName, Route> {

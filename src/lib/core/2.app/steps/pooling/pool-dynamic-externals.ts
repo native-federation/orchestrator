@@ -72,6 +72,7 @@ export function createPoolDynamicExternals(
     const scope = (name: string, cause: PoolCause) => {
       actions[name]!.action = 'scope';
       delete actions[name]!.override;
+      delete actions[name]!.covered;
       verdicts.set(name, { cause });
     };
 
@@ -91,28 +92,38 @@ export function createPoolDynamicExternals(
         const mine = pool.filter(member => names.has(member.name));
         if (mine.length === 0) continue;
 
-        const asked = gateViews(entry.name, pool);
-        // The resolver scoping a member means the committed map cannot serve it — a range rejects its tag, or
-        // under `scopeUncoveredEntrypoints` it lacks an entrypoint — so no committed build is trusted with
-        // this remote: it serves its whole family itself, no dedup.
-        const resolverScoped = mine.find(m => actions[m.name]!.action === 'scope');
-        const verdict = resolverScoped
-          ? missOf(entry.name, asked, resolverScoped.name)
-          : judge(entry.name, asked);
-        if (verdict === 'global') continue;
+        try {
+          const asked = gateViews(entry.name, pool);
+          // The resolver scoping a member means the committed map cannot serve it — a range rejects its tag,
+          // or under `scopeUncoveredEntrypoints` it lacks an entrypoint — so no committed build is trusted
+          // with this remote: it serves its whole family itself, no dedup.
+          const resolverScoped = mine.find(m => actions[m.name]!.action === 'scope');
+          const verdict = resolverScoped
+            ? missOf(entry.name, asked, resolverScoped.name)
+            : judge(entry.name, asked);
+          if (verdict === 'global') continue;
 
-        const subpool = resolverScoped ? undefined : subpoolFor(entry.name, asked, shareScope);
-        if (subpool === undefined) {
-          config.log.warn(
+          const subpool = resolverScoped ? undefined : subpoolFor(entry.name, asked, shareScope);
+          if (subpool === undefined) {
+            config.log.warn(
+              8,
+              `[${shareScope}] ${selfServeWarning(entry.name, verdict, mine.length)}`
+            );
+            mine.forEach(member => scope(member.name, verdict.cause));
+            continue;
+          }
+
+          for (const name of redirect(entry.name, subpool, pool, asked.view, actions))
+            verdicts.set(name, { servedBy: subpool.build });
+        } catch (error) {
+          // Its own build is the one family this remote can always resolve coherently.
+          config.log.error(
             8,
-            `[${shareScope}] ${selfServeWarning(entry.name, verdict, mine.length)}`
+            `[${shareScope}][${entry.name}] could not judge its pool; it serves its own family.`,
+            error
           );
-          mine.forEach(member => scope(member.name, verdict.cause));
-          continue;
+          mine.forEach(member => scope(member.name, 'uncovered'));
         }
-
-        for (const name of redirect(entry.name, subpool, pool, asked.view, actions))
-          verdicts.set(name, { servedBy: subpool.build });
       }
 
       const written: Record<string, SharedExternal> = {};
