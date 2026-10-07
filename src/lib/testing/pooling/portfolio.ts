@@ -58,6 +58,11 @@ export type PortfolioOptions = {
    * needed to init from remote entries and to `reload`.
    */
   realRepositories?: boolean;
+  /**
+   * The share scope `seed` writes into and every reader (`stored`, `islands`, the oracle) reads; global by
+   * default. Remote entries carry their own `shareScope`.
+   */
+  scope?: string;
 };
 
 export type DynamicLoad = {
@@ -76,6 +81,7 @@ export const portfolio = (
     assertNoTear: checkTear = true,
     strict = false,
     realRepositories = false,
+    scope = GLOBAL_SCOPE,
   }: PortfolioOptions = {}
 ) => {
   // What the flows fetch: remote entries by URL, handed out as fresh copies the way a fetch parses them.
@@ -143,22 +149,28 @@ export const portfolio = (
 
   let { config, adapters, drivers } = wire(true);
 
-  const seed = (name: string, versions: SharedVersion[], dirty = true) =>
+  // `state` is what an earlier election stored on the record, for a fixture that starts warm.
+  const seed = (
+    name: string,
+    versions: SharedVersion[],
+    dirty = true,
+    state: Pick<SharedExternal, 'poolName' | 'poolWinner'> = {}
+  ) =>
     adapters.sharedExternalsRepo.addOrUpdate(
       name,
-      storedRecord(name, versions, adapters.versionCheck.compare, dirty),
-      undefined
+      { ...storedRecord(name, versions, adapters.versionCheck.compare, dirty), ...state },
+      scope
     );
 
-  const stored = (): shareScope => adapters.sharedExternalsRepo.getFromScope(undefined);
+  const stored = (): shareScope => adapters.sharedExternalsRepo.getFromScope(scope);
 
   const record = (name: string): SharedExternal => stored()[name]!;
 
   const assertNoTear = (importMap: ImportMap) => {
     if (!checkTear) return;
-    expect(
-      tearsByPool({ importMap, externals: { [GLOBAL_SCOPE]: stored() }, scopeUrls, hosts })
-    ).toEqual([]);
+    expect(tearsByPool({ importMap, externals: { [scope]: stored() }, scopeUrls, hosts })).toEqual(
+      []
+    );
   };
 
   /**

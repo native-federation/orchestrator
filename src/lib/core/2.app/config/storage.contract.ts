@@ -23,6 +23,9 @@ const STORAGE_KEYS = {
 
 type StorageKey = (typeof STORAGE_KEYS)[keyof typeof STORAGE_KEYS];
 
+// Holds the orchestrator version that wrote the cache; a cache stamped with any other is dropped.
+const STORAGE_VERSION_KEY = 'version';
+
 type StorageEntryHandler = <TValue>(key: string, initialValue: TValue) => StorageEntry<TValue>;
 
 type StorageConfig = {
@@ -47,4 +50,5 @@ export {
   StorageType,
   StorageKey,
   STORAGE_KEYS,
+  STORAGE_VERSION_KEY,
 };
