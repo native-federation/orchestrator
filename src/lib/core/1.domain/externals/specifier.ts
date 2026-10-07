@@ -36,6 +36,11 @@ export class SpecifierTags extends Map<Specifier, VersionName> {
     return this;
   }
 
+  override clear(): void {
+    super.clear();
+    this.packages.clear();
+  }
+
   tagOf(specifier: Specifier): VersionName | undefined {
     return this.get(specifier) ?? this.packages.get(owningPackage(specifier) ?? specifier);
   }

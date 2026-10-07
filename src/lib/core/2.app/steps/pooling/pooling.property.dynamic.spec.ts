@@ -38,7 +38,7 @@ describe('pooling properties: dynamic loads (generated portfolios)', { timeout: 
   it('dynamic additivity: the delta never re-declares a committed key and adds no tear', () =>
     run(
       101,
-      portfolioArbitrary({ maxRemotes: 12 }).chain(spec =>
+      portfolioArbitrary({ maxRemotes: 12, labelNoise: true }).chain(spec =>
         fc.tuple(fc.constant(lenient(spec)), extraRemotesArbitrary(spec))
       ),
       150,

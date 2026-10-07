@@ -12,6 +12,7 @@ import {
 } from 'lib/testing/pooling/generate-portfolio';
 import {
   TIMEOUT,
+  accepts,
   copiesOf,
   electedTags,
   initOrRefuse,
@@ -59,7 +60,7 @@ describe('pooling properties: init (generated portfolios)', { timeout: TIMEOUT }
     }));
 
   it('no-tear (binding): no file a remote reaches binds a second tag of any specifier', () =>
-    run(2, portfolioArbitrary(), 300, async spec => {
+    run(2, portfolioArbitrary({ labelNoise: true }), 300, async spec => {
       const init = await initOrRefuse(spec);
       if (!init.ok) return;
       const { importMap, record } = init.result;
@@ -272,6 +273,63 @@ describe('pooling properties: init (generated portfolios)', { timeout: TIMEOUT }
       }
     }));
 
+  // A remote alone serves its family itself, which a subpool whose build serves it would spare. The rounds
+  // see to that for the remotes waiting at the time; a remote the publish fixpoint takes off the global map
+  // later must find a subpool too, whether it came from one or from round 1 (docs/version-resolver.md
+  // §"How pooling resolves", step 4). Without that, it went `uncovered`, and this property failed at offset 19
+  // (most generated portfolios demote nobody). The one exception is on purpose (step 2): a lender stays out of
+  // a subpool so that its loan keeps a publisher. Restated here as any remote that ships, at the winner's tag of
+  // a member, an entrypoint the winner does not list, which spares a few more remotes than the election does.
+  // Two known gaps the election still has (backlog) that this stream does not reach: (A) a lender whose loan
+  // the fixpoint drops stays alone, as `lenders` is computed once against round 1's coverage; (B) the build of
+  // a dissolved subpool stays alone even when a surviving subpool's build serves it.
+  it('no stray loner: no remote left alone is served by a final subpool build', () =>
+    run(19, portfolioArbitrary({ labelNoise: true }), 250, async spec => {
+      const init = await initOrRefuse(spec);
+      if (!init.ok) return;
+      for (const [pool, members] of pools(init.result.record)) {
+        const copies = copiesOf(members);
+        const remotes = [...new Set(copies.map(c => c.remote))];
+        const builds = remotes.filter(r => placementOf(r, copies).servesOthers);
+        const winnerCopies = copies.filter(
+          c => c.remote === Object.values(members).find(m => m.poolWinner)?.poolWinner
+        );
+        const lends = (remote: string) =>
+          copies.some(
+            c =>
+              c.remote === remote &&
+              c.specifiers.some(
+                s =>
+                  !winnerCopies.some(w => w.specifiers.includes(s)) &&
+                  winnerCopies.some(
+                    w => w.tag === c.tag && (w.member === c.member || s.startsWith(`${w.member}/`))
+                  )
+              )
+          );
+        // The election's `serves`: the build lists every specifier the remote ships, at a tag its range accepts.
+        const serves = (build: string, remote: string) => {
+          const tagOf = new Map<string, string>();
+          for (const c of copies)
+            if (c.remote === build)
+              for (const s of c.specifiers) if (!tagOf.has(s)) tagOf.set(s, c.tag);
+          return copies
+            .filter(c => c.remote === remote)
+            .every(c =>
+              c.specifiers.every(s => tagOf.has(s) && accepts(tagOf.get(s)!, c.tag, c.range))
+            );
+        };
+        for (const remote of remotes) {
+          const { causes, servedBy } = placementOf(remote, copies);
+          if (causes.length === 0 || servedBy.length > 0 || lends(remote)) continue;
+          const at = { pool, remote };
+          expect({ ...at, servedBy: builds.filter(b => serves(b, remote)) }).toEqual({
+            ...at,
+            servedBy: [],
+          });
+        }
+      }
+    }));
+
   // The oracles judge combinations, not ranges: a placement that runs a tag the copy's own range rejects is
   // coherent and untorn, so only this property sees it.
   it('range soundness: every pooled copy runs a tag its own range accepts', () =>
@@ -443,70 +501,68 @@ describe('pooling properties: shrunk counterexamples', () => {
   // r1 labels its @p0/m0 (only the `/sub` entrypoint, 17.0.1) `p1`, which joins p0 and p1 into one pool
   // whose builds ship its members at different tags. r1 and r2 are islanded `uncovered` for @p0/m0 alone,
   // and both ship @p1/m0 17.0.0-rc.0, which `imports` serves from r1's file. r2 runs its own @p0/m0 17.0.0
-  // beside r1's @p1/m0, a file r1's build bound to @p0/m0 17.0.1: a split.
-  it.fails(
-    'no-tear (binding): a partly islanded remote does not take a same-tag file from another build',
-    async () => {
-      const spec: PortfolioSpec = {
-        poolSizes: [5, 3],
-        remotes: [
-          {
-            pools: [
-              {
-                major: 0,
-                minor: 0,
-                patch: 0,
-                range: 'major',
-                members: [null, null, null, null, 'root'],
-              },
-              { major: 0, minor: 0, patch: 0, range: 'major', members: [null, null, 'root'] },
-            ],
-            strictVersion: false,
-            extra: null,
-          },
-          {
-            pools: [
-              {
-                major: 0,
-                minor: 0,
-                patch: 1,
-                range: 'major',
-                members: ['sub', null, 'root', null, null],
-              },
-              { major: 0, minor: 0, patch: 0, pre: 0, range: 'major', members: [null, null, null] },
-            ],
-            strictVersion: false,
-            extra: null,
-            relabel: { pool: 0, member: 0, to: 1 },
-          },
-          {
-            pools: [
-              {
-                major: 0,
-                minor: 0,
-                patch: 0,
-                range: 'major',
-                members: [null, null, null, null, null],
-              },
-              { major: 0, minor: 0, patch: 0, pre: 0, range: 'major', members: [null, null, null] },
-            ],
-            strictVersion: false,
-            extra: null,
-          },
-        ],
-        host: null,
-        strict: true,
-      };
-      const entries = toRemoteEntries(spec);
-      // `it.fails` passes on any throw: only the oracle may throw, so a refusal returns and turns this red.
-      const init = await openPortfolio({ strict: true })
-        .init(entries)
-        .catch(() => undefined);
-      if (!init) return;
-      const split = poolTears(init.importMap, init.record, scopeUrlsOf(entries)).flatMap(
-        t => t.split
-      );
-      expect(split).toEqual([]);
-    }
-  );
+  // beside r1's @p1/m0, a file r1's build bound to @p0/m0 17.0.1: a split. Fixed by letting only a build that
+  // takes every member it ships from the global map publish a file there.
+  it('no-tear (binding): a partly islanded remote does not take a same-tag file from another build', async () => {
+    const spec: PortfolioSpec = {
+      poolSizes: [5, 3],
+      remotes: [
+        {
+          pools: [
+            {
+              major: 0,
+              minor: 0,
+              patch: 0,
+              range: 'major',
+              members: [null, null, null, null, 'root'],
+            },
+            { major: 0, minor: 0, patch: 0, range: 'major', members: [null, null, 'root'] },
+          ],
+          strictVersion: false,
+          extra: null,
+        },
+        {
+          pools: [
+            {
+              major: 0,
+              minor: 0,
+              patch: 1,
+              range: 'major',
+              members: ['sub', null, 'root', null, null],
+            },
+            { major: 0, minor: 0, patch: 0, pre: 0, range: 'major', members: [null, null, null] },
+          ],
+          strictVersion: false,
+          extra: null,
+          relabel: { pool: 0, member: 0, to: 1 },
+        },
+        {
+          pools: [
+            {
+              major: 0,
+              minor: 0,
+              patch: 0,
+              range: 'major',
+              members: [null, null, null, null, null],
+            },
+            { major: 0, minor: 0, patch: 0, pre: 0, range: 'major', members: [null, null, null] },
+          ],
+          strictVersion: false,
+          extra: null,
+        },
+      ],
+      host: null,
+      strict: true,
+    };
+    const entries = toRemoteEntries(spec);
+    // A strict refusal places nothing, so it cannot tear.
+    const init = await openPortfolio({ strict: true })
+      .init(entries)
+      .catch(() => undefined);
+    if (!init) return;
+    const split = poolTears(init.importMap, init.record, scopeUrlsOf(entries)).flatMap(
+      t => t.split
+    );
+    expect(split).toEqual([]);
+  });
 });

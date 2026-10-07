@@ -978,4 +978,300 @@ describe('pooling regressions', () => {
       expect(resolves(merged, 'team/mfe-d', '@fw/common')).toBe(file('team/mfe-s', '@fw/common'));
     });
   });
+
+  /**
+   * A remote that serves some members itself could still publish a global file: rule 5 gave an
+   * agreeing build every file at a tag round 1 publishes, and both the extension and round 1's same-tag loans
+   * took files from such builds. Import-map scopes are keyed by URL, so that file's own imports resolve in its
+   * owner's scope, and every remote taking it also ran the owner's private copies one hop in: a split. Now only
+   * a build that takes every member it ships from the global map may publish one. Both cases are one pool
+   * under one npm-scope label, no label noise; the harness's no-tear oracle failed each with a `split` for c.
+   */
+  describe('a build serving some members itself publishes no global file', () => {
+    const CORE = '@ng/core';
+    const ROUTER = '@ng/router';
+    const MATERIAL = '@ng/material';
+    const CDK = '@ng/cdk';
+
+    const copy = (remote: string, entries?: Record<string, string>) => ({
+      remote,
+      req: '^17.3.0',
+      strict: false,
+      entries,
+    });
+
+    // w (core, router) wins round 1: p and c both agree with it, and neither serves the other, as they import
+    // different cdk entrypoints. They disagree on cdk's tag, so the extension published material@17.3.0
+    // (both ship it) but not cdk. c took p's material file, whose `@ng/cdk/overlay` import resolves in p's
+    // scope at 17.3.1, beside its own cdk 17.3.0. Neither p nor c takes every member globally, so material is
+    // not published at all now.
+    it('through the extension', async () => {
+      const p = portfolio(
+        { w: 'http://w/', p: 'http://p/', c: 'http://c/' },
+        { storage: 'nf-regression-t1-extension' }
+      );
+      p.seed(CORE, [p.version('17.3.0', CORE, [copy('w'), copy('p'), copy('c')])]);
+      p.seed(ROUTER, [p.version('17.3.0', ROUTER, [copy('w')])]);
+      p.seed(MATERIAL, [p.version('17.3.0', MATERIAL, [copy('p'), copy('c')])]);
+      p.seed(CDK, [
+        p.version('17.3.1', CDK, [copy('p', { '@ng/cdk/overlay': '@ng/cdk/overlay.js' })]),
+        p.version('17.3.0', CDK, [copy('c', { '@ng/cdk': '@ng/cdk.js' })]),
+      ]);
+
+      const importMap = await p.runInit();
+
+      expect(importMap.imports).toEqual({
+        [CORE]: 'http://w/@ng/core.js',
+        [ROUTER]: 'http://w/@ng/router.js',
+      });
+      expect(p.islands()).toEqual({ p: 'uncovered', c: 'uncovered' });
+    });
+
+    // The host w ships cdk's root; l and c lend cdk/overlay at w's tag. They ship different material
+    // entrypoints at different tags, so neither serves the other and material is not published. The overlay
+    // file was l's, which binds l's material 17.3.1, and c ran it beside its own material 17.3.0.
+    it('through a borrowed entrypoint', async () => {
+      const p = portfolio(
+        { w: 'http://w/', l: 'http://l/', c: 'http://c/' },
+        { storage: 'nf-regression-t1-loan', hosts: ['w'] }
+      );
+      p.seed(CORE, [
+        { ...p.version('17.3.0', CORE, [copy('w'), copy('l'), copy('c')]), host: true },
+      ]);
+      p.seed(CDK, [
+        {
+          ...p.version('17.3.0', CDK, [
+            copy('w', { '@ng/cdk': '@ng/cdk.js' }),
+            copy('l', { '@ng/cdk/overlay': '@ng/cdk/overlay.js' }),
+            copy('c', { '@ng/cdk/overlay': '@ng/cdk/overlay.js' }),
+          ]),
+          host: true,
+        },
+      ]);
+      p.seed(MATERIAL, [
+        p.version('17.3.1', MATERIAL, [copy('l', { '@ng/material/sort': '@ng/material/sort.js' })]),
+        p.version('17.3.0', MATERIAL, [
+          copy('c', { '@ng/material/table': '@ng/material/table.js' }),
+        ]),
+      ]);
+
+      const importMap = await p.runInit();
+
+      expect(importMap.imports).toEqual({
+        [CORE]: 'http://w/@ng/core.js',
+        [CDK]: 'http://w/@ng/cdk.js',
+      });
+      expect(p.islands()).toEqual({ l: 'uncovered', c: 'uncovered' });
+    });
+
+    // The host w wins with core+router@17.3.0. n's build (Y@17.3.1, Z@17.3.5) serves m1 and m2 (router and
+    // Y at 17.3.1 and 17.3.0, `^17.3.0`), so they form subpool n. The extension publishes Y@17.3.1, as n is
+    // the only agreeing remote shipping Y (m1 and m2 disagree on router), and m1 and m2 move onto the global
+    // map, which n's build witnesses. But n serves Z itself (q ships it at 17.3.4, both exact), so the
+    // fixpoint drops Y and takes m1 and m2 off the global map again. They went `alone` and each served its
+    // whole family itself; now they go back to the later rounds and n's subpool takes them in again.
+    it('sends a remote the fixpoint takes off the global map back to the subpool rounds', async () => {
+      const Y = '@ng/y';
+      const Z = '@ng/z';
+      const p = portfolio(
+        { w: 'http://w/', n: 'http://n/', q: 'http://q/', m1: 'http://m1/', m2: 'http://m2/' },
+        { storage: 'nf-regression-t1-demoted', hosts: ['w'] }
+      );
+      const at = (remote: string, req = '^17.3.0') => ({ remote, req, strict: false });
+      p.seed(CORE, [
+        {
+          ...p.version(
+            '17.3.0',
+            CORE,
+            ['w', 'n', 'q', 'm1', 'm2'].map(r => at(r))
+          ),
+          host: true,
+        },
+      ]);
+      p.seed(ROUTER, [
+        p.version('17.3.1', ROUTER, [at('m1'), at('m2')]),
+        { ...p.version('17.3.0', ROUTER, [at('w'), at('n')]), host: true },
+      ]);
+      p.seed(Y, [p.version('17.3.1', Y, [at('n')]), p.version('17.3.0', Y, [at('m1'), at('m2')])]);
+      p.seed(Z, [
+        p.version('17.3.5', Z, [at('n', '17.3.5')]),
+        p.version('17.3.4', Z, [at('q', '17.3.4')]),
+      ]);
+
+      const importMap = await p.runInit();
+
+      expect(importMap.imports).toEqual({
+        [CORE]: 'http://w/@ng/core.js',
+        [ROUTER]: 'http://w/@ng/router.js',
+      });
+      expect(p.islands()).toEqual({
+        n: 'subpool n',
+        m1: 'subpool n',
+        m2: 'subpool n',
+        q: 'uncovered',
+      });
+      expect(importMap.scopes?.['http://m1/']).toEqual({
+        [ROUTER]: 'http://n/@ng/router.js',
+        [Y]: 'http://n/@ng/y.js',
+      });
+    });
+
+    // As above, but n's subpool survives the extension: m3 (router@17.3.1, Z@17.3.5) stays in it, as the
+    // extended coverage does not serve Z, while m1 (router@17.3.1, Y@17.3.0) moves onto the global map. When
+    // the fixpoint drops Y again, no new subpool can form around m1, so it has to rejoin subpool n, the one
+    // it left, instead of going `alone` and serving its whole family itself.
+    it('returns a remote the fixpoint takes off the global map to the subpool it left', async () => {
+      const Y = '@ng/y';
+      const Z = '@ng/z';
+      const p = portfolio(
+        { w: 'http://w/', n: 'http://n/', q: 'http://q/', m1: 'http://m1/', m3: 'http://m3/' },
+        { storage: 'nf-regression-t1-rejoin', hosts: ['w'] }
+      );
+      const at = (remote: string, req = '^17.3.0') => ({ remote, req, strict: false });
+      p.seed(CORE, [
+        {
+          ...p.version(
+            '17.3.0',
+            CORE,
+            ['w', 'n', 'q', 'm1', 'm3'].map(r => at(r))
+          ),
+          host: true,
+        },
+      ]);
+      p.seed(ROUTER, [
+        p.version('17.3.1', ROUTER, [at('m3'), at('m1')]),
+        { ...p.version('17.3.0', ROUTER, [at('w'), at('n')]), host: true },
+      ]);
+      p.seed(Y, [p.version('17.3.1', Y, [at('n')]), p.version('17.3.0', Y, [at('m1')])]);
+      p.seed(Z, [
+        p.version('17.3.5', Z, [at('n', '17.3.5'), at('m3')]),
+        p.version('17.3.4', Z, [at('q', '17.3.4')]),
+      ]);
+
+      const importMap = await p.runInit();
+
+      expect(importMap.imports).toEqual({
+        [CORE]: 'http://w/@ng/core.js',
+        [ROUTER]: 'http://w/@ng/router.js',
+      });
+      // Without the way back, m1 went `uncovered` and scoped its own core, router and Y.
+      expect(p.islands()).toEqual({
+        n: 'subpool n',
+        m1: 'subpool n',
+        m3: 'subpool n',
+        q: 'uncovered',
+      });
+      expect(importMap.scopes?.['http://m1/']).toEqual({
+        [ROUTER]: 'http://n/@ng/router.js',
+        [Y]: 'http://n/@ng/y.js',
+      });
+    });
+
+    // The same way back for a remote round 1 placed. The host w ships core alone; l lends it `core/testing`
+    // at 17.3.0, so round 1 serves a (core and core/testing at 17.3.1). l ships router too, so it serves
+    // itself and m (router@17.3.1) as subpool l. But l runs router off the global map, so it publishes
+    // nothing: the fixpoint drops `core/testing` and takes a off the global map again. a was never in a
+    // subpool and no new one forms around it; it joins subpool l, whose build serves it, instead of going
+    // `alone` and serving core itself.
+    it('puts a remote the fixpoint takes off the global map in a subpool whose build serves it', async () => {
+      const TESTING = '@ng/core/testing';
+      const p = portfolio(
+        { w: 'http://w/', l: 'http://l/', a: 'http://a/', m: 'http://m/' },
+        { storage: 'nf-regression-t1-round1', hosts: ['w'] }
+      );
+      const at = (remote: string, entries?: Record<string, string>) => ({
+        remote,
+        req: '^17.3.0',
+        strict: false,
+        entries,
+      });
+      const withTesting = (remote: string) =>
+        at(remote, { [CORE]: `${remote}-core.js`, [TESTING]: `${remote}-testing.js` });
+      p.seed(CORE, [
+        p.version('17.3.1', CORE, [withTesting('a')]),
+        { ...p.version('17.3.0', CORE, [at('w'), withTesting('l'), at('m')]), host: true },
+      ]);
+      p.seed(ROUTER, [
+        p.version('17.3.1', ROUTER, [at('m')]),
+        p.version('17.3.0', ROUTER, [at('l')]),
+      ]);
+
+      const importMap = await p.runInit();
+
+      expect(importMap.imports).toEqual({ [CORE]: 'http://w/@ng/core.js' });
+      // Without it, a went `uncovered` and scoped its own core and core/testing.
+      expect(p.islands()).toEqual({ a: 'subpool l', l: 'subpool l', m: 'subpool l' });
+      expect(importMap.scopes?.['http://a/']).toEqual({
+        [CORE]: 'http://l/l-core.js',
+        [TESTING]: 'http://l/l-testing.js',
+      });
+    });
+
+    // A flat and a dense build of one entrypoint. The host w ships core+router; p ships `@ng/cdk/overlay` as
+    // a package of its own, n and x as an entry of `@ng/cdk`, all at 17.3.0. The extension publishes the
+    // overlay (p, n and x agree on it) and p moves global, but n and x ship forms at 17.3.1 and 17.3.0
+    // (exact), so they serve forms themselves and publish nothing. The coverage check let n's and x's dense
+    // copies onto the global map, since p publishes the overlay at their tag. The import map maps a
+    // specifier from whichever external reaches it first, so with `@ng/cdk` stored first it took n's overlay
+    // file, which binds n's forms 17.3.1, and x ran it beside its own forms 17.3.0. A copy that serves some
+    // member itself now takes a file global only where a publishing copy of the same member lists it.
+    for (const denseFirst of [true, false])
+      it(`publishes no file of a build serving some members itself from a dense record (dense first: ${denseFirst})`, async () => {
+        const OVERLAY = '@ng/cdk/overlay';
+        const FORMS = '@ng/forms';
+        const p = portfolio(
+          { w: 'http://w/', p: 'http://p/', n: 'http://n/', x: 'http://x/' },
+          { storage: `nf-regression-t1-dense-${denseFirst}`, hosts: ['w'] }
+        );
+        const at = (remote: string, entries?: Record<string, string>, req = '^17.3.0') => ({
+          remote,
+          req,
+          strict: false,
+          entries,
+        });
+        p.seed(CORE, [
+          {
+            ...p.version(
+              '17.3.0',
+              CORE,
+              ['w', 'p', 'n', 'x'].map(r => at(r))
+            ),
+            host: true,
+          },
+        ]);
+        p.seed(ROUTER, [{ ...p.version('17.3.0', ROUTER, [at('w')]), host: true }]);
+        const dense = () =>
+          p.seed(CDK, [
+            p.version('17.3.0', CDK, [
+              at('n', { [OVERLAY]: 'n-overlay.js' }),
+              at('x', { [OVERLAY]: 'x-overlay.js' }),
+            ]),
+          ]);
+        const flat = () => p.seed(OVERLAY, [p.version('17.3.0', OVERLAY, [at('p')])]);
+        if (denseFirst) {
+          dense();
+          flat();
+        } else {
+          flat();
+          dense();
+        }
+        p.seed(FORMS, [
+          p.version('17.3.1', FORMS, [at('n', undefined, '17.3.1')]),
+          p.version('17.3.0', FORMS, [at('x', undefined, '17.3.0')]),
+        ]);
+
+        const importMap = await p.runInit();
+
+        expect(importMap.imports).toEqual({
+          [CORE]: 'http://w/@ng/core.js',
+          [ROUTER]: 'http://w/@ng/router.js',
+          [OVERLAY]: 'http://p/@ng/cdk/overlay.js',
+        });
+        expect(p.islands()).toEqual({ n: 'uncovered', x: 'uncovered' });
+        expect(importMap.scopes?.['http://x/']).toEqual({
+          [OVERLAY]: 'http://x/x-overlay.js',
+          [FORMS]: 'http://x/@ng/forms.js',
+        });
+      });
+  });
 });

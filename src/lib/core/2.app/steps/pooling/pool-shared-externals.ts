@@ -177,6 +177,7 @@ export function createPoolSharedExternals(
       subpools: [],
       alone,
       agreeing: new Set(),
+      publishing: new Set(),
       tagOf: s => coverage.tagOf(s),
       missOf: () => undefined,
     };
@@ -236,14 +237,40 @@ export function createPoolSharedExternals(
       if (meta.name === election.winner && hosts.has(meta.name)) row.host = true;
     };
 
+    const runsOf = (name: RemoteName) => {
+      const route = routes.get(name)!;
+      return route.kind === 'subpool' ? route.build : name;
+    };
+    const publishes = (name: RemoteName) =>
+      routes.get(name)!.kind === 'global' || election.publishing.has(runsOf(name));
+    // What those copies of this member ship, per tag. The import map maps a specifier from whichever external
+    // reaches it first, so a publisher in another member's record cannot stop a copy of this one claiming it.
+    const publishedAt = new Map<VersionName, Set<Specifier>>();
+    for (const version of member.external.versions)
+      for (const { name, entries } of version.remotes)
+        if (publishes(name)) {
+          let specifiers = publishedAt.get(version.tag);
+          if (!specifiers) publishedAt.set(version.tag, (specifiers = new Set()));
+          for (const s in entries) specifiers.add(s);
+        }
+
     for (const version of member.external.versions) {
       for (const stored of version.remotes) {
         const { servedBy: _servedBy, poolCause: _poolCause, ...meta } = stored;
         const route = routes.get(meta.name)!;
-        const runs = route.kind === 'subpool' ? route.build : meta.name;
-        // Rule 5: a build agreeing with round 1 takes its files wherever round 1 publishes this package.
+        const runs = runsOf(meta.name);
+        // Rule 5: a build agreeing with round 1 takes its files wherever round 1 publishes this package; one
+        // that serves some member itself only where a publishing copy at its tag lists every file it takes.
         const global =
-          route.kind === 'global' || (election.agreeing.has(runs) && pinned !== undefined);
+          route.kind === 'global' ||
+          (election.agreeing.has(runs) &&
+            pinned !== undefined &&
+            (election.publishing.has(runs) ||
+              Object.keys(meta.entries).every(
+                s =>
+                  election.coverage.get(s) === version.tag &&
+                  publishedAt.get(version.tag)?.has(s) === true
+              )));
 
         if (global) place(version.tag, version.tag === published ? 'share' : 'skip', meta);
         else if (route.kind === 'subpool' || builds.has(meta.name))
@@ -251,6 +278,10 @@ export function createPoolSharedExternals(
         else place(version.tag, 'scope', { ...meta, poolCause: misses.get(meta.name)!.cause });
       }
     }
+
+    // Stable, so the winner still leads; the import map publishes the first copy listing a specifier.
+    for (const row of rows.values())
+      row.remotes.sort((a, b) => Number(!publishes(a.name)) - Number(!publishes(b.name)));
 
     // Newest tag first, as `commit()` orders a record; within a tag `share`, `skip`, then `scope`.
     const order = { share: 0, skip: 1, scope: 2 };

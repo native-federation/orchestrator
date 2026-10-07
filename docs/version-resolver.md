@@ -700,11 +700,16 @@ builds. Rounds repeat while some build serves at least two; earlier rounds never
 build's files through scopes (`servedBy`).
 
 **4. Extension.** A package the winner does not ship at all is published globally when every remote outside
-round 1 that agrees with the coverage, and whose files would resolve globally, ships it at one tag. Every
-remote the extended coverage now serves moves onto the global map, in a subpool or not — but a subpool's
-build only once no other member needs it, so a subpool moves as a whole or keeps its build. A subpool left
-with its build alone dissolves: that remote moves onto the global map when served, else serves itself. It
-runs after the rounds so the rounds can place what it does not settle.
+round 1 that agrees with the coverage, and whose files would resolve globally, ships it at one tag. A build's
+files resolve globally when it runs every member it ships from the global map: a file's own imports resolve
+in its owner's scope, so a file of a build that serves any member itself binds that build's copy for
+whoever takes it. Every remote the extended coverage now serves moves onto the global map, in a subpool or
+not — but a subpool's build only once no other member needs it, so a subpool moves as a whole or keeps its
+build. A subpool left with its build alone dissolves: that remote moves onto the global map when served, else
+serves itself. It runs after the rounds so the rounds can place what it does not settle. Then the coverage
+keeps only what a build whose files resolve globally ships at its tag, a borrowed entrypoint included, and a
+remote it no longer serves leaves the global map: it joins the first subpool whose build serves it, else
+another round of subpools, until nothing changes.
 Served is not enough to move: **one build must have shipped the combination the remote would resolve**,
 counting a build's package at its tag for that package's other entrypoints. The winner's `core@18.0.1` next
 to another build's `common@18.0.1` is a pair no build shipped, so a remote importing both stays where the
@@ -714,7 +719,10 @@ rounds put it (or serves itself, `uncovered`) rather than resolving that pair.
 a remote left alone — that agrees with the final coverage on *everything* both ship takes the global files for
 those packages and serves only the rest itself. A remote that disagrees on anything takes nothing global,
 **not even a file at its own version**: that file's own imports bind the global peers, so it would run the
-global `core` under its own `router` one hop in.
+global `core` under its own `router` one hop in. A remote that serves any member itself publishes no global
+file; it takes a copy global only where a build whose files resolve globally lists every entrypoint of that
+copy in its own copy of the same member, at the same tag, since the import map maps a specifier from whichever
+member reaches it first.
 
 **6. Everyone left serves themselves**, with the reason recorded (`poolCause`, see
 [What pooling stores](#what-pooling-stores)).

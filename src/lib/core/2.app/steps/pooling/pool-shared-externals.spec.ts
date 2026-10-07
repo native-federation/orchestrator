@@ -700,7 +700,8 @@ describe('createPoolSharedExternals', () => {
 
       it('dissolves a subpool the extension leaves with its build alone', async () => {
         // a also ships cdk@17.1.0, c ships cdk@17.0.0 and their ranges keep them apart, so cdk is not
-        // published: r moves global, a cannot, and a subpool of one is none.
+        // published: r moves global, a cannot, and a subpool of one is none. r leads the animations row: a
+        // serves cdk itself, so a file of its would bind a's cdk for whoever takes it.
         seedPortfolio([copy('c', '^17.0.0')]);
         p.seed('@framework/cdk', [
           at('17.1.0', '@framework/cdk', [copy('a', '~17.1.0')]),
@@ -709,7 +710,7 @@ describe('createPoolSharedExternals', () => {
 
         await p.runInit();
 
-        expect(rowsOf('@framework/animations')).toEqual(['17.0.0:share:[a,r]']);
+        expect(rowsOf('@framework/animations')).toEqual(['17.0.0:share:[r,a]']);
         expect(namesOf('@framework/cdk', 'scope')).toEqual(['a', 'c']);
         expect(verdicts()).toEqual(['a@@framework/cdk: uncovered', 'c@@framework/cdk: uncovered']);
       });
