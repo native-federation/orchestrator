@@ -12,14 +12,13 @@ import { NFError } from 'lib/core/native-federation.error';
 import type { DrivingContract } from '../../driving-ports/driving.contract';
 import type { LoggingConfig } from '../../config/log.contract';
 import type { ModeConfig } from '../../config/mode.contract';
-import { acceptsTag } from 'lib/core/1.domain/externals/basis';
-import { arrivalOrder, hostRemotes } from './pool-views';
-import { electVariants, type Election } from './election';
-import { buildPools, SpecifierTags } from './pool-graph';
+import { acceptsTag } from 'lib/core/1.domain/externals/compatibility';
+import { arrivalOrder, hostRemotes } from 'lib/core/1.domain/pooling/views';
+import { electVariants, type Election } from 'lib/core/1.domain/pooling/election';
+import { buildPools, type PoolMember, type PoolName } from 'lib/core/1.domain/pooling/membership';
+import { type Specifier, SpecifierTags } from 'lib/core/1.domain/externals/specifier';
 import { poolableScopes, syncPoolNames } from './pool.util';
-import type { PoolMember, PoolName, Specifier } from './pool.types';
 
-// Where one remote's copies resolve: the global map, the build of the subpool it runs in, or its own.
 type Route = { kind: 'global' } | { kind: 'subpool'; build: RemoteName } | { kind: 'own' };
 
 // Why a remote missed round 1, worded for the log and stored as `poolCause` on what it scopes.
@@ -30,18 +29,20 @@ export function createPoolSharedExternals(
   config: LoggingConfig & ModeConfig,
   ports: Pick<DrivingContract, 'sharedExternalsRepo' | 'versionCheck'>
 ): ForPoolingSharedExternals {
-  // Elects every pool `determine` left alone and rewrites its members' records; see docs/version-resolver.md
-  // §"How pooling resolves". A pool is marked dirty as a whole, so one with no touched member is what storage
-  // already holds.
+  // See docs/version-resolver.md §"How pooling resolves". A pool is marked dirty as a whole, so one with no
+  // touched member is what storage already holds.
   return (touched?: TouchedExternals) => {
-    for (const scope of poolableScopes(ports.sharedExternalsRepo)) {
+    const inTouched = (scope: string) => !touched || touched.has(scope);
+    for (const [scope, sharedExternals] of poolableScopes(ports.sharedExternalsRepo, inTouched)) {
       const touchedInScope = touched?.get(scope);
-      if (touched && !touchedInScope) continue;
-
-      const sharedExternals = ports.sharedExternalsRepo.getFromScope(scope);
 
       try {
-        const pools = buildPools(sharedExternals, config.log);
+        const { pools, lonelyTags } = buildPools(sharedExternals);
+        for (const name of lonelyTags)
+          config.log.warn(
+            3,
+            `[${name}] declares a 'pool' tag but no other external joined its pool; likely a typo or a missing sibling.`
+          );
         const rebuilt = new Set<PoolName>();
         for (const [poolName, members] of pools) {
           if (touchedInScope && !members.some(m => touchedInScope.has(m.name))) continue;

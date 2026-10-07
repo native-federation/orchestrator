@@ -108,8 +108,15 @@ describe('createPoolDynamicExternals', () => {
       )
       .sort();
 
-  it('leaves an all-compatible (all skip) family untouched', async () => {
+  it('leaves a family that agrees with the committed map (all skip) untouched', async () => {
     const entry = entryWith(shared('@framework/core'), shared('@framework/common'));
+    givenCommitted({
+      '@framework/core': committed('@framework/core', { tag: '17.0.0', remotes: ['host', 'mfe'] }),
+      '@framework/common': committed('@framework/common', {
+        tag: '17.0.0',
+        remotes: ['host', 'mfe'],
+      }),
+    });
     const actions: SharedInfoActions = {
       '@framework/core': { action: 'skip', override: 'http://host/core.js' },
       '@framework/common': { action: 'skip', override: 'http://host/common.js' },
@@ -121,72 +128,6 @@ describe('createPoolDynamicExternals', () => {
       '@framework/core': { action: 'skip', override: 'http://host/core.js' },
       '@framework/common': { action: 'skip', override: 'http://host/common.js' },
     });
-  });
-
-  it('forces the whole family to scope when one member is incompatible', async () => {
-    const entry = entryWith(shared('@framework/core'), shared('@framework/common'));
-    givenCommitted({
-      '@framework/core': committed('@framework/core', { tag: '17.0.0', remotes: ['host', 'mfe'] }),
-      '@framework/common': committed('@framework/common', {
-        tag: '17.0.0',
-        remotes: ['host', 'mfe'],
-      }),
-    });
-    const actions: SharedInfoActions = {
-      '@framework/core': { action: 'skip', override: 'http://host/core.js' },
-      '@framework/common': { action: 'scope' },
-    };
-
-    const result = await poolDynamicExternals({ entry, actions });
-
-    expect(result.actions['@framework/core']).toEqual({ action: 'scope' });
-    expect(result.actions['@framework/common']).toEqual({ action: 'scope' });
-  });
-
-  it('passes a share+skip mix through (coverage gap, not a conflict): every member keeps its verdict', async () => {
-    // No member is `scope`, so this is coverage, not incompatibility — the loaded remote follows.
-    const entry = entryWith(shared('@framework/core'), shared('@framework/common'));
-    const actions: SharedInfoActions = {
-      '@framework/core': { action: 'skip', override: 'http://host/core.js' },
-      '@framework/common': { action: 'share' },
-    };
-
-    const result = await poolDynamicExternals({ entry, actions });
-
-    expect(result.actions['@framework/core']).toEqual({
-      action: 'skip',
-      override: 'http://host/core.js',
-    });
-    expect(result.actions['@framework/common']).toEqual({ action: 'share' });
-  });
-
-  it('incompatibility-forced: scopes the whole family with no dedup, even the same-version member', async () => {
-    // One member is `scope`, so the WHOLE family scopes — the same-version `skip` member does NOT
-    // dedup (that would bridge the incompatible build via a shared intermediary).
-    const entry = entryWith(
-      shared('@framework/core'),
-      shared('@framework/common'),
-      shared('@framework/cdk')
-    );
-    givenCommitted({
-      '@framework/core': committed('@framework/core', { tag: '17.0.0', remotes: ['host', 'mfe'] }),
-      '@framework/common': committed('@framework/common', {
-        tag: '17.0.0',
-        remotes: ['host', 'mfe'],
-      }),
-      '@framework/cdk': committed('@framework/cdk', { tag: '17.0.0', remotes: ['host', 'mfe'] }),
-    });
-    const actions: SharedInfoActions = {
-      '@framework/core': { action: 'skip', override: 'http://host/core.js' },
-      '@framework/common': { action: 'share' },
-      '@framework/cdk': { action: 'scope' },
-    };
-
-    const result = await poolDynamicExternals({ entry, actions });
-
-    expect(result.actions['@framework/core']).toEqual({ action: 'scope' });
-    expect(result.actions['@framework/common']).toEqual({ action: 'scope' });
-    expect(result.actions['@framework/cdk']).toEqual({ action: 'scope' });
   });
 
   it('scopes the family when no committed build ships the combination it would be handed', async () => {
@@ -471,7 +412,10 @@ describe('createPoolDynamicExternals', () => {
     // Constraint 9. team/b covers mfe and its versions fit, but it does not win `@framework/core`: its own
     // family resolves through the committed 22.0.8 winner, so its modules are already bound to that copy.
     // A consumer deduping onto it would inherit the tear one hop in, and no additive map can repair it —
-    // so mfe serves its own family instead.
+    // so mfe serves its own family instead. Both builds are mappable, so that rule alone refuses team/b.
+    adapters.remoteInfoRepo.tryGet = vi.fn(name =>
+      Optional.of({ scopeUrl: `http://${name.slice('team/'.length)}/`, exposes: [] } as RemoteInfo)
+    );
     givenCommitted({
       '@framework/core': committed(
         '@framework/core',
@@ -562,6 +506,11 @@ describe('createPoolDynamicExternals', () => {
 
   it('leaves a whole-pool-introducing remote (all share) untouched', async () => {
     const entry = entryWith(shared('@framework/core'), shared('@framework/common'));
+    // Its copies are the only ones: update-cache has recorded them, and the committed map serves nothing.
+    givenCommitted({
+      '@framework/core': committed('@framework/core', { tag: '17.0.0', remotes: ['mfe'] }),
+      '@framework/common': committed('@framework/common', { tag: '17.0.0', remotes: ['mfe'] }),
+    });
     const actions: SharedInfoActions = {
       '@framework/core': { action: 'share' },
       '@framework/common': { action: 'share' },
@@ -573,68 +522,6 @@ describe('createPoolDynamicExternals', () => {
       '@framework/core': { action: 'share' },
       '@framework/common': { action: 'share' },
     });
-  });
-
-  it('does nothing when the committed record has no pools', async () => {
-    const entry = entryWith(shared('@framework/core'), shared('@framework/common'));
-    const actions: SharedInfoActions = {
-      '@framework/core': { action: 'skip' },
-      '@framework/common': { action: 'scope' },
-    };
-
-    const result = await poolDynamicExternals({ entry, actions });
-
-    expect(result.actions).toEqual({
-      '@framework/core': { action: 'skip' },
-      '@framework/common': { action: 'scope' },
-    });
-  });
-
-  it('bridges a cross-scope tagged sibling into the family via a co-tagged member', async () => {
-    // ui joins the family only because the same remote tags it with a member of it, bridging the
-    // groups. ui is incompatible, so the family scopes.
-    const entry = entryWith(
-      shared('@framework/core', { pool: 'framework' }),
-      shared('@design-system/ui', { pool: 'framework' })
-    );
-    givenCommitted({
-      '@framework/core': committed('@framework/core', {
-        tag: '17.0.0',
-        remotes: ['mfe'],
-        pool: 'framework',
-      }),
-      '@design-system/ui': committed('@design-system/ui', {
-        tag: '17.0.0',
-        remotes: ['mfe'],
-        pool: 'framework',
-      }),
-    });
-    const actions: SharedInfoActions = {
-      '@framework/core': { action: 'skip', override: 'http://host/core.js' },
-      '@design-system/ui': { action: 'scope' },
-    };
-
-    const result = await poolDynamicExternals({ entry, actions });
-
-    expect(result.actions['@framework/core']).toEqual({ action: 'scope' });
-    expect(result.actions['@design-system/ui']).toEqual({ action: 'scope' });
-  });
-
-  it('pools unscoped packages through an explicit pool tag', async () => {
-    const entry = entryWith(shared('foo', { pool: 'grp' }), shared('bar', { pool: 'grp' }));
-    givenCommitted({
-      foo: committed('foo', { tag: '17.0.0', remotes: ['mfe'], pool: 'grp' }),
-      bar: committed('bar', { tag: '17.0.0', remotes: ['mfe'], pool: 'grp' }),
-    });
-    const actions: SharedInfoActions = {
-      foo: { action: 'skip', override: 'http://host/foo.js' },
-      bar: { action: 'scope' },
-    };
-
-    const result = await poolDynamicExternals({ entry, actions });
-
-    expect(result.actions.foo).toEqual({ action: 'scope' });
-    expect(result.actions.bar).toEqual({ action: 'scope' });
   });
 
   it('passes actions through when the committed scope carries no pool state at all', async () => {
@@ -659,34 +546,22 @@ describe('createPoolDynamicExternals', () => {
     expect(adapters.sharedExternalsRepo.addOrUpdate).not.toHaveBeenCalled();
   });
 
-  it('subjects an untagged entry to a pool another remote tagged', async () => {
-    // The dynamic counterpart of "one remote declaring this is enough for the whole portfolio". `team/a`
-    // tagged the lockstep pair at init; this entry declares neither tag nor a shared npm scope, and is
-    // still subject to the family's coherence rules — previously it slipped through untouched and could
-    // bridge two builds the portfolio had deliberately pooled apart.
-    const entry = entryWith(shared('foo'), shared('bar'));
-    givenCommitted({
-      foo: committed('foo', { tag: '17.0.0', remotes: ['team/a', 'mfe'], pool: 'grp' }),
-      bar: committed('bar', { tag: '17.0.0', remotes: ['team/a', 'mfe'], pool: 'grp' }),
-    });
-    const actions: SharedInfoActions = {
-      foo: { action: 'skip', override: 'http://host/foo.js' },
-      bar: { action: 'scope' },
-    };
-
-    const result = await poolDynamicExternals({ entry, actions });
-
-    expect(result.actions.foo).toEqual({ action: 'scope' });
-    expect(result.actions.bar).toEqual({ action: 'scope' });
-  });
-
   it('never pools the strict scope (an incompatible global sibling cannot island it)', async () => {
     // The strict scope is never pooled: a strict @framework/core must not be islanded by an
-    // incompatible global sibling.
+    // incompatible global sibling. mfe's common is 18, which the committed 17 rejects. The mocked
+    // repository hands this record out for every scope, so pooling the strict scope would island core.
     const entry = entryWith(
       shared('@framework/core', { shareScope: 'strict' }),
       shared('@framework/common')
     );
+    givenCommitted({
+      '@framework/core': committed('@framework/core', { tag: '17.0.0', remotes: ['host', 'mfe'] }),
+      '@framework/common': committed(
+        '@framework/common',
+        { tag: '17.0.0', remotes: ['host'] },
+        { tag: '18.0.0', remotes: ['mfe'], action: 'scope' }
+      ),
+    });
     const actions: SharedInfoActions = {
       '@framework/core': { action: 'share' },
       '@framework/common': { action: 'scope' },
@@ -699,24 +574,38 @@ describe('createPoolDynamicExternals', () => {
   });
 
   it('coordinates each shareScope independently (no cross-scope pooling)', async () => {
-    // Same pool name but different scopes (core in team-a, common in global): they must not
-    // coordinate — each is a single-member pool, so both pass through.
+    // Same pool name but different scopes (core in team-a, common in global): they must not coordinate.
+    // In global, common is 18 against the committed 17 and scopes; core, alone in team-a, is a lone tag
+    // and passes through, where one cross-scope family would scope it too.
     const entry = entryWith(
       shared('@framework/core', { shareScope: 'team-a' }),
       shared('@framework/common')
     );
+    const global = {
+      '@framework/core': committed('@framework/core', { tag: '17.0.0', remotes: ['host'] }),
+      '@framework/common': committed(
+        '@framework/common',
+        { tag: '17.0.0', remotes: ['host'] },
+        { tag: '18.0.0', remotes: ['mfe'], action: 'scope' }
+      ),
+    };
+    const teamA = {
+      '@framework/core': committed('@framework/core', { tag: '17.0.0', remotes: ['mfe'] }),
+    };
+    tagStoredByNpmScope(global);
+    tagStoredByNpmScope(teamA);
+    adapters.sharedExternalsRepo.getFromScope = vi.fn(scope =>
+      scope === 'team-a' ? teamA : global
+    );
     const actions: SharedInfoActions = {
       '@framework/core': { action: 'share' },
-      '@framework/common': { action: 'skip', override: 'http://host/common.js' },
+      '@framework/common': { action: 'scope' },
     };
 
     const result = await poolDynamicExternals({ entry, actions });
 
     expect(result.actions['@framework/core']).toEqual({ action: 'share' });
-    expect(result.actions['@framework/common']).toEqual({
-      action: 'skip',
-      override: 'http://host/common.js',
-    });
+    expect(result.actions['@framework/common']).toEqual({ action: 'scope' });
   });
 
   // The delta decides in `actions`; these pin that the record agrees, because a plain reload rebuilds the

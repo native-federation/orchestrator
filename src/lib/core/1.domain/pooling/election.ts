@@ -1,7 +1,11 @@
 import type { ExternalName, RemoteName, VersionName } from 'lib/core/1.domain';
-import type { AcceptsTag } from 'lib/core/1.domain/externals/basis';
-import { owningPackage, SpecifierTags } from './pool-graph';
-import type { PoolMember, Specifier } from './pool.types';
+import type { AcceptsTag } from 'lib/core/1.domain/externals/compatibility';
+import {
+  owningPackage,
+  type Specifier,
+  SpecifierTags,
+} from 'lib/core/1.domain/externals/specifier';
+import type { PoolMember } from './membership';
 import { compareStrings } from 'lib/utils/compare-strings';
 
 // Who serves each remote of one pool, keyed by specifier; pure, `pool-shared-externals.ts` turns it into
@@ -165,15 +169,26 @@ export function electVariants(input: ElectionInput): Election {
   // The first specifier no build ships next to the ones before it, and a smallest set of those it clashes with.
   const unwitnessed = (remote: RemoteName) => {
     const specifiers = own.get(remote)!.flatMap(c => c.specifiers);
-    const end = specifiers.findIndex((_, i) => !shippedTogether(specifiers.slice(0, i + 1)));
-    if (end === -1) return undefined;
-    const gap = specifiers[end]!;
-    let clash = specifiers.slice(0, end);
-    for (const s of specifiers.slice(0, end)) {
-      const without = clash.filter(c => c !== s);
-      if (!shippedTogether([...without, gap])) clash = without;
+    const matches = [...own.keys()].map(build => {
+      const tags = buildOf(build);
+      return specifiers.map(s => tags.tagOf(s) === coverage.get(s));
+    });
+    let alive = matches;
+    let end = -1;
+    for (let i = 0; i < specifiers.length && end === -1; i++) {
+      alive = alive.filter(m => m[i]);
+      if (alive.length === 0) end = i;
     }
-    return { gap, with: clash };
+    if (end === -1) return undefined;
+
+    const together = (indices: number[]) => matches.some(m => indices.every(i => m[i]));
+    let clash = Array.from({ length: end }, (_, i) => i);
+    for (let i = 0; i < end; i++) {
+      // By specifier, not index: two members may list the same one, and dropping it drops every repeat.
+      const without = clash.filter(c => specifiers[c] !== specifiers[i]);
+      if (!together([...without, end])) clash = without;
+    }
+    return { gap: specifiers[end]!, with: clash.map(i => specifiers[i]!) };
   };
 
   const byArrival = (a: RemoteName, b: RemoteName) =>

@@ -1,6 +1,8 @@
 import type { ExternalName, RemoteName, VersionName } from 'lib/core/1.domain';
-import type { AcceptsTag } from 'lib/core/1.domain/externals/basis';
-import type { Coverage, FamilyInstance, PoolMember, Specifier } from './pool.types';
+import type { AcceptsTag } from 'lib/core/1.domain/externals/compatibility';
+import type { Coverage, FamilyInstance } from 'lib/core/1.domain/pooling/views';
+import type { PoolMember } from 'lib/core/1.domain/pooling/membership';
+import type { Specifier } from 'lib/core/1.domain/externals/specifier';
 
 // What a runtime remote is checked against before it may take a committed build: coverage and its own
 // ranges, never tag distance.
@@ -10,10 +12,7 @@ export type Acceptance = Map<RemoteName, Map<ExternalName, Set<VersionName>>>;
 
 // Every tag each remote's own range accepts, per member: precomputed rather than asked per
 // consumer/candidate pair.
-export function acceptanceTable(
-  members: PoolMember[],
-  acceptsTag: AcceptsTag
-): Acceptance {
+export function acceptanceTable(members: PoolMember[], acceptsTag: AcceptsTag): Acceptance {
   const table: Acceptance = new Map();
 
   for (const member of members) {

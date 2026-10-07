@@ -1,7 +1,7 @@
 import fc from 'fast-check';
 import { GLOBAL_SCOPE, type ImportMap, type RemoteEntry, type shareScope } from 'lib/core/1.domain';
 import { NFError } from 'lib/core/native-federation.error';
-import { acceptsTag } from 'lib/core/1.domain/externals/basis';
+import { acceptsTag } from 'lib/core/1.domain/externals/compatibility';
 import { createVersionCheck } from 'lib/core/3.adapters/checks/version.check';
 import * as _path from 'lib/utils/path';
 import { type GroupTear, tearsByPool } from './no-tear';

@@ -1,8 +1,6 @@
 import type { SharedExternal, shareScope } from 'lib/core/1.domain';
 import { mockVersionRemote } from 'lib/testing/domain/externals/version.mock';
-import { createMockLogHandler } from 'lib/testing/handlers/log.handler';
-import { buildPools } from './pool-graph';
-import type { PoolMember, PoolName } from './pool.types';
+import { buildPools, type PoolMember, type PoolName } from './membership';
 
 // buildPools reads only the external name and each remote's name + pool tag — one skip version suffices.
 const ext = (remotes: { remote: string; pool?: string }[]): SharedExternal => ({
@@ -29,7 +27,7 @@ describe('buildPools', () => {
   describe('scope-derived tags (what the build emits by default)', () => {
     it('pools one name across remotes even when they share no member', () => {
       // a and b share no member: the name alone says core and common belong together, whoever declared it.
-      const pools = buildPools(
+      const { pools } = buildPools(
         scope({
           '@ng/core': [{ remote: 'a', pool: 'ng' }],
           '@ng/common': [{ remote: 'b', pool: 'ng' }],
@@ -39,7 +37,7 @@ describe('buildPools', () => {
     });
 
     it('pools as soon as one remote declares two tagged members', () => {
-      const pools = buildPools(
+      const { pools } = buildPools(
         scope({
           '@ng/core': [{ remote: 'a', pool: 'ng' }],
           '@ng/common': [{ remote: 'a', pool: 'ng' }],
@@ -49,7 +47,7 @@ describe('buildPools', () => {
     });
 
     it('pulls every remote declaring the name into one pool', () => {
-      const pools = buildPools(
+      const { pools } = buildPools(
         scope({
           '@ng/core': [
             { remote: 'a', pool: 'ng' },
@@ -64,7 +62,7 @@ describe('buildPools', () => {
     });
 
     it('is inert without tags', () => {
-      const pools = buildPools(
+      const { pools } = buildPools(
         scope({ '@ng/core': [{ remote: 'a' }], '@ng/common': [{ remote: 'a' }] })
       );
       expect(pools.size).toBe(0);
@@ -74,7 +72,7 @@ describe('buildPools', () => {
   describe('explicit tags (one pool per name, names merge through a shared member)', () => {
     it('merges tag groups with different labels through a shared member', () => {
       // mfe1 tags {core, ui}="ng"; mfe2 tags {ui, forms}="ds". ui bridges them despite the labels differing.
-      const pools = buildPools(
+      const { pools } = buildPools(
         scope({
           '@x/core': [{ remote: 'mfe1', pool: 'ng' }],
           '@x/ui': [
@@ -90,7 +88,7 @@ describe('buildPools', () => {
 
     it('pools disjoint member sets that declare the same name', () => {
       // The name is the pool's identity, so identical labels pool even with no member in common.
-      const pools = buildPools(
+      const { pools } = buildPools(
         scope({
           core: [{ remote: 'mfe1', pool: 'x' }],
           ui: [{ remote: 'mfe1', pool: 'x' }],
@@ -102,7 +100,7 @@ describe('buildPools', () => {
     });
 
     it('bridges a co-tagged cross-scope member into the family', () => {
-      const pools = buildPools(
+      const { pools } = buildPools(
         scope({
           '@ng/core': [
             { remote: 'mfe1', pool: 'ng' },
@@ -119,7 +117,7 @@ describe('buildPools', () => {
   describe('naming', () => {
     it('names a pool after the tag most copies declare', () => {
       // "ng" is declared three times, "ds" once; the alphabetical order would have picked "ds".
-      const pools = buildPools(
+      const { pools } = buildPools(
         scope({
           '@ng/core': [
             { remote: 'mfe1', pool: 'ng' },
@@ -136,7 +134,7 @@ describe('buildPools', () => {
     });
 
     it('breaks a count tie alphabetically', () => {
-      const pools = buildPools(
+      const { pools } = buildPools(
         scope({
           a: [{ remote: 'mfe1', pool: 'zeta' }],
           b: [
@@ -154,7 +152,7 @@ describe('buildPools', () => {
     // A flat build that tags only the package would otherwise leave its entrypoints out of pooling —
     // measured as a torn @ng/core.
     it('pulls an untagged entrypoint into its tagged package’s pool', () => {
-      const pools = buildPools(
+      const { pools } = buildPools(
         scope({
           '@ng/core': [{ remote: 'mfe1', pool: 'ng' }],
           '@ng/core/primitives/di': [{ remote: 'mfe1' }],
@@ -167,7 +165,7 @@ describe('buildPools', () => {
     // The package and its own entrypoints are a pool even across remotes: they are exactly the pair
     // that tears when one remote's `@ng/forms` is served beside another's `@ng/forms/signals`.
     it('pools an entrypoint with its package across remotes, unscoped names included', () => {
-      const pools = buildPools(
+      const { pools } = buildPools(
         scope({ rxjs: [{ remote: 'mfe1' }], 'rxjs/operators': [{ remote: 'mfe2', pool: 'rx' }] })
       );
       expect(shape(pools)).toEqual([['rx', ['rxjs', 'rxjs/operators']]]);
@@ -175,7 +173,7 @@ describe('buildPools', () => {
 
     // An entrypoint edge is not itself a reason to pool.
     it('forms no pool from a package and its entrypoint when nothing is tagged', () => {
-      const pools = buildPools(
+      const { pools } = buildPools(
         scope({ utils: [{ remote: 'a' }], 'utils/deep': [{ remote: 'a' }] })
       );
       expect(pools.size).toBe(0);
@@ -183,11 +181,13 @@ describe('buildPools', () => {
   });
 
   describe('singletons', () => {
-    it('warns when a tag pools with nothing (likely typo/missing sibling)', () => {
-      const log = createMockLogHandler('debug');
-      const pools = buildPools(scope({ '@a/solo': [{ remote: 'mfe1', pool: 'z' }] }), log);
+    // The step warns about these; the sentence is pinned in island-warnings.contract.spec.ts.
+    it('reports a tag that pools with nothing (likely typo/missing sibling)', () => {
+      const { pools, lonelyTags } = buildPools(
+        scope({ '@a/solo': [{ remote: 'mfe1', pool: 'z' }] })
+      );
       expect(pools.size).toBe(0);
-      expect(log.warn).toHaveBeenCalledOnce();
+      expect(lonelyTags).toEqual(['@a/solo']);
     });
   });
 
@@ -198,14 +198,14 @@ describe('buildPools', () => {
         '@ng/common': [{ remote: 'a', pool: 'ng' }],
         '@ng/forms': [{ remote: 'a', pool: 'ng' }],
       };
-      const forward = buildPools(scope(members));
+      const forward = buildPools(scope(members)).pools;
       const shuffled = buildPools(
         scope({
           '@ng/forms': members['@ng/forms'],
           '@ng/core': members['@ng/core'],
           '@ng/common': members['@ng/common'],
         })
-      );
+      ).pools;
       expect(shape(forward)).toEqual([['ng', ['@ng/common', '@ng/core', '@ng/forms']]]);
       expect(shape(shuffled)).toEqual(shape(forward));
     });

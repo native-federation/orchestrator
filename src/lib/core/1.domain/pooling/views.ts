@@ -1,24 +1,36 @@
-import type { ExternalName, RemoteName, SharedVersion, VersionName } from 'lib/core/1.domain';
+import type {
+  ExternalName,
+  RemoteName,
+  SharedVersion,
+  SharedVersionMeta,
+  VersionName,
+} from 'lib/core/1.domain';
 import { forEachVersionEntry } from 'lib/core/1.domain/externals/basis';
-import type { BuildView, CommittedView, PoolMember, Specifier } from './pool.types';
-import { SpecifierTags } from './pool-graph';
+import { type Specifier, SpecifierTags } from 'lib/core/1.domain/externals/specifier';
+import type { PoolMember } from './membership';
 
-/**
- * Read-only projections of one pool's stored record, for the runtime path and the election's inputs. Nothing
- * here decides anything.
- *
- * Every set is keyed by entrypoint **specifier**, not by external name. A flat remote declares
- * `@framework/core/testing` as its own external while a dense one carries the same specifier as an entry
- * of `@framework/core`; comparing names makes those two shapes mutually uncoverable for a build-tool
- * reason with no provenance content. See docs/version-resolver.md §"How pooling resolves".
- */
+// Read-only projections of one pool's stored record, keyed by specifier rather than external name so flat and
+// dense builds of one package compare; see docs/version-resolver.md §"How pooling resolves".
 
-type VersionMeta = SharedVersion['remotes'][number];
+// One remote's whole build of a pool: the unit of decision, as a build is consistent by construction.
+export type FamilyInstance = Map<ExternalName, VersionName>;
 
-/**
- * Per build of the *committed* record, what it serves (a `scope` copy included: its files are already in the
- * map under its own scope), and what the global map publishes per specifier.
- */
+// Specifier -> the file a build serves it from.
+export type Coverage = Map<Specifier, string>;
+
+export type BuildView = {
+  coverage: Coverage;
+  tags: SpecifierTags;
+  instance: FamilyInstance;
+};
+
+export type CommittedView = {
+  builds: Map<RemoteName, BuildView>;
+  // What the committed `imports` serves, per specifier.
+  global: Map<Specifier, { tag: VersionName; remote: RemoteName; file: string }>;
+};
+
+// A `scope` copy counts as served by its build: its files are already in the map under its own scope.
 export function committedView(members: PoolMember[]): CommittedView {
   const global: CommittedView['global'] = new Map();
 
@@ -148,15 +160,12 @@ export function arrivalOrder(members: PoolMember[]): Map<RemoteName, number> {
   return arrival;
 }
 
-/**
- * The order `generate-import-map` fills the global `imports` in: every member's `share` version first (its
- * basis, then sibling copies of the tag), then every `skip` copy for what nobody claimed yet. First claim per
- * specifier wins, which the caller applies. Which copies may claim is `forEachVersionEntry`'s rule, the one
- * the builders publish by, so a copy served by another build is never a publisher.
- */
+// The order `generate-import-map` fills `imports` in: every `share` version, then every `skip` copy; the
+// caller keeps the first claim per specifier. `forEachVersionEntry` decides which copies may claim, so a copy
+// served by another build never publishes.
 function forEachGlobalClaim(
   members: PoolMember[],
-  visit: (specifier: Specifier, tag: VersionName, meta: VersionMeta) => void
+  visit: (specifier: Specifier, tag: VersionName, meta: SharedVersionMeta) => void
 ): void {
   const claim = (version: SharedVersion) =>
     forEachVersionEntry(version, undefined, (specifier, meta) =>

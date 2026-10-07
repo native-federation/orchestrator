@@ -586,7 +586,7 @@ The repository is organized **flow-first**: every published subpath of the packa
 
 ```
 core/
-  1.domain/            Pure domain contracts and their invariants (remote entries, externals, import maps)
+  1.domain/            Pure domain contracts, their invariants and pure policy (remote entries, externals, import maps, pooling)
   2.app/               Application logic
     flows/               The pipelines: which steps run in which order (init, initRemoteEntry)
     steps/               The pipeline steps (1-6 run during init, 7-9 back initRemoteEntry)
@@ -617,5 +617,8 @@ Enforced by ESLint (`no-restricted-imports` in `eslint.config.js`):
 
 1. Internal code never imports a `*.index.ts` barrel — those are for package consumers only. Import the concrete module instead.
 2. `registry`, `audit` and `node` may depend on `core` and `utils`, never on each other. `core` depends on no flow folder.
+3. `core/1.domain` is pure: it imports nothing from core's outer layers (`2.app`, `3.adapters`, `4.config`, `5.di`). Logging and storage stay with the caller: a domain function returns what the step should log or write (for example `buildPools` returns the lonely pool tags, and the pooling step warns about them).
+4. Only `core/5.di` imports the pipeline steps (`core/2.app/steps/**`), which it wires into the flows. Everything else, flows and adapters included, reaches a step through its driver port. `src/lib/testing` is exempt, since the test harness runs the real steps.
+5. A step never imports another step, i.e. any module `5.di` wires (`init.factory.ts`). Steps share code through `1.domain`, or through a template that is not itself a step, such as `store-remote-entry` (used by `process-remote-entries` and `update-cache`) or `apply-winner` (used by `determine-shared-externals`).
 
 Adding a new flow means adding a new folder under `src/lib/`, a `<name>.index.ts` barrel next to the existing ones, and one bundle entry in `build.js`.

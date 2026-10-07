@@ -3,7 +3,7 @@ import { mockSharedInfo } from 'lib/testing/domain/remote-entry/shared-info.mock
 import { mockVersionRemote } from 'lib/testing/domain/externals/version.mock';
 import { portfolio } from 'lib/testing/pooling/portfolio';
 import { tagSharedInfoByNpmScope } from 'lib/testing/pooling/tag-by-npm-scope';
-import { committedView } from './pool-views';
+import { committedView } from 'lib/core/1.domain/pooling/views';
 
 /**
  * End-to-end coherence through determine → pooling → import map. Pooling does not make a family resolve

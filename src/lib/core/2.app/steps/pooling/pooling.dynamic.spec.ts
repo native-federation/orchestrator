@@ -15,12 +15,13 @@ describe('pooling (dynamic)', () => {
   const file = (remote: string, specifier: string) =>
     `http://${remote}/${specifier.slice(1).replace(/\//g, '_')}.js`;
 
-  // One package of the `fw` pool; `entrypoints` are its secondary specifiers, shipped in the same build.
+  // One package of the `fw` pool unless `pool` says otherwise (`null`: unlabelled); `entrypoints` are its
+  // secondary specifiers, shipped in the same build.
   const shared = (
     packageName: string,
     version: string,
     requiredVersion: string,
-    o: { strict?: boolean; entrypoints?: string[] } = {}
+    o: { strict?: boolean; entrypoints?: string[]; pool?: string | null } = {}
   ): DenseSharedInfo =>
     ({
       packageName,
@@ -28,7 +29,7 @@ describe('pooling (dynamic)', () => {
       requiredVersion,
       singleton: true,
       strictVersion: o.strict ?? true,
-      pool: 'fw',
+      ...(o.pool === null ? {} : { pool: o.pool ?? 'fw' }),
       entries: Object.fromEntries(
         [packageName, ...(o.entrypoints ?? [])].map(s => [
           s,
@@ -52,9 +53,10 @@ describe('pooling (dynamic)', () => {
   /**
    * A remote loaded at runtime may run a combination only one committed build shipped, and may take a
    * committed build only if that build covers every specifier it imports; no comparison of tags can stand
-   * in for either. Ported from `subpool-fit.spec.ts`, which checks the same portfolios against the gate's
-   * helpers directly. On the flow, the witness rule already refuses the first two before coverage is
-   * asked; the last pair turns on coverage alone.
+   * in for either. Two shapes: *disjoint providers* (each provides one member alone, no build ships the
+   * pair the consumer would run) and *the lockstep pair* (two providers agree exactly on what they share,
+   * yet the coupled pair is in neither build). On the flow, the witness rule already refuses those two
+   * before coverage is asked; the last pair turns on coverage alone.
    */
   describe('coverage is what fails on the defect portfolios', () => {
     it('serves the consumer of two disjoint providers from its own build', async () => {
@@ -149,6 +151,130 @@ describe('pooling (dynamic)', () => {
         );
       });
     });
+  });
+
+  /**
+   * Once the resolver scopes one member (a strict range rejects its committed tag), no committed build is
+   * trusted with the remote: it serves its whole family itself, a member at the committed tag included, so
+   * no file of the committed build can bind its modules (docs/version-resolver.md §"Scope and dynamic init").
+   */
+  describe('one rejected member scopes the whole family', () => {
+    const family = ['@fw/core', '@fw/common', '@fw/cdk'];
+
+    it('scopes every member, the ones at the committed tag included', async () => {
+      await p.runInit([entry('host', ...family.map(s => shared(s, '17.0.0', '^17.0.0')))]);
+
+      const { merged } = await p.runDynamic(
+        entry(
+          'mfe',
+          shared('@fw/core', '17.0.0', '^17.0.0'),
+          shared('@fw/common', '17.0.0', '^17.0.0'),
+          shared('@fw/cdk', '18.0.0', '^18.0.0')
+        )
+      );
+
+      expect(p.islands()).toEqual({ mfe: 'incompatible' });
+      for (const specifier of family)
+        expect(resolves(merged, 'mfe', specifier)).toBe(file('mfe', specifier));
+    });
+
+    it('bridges a package another pool labels into the family through the remote that labels it', async () => {
+      // The host labels ui `ds`; mfe labels it `fw`, which joins ui to core's family for the whole page.
+      await p.runInit([
+        entry(
+          'host',
+          shared('@fw/core', '17.0.0', '^17.0.0'),
+          shared('@ds/ui', '17.0.0', '^17.0.0', { pool: 'ds' }),
+          shared('@ds/icons', '17.0.0', '^17.0.0', { pool: 'ds' })
+        ),
+      ]);
+
+      const { merged } = await p.runDynamic(
+        entry('mfe', shared('@fw/core', '17.0.0', '^17.0.0'), shared('@ds/ui', '18.0.0', '^18.0.0'))
+      );
+
+      expect(p.islands()).toEqual({ mfe: 'incompatible' });
+      expect(resolves(merged, 'mfe', '@fw/core')).toBe(file('mfe', '@fw/core'));
+    });
+
+    it('holds an unlabelled remote to a pool the committed remotes labelled', async () => {
+      // One label anywhere is enough: mfe declares none, and could otherwise bridge two builds the page
+      // pooled apart.
+      await p.runInit([
+        entry(
+          'team-a',
+          shared('@fw/core', '17.0.0', '^17.0.0'),
+          shared('@fw/common', '17.0.0', '^17.0.0')
+        ),
+      ]);
+
+      const { merged } = await p.runDynamic(
+        entry(
+          'mfe',
+          shared('@fw/core', '17.0.0', '^17.0.0', { pool: null }),
+          shared('@fw/common', '18.0.0', '^18.0.0', { pool: null })
+        )
+      );
+
+      expect(p.islands()).toEqual({ mfe: 'incompatible' });
+      expect(resolves(merged, 'mfe', '@fw/core')).toBe(file('mfe', '@fw/core'));
+    });
+
+    // F4 (backlog): a committed 21 island would fit mfe as a subpool, but the resolver scoped mfe's core, so
+    // it is not offered one and downloads a third 21 build. Pins today's behaviour; F4 flips it on purpose.
+    it('offers no subpool to a remote the resolver scoped', async () => {
+      await p.runInit([
+        entry(
+          'a',
+          shared('@fw/core', '22.0.5', '^22.0.0'),
+          shared('@fw/common', '22.0.5', '^22.0.0')
+        ),
+        entry(
+          'legacy',
+          shared('@fw/core', '21.2.0', '~21.2.0'),
+          shared('@fw/common', '21.2.0', '~21.2.0')
+        ),
+      ]);
+
+      await p.runDynamic(
+        entry(
+          'mfe',
+          shared('@fw/core', '21.2.0', '^21.0.0'),
+          shared('@fw/common', '21.2.0', '^21.0.0')
+        )
+      );
+
+      expect(p.islands()).toEqual({ legacy: 'incompatible', mfe: 'incompatible' });
+    });
+  });
+
+  /**
+   * A subpool's build must offer every member at a tag the remote's own range accepts, not only cover it:
+   * the flow form of `subpool-fit.spec.ts` "acceptance". Two committed 21 islands both cover mfe; legacy-a
+   * sorts first but offers 21.1.0, which mfe's `~21.2.0` rejects, so mfe runs legacy-b's 21.2.0.
+   */
+  it('joins the island whose tags its range accepts, not the first one that covers it', async () => {
+    const legacy = (name: string, tag: string, range: string) =>
+      entry(name, shared('@fw/core', tag, range), shared('@fw/router', tag, range));
+    await p.runInit([
+      legacy('a', '22.0.5', '^22.0.0'),
+      legacy('legacy-a', '21.1.0', '~21.1.0'),
+      legacy('legacy-b', '21.2.0', '~21.2.0'),
+    ]);
+    expect(p.islands()).toEqual({ 'legacy-a': 'incompatible', 'legacy-b': 'incompatible' });
+
+    // Non-strict, so the resolver leaves it to pooling.
+    const { merged } = await p.runDynamic(
+      entry(
+        'mfe',
+        shared('@fw/core', '21.2.5', '~21.2.0', { strict: false }),
+        shared('@fw/router', '21.2.5', '~21.2.0', { strict: false })
+      )
+    );
+
+    expect(p.islands()).toMatchObject({ mfe: 'subpool legacy-b' });
+    for (const specifier of ['@fw/core', '@fw/router'])
+      expect(resolves(merged, 'mfe', specifier)).toBe(file('legacy-b', specifier));
   });
 
   describe('sequential loads', () => {

@@ -7,7 +7,7 @@ import type { LoggingConfig } from '../../config/log.contract';
 import type { ModeConfig } from '../../config/mode.contract';
 import type { ExternalName } from 'lib/core/1.domain';
 import { hasPoolResults, withoutPoolResults } from 'lib/core/1.domain/pooling/pool-state';
-import { buildPools } from './pool-graph';
+import { buildPools } from 'lib/core/1.domain/pooling/membership';
 import { poolableScopes } from './pool.util';
 
 export function createMarkPoolsForReelection(
@@ -27,9 +27,7 @@ export function createMarkPoolsForReelection(
    */
   return () => {
     const reelected = new Map<string, Set<ExternalName>>();
-    for (const scope of poolableScopes(ports.sharedExternalsRepo)) {
-      const sharedExternals = ports.sharedExternalsRepo.getFromScope(scope);
-
+    for (const [scope, sharedExternals] of poolableScopes(ports.sharedExternalsRepo)) {
       // Nothing dirty in the scope ⇒ no pool has a dirty member ⇒ nothing to spread, so skip before
       // building the graph. Measured, this was the whole pooling cost of a warm init.
       if (!Object.values(sharedExternals).some(external => external.dirty)) continue;
@@ -40,7 +38,7 @@ export function createMarkPoolsForReelection(
 
       // Mutates the stored records in place; nothing is written, so a scope with nothing dirty stays
       // untouched and `commit()` has no reason to fire.
-      for (const [, members] of buildPools(sharedExternals)) {
+      for (const [, members] of buildPools(sharedExternals).pools) {
         for (const member of members) pooled.add(member.name);
         if (!members.some(m => m.external.dirty)) continue;
         let names = reelected.get(scope);

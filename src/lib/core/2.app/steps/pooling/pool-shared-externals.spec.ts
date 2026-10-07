@@ -203,12 +203,12 @@ describe('createPoolSharedExternals', () => {
     });
   });
 
-  // W1: a scope carrying no pool state builds no pool graph. Pooling's work shows up as storage reads and
-  // writes of the scope it pools, so a scope without pool state must cost exactly what it costs on a page
-  // with no pool anywhere. Before the narrowing, one tag in any scope put every non-strict scope through it.
+  // W1: a scope carrying no pool state is not pooled. Pooling's work shows up as storage writes of the scope it
+  // pools, so a scope without pool state must cost exactly what it costs on a page with no pool anywhere. Which
+  // scopes are pooled at all is pinned by the `poolableScopes` spec in pool.util.spec.ts.
   describe('skips work', () => {
     // team-b holds foo and bar, tagged into one pool or not; `pooledElsewhere` adds a pool to the global
-    // scope. Counts team-b's storage traffic over one init.
+    // scope. Counts team-b's storage writes over one init, and those that carry a pool result.
     const trafficOf = async (o: { tagged: boolean; pooledElsewhere: boolean }) => {
       page({ scope: 'team-b' });
       const tag = o.tagged ? { pool: 'grp' } : {};
@@ -229,27 +229,28 @@ describe('createPoolSharedExternals', () => {
             GLOBAL_SCOPE
           );
 
-      const reads = vi.spyOn(p.adapters.sharedExternalsRepo, 'getFromScope');
       const writes = vi.spyOn(p.adapters.sharedExternalsRepo, 'addOrUpdate');
       await p.runInit();
+      const inTeamB = writes.mock.calls.filter(([, , scope]) => scope === 'team-b');
       return {
-        reads: reads.mock.calls.filter(([scope]) => scope === 'team-b').length,
-        writes: writes.mock.calls.filter(([, , scope]) => scope === 'team-b').length,
+        writes: inTeamB.length,
+        poolNames: inTeamB.filter(([, external]) => external.poolName !== undefined).length,
         pooledElsewhere:
           p.adapters.sharedExternalsRepo.getFromScope(GLOBAL_SCOPE)['@framework/core']?.poolName,
       };
     };
 
-    it('reads and writes a scope without pool state as if no scope had any (W1)', async () => {
+    it('writes a scope without pool state as if no scope had any (W1)', async () => {
       const alone = await trafficOf({ tagged: false, pooledElsewhere: false });
       const besidePool = await trafficOf({ tagged: false, pooledElsewhere: true });
       const pooled = await trafficOf({ tagged: true, pooledElsewhere: false });
 
       expect(besidePool.pooledElsewhere).toBe('framework');
-      expect(besidePool.reads).toBe(alone.reads);
       expect(besidePool.writes).toBe(alone.writes);
-      // The control: pooling the scope itself does show up in its traffic.
-      expect(pooled.reads).toBeGreaterThan(alone.reads);
+      expect(besidePool.poolNames).toBe(0);
+      // The control: pooling the scope itself does show up in its writes. Not in their number, since pooling
+      // rewrites the members `determine` left to it, but in the `poolName` they carry.
+      expect(pooled.poolNames).toBeGreaterThan(alone.poolNames);
     });
   });
 

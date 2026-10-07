@@ -1,60 +1,17 @@
 import type { SharedExternal, SharedVersion, SharedVersionMeta } from 'lib/core/1.domain';
+import { uncoveredEntrypoints, versionEntries } from 'lib/core/1.domain/externals/basis';
 import {
   type AcceptsTag,
-  uncoveredEntrypoints,
-  versionDemands,
-  versionEntries,
-} from 'lib/core/1.domain/externals/basis';
+  type VersionAcceptance,
+  versionAcceptance,
+} from 'lib/core/1.domain/externals/compatibility';
 import { NFError } from 'lib/core/native-federation.error';
 import type { LoggingConfig } from '../config/log.contract';
 import type { ModeConfig } from '../config/mode.contract';
 
-export type IsCompatible = (tag: string, requiredVersion: string) => boolean;
-
-// An election asks far more questions than it has distinct (tag, range) pairs. Scope it to one election, so
-// the cache needs no bound.
-export function memoizeCompatibility(isCompatible: IsCompatible): IsCompatible {
-  const memo = new Map<string, boolean>();
-  return (tag, requiredVersion) => {
-    const key = `${tag}|${requiredVersion}`;
-    let hit = memo.get(key);
-    if (hit === undefined) memo.set(key, (hit = isCompatible(tag, requiredVersion)));
-    return hit;
-  };
-}
-
-export type VersionAcceptance = {
-  // A version can only be redirected to `tag` if none of its remotes rejects that tag.
-  accepts: (version: SharedVersion, tag: string) => boolean;
-  // A representative copy that makes the redirect unsafe: it rejects `tag` while `strictVersion` is set,
-  // so it keeps its own build instead of being deduped away. One is enough for the message and the
-  // strict check; `applyWinner` enumerates the rest itself when it splits the version.
-  objector: (version: SharedVersion, tag: string) => SharedVersionMeta | undefined;
-};
-
-// Every compatibility question is asked of the whole version, not of its basis: see `versionDemands`.
-// Computed once per external, since the selection loop is O(versions²).
-export function versionAcceptance(
-  external: SharedExternal,
-  acceptsTag: AcceptsTag
-): VersionAcceptance {
-  const demands = new Map<SharedVersion, SharedVersionMeta[]>(
-    external.versions.map(v => [v, versionDemands(v)])
-  );
-
-  return {
-    accepts: (version, tag) =>
-      demands.get(version)!.every(d => acceptsTag(tag, version.tag, d.requiredVersion)),
-    objector: (version, tag) =>
-      demands
-        .get(version)!
-        .find(d => d.strictVersion && !acceptsTag(tag, version.tag, d.requiredVersion)),
-  };
-}
-
 /**
  * The tail of winner election: derive every other version's verdict from the chosen one, apply the
- * entrypoint coverage policy, clear `dirty`. `determine` is the only caller, and passes its memoized
+ * entrypoint coverage policy, clear `dirty`. `determine` is the only caller, and passes its
  * `acceptsTag` plus the `acceptance` it already built for the election.
  *
  * A hazard for anyone who ever adds a second caller that re-points a winner: `findTears` keys off the

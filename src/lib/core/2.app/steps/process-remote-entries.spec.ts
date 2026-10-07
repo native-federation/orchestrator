@@ -152,9 +152,9 @@ describe('createProcessRemoteEntries', () => {
   });
 
   // A declared `pool` tag reaches storage on the version meta as `pool`, which is what
-  // `hasPoolState()` reads.
+  // `scopeHasPoolState()` reads.
   // This step used to also set an in-memory flag; it no longer does, because a warm init may not
-  // refetch the tagged remote at all (see shared-externals.repository.spec.ts).
+  // refetch the tagged remote at all (see 1.domain/pooling/pool-state.spec.ts).
   describe('pool tags reach storage', () => {
     it('stores the pool tag on the version meta', async () => {
       const remoteEntries = [

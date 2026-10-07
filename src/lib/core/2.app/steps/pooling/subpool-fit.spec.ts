@@ -1,20 +1,16 @@
 import type { SharedExternal, SharedVersion, SharedVersionAction } from 'lib/core/1.domain';
 import { mockVersionRemote } from 'lib/testing/domain/externals/version.mock';
-import { acceptanceTable, acceptsAll, covers } from './subpool-fit';
-import { committedView, consumedMembers, consumedSpecifiers } from './pool-views';
-import type { PoolMember } from './pool.types';
-import { acceptsTag } from 'lib/core/1.domain/externals/basis';
+import { acceptanceTable, acceptsAll } from './subpool-fit';
+import { committedView, consumedMembers } from 'lib/core/1.domain/pooling/views';
+import type { PoolMember } from 'lib/core/1.domain/pooling/membership';
+import { acceptsTag } from 'lib/core/1.domain/externals/compatibility';
 import { createVersionCheck } from 'lib/core/3.adapters/checks/version.check';
 
 /**
- * The checks a remote loaded at runtime is held to before it may take a committed build — coverage and
- * acceptance — tested on the portfolios that reproduce the defect they exist for.
- *
- * Two shapes recur and are worth naming up front:
- *  - *disjoint providers*: mfe1 solely provides core, mfe2 solely provides router, mfe3 consumes both.
- *    No build in the portfolio ships the pair mfe3 ends up running.
- *  - *the lockstep pair*: two providers overlap and agree exactly on what they share, yet the coupled pair
- *    is in neither build. No tag comparison can reach it, which is why coverage is the test.
+ * Acceptance, the check a remote loaded at runtime is held to before it may take a committed build, on the
+ * *disjoint providers* portfolio: mfe1 solely provides core, mfe2 solely provides router, mfe3 consumes both.
+ * Coverage, the other check, is tested on the flow in `pooling.dynamic.spec.ts`, as is acceptance ("joins
+ * the island whose tags its range accepts").
  */
 
 // A remote's copy of one member: `req` is its own range, `entries` the specifiers it carries (defaulting to
@@ -59,57 +55,6 @@ const accepts = acceptsTag(
   createVersionCheck().compare
 );
 
-describe('coverage is what fails on the defect portfolios', () => {
-  it('gives the consumer of two disjoint providers no covering build but itself', () => {
-    const members = disjointProviders();
-    const builds = committedView(members).builds;
-    const consumed = consumedSpecifiers(members);
-
-    // Neither provider covers mfe3: each ships one of the pair.
-    expect(covers(builds.get('mfe1')!.coverage, consumed.get('mfe3')!)).toBe(false);
-    expect(covers(builds.get('mfe2')!.coverage, consumed.get('mfe3')!)).toBe(false);
-    expect(covers(builds.get('mfe3')!.coverage, consumed.get('mfe3')!)).toBe(true);
-  });
-
-  // The lockstep pair. Both providers ship core@22.0.5 and agree on it exactly, so no tightening of a tag
-  // comparison reaches this — but neither covers {material, cdk}, which coverage says outright.
-  it('rejects both providers of a lockstep pair that agree exactly on what they share', () => {
-    const members = [
-      member('@ng/core', [
-        { tag: '22.0.5', action: 'share', copies: [{ remote: 'mfe1' }, { remote: 'mfe2' }] },
-      ]),
-      member('@ng/material', [
-        { tag: '22.0.5', action: 'share', copies: [{ remote: 'mfe1' }, { remote: 'mfe3' }] },
-      ]),
-      member('@ng/cdk', [
-        { tag: '22.1.0', action: 'share', copies: [{ remote: 'mfe2', req: '^22.1.0' }] },
-        { tag: '22.0.5', copies: [{ remote: 'mfe3' }] },
-      ]),
-    ];
-    const builds = committedView(members).builds;
-    const consumed = consumedSpecifiers(members);
-
-    expect(builds.get('mfe1')!.coverage.has('@ng/cdk')).toBe(false);
-    expect(builds.get('mfe2')!.coverage.has('@ng/material')).toBe(false);
-    expect(covers(builds.get('mfe1')!.coverage, consumed.get('mfe3')!)).toBe(false);
-    expect(covers(builds.get('mfe2')!.coverage, consumed.get('mfe3')!)).toBe(false);
-  });
-
-  it('still fails on a specifier genuinely absent from the build', () => {
-    const members = [
-      member('@ng/core', [
-        { tag: '22.0.5', action: 'share', copies: [{ remote: 'partial' }, { remote: 'wide' }] },
-      ]),
-      member('@ng/core/testing', [{ tag: '22.0.5', copies: [{ remote: 'wide' }] }]),
-    ];
-    const builds = committedView(members).builds;
-    const consumed = consumedSpecifiers(members);
-
-    expect(covers(builds.get('partial')!.coverage, consumed.get('wide')!)).toBe(false);
-    expect(covers(builds.get('wide')!.coverage, consumed.get('partial')!)).toBe(true);
-  });
-});
-
 describe('acceptance', () => {
   it('records every tag a remote’s own range accepts, per member', () => {
     const table = acceptanceTable(disjointProviders(), accepts);
@@ -126,7 +71,7 @@ describe('acceptance', () => {
     const consumed = consumedMembers(members);
 
     // mfe3 accepts router@22.1.0 under ^22.0.0, so mfe2's tag is fine on acceptance alone — coverage is
-    // what stops it (above). Reverse the question: mfe2 cannot take mfe3's 22.0.5.
+    // what stops it. Reverse the question: mfe2 cannot take mfe3's 22.0.5.
     expect(acceptsAll(table, builds.get('mfe3')!.instance, 'mfe2', consumed.get('mfe2')!)).toBe(
       false
     );

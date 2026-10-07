@@ -5,17 +5,17 @@ import {
   type SharedExternal,
   type SharedVersion,
 } from 'lib/core/1.domain';
+import { countUncoveredEntrypoints, versionEntries } from 'lib/core/1.domain/externals/basis';
 import {
   type AcceptsTag,
   acceptsTag as createAcceptsTag,
-  countUncoveredEntrypoints,
-  versionEntries,
-} from 'lib/core/1.domain/externals/basis';
+  versionAcceptance,
+} from 'lib/core/1.domain/externals/compatibility';
 import { NFError } from 'lib/core/native-federation.error';
 import type { DrivingContract } from '../driving-ports/driving.contract';
 import type { LoggingConfig } from '../config/log.contract';
 import type { ModeConfig } from '../config/mode.contract';
-import { createApplyWinner, memoizeCompatibility, versionAcceptance } from './apply-winner';
+import { createApplyWinner } from './apply-winner';
 
 export function createDetermineSharedExternals(
   config: LoggingConfig & ModeConfig,
@@ -45,9 +45,8 @@ export function createDetermineSharedExternals(
    * @returns the externals it re-elected or left to pooling, per scope — pooling's signal for what changed.
    */
   return pooled => {
-    // The selection loop asks this O(versions² × demands) times.
     const acceptsTag = createAcceptsTag(
-      memoizeCompatibility(ports.versionCheck.isCompatible),
+      ports.versionCheck.isCompatible,
       ports.versionCheck.compare
     );
 
@@ -164,10 +163,7 @@ export function createDetermineSharedExternals(
           );
 
       external.versions.forEach(vA => {
-        const extraDownloads = external.versions.reduce(
-          (sum, vB) => sum + costOf(vB, vA.tag),
-          0
-        );
+        const extraDownloads = external.versions.reduce((sum, vB) => sum + costOf(vB, vA.tag), 0);
         // Tiebreak equal-download candidates toward the one that leaves fewest entrypoints
         // uncovered across the versions it would skip (fewest tears / scope-promotions).
         if (extraDownloads < leastExtraDownloads) {

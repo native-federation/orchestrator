@@ -12,19 +12,21 @@ import {
   type SharedInfoActions,
   type SharedVersionMeta,
 } from 'lib/core/1.domain';
-import { buildPools, SpecifierTags } from './pool-graph';
+import { buildPools, type PoolMember } from 'lib/core/1.domain/pooling/membership';
+import { scopeHasPoolState } from 'lib/core/1.domain/pooling/pool-state';
+import { type Specifier, SpecifierTags } from 'lib/core/1.domain/externals/specifier';
 import {
   basisPerMember,
+  type CommittedView,
   committedView,
   consumedMembers,
   consumedSpecifiers,
   hostRemotes,
-} from './pool-views';
+} from 'lib/core/1.domain/pooling/views';
 import { lazy, syncPoolNames } from './pool.util';
 import { acceptanceTable, acceptsAll, covers, type Acceptance } from './subpool-fit';
-import type { CommittedView, PoolMember, Specifier } from './pool.types';
 import * as _path from 'lib/utils/path';
-import { type AcceptsTag, acceptsTag } from 'lib/core/1.domain/externals/basis';
+import { acceptsTag } from 'lib/core/1.domain/externals/compatibility';
 import { compareStrings } from 'lib/utils/compare-strings';
 
 // What the gate decided for the loaded remote's copy of one member, as the record must keep it.
@@ -46,8 +48,11 @@ export function createPoolDynamicExternals(
   config: LoggingConfig & ModeConfig,
   ports: Pick<DrivingContract, 'sharedExternalsRepo' | 'remoteInfoRepo' | 'versionCheck'>
 ): ForPoolingDynamicExternals {
-  const accepts: AcceptsTag = (offered, ownTag, range) =>
-    acceptsTag(ports.versionCheck.isCompatible, ports.versionCheck.compare)(offered, ownTag, range);
+  // Read per call so a port swapped after wiring is honoured.
+  const accepts = acceptsTag(
+    (tag, range) => ports.versionCheck.isCompatible(tag, range),
+    (a, b) => ports.versionCheck.compare(a, b)
+  );
 
   // The committed map is immutable, so this only rewrites the loaded remote's own actions and copies, never
   // another remote's. See docs/version-resolver.md §"Scope and dynamic init".
@@ -79,12 +84,11 @@ export function createPoolDynamicExternals(
 
     for (const [shareScope, names] of declared) {
       // A tag anywhere in the committed scope forms pools this entry is subject to — its own tag is not
-      // required, and the pool covers the whole external, this entry's copies included. Reading only this
-      // entry's tags let an untagged remote bridge two builds the portfolio had pooled apart.
-      if (!ports.sharedExternalsRepo.hasPoolState(shareScope)) continue;
-
+      // required, and the pool covers the whole external, this entry's copies included.
       const committed = ports.sharedExternalsRepo.getFromScope(shareScope);
-      const pools = buildPools(committed);
+      if (!scopeHasPoolState(committed)) continue;
+
+      const { pools } = buildPools(committed);
       verdicts = new Map();
 
       for (const pool of pools.values()) {

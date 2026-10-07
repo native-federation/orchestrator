@@ -7,8 +7,8 @@ import {
   type SharedVersionMeta,
   GLOBAL_SCOPE,
 } from 'lib/core/1.domain';
+import { acceptsTag } from 'lib/core/1.domain/externals/compatibility';
 import {
-  acceptsTag,
   addRemoteToVersion,
   committedEntries,
   uncoveredEntrypoints,
@@ -38,6 +38,11 @@ export function createUpdateCache(
 ): ForUpdatingCache {
   const storeRemoteEntry = createStoreRemoteEntry(config, ports, 8);
   const removeCachedRemoteEntries = createRemoveCachedRemoteEntries(ports);
+  // Read per call so a port swapped after wiring is honoured.
+  const accepts = acceptsTag(
+    (tag, range) => ports.versionCheck.isCompatible(tag, range),
+    (a, b) => ports.versionCheck.compare(a, b)
+  );
 
   /**
    * Step 8 (dynamic init): merge a runtime-loaded remoteEntry into the cache. The
@@ -93,13 +98,7 @@ export function createUpdateCache(
     let action: SharedVersionAction = scopeType === 'strict' ? 'share' : 'skip';
 
     const sharedVersion = cached.versions.find(c => c.action === 'share');
-    const isCompatible =
-      !sharedVersion ||
-      acceptsTag(ports.versionCheck.isCompatible, ports.versionCheck.compare)(
-        sharedVersion.tag,
-        tag,
-        remote.requiredVersion
-      );
+    const isCompatible = !sharedVersion || accepts(sharedVersion.tag, tag, remote.requiredVersion);
 
     if (action === 'skip' && !isCompatible && remote.strictVersion) {
       action = 'scope';

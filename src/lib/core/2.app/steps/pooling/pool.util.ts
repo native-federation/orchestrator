@@ -1,26 +1,25 @@
 import type { ExternalName, shareScope } from 'lib/core/1.domain';
 import type { ForSharedExternalsStorage } from '../../driving-ports/for-shared-externals-storage.port';
-import { withoutPoolResults } from 'lib/core/1.domain/pooling/pool-state';
-import type { PoolMember, PoolName } from './pool.types';
+import { scopeHasPoolState, withoutPoolResults } from 'lib/core/1.domain/pooling/pool-state';
+import type { PoolMember, PoolName } from 'lib/core/1.domain/pooling/membership';
 
-// A projection built at most once, and only if the decision gets far enough to ask for it.
 export function lazy<T>(make: () => T): () => T {
   let value: T | undefined;
   return () => (value ??= make());
 }
 
-/**
- * The scopes either pooling step has anything to do in. A pool never spans share scopes, so one tag must
- * not put every other scope through a graph build. The `strict` scope is never pooled.
- *
- * Names only, so a caller that decides to skip a scope never reads it out of storage.
- */
+// A pool never spans share scopes, so one tag must not put every other scope through a graph build.
 export function poolableScopes(
-  repo: Pick<ForSharedExternalsStorage, 'getScopes' | 'scopeType' | 'hasPoolState'>
-): string[] {
-  return repo
-    .getScopes()
-    .filter(scope => repo.scopeType(scope) !== 'strict' && repo.hasPoolState(scope));
+  repo: Pick<ForSharedExternalsStorage, 'getScopes' | 'scopeType' | 'getFromScope'>,
+  only: (scope: string) => boolean = () => true
+): [scope: string, sharedExternals: shareScope][] {
+  const poolable: [string, shareScope][] = [];
+  for (const scope of repo.getScopes()) {
+    if (repo.scopeType(scope) === 'strict' || !only(scope)) continue;
+    const sharedExternals = repo.getFromScope(scope);
+    if (scopeHasPoolState(sharedExternals)) poolable.push([scope, sharedExternals]);
+  }
+  return poolable;
 }
 
 // Writes each external's current `poolName`, and clears every pool result off one in no pool any more;

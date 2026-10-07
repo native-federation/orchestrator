@@ -1,6 +1,6 @@
 import type { SharedExternal } from '../externals/external.contract';
 import { mockVersionRemote } from 'lib/testing/domain/externals/version.mock';
-import { hasPoolResults, withoutPoolResults } from './pool-state';
+import { hasPoolResults, scopeHasPoolState, withoutPoolResults } from './pool-state';
 
 const pooledRecord = (): SharedExternal => ({
   dirty: false,
@@ -68,5 +68,55 @@ describe('pool results', () => {
     ]);
     // The dynamic path hands this a committed record, which must stay as the map was built from it.
     expect(record).toEqual(pooledRecord());
+  });
+});
+
+/**
+ * Whether a share scope gives either pooling step anything to do. It reads the stored record, not a flag set
+ * while this init's entries were merged: a warm init whose tagged remotes are all cached merges nothing, and
+ * pooling still has to coordinate their pool — see docs/version-resolver.md §"How pooling resolves". It takes
+ * one scope because a pool never spans share scopes: a tag elsewhere is no reason to pool here.
+ */
+describe('scopeHasPoolState', () => {
+  const external = (pool?: string): SharedExternal => ({
+    dirty: false,
+    versions: [
+      {
+        tag: '2.1.1',
+        host: false,
+        action: 'share',
+        remotes: [mockVersionRemote('team/mfe1', 'dep-a', pool ? { pool } : {})],
+      },
+    ],
+  });
+
+  it('reports none for an empty scope', () => {
+    expect(scopeHasPoolState({})).toBe(false);
+  });
+
+  it('reports none when no stored remote carries a tag', () => {
+    expect(scopeHasPoolState({ 'dep-a': external(), 'dep-b': external() })).toBe(false);
+  });
+
+  it('reports a declared tag on any external', () => {
+    expect(scopeHasPoolState({ 'dep-a': external(), 'dep-b': external('grp') })).toBe(true);
+  });
+
+  it('ignores a blank tag', () => {
+    expect(scopeHasPoolState({ 'dep-a': external('  ') })).toBe(false);
+  });
+
+  // The tags are gone but the record still carries what pooling wrote: the scope must be visited to clear it.
+  it('reports any stored pool result with no tag left', () => {
+    expect(scopeHasPoolState({ 'dep-a': { ...external(), poolName: 'grp' } })).toBe(true);
+    expect(scopeHasPoolState({ 'dep-a': { ...external(), poolWinner: 'team/mfe1' } })).toBe(true);
+
+    const served = external();
+    served.versions[0]!.remotes[0]!.servedBy = 'team/mfe2';
+    expect(scopeHasPoolState({ 'dep-a': served })).toBe(true);
+
+    const islanded = external();
+    islanded.versions[0]!.remotes[0]!.poolCause = 'uncovered';
+    expect(scopeHasPoolState({ 'dep-a': islanded })).toBe(true);
   });
 });

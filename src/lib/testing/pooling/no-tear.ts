@@ -7,7 +7,7 @@ import type {
   VersionName,
 } from 'lib/core/1.domain';
 import * as _path from 'lib/utils/path';
-import { owningPackage } from 'lib/core/2.app/steps/pooling/pool-graph';
+import { owningPackage } from 'lib/core/1.domain/externals/specifier';
 
 // Re-exported so harnesses outside `src` depend on `lib/testing` only, not on where the step code lives.
 export { owningPackage };

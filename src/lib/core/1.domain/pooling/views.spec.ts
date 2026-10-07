@@ -1,7 +1,7 @@
 import type { SharedExternal, SharedVersion, SharedVersionAction } from 'lib/core/1.domain';
 import { mockVersionRemote } from 'lib/testing/domain/externals/version.mock';
-import { committedView, consumedMembers, hostRemotes } from './pool-views';
-import type { PoolMember } from './pool.types';
+import { committedView, consumedMembers, hostRemotes } from './views';
+import type { PoolMember } from './membership';
 
 /**
  * The projections the runtime path reads off a committed record. Nothing here decides anything, so each test
