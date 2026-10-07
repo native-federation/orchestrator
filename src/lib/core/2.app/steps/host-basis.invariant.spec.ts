@@ -20,7 +20,7 @@ import { tagSharedInfoByNpmScope } from 'lib/testing/pooling/tag-by-npm-scope';
  * Nothing enforces it locally; it is the product of three decisions this spec pulls at in turn:
  * `addRemoteToVersion` unshifts the host and then freezes the leader, `applyWinner` never splits the winner
  * (host precedence always makes the host's version the winner), and pooling's `rebuildMember` sorts the
- * elected basis first — the host, since a host is never islanded, torn, or anchored elsewhere.
+ * elected basis first — the host, since a host is never islanded, torn, or placed in a subpool.
  */
 
 type Dep = { pkg: string; version: string; req?: string; strict?: boolean };
@@ -167,8 +167,7 @@ describe('the host stays at remotes[0]', () => {
         { pkg: `${FAMILY}/router`, version: '21.0.0', req: '~21.0.0' },
       ]),
     ]);
-    await mark();
-    await determine();
+    await determine(await mark());
     await pool();
 
     expect(violations(ports)).toEqual([]);
@@ -177,7 +176,7 @@ describe('the host stays at remotes[0]', () => {
   it('pooled family where the host is not the widest build', async () => {
     const { ports, process, mark, determine, pool } = setup(true);
 
-    // The host ships only core; mfe1 ships the whole family and is the better anchor for mfe2.
+    // The host ships only core; mfe1 ships the whole family and is the better build for mfe2.
     await process([
       entry('host', [{ pkg: `${FAMILY}/core`, version: '22.0.5' }], { host: true }),
       entry('team/mfe1', [
@@ -190,8 +189,7 @@ describe('the host stays at remotes[0]', () => {
         { pkg: `${FAMILY}/router`, version: '22.0.5' },
       ]),
     ]);
-    await mark();
-    await determine();
+    await determine(await mark());
     await pool();
 
     expect(violations(ports)).toEqual([]);
@@ -227,8 +225,7 @@ describe('the host stays at remotes[0]', () => {
     await process([
       entry('host', [{ pkg: `${FAMILY}/core`, version: '22.0.5' }], { host: true, override: true }),
     ]);
-    await mark();
-    await determine();
+    await determine(await mark());
     await pool();
 
     expect(violations(ports)).toEqual([]);

@@ -1,17 +1,11 @@
 import type { ExternalName, RemoteName, SharedVersion, VersionName } from 'lib/core/1.domain';
 import { forEachVersionEntry } from 'lib/core/1.domain/externals/basis';
-import type {
-  BuildView,
-  CommittedView,
-  Islanded,
-  OwnCopy,
-  PoolMember,
-  Specifier,
-} from './pool.types';
+import type { BuildView, CommittedView, PoolMember, Specifier } from './pool.types';
+import { SpecifierTags } from './pool-graph';
 
 /**
- * Read-only projections of one pool's stored record: everything the gates in `anchoring.ts` decide on is
- * derived here, and nothing here decides anything.
+ * Read-only projections of one pool's stored record, for the runtime path and the election's inputs. Nothing
+ * here decides anything.
  *
  * Every set is keyed by entrypoint **specifier**, not by external name. A flat remote declares
  * `@framework/core/testing` as its own external while a dense one carries the same specifier as an entry
@@ -22,56 +16,37 @@ import type {
 type VersionMeta = SharedVersion['remotes'][number];
 
 /**
- * Per build: the specifiers it serves and from which file, the tag each is served at, and the
- * `(member → tag)` instance it runs. Built once per pool and reused across consumers, so a coverage question
- * is a subset test rather than a walk of `entries`.
- *
- * A `scope` copy is excluded — it is about to self-serve, so it serves nobody else.
- */
-export function liveBuilds(members: PoolMember[], islanded?: Islanded): Map<RemoteName, BuildView> {
-  return walkBuilds(members, islanded, true);
-}
-
-/**
- * The same walk over the *committed* record, where a `scope` copy is a **stable island** rather than a
- * remote about to self-serve: its files are already in the map under its own scope and it demonstrably runs
- * its own build, so it can serve a remote loaded later.
+ * Per build of the *committed* record, what it serves (a `scope` copy included: its files are already in the
+ * map under its own scope), and what the global map publishes per specifier.
  */
 export function committedView(members: PoolMember[]): CommittedView {
   const global: CommittedView['global'] = new Map();
 
   // Mirrors what `generate-import-map` emitted, so `global` is what the committed map really serves.
-  forEachGlobalClaim(members, undefined, (specifier, tag, meta) => {
+  forEachGlobalClaim(members, (specifier, tag, meta) => {
     if (!global.has(specifier))
       global.set(specifier, { tag, remote: meta.name, file: meta.entries[specifier]! });
   });
 
-  return { builds: walkBuilds(members, undefined, false), global };
+  return { builds: walkBuilds(members), global };
 }
 
-function walkBuilds(
-  members: PoolMember[],
-  islanded: Islanded | undefined,
-  skipScoped: boolean
-): Map<RemoteName, BuildView> {
+function walkBuilds(members: PoolMember[]): Map<RemoteName, BuildView> {
   const builds = new Map<RemoteName, BuildView>();
 
   for (const member of members) {
     const versions = member.external.versions;
     for (let v = 0; v < versions.length; v++) {
       const version = versions[v]!;
-      if (skipScoped && version.action === 'scope') continue;
 
       const remotes = version.remotes;
       for (let r = 0; r < remotes.length; r++) {
         const meta = remotes[r]!;
-        if (islanded?.has(meta.name)) continue;
-
         let own = builds.get(meta.name);
         if (!own) {
           builds.set(
             meta.name,
-            (own = { coverage: new Map(), tags: new Map(), instance: new Map() })
+            (own = { coverage: new Map(), tags: new SpecifierTags(), instance: new Map() })
           );
         }
 
@@ -87,37 +62,6 @@ function walkBuilds(
   }
 
   return builds;
-}
-
-/**
- * Per remote, every copy it holds — **including** ones marked `scope`, which is what separates this from
- * `liveBuilds`. That one answers "what can this build serve others"; this one answers "what does this remote
- * run itself", where a `scope` copy is precisely what it runs. Only the second question can see a torn
- * family.
- */
-export function ownCopies(
-  members: PoolMember[],
-  // Callers that only judge a few remotes pay for a few: the whole pool is never needed at once.
-  only?: ReadonlySet<RemoteName>
-): Map<RemoteName, OwnCopy[]> {
-  const own = new Map<RemoteName, OwnCopy[]>();
-
-  for (const member of members) {
-    for (const version of member.external.versions) {
-      for (const meta of version.remotes) {
-        if (only && !only.has(meta.name)) continue;
-
-        let copies = own.get(meta.name);
-        if (!copies) own.set(meta.name, (copies = []));
-        // A remote ships one copy per member, so a second row for one member is a record it cannot
-        // produce; the first wins so such a record still reads deterministically.
-        if (!copies.some(c => c.member === member.name))
-          copies.push({ member: member.name, tag: version.tag, entries: meta.entries });
-      }
-    }
-  }
-
-  return own;
 }
 
 // Per remote, what it must be served. Wider than its instance: a copy marked `scope` is excluded there
@@ -162,78 +106,14 @@ export function consumedSpecifiers(members: PoolMember[]): Map<RemoteName, Set<S
   return consumed;
 }
 
-/**
- * Does one build serve every specifier the pool's live copies consume? The cheap form of
- * `consumedSpecifiers` against one `liveBuilds` entry, for the only question the healthy path asks.
- *
- * Keyed by specifier, because being the basis of every *member* is not the same thing: an entrypoint the
- * basis does not carry is served from the declaring remote's own build, at that remote's own tag (see
- * §"Entrypoint coverage and tearing"), which is a torn package and not something a member-level test can
- * see.
- */
-export function coversWholePool(
-  members: PoolMember[],
-  build: RemoteName,
-  islanded: Islanded
-): boolean {
-  const served = new Set<Specifier>();
-  const wanted = new Set<Specifier>();
-
-  for (const member of members) {
-    for (const version of member.external.versions) {
-      for (const meta of version.remotes) {
-        if (islanded.has(meta.name)) continue;
-        const into = meta.name === build ? served : wanted;
-        for (const specifier in meta.entries) into.add(specifier);
-      }
-    }
-  }
-
-  for (const specifier of wanted) if (!served.has(specifier)) return false;
-  return true;
-}
-
-/**
- * The build serving each member, i.e. `remotes[0]` of its shared version — skipping copies islanding has
- * taken, since those are about to self-serve. A member with no entry is served by nobody and every
- * consumer falls back to its own build.
- */
-export function servingBuilds(
-  members: PoolMember[],
-  islanded: Islanded
-): Map<ExternalName, RemoteName> {
-  const serving = new Map<ExternalName, RemoteName>();
-
-  for (const member of members) {
-    const shared = member.external.versions.find(v => v.action === 'share');
-    const basis = shared?.remotes.find(r => !islanded.has(r.name));
-    if (basis) serving.set(member.name, basis.name);
-  }
-
-  return serving;
-}
-
-/**
- * The copy whose file the global mapping publishes, per member: the first copy of the member's `share`
- * version that still runs its own build. A remote deduping onto a foreign build is skipped, because
- * publishing its file while it runs somebody else's makes the global mapping and `servedBy` name two
- * different builds for one remote (constraint 17). Order is otherwise the basis precedence `commit()`
- * established, so skipping never promotes a worse-covered copy over a better one. A member with no entry has
- * no basis left and leaves the shared set.
- */
-export function basisPerMember(
-  members: PoolMember[],
-  islanded?: Islanded,
-  dedupsElsewhere?: (remote: RemoteName) => boolean
-): Map<ExternalName, RemoteName> {
+// The first own-build copy of each member's `share` version, in `commit()`'s basis order: the one whose file
+// the global mapping publishes. A member with no entry is not published globally.
+export function basisPerMember(members: PoolMember[]): Map<ExternalName, RemoteName> {
   const basis = new Map<ExternalName, RemoteName>();
 
   for (const member of members) {
     const winner = member.external.versions.find(v => v.action === 'share');
-    if (!winner) continue;
-    const own = winner.remotes.find(
-      r => !islanded?.has(r.name) && !dedupsElsewhere?.(r.name)
-    );
+    const own = winner?.remotes.find(r => r.servedBy === undefined);
     if (own) basis.set(member.name, own.name);
   }
 
@@ -253,7 +133,7 @@ export function hostRemotes(members: PoolMember[]): Set<RemoteName> {
   return hosts;
 }
 
-/** First appearance of each remote across the pool — the arrival order anchor tiebreaks read. */
+// The arrival order round 1 breaks ties by.
 export function arrivalOrder(members: PoolMember[]): Map<RemoteName, number> {
   const arrival = new Map<RemoteName, number>();
 
@@ -269,49 +149,24 @@ export function arrivalOrder(members: PoolMember[]): Map<RemoteName, number> {
 }
 
 /**
- * The tag the global `imports` publishes per specifier. Reading the winning version's basis alone
- * understates it, which islands remotes that were never at risk.
- */
-export function sharedTagPerSpecifier(
-  members: PoolMember[],
-  islanded: Islanded
-): Map<Specifier, VersionName> {
-  const shared = new Map<Specifier, VersionName>();
-  forEachGlobalClaim(members, islanded, (specifier, tag) => {
-    if (!shared.has(specifier)) shared.set(specifier, tag);
-  });
-  return shared;
-}
-
-/**
- * The order `generate-import-map` fills the global `imports` in: per member the `share` version's basis first,
- * then its siblings (`mergeVersionEntries`), then the `skip` copies (`selfFillUncovered`), each filling only
- * what nobody claimed yet. Both gates decide on what a consumer would *land on*, so both read this rather than
- * the winning version alone — a package's secondary entrypoints are routinely published from a sibling copy of
- * the same tag.
- *
- * Which copies may claim is not restated here: `forEachVersionEntry` is the rule the builders publish by, so an
- * anchored copy — whose files the map names per consumer rather than globally — cannot be modelled as
- * publishing them. Islanded copies are discounted on top, being about to self-serve.
- *
- * `visit` is called in claim order for every candidate; first claim per specifier wins, which the callers
- * apply themselves so the walk stays allocation-free.
+ * The order `generate-import-map` fills the global `imports` in: every member's `share` version first (its
+ * basis, then sibling copies of the tag), then every `skip` copy for what nobody claimed yet. First claim per
+ * specifier wins, which the caller applies. Which copies may claim is `forEachVersionEntry`'s rule, the one
+ * the builders publish by, so a copy served by another build is never a publisher.
  */
 function forEachGlobalClaim(
   members: PoolMember[],
-  islanded: Islanded | undefined,
   visit: (specifier: Specifier, tag: VersionName, meta: VersionMeta) => void
 ): void {
-  const accepts = islanded ? (meta: VersionMeta) => !islanded.has(meta.name) : undefined;
   const claim = (version: SharedVersion) =>
-    forEachVersionEntry(version, accepts, (specifier, meta) => visit(specifier, version.tag, meta));
+    forEachVersionEntry(version, undefined, (specifier, meta) =>
+      visit(specifier, version.tag, meta)
+    );
 
   for (const member of members) {
-    const versions = member.external.versions;
-    const winner = versions.find(v => v.action === 'share');
+    const winner = member.external.versions.find(v => v.action === 'share');
     if (winner) claim(winner);
-    for (let v = 0; v < versions.length; v++) {
-      if (versions[v]!.action === 'skip') claim(versions[v]!);
-    }
   }
+  for (const member of members)
+    for (const version of member.external.versions) if (version.action === 'skip') claim(version);
 }

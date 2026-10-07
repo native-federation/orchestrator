@@ -10,7 +10,6 @@ import {
 import {
   addRemoteToVersion,
   committedEntries,
-  findVersionForTag,
   uncoveredEntrypoints,
   versionEntries,
 } from 'lib/core/1.domain/externals/basis';
@@ -141,7 +140,10 @@ export function createUpdateCache(
       }
     }
 
-    const matchingVersion = findVersionForTag(cached.versions, tag);
+    // A `scope` row is another remote's own files, and a `skip` row nobody shares serves nothing globally.
+    const matchingVersion = sharedVersion
+      ? cached.versions.find(v => v.tag === tag && v.action !== 'scope')
+      : undefined;
 
     if (action === 'scope') {
       // Inside a shareable version a later import-map build would redirect it to the basis.

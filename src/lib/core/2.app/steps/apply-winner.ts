@@ -168,7 +168,7 @@ export function createApplyWinner(config: LoggingConfig & ModeConfig) {
       if (version === shared) continue;
 
       version.remotes.forEach(remote => {
-        // Pooling anchored this copy elsewhere: the map names that build's files for it, so the shared
+        // Pooling placed this copy in a subpool: the map names that build's files for it, so the shared
         // version is not what it resolves through and cannot tear it.
         if (remote.servedBy) return;
 

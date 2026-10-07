@@ -40,7 +40,7 @@ test.describe('membership: npm scope', () => {
       '@angular/core': 'http://mfe2/@angular/core.js',
       '@angular/router': 'http://mfe2/@angular/router.js',
     });
-    expect(await nf.islands()).toEqual(['team/mfe2 on @angular/core@17.0.0']);
+    expect(await nf.islands()).toEqual(['team/mfe2 on @angular/core@18.0.0']);
 
     // What the island means at runtime: mfe2's code runs its own framework and the shared design
     // system, and only one @design/ui was ever instantiated for the page.
@@ -139,7 +139,7 @@ test.describe('membership: the `pool` tag', () => {
       react: 'http://mfe2/react.js',
       'react-dom': 'http://mfe2/react-dom.js',
     });
-    expect(await nf.islands()).toEqual(['team/mfe2 on react@17.0.2']);
+    expect(await nf.islands()).toEqual(['team/mfe2 on react@18.2.0']);
 
     // The point of the recipe: neither remote ends up with a mismatched pair.
     const loaded = await nf.loadAll();

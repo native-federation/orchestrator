@@ -21,7 +21,9 @@ test.describe('incremental: a pool is re-elected as a unit', () => {
     dep('@angular/core', '22.1.0', { req: '^22.0.0' }),
     dep('@angular/router', '22.1.0', { req: '^22.0.0' }),
   ]);
-  const pinned = remote('team/mfe2', SCOPE.mfe2, [dep('@angular/core', '22.0.5', { req: '~22.0.5' })]);
+  const pinned = remote('team/mfe2', SCOPE.mfe2, [
+    dep('@angular/core', '22.0.5', { req: '~22.0.5' }),
+  ]);
   const coreOnly = remote('team/mfe3', SCOPE.mfe3, [
     dep('@angular/core', '22.1.0', { req: '^22.0.0' }),
   ]);
@@ -32,7 +34,7 @@ test.describe('incremental: a pool is re-elected as a unit', () => {
 
     // mfe1 wins `core` with its own build and ships the only `router`, so it is coherent here. It used
     // to stay islanded on the `router` verdict pooling wrote during the first init.
-    expect(await nf.islands()).toEqual(['team/mfe2 on @angular/core@22.0.5']);
+    expect(await nf.islands()).toEqual(['team/mfe2 on @angular/core@22.1.0']);
 
     // And `router` is still a shared member rather than a leftover scope with no provider.
     const store = await nf.store();
@@ -112,7 +114,7 @@ test.describe('incremental: a pool is re-elected as a unit', () => {
 test.describe('incremental: a tag-formed pool on a warm cache', () => {
   // Auto-pooling off, so only the explicit `pool` tag groups these — and the tagged remotes are cached
   // by the second init, which is why `hasPoolTag()` has to read storage rather than this init's entries.
-  const anchor = remote('team/mfe1', SCOPE.mfe1, [
+  const base = remote('team/mfe1', SCOPE.mfe1, [
     dep('core-pkg', '22.1.0', { req: '^22.0.0', pool: 'fw' }),
     dep('router-pkg', '22.1.0', { req: '^22.0.0', pool: 'fw' }),
   ]);
@@ -123,14 +125,14 @@ test.describe('incremental: a tag-formed pool on a warm cache', () => {
   const untagged = remote('team/mfe3', SCOPE.mfe3, [dep('core-pkg', '22.1.0', { req: '^22.0.0' })]);
 
   test('still coordinates the pool when no fetched entry declares the tag', async ({ nf }) => {
-    await nf.init([anchor, pinned], { pooling: false });
-    await nf.init([anchor, pinned, untagged], { pooling: false });
+    await nf.init([base, pinned], { pooling: false });
+    await nf.init([base, pinned, untagged], { pooling: false });
 
     expect(nf.fetches()).toEqual([untagged.url]);
 
     const store = await nf.store();
     expect(storedActions(store, 'router-pkg')).toEqual(['22.1.0:share']);
-    expect(await nf.islands()).toEqual(['team/mfe2 on core-pkg@22.0.5']);
+    expect(await nf.islands()).toEqual(['team/mfe2 on core-pkg@22.1.0']);
 
     await nf.loadAll();
     expect(nf.downloads()).toHaveLength(3);

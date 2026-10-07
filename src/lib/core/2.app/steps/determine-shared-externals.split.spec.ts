@@ -222,15 +222,15 @@ describe('determine: splitting a version on election', () => {
 
   /**
    * A warm init reads `servedBy` written by the previous portfolio's pooling — determine runs before
-   * `poolSharedExternals` (init.flow.ts), so these anchors are always already in the record. An anchored
-   * copy resolves through its anchor's build, not through the shared version, which cuts both ways: what it
+   * `poolSharedExternals` (init.flow.ts), so these subpools are always already in the record. A subpool
+   * copy resolves through its subpool's build, not through the shared version, which cuts both ways: what it
    * bundles cannot cover anyone else, and the shared version cannot tear it.
    */
-  describe('copies pooling anchored on a foreign build', () => {
-    it('scopes a torn copy an anchored sibling only appeared to cover', async () => {
+  describe("copies pooling placed in a foreign build's subpool", () => {
+    it('scopes a torn copy a subpool sibling only appeared to cover', async () => {
       config.profile.scopeUncoveredEntrypoints = true;
       const winner = majority('2.2.0', 4);
-      // The widest copy of the winner is the anchored one, so only it declares `/extra`.
+      // The widest copy of the winner is the subpool one, so only it declares `/extra`.
       Object.assign(winner.remotes[3]!, {
         servedBy: 'team/mfe9',
         entries: { 'dep-a': 'a.js', 'dep-a/extra': 'x.js' },
@@ -248,12 +248,12 @@ describe('determine: splitting a version on election', () => {
 
       await createDetermineSharedExternals(config, adapters)();
 
-      // The anchored copy bundles `/extra`, but the map serves it mfe9's file in its own scope only —
+      // The subpool copy bundles `/extra`, but the map serves it mfe9's file in its own scope only —
       // nothing publishes `/extra` for mfe-a, so mfe-a is genuinely torn and takes its own build.
       expect(rows()).toEqual([majorityRow('2.2.0', 4), '2.1.0:scope:[team/mfe-a]']);
     });
 
-    it('keeps an anchored copy deduping, since its anchor already serves it', async () => {
+    it("keeps a subpool copy deduping, since its subpool's build already serves it", async () => {
       config.profile.scopeUncoveredEntrypoints = true;
       seed([
         majority('2.2.0', 4),
@@ -274,7 +274,7 @@ describe('determine: splitting a version on election', () => {
       expect(rows()).toEqual([majorityRow('2.2.0', 4), '2.1.0:skip:[team/mfe-a]']);
     });
 
-    it('does not refuse the portfolio for an anchored copy under strictEntryPointCoverage', async () => {
+    it('does not refuse the portfolio for a subpool copy under strictEntryPointCoverage', async () => {
       config.strict.strictEntryPointCoverage = true;
       seed([
         majority('2.2.0', 4),

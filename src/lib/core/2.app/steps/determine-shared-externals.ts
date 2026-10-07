@@ -22,8 +22,9 @@ export function createDetermineSharedExternals(
    * Step 3: Determine which version is the optimal version to share.
    *
    * The shared external versions that were merged into the cache/storage caused the shared
-   * external to be 'dirty', this step cleans all dirty externals in the storage by calculating
-   * the most optimal version to share since only 1 version can be shared globally. Every other copy
+   * external to be 'dirty', this step re-elects every dirty external but the members of a pool up for
+   * re-election (`pooled`, elected by pooling as one family) by calculating the most optimal version to
+   * share since only 1 version can be shared globally. Every other copy
    * either skips onto the winner or, where its own range rejects it and `strictVersion` is set, is split
    * out into a scoped external of its own tag.
    *
@@ -36,10 +37,9 @@ export function createDetermineSharedExternals(
    *
    * @param config
    * @param adapters
-   * @returns the externals it re-elected, per scope — pooling's signal for what changed, since this
-   * step clears `dirty` on everything it touches.
+   * @returns the externals it re-elected or left to pooling, per scope — pooling's signal for what changed.
    */
-  return () => {
+  return pooled => {
     // The selection loop asks this O(versions² × demands) times but has only
     // (candidate tag × distinct requiredVersion) distinct questions to ask. Scoped to one resolve,
     // so the map needs no bound.
@@ -61,15 +61,19 @@ export function createDetermineSharedExternals(
 
       try {
         const elected = new Set<ExternalName>();
+        // A pool elects its members as one family, so they are reported as touched and left to pooling.
+        const leftToPooling = pooled?.get(shareScope);
+
         Object.entries(sharedExternals)
           .filter(([_, e]) => e.dirty)
           .forEach(([name, external]) => {
+            elected.add(name);
+            if (leftToPooling?.has(name)) return;
             ports.sharedExternalsRepo.addOrUpdate(
               name,
               setVersionActions(name, external, isCompatible),
               shareScope
             );
-            elected.add(name);
           });
         if (elected.size > 0) touched.set(shareScope, elected);
       } catch (error) {
@@ -93,8 +97,8 @@ export function createDetermineSharedExternals(
   };
 
   // Entrypoints declared by the versions `winner` would skip that its own copies can't serve. Prices
-  // exactly the tears `applyWinner.findTears` would report, so an anchored copy — which resolves through
-  // its pooling anchor, not through the winner — is no more a tear here than it is there.
+  // exactly the tears `applyWinner.findTears` would report, so a subpool copy — which resolves through its
+  // subpool's build, not through the winner — is no more a tear here than it is there.
   function uncoveredTears(
     external: SharedExternal,
     winner: SharedVersion,

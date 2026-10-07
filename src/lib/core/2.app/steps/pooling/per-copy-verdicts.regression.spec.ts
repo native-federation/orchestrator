@@ -3,13 +3,14 @@ import type { ConfigContract } from 'lib/core/2.app/config';
 import { mockConfig } from 'lib/testing/config.mock';
 import { mockAdapters } from 'lib/testing/adapters.mock';
 import { mockVersionRemote, newestFirst } from 'lib/testing/domain/externals/version.mock';
-import { emittedUrls, findIncoherentRemotes } from 'lib/testing/pooling/no-tear';
+import { emittedUrls, findIncoherentRemotes, findSplitRemotes } from 'lib/testing/pooling/no-tear';
 import { Optional } from 'lib/utils/optional';
 import type { RemoteInfo, SharedVersion } from 'lib/core/1.domain';
 import { createSharedExternalsRepository } from 'lib/core/3.adapters/storage/shared-externals.repository';
 import { createVersionCheck } from 'lib/core/3.adapters/checks/version.check';
 import { globalThisStorageEntry } from 'lib/core/4.config/storage/global-this.storage';
 import { createDetermineSharedExternals } from '../determine-shared-externals';
+import { createMarkPoolsForReelection } from './mark-pools-for-reelection';
 import { createPoolSharedExternals } from './pool-shared-externals';
 import { createGenerateImportMap } from '../generate-import-map';
 import { tagStoredByNpmScope } from 'lib/testing/pooling/tag-by-npm-scope';
@@ -90,7 +91,8 @@ describe('pooling: per-copy verdicts (F-F)', () => {
     );
 
   const runInit = async () => {
-    const touched = await createDetermineSharedExternals(config, adapters)();
+    const pooled = await createMarkPoolsForReelection(config, adapters)();
+    const touched = await createDetermineSharedExternals(config, adapters)(pooled);
     await createPoolSharedExternals(config, adapters)(touched);
     return createGenerateImportMap(config, adapters)();
   };
@@ -166,6 +168,7 @@ describe('pooling: per-copy verdicts (F-F)', () => {
     // I3: every remote's resolved tags are ones a single build shipped. mfe-a takes core@21.2.0 and
     // common@21.2.0, which is mfe-b's build; mfe-c runs its own 21.1.1.
     expect(findIncoherentRemotes({ importMap, members: stored(), scopeUrls: SCOPE })).toEqual([]);
+    expect(findSplitRemotes({ importMap, members: stored(), scopeUrls: SCOPE })).toEqual([]);
   });
 
   it("shares the pinner's tag with a co-tagged joiner that accepts the winner", async () => {
@@ -210,5 +213,6 @@ describe('pooling: per-copy verdicts (F-F)', () => {
 
     // I3: mfe3 runs core@22.1.0, which is mfe1's build.
     expect(findIncoherentRemotes({ importMap, members: stored(), scopeUrls: SCOPE })).toEqual([]);
+    expect(findSplitRemotes({ importMap, members: stored(), scopeUrls: SCOPE })).toEqual([]);
   });
 });

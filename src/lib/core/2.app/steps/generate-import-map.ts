@@ -172,7 +172,7 @@ export function createGenerateImportMap(
 
         version.remotes.forEach(r => {
           const rScope = getScope(shareScope, r.name, externalName);
-          // Pooling anchored this remote on another build, so its scope names that build's files for
+          // Pooling placed this remote in a subpool, so its scope names that subpool's build's files for
           // everything it imports rather than the shared source's.
           if (index && r.servedBy) {
             const files = index.get(r.servedBy);
@@ -262,7 +262,7 @@ export function createGenerateImportMap(
   /**
    * Where a build serves a specifier from, per remote — built only when some copy carries a `servedBy`,
    * so an unpooled portfolio allocates nothing. Pool-wide rather than per-external on purpose: the
-   * specifier a consumer is anchored on may be an *entry* of a different external of the serving build,
+   * specifier a subpool member runs may be an *entry* of a different external of the serving build,
    * which is the whole reason coverage is keyed by specifier (see docs/version-resolver.md §"The
    * provenance promise").
    */
@@ -384,8 +384,12 @@ export function createGenerateImportMap(
         // map really publishes, which the dynamic path reads as what it may call covered.
         mergeVersionEntries(importMap, chunkBundles, externalName, version);
       }
+    }
 
-      // Second pass, so winners have claimed their imports first.
+    // Second pass, once every external's winner has claimed its imports: a specifier can be an entry of one
+    // external and a package of its own in another (flat vs dense), so filling per external would let a
+    // skipped copy claim it before the winner that serves it got there.
+    for (const [externalName, external] of Object.entries(sharedExternals)) {
       for (const version of external.versions) {
         if (version.action !== 'skip') continue;
         selfFillUncovered(importMap, chunkBundles, externalName, version.remotes);
@@ -448,8 +452,8 @@ export function createGenerateImportMap(
     remotes: SharedVersionMeta[]
   ): void {
     for (const remote of remotes) {
-      // A remote pooling anchored elsewhere takes every entrypoint from that build, so filling from its
-      // own would put a second build into the global mapping.
+      // A remote pooling placed in a subpool takes every entrypoint from that subpool's build, so filling
+      // from its own would put a second build into the global mapping.
       if (remote.servedBy) continue;
       for (const [packageName, file] of Object.entries(remote.entries)) {
         if (importMap.imports[packageName]) continue;

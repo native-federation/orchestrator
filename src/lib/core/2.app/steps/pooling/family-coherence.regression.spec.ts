@@ -9,9 +9,10 @@ import { createSharedExternalsRepository } from 'lib/core/3.adapters/storage/sha
 import { createVersionCheck } from 'lib/core/3.adapters/checks/version.check';
 import { globalThisStorageEntry } from 'lib/core/4.config/storage/global-this.storage';
 import { createDetermineSharedExternals } from '../determine-shared-externals';
+import { createMarkPoolsForReelection } from './mark-pools-for-reelection';
 import { createPoolSharedExternals } from './pool-shared-externals';
 import { createGenerateImportMap } from '../generate-import-map';
-import { findIncoherentRemotes } from 'lib/testing/pooling/no-tear';
+import { findIncoherentRemotes, findSplitRemotes } from 'lib/testing/pooling/no-tear';
 import { tagStoredByNpmScope } from 'lib/testing/pooling/tag-by-npm-scope';
 
 /**
@@ -22,15 +23,15 @@ import { tagStoredByNpmScope } from 'lib/testing/pooling/tag-by-npm-scope';
  * — `@angular/core` from one remote, `@angular/router` from another — and the remote consuming both ran
  * a mismatched framework family.
  *
- * The coverage rule closes it, and reads no tag distance at all: a remote may dedup only onto a build
- * that offers **every** entrypoint it imports, at versions its own `requiredVersion` accepts — or, the
- * witness, when the map already serves all of them at exactly the tags some build shipped together.
- * Failing both it serves its whole family from its own build.
+ * Variant election closes it by construction: a pool elects whole builds, and a remote runs the elected
+ * build only when it ships every entrypoint the remote imports at versions its `requiredVersion` accepts.
+ * Otherwise it runs a later round's build or its own, taking the elected files only where it agrees with
+ * them on everything both ship.
  *
- * The five things this file locks, in order: the two #63 repro cases are fixed, the second of them with
- * the host keeping its pin; patch drift across two builds is islanded, where the agreement gate this
- * replaced tolerated it as benign; a previous-major member leaves the shared set when its only provider is
- * islanded; and a clean subset consumer of an asymmetric family is never islanded.
+ * The five things this file locks, in order: the two #63 repro cases are fixed, the second with the host
+ * keeping its pin; patch drift runs on the one build covering both remotes; a previous-major member leaves
+ * the shared set when its only provider runs its own build; and a clean subset consumer of an asymmetric
+ * family is never islanded.
  */
 describe('pooling: family coherence', () => {
   const SCOPE = {
@@ -94,7 +95,8 @@ describe('pooling: family coherence', () => {
   // non-host remote may resolve a combination of tags that no single build shipped. `team/host` is the
   // only exemption, since a host cannot be repointed onto another build.
   const runInit = async () => {
-    const touched = await createDetermineSharedExternals(config, adapters)();
+    const pooled = await createMarkPoolsForReelection(config, adapters)();
+    const touched = await createDetermineSharedExternals(config, adapters)(pooled);
     await createPoolSharedExternals(config, adapters)(touched);
     const importMap = await createGenerateImportMap(config, adapters)();
 
@@ -106,14 +108,24 @@ describe('pooling: family coherence', () => {
         hosts: ['team/host'],
       })
     ).toEqual([]);
+    // The second hop: no remote's import graph may reach a specifier at two tags.
+    expect(
+      findSplitRemotes({
+        importMap,
+        members: adapters.sharedExternalsRepo.getFromScope(undefined),
+        scopeUrls: SCOPE,
+        hosts: ['team/host'],
+      })
+    ).toEqual([]);
 
     return importMap;
   };
 
-  it('islands the remote that would mix builds when a strict pin drags one member down', async () => {
-    // mfe-b pins core to ~22.0.5, so core resolves DOWN to 22.0.5 (mfe-b's build). router carries no
-    // such pin and only mfe-a provides it, so it resolves to 22.1.0 (mfe-a's build) — leaving mfe-a
-    // drawing core from mfe-b and router from itself, across a minor line.
+  it('islands the strict pinner rather than letting it drag one member down', async () => {
+    // mfe-b pins core to ~22.0.5; mfe-a ships core + router at 22.1.0 and is the only router provider.
+    // Under per-member election core resolved DOWN to mfe-b's 22.0.5 while router stayed on 22.1.0, and
+    // mfe-a had to island. Electing the family: neither build serves the other remote, nobody agrees with
+    // either, so the newer build wins round 1 and the pinner is the one that runs its own core.
     seed('@angular/core', [
       version('22.1.0', '@angular/core', [{ remote: 'team/mfe-a', req: '^22.0.0' }]),
       version('22.0.5', '@angular/core', [{ remote: 'team/mfe-b', req: '~22.0.5', strict: true }]),
@@ -124,31 +136,22 @@ describe('pooling: family coherence', () => {
 
     const importMap = await runInit();
 
-    // core stays shared for mfe-b, which is the only remote that can still use it.
-    expect(importMap.imports['@angular/core']).toBe('http://mfe-b/@angular/core.js');
-
-    // mfe-a serves its whole family from its own build rather than mixing 22.0.5 with 22.1.0.
-    expect(importMap.scopes?.[SCOPE['team/mfe-a']]).toEqual({
-      '@angular/core': 'http://mfe-a/@angular/core.js',
-      '@angular/router': 'http://mfe-a/@angular/router.js',
+    expect(importMap.imports['@angular/core']).toBe('http://mfe-a/@angular/core.js');
+    expect(importMap.imports['@angular/router']).toBe('http://mfe-a/@angular/router.js');
+    expect(importMap.scopes?.[SCOPE['team/mfe-b']]).toEqual({
+      '@angular/core': 'http://mfe-b/@angular/core.js',
     });
 
-    // router had no other provider, so it is not shared at all any more.
-    expect(importMap.imports['@angular/router']).toBeUndefined();
-
     const core = adapters.sharedExternalsRepo.getFromScope(undefined)['@angular/core']!;
-    expect(core.versions.map(v => `${v.tag}:${v.action}`).sort()).toEqual([
-      '22.0.5:share',
-      '22.1.0:scope',
+    expect(core.versions.map(v => `${v.tag}:${v.action}`)).toEqual([
+      '22.1.0:share',
+      '22.0.5:scope',
     ]);
 
-    // The island is `warn`, names the member coverage broke on, and is the ONLY warning: router losing
-    // its last provider is that island's own effect, so `warnIfScopedOnly` must not restate it.
+    // One warning: the pinner, naming the elected tag its range rejects.
     expect(config.log.warn).toHaveBeenCalledWith(
       3,
-      expect.stringContaining(
-        "'team/mfe-a' serves its own family: no shared build offers every entrypoint it imports at a version it accepts — '@angular/router' is the gap"
-      )
+      expect.stringContaining("'team/mfe-b' is islanded: its range rejects '@angular/core@22.1.0'")
     );
     expect(vi.mocked(config.log.warn).mock.calls).toHaveLength(1);
   });
@@ -176,20 +179,11 @@ describe('pooling: family coherence', () => {
     });
   });
 
-  it('islands patch drift across two builds, which the old gate tolerated', async () => {
-    // Rewritten deliberately for the provenance promise. Two remotes one patch apart, both declaring
-    // ~21.2.0. core goes to mfe-b's newer patch, while forms has no provider but mfe-a and stays on its
-    // build — so mfe-a would draw from two builds.
-    //
-    // What the old promise allowed: 21.2.2 beside 21.2.3 sit on the same minor line, so the two builds
-    // "agreed" and mfe-a kept deduping core. What the new one requires: no build ever shipped
-    // core@21.2.3 beside forms@21.2.2, and minor lines are not read at all, so mfe-a serves its own
-    // family. Cost: 2 downloads before, 3 after — and forms, which only mfe-a provided, leaves the
-    // shared set with it.
-    //
-    // The drift has to come from coverage asymmetry, not tag order: with both members provided by both
-    // remotes, one build would simply win the whole family. Same shape as `tolerates patch drift when
-    // each remote solely provides a member` in `e2e/pooling/asymmetric.e2e.spec.ts`.
+  it('runs patch drift on the one build that covers both remotes', async () => {
+    // Two remotes one patch apart, both ~21.2.0; mfe-a ships core + forms at 21.2.2, mfe-b only core at
+    // 21.2.3. Per-member election put core on mfe-b's newer patch while forms stayed on mfe-a's build, so
+    // mfe-a islanded (3 downloads). mfe-a's build serves both remotes, so the family runs it: older, but
+    // coherent, and 2 downloads.
     seed('@angular/core', [
       version('21.2.2', '@angular/core', [{ remote: 'team/mfe-a', req: '~21.2.0' }]),
       version('21.2.3', '@angular/core', [{ remote: 'team/mfe-b', req: '~21.2.0' }]),
@@ -200,17 +194,10 @@ describe('pooling: family coherence', () => {
 
     const importMap = await runInit();
 
-    expect(importMap.imports['@angular/core']).toBe('http://mfe-b/@angular/core.js');
-    expect(importMap.imports['@angular/forms']).toBeUndefined();
-    expect(importMap.scopes?.[SCOPE['team/mfe-a']]).toEqual({
-      '@angular/core': 'http://mfe-a/@angular/core.js',
-      '@angular/forms': 'http://mfe-a/@angular/forms.js',
-    });
-
-    expect(config.log.warn).toHaveBeenCalledWith(
-      3,
-      expect.stringContaining("'team/mfe-a' serves its own family")
-    );
+    expect(importMap.imports['@angular/core']).toBe('http://mfe-a/@angular/core.js');
+    expect(importMap.imports['@angular/forms']).toBe('http://mfe-a/@angular/forms.js');
+    expect(importMap.scopes ?? {}).toEqual({});
+    expect(config.log.warn).not.toHaveBeenCalled();
   });
 
   it('drops a previous-major member from the shared set when its only provider is islanded', async () => {
@@ -245,11 +232,9 @@ describe('pooling: family coherence', () => {
 
   it('never islands a clean subset consumer of an asymmetric family', async () => {
     // Asymmetric coverage: mfe-a ships {core, common, material}, mfe-b only {core, common}, one patch
-    // apart — and they hold the newer patch on different members, which is what splits the winners
-    // across both builds: mfe-a self-serves common and material while deduping core from mfe-b. Every
-    // build agrees at minor granularity, so neither remote is islanded and material stays shared — the
-    // regression this locks is gratuitous scoping (I3), which the old single-build-per-remote rule
-    // would have caused for mfe-a.
+    // apart and newer on different members. mfe-a's build serves mfe-b too (^17.0.0 takes either patch),
+    // so the whole family is mfe-a's and the map needs no scope at all. The gate pipeline reached the
+    // same 3 downloads through two scope entries, because it could not re-elect core onto 17.0.0.
     seed('@angular/core', [
       version('17.0.1', '@angular/core', [{ remote: 'team/mfe-b', req: '^17.0.0' }]),
       version('17.0.0', '@angular/core', [{ remote: 'team/mfe-a', req: '^17.0.0' }]),
@@ -264,25 +249,11 @@ describe('pooling: family coherence', () => {
 
     const importMap = await runInit();
 
-    // Both remotes end up on mfe-a's build, explicitly. What the old promise allowed: mfe-a deduped
-    // core@17.0.1 from mfe-b while running its own common@17.0.1 — every build agreed at minor
-    // granularity, so nothing was scoped and core stayed globally mapped. What the new one requires: one
-    // build per remote, and mfe-a's is the only one covering both, so mfe-b takes core from it too.
-    // Cost is unchanged at 3 downloads; what changed is that the family is coherent for both of them.
-    //
-    // core keeps no global mapping: its elected copy is mfe-b's, mfe-b now runs mfe-a's, and a basis that
-    // does not run its own file may not publish it (constraint 17). Both consumers name mfe-a's file
-    // instead — which is where a build-electing substrate would re-elect core onto 17.0.1's older
-    // sibling and drop both scope entries. See §"The provenance promise", the election bullet.
-    expect(importMap.imports['@angular/core']).toBeUndefined();
+    expect(importMap.imports['@angular/core']).toBe('http://mfe-a/@angular/core.js');
     expect(importMap.imports['@angular/common']).toBe('http://mfe-a/@angular/common.js');
     expect(importMap.imports['@angular/material']).toBe('http://mfe-a/@angular/material.js');
-    expect(importMap.scopes).toEqual({
-      'http://mfe-a/': { '@angular/core': 'http://mfe-a/@angular/core.js' },
-      'http://mfe-b/': { '@angular/core': 'http://mfe-a/@angular/core.js' },
-    });
+    expect(importMap.scopes ?? {}).toEqual({});
 
-    // Nothing is islanded: no copy is scoped, and the dedup is explicit rather than lost.
     const scoped = Object.values(adapters.sharedExternalsRepo.getFromScope(undefined)).flatMap(e =>
       e.versions.filter(v => v.action === 'scope')
     );

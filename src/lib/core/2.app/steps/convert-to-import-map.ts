@@ -57,8 +57,9 @@ export function createConvertToImportMap(
       }
 
       // Skipped externals are provided by another remote. An override — from a shareScope skip, or from
-      // pooling having anchored this remote on one committed build — names whose files, per consumer. A
-      // global skip without one inherits the committed global mapping and needs no entry of its own.
+      // pooling having placed this remote in a committed build's subpool — names whose files, per
+      // consumer. A global skip without one inherits the committed global mapping and needs no entry of
+      // its own.
       if (actions[external.packageName]!.action === 'skip') {
         const { override, covered, sameVersion } = actions[external.packageName]!;
         if (override) {

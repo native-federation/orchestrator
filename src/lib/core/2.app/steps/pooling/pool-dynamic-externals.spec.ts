@@ -70,8 +70,8 @@ describe('createPoolDynamicExternals', () => {
   let adapters: DrivingContract;
 
   // The `committed` helper derives every range from its own version tag, so "same major" is exactly the
-  // acceptance a real portfolio has here — and the coverage gate needs it to be real, since an anchor that
-  // offers a version the loaded remote rejects has to fail on versions rather than on coverage.
+  // acceptance a real portfolio has here — and the coverage gate needs it to be real, since a subpool build
+  // that offers a version the loaded remote rejects has to fail on versions rather than on coverage.
   const acceptsSameMajor = () =>
     vi.fn(
       (tag: string, range: string) => tag.split('.')[0] === range.replace(/^\^/, '').split('.')[0]
@@ -88,6 +88,8 @@ describe('createPoolDynamicExternals', () => {
     config = mockConfig();
     adapters = mockAdapters();
     adapters.sharedExternalsRepo.getFromScope = vi.fn(() => ({}));
+    // The decision asks every range whether it takes what the committed map serves.
+    adapters.versionCheck.isCompatible = acceptsSameMajor();
     poolDynamicExternals = createPoolDynamicExternals(config, adapters);
   });
 
@@ -201,14 +203,11 @@ describe('createPoolDynamicExternals', () => {
 
     expect(result.actions['@framework/forms']).toEqual({ action: 'scope' });
     expect(result.actions['@framework/forms/signals']).toEqual({ action: 'scope' });
-    // team/legacy comes closest — it is the one build carrying both members — and the reason it cannot
-    // serve mfe is the version, not the coverage. Saying "an entrypoint is missing" here would send the
-    // owner looking for the wrong thing.
+    // mfe's ^22 rejects the committed signals@21.2.18, so this is a range rejection — `incompatible`, warned
+    // in the init sentence so `nf.islands()` sees runtime islands too — not a missing entrypoint.
     expect(config.log.warn).toHaveBeenCalledWith(
       8,
-      expect.stringContaining(
-        "'mfe' serves its own family: no committed build offers every entrypoint it imports at a version it accepts — '@framework/forms@21.2.18' is the gap, closest is 'team/legacy'."
-      )
+      "[__GLOBAL__] 'mfe' is islanded: its range rejects '@framework/forms/signals@21.2.18' of the committed map. All 2 members it imports are scoped for it."
     );
   });
 
@@ -240,7 +239,7 @@ describe('createPoolDynamicExternals', () => {
     });
   });
 
-  it('anchors onto a committed island and maps its files per consumer', async () => {
+  it("joins a committed island's subpool and maps its files per consumer", async () => {
     // What lifting the override guard onto the global path buys. team/legacy is a committed island: every
     // copy it holds is scoped, so it demonstrably runs its own build and its files sit in the map under
     // its own scope. mfe ships the same previous-major family, which the committed 22 winner cannot serve,
@@ -289,7 +288,139 @@ describe('createPoolDynamicExternals', () => {
     expect(config.log.warn).not.toHaveBeenCalled();
   });
 
-  it('refuses to anchor onto a build that is itself deduping', async () => {
+  it('lets a remote that agrees with the committed map add the package it introduces', async () => {
+    // mfe ships core at exactly the committed tag and cdk, which nobody committed. Agreeing, it takes the
+    // global core and its own cdk is what the map adds: both actions stand.
+    givenCommitted({
+      '@framework/core': committed('@framework/core', {
+        tag: '22.0.8',
+        remotes: ['team/a', 'mfe'],
+      }),
+      '@framework/cdk': committed('@framework/cdk', { tag: '22.0.6', remotes: ['mfe'] }),
+    });
+    const entry = entryWith(shared('@framework/core'), shared('@framework/cdk'));
+    const actions: SharedInfoActions = {
+      '@framework/core': { action: 'skip' },
+      '@framework/cdk': { action: 'share' },
+    };
+
+    const result = await poolDynamicExternals({ entry, actions });
+
+    expect(result.actions).toEqual({
+      '@framework/core': { action: 'skip' },
+      '@framework/cdk': { action: 'share' },
+    });
+    // Whatever is written names the pool; no copy of mfe carries a verdict.
+    for (const [, written] of vi.mocked(adapters.sharedExternalsRepo.addOrUpdate).mock.calls)
+      for (const version of written.versions)
+        for (const meta of version.remotes.filter(r => r.name === 'mfe')) {
+          expect(meta.servedBy).toBeUndefined();
+          expect(meta.poolCause).toBeUndefined();
+        }
+  });
+
+  it('does not let an entrypoint at another tag than its committed siblings agree', async () => {
+    // Material ships entrypoints only, no root. The map serves `/sort` at 17.0.2; mfe introduces `/table` at
+    // 17.0.0. Same package, so mfe disagrees: publishing its table would put two Material builds in the map.
+    givenCommitted({
+      '@framework/core': committed('@framework/core', {
+        tag: '17.0.0',
+        remotes: ['team/a', 'mfe'],
+      }),
+      '@framework/material/sort': committed('@framework/material/sort', {
+        tag: '17.0.2',
+        remotes: ['team/a'],
+      }),
+      '@framework/material/table': committed('@framework/material/table', {
+        tag: '17.0.0',
+        remotes: ['mfe'],
+      }),
+    });
+    const entry = entryWith(shared('@framework/core'), shared('@framework/material/table'));
+    const actions: SharedInfoActions = {
+      '@framework/core': { action: 'skip' },
+      '@framework/material/table': { action: 'share' },
+    };
+
+    const result = await poolDynamicExternals({ entry, actions });
+
+    expect(result.actions['@framework/core']).toEqual({ action: 'scope' });
+    expect(result.actions['@framework/material/table']).toEqual({ action: 'scope' });
+  });
+
+  it('does not count its own new copies as served by the committed map', async () => {
+    // update-cache has already recorded mfe's forms as a shared version, but the committed map holds no
+    // forms at all. mfe also runs router@22.0.5 against the committed 22.1.0, so it cannot add forms beside
+    // it either: forms is the gap, and mfe serves its own family.
+    givenCommitted({
+      '@framework/router': committed(
+        '@framework/router',
+        { tag: '22.1.0', remotes: ['team/a'] },
+        { tag: '22.0.5', remotes: ['mfe'] }
+      ),
+      '@framework/forms': committed('@framework/forms', { tag: '22.0.5', remotes: ['mfe'] }),
+    });
+    const entry = entryWith(shared('@framework/router'), shared('@framework/forms'));
+    const actions: SharedInfoActions = {
+      '@framework/router': { action: 'skip' },
+      '@framework/forms': { action: 'share' },
+    };
+
+    const result = await poolDynamicExternals({ entry, actions });
+
+    expect(result.actions['@framework/router']).toEqual({ action: 'scope' });
+    expect(result.actions['@framework/forms']).toEqual({ action: 'scope' });
+    expect(config.log.warn).toHaveBeenCalledWith(
+      8,
+      expect.stringContaining("'@framework/forms' is the gap")
+    );
+  });
+
+  it("joins a committed subpool: its build's copies name itself and run its own family", async () => {
+    // The committed map is 22; team/legacy-a runs a 21 subpool (its copies name it) with legacy-b in it.
+    // mfe is 21 too, so it joins the subpool rather than downloading a third 21 build.
+    adapters.remoteInfoRepo.tryGet = vi.fn(name =>
+      name === 'team/legacy-a'
+        ? Optional.of({ scopeUrl: 'http://legacy-a/', exposes: [] } as RemoteInfo)
+        : Optional.empty<RemoteInfo>()
+    );
+    const record = {
+      '@framework/core': committed(
+        '@framework/core',
+        { tag: '22.0.8', remotes: ['team/a'] },
+        { tag: '21.2.18', remotes: ['team/legacy-a', 'mfe'] },
+        { tag: '21.2.15', remotes: ['team/legacy-b'] }
+      ),
+      '@framework/router': committed(
+        '@framework/router',
+        { tag: '22.0.8', remotes: ['team/a'] },
+        { tag: '21.2.18', remotes: ['team/legacy-a', 'mfe'] }
+      ),
+    };
+    for (const external of Object.values(record))
+      for (const version of external.versions)
+        for (const meta of version.remotes)
+          if (meta.name.startsWith('team/legacy')) meta.servedBy = 'team/legacy-a';
+    givenCommitted(record);
+    const entry = entryWith(shared('@framework/core'), shared('@framework/router'));
+    const actions: SharedInfoActions = {
+      '@framework/core': { action: 'skip' },
+      '@framework/router': { action: 'skip' },
+    };
+
+    const result = await poolDynamicExternals({ entry, actions });
+
+    expect(result.actions['@framework/core']).toMatchObject({
+      action: 'skip',
+      override: { '@framework/core': 'http://legacy-a/@framework/core.js' },
+    });
+    expect(result.actions['@framework/router']).toMatchObject({
+      action: 'skip',
+      override: { '@framework/router': 'http://legacy-a/@framework/router.js' },
+    });
+  });
+
+  it("refuses to join a build's subpool when that build is itself deduping", async () => {
     // Constraint 9. team/b covers mfe and its versions fit, but it does not win `@framework/core`: its own
     // family resolves through the committed 22.0.8 winner, so its modules are already bound to that copy.
     // A consumer deduping onto it would inherit the tear one hop in, and no additive map can repair it —
@@ -322,7 +453,7 @@ describe('createPoolDynamicExternals', () => {
     // Rewritten for the promise. The committed map serves core@22.0.8 from team/a and cdk@22.0.6 from
     // team/b; mfe imports both. The old gate deduped it because 22.0.8 and 22.0.6 sit on one minor line —
     // benign drift by construction. No build shipped that pair, so mfe serves its own family and pays the
-    // download. team/b is not an anchor either: it does not win core (constraint 9).
+    // download. team/b runs no subpool either: it does not win core (constraint 9).
     adapters.versionCheck.isCompatible = vi.fn(() => true);
     givenCommitted({
       '@framework/core': committed(
@@ -579,15 +710,15 @@ describe('createPoolDynamicExternals', () => {
 
     it('moves an islanded remote out of the shared version into a scope version', async () => {
       const entry = entryWith(shared('@framework/core'), shared('@framework/common'));
+      const common = committed('@framework/common', { tag: '17.0.0', remotes: ['host', 'mfe'] });
+      // The resolver scopes a copy only for a reason: here mfe's strict common range rejects the shared 17.
+      common.versions[0]!.remotes[1]!.requiredVersion = '^18.0.0';
       givenCommitted({
         '@framework/core': committed('@framework/core', {
           tag: '17.0.0',
           remotes: ['host', 'mfe'],
         }),
-        '@framework/common': committed('@framework/common', {
-          tag: '17.0.0',
-          remotes: ['host', 'mfe'],
-        }),
+        '@framework/common': common,
       });
 
       await poolDynamicExternals({
@@ -606,9 +737,62 @@ describe('createPoolDynamicExternals', () => {
         ]);
         expect(writtenFor(name)!.poolName).toBe('framework');
       }
+      expect(config.log.warn).toHaveBeenCalledWith(
+        8,
+        expect.stringContaining("'mfe' is islanded: its range rejects '@framework/common@17.0.0'")
+      );
     });
 
-    it('records a coverage self-serve as uncovered, and drops a share only it provided', async () => {
+    it("records a resolver scope for a missing entrypoint as 'uncovered', not a range rejection", async () => {
+      // Under `scopeUncoveredEntrypoints` the resolver scopes mfe's common@17.0.1: its `/http` entrypoint is
+      // not in the committed 17.0.0, though its range takes 17.0.0. The family self-serves for coverage.
+      const entry = entryWith(shared('@framework/core'), shared('@framework/common'));
+      const common = committed('@framework/common', { tag: '17.0.0', remotes: ['host'] });
+      common.versions.push({
+        tag: '17.0.1',
+        host: false,
+        action: 'scope',
+        remotes: [
+          mockVersionRemote('mfe', '@framework/common', {
+            requiredVersion: '^17.0.0',
+            entries: {
+              '@framework/common': 'common.js',
+              '@framework/common/http': 'http.js',
+            },
+          }),
+        ],
+      });
+      givenCommitted({
+        '@framework/core': committed('@framework/core', {
+          tag: '17.0.0',
+          remotes: ['host', 'mfe'],
+        }),
+        '@framework/common': common,
+      });
+
+      await poolDynamicExternals({
+        entry,
+        actions: {
+          '@framework/core': { action: 'skip' },
+          '@framework/common': { action: 'scope' },
+        },
+      });
+
+      expect(copies(writtenFor('@framework/core'))).toEqual([
+        ['17.0.0:share', [{ name: 'host' }]],
+        ['17.0.0:scope', [{ name: 'mfe', poolCause: 'uncovered' }]],
+      ]);
+      expect(config.log.warn).toHaveBeenCalledWith(
+        8,
+        expect.stringContaining("'mfe' serves its own family")
+      );
+      expect(config.log.warn).toHaveBeenCalledWith(
+        8,
+        expect.stringContaining("'@framework/common/http' is the gap")
+      );
+    });
+
+    it('records a range rejection as incompatible, and drops a share only it provided', async () => {
       adapters.versionCheck.isCompatible = acceptsSameMajor();
       givenCommitted({
         '@framework/forms': committed(
@@ -642,22 +826,23 @@ describe('createPoolDynamicExternals', () => {
         },
       });
 
+      // mfe's ^22 rejects the committed signals@21.2.18: a range rejection, so `incompatible`.
       expect(copies(writtenFor('@framework/forms'))).toEqual([
         ['22.0.8:share', [{ name: 'team/a' }]],
-        ['22.0.8:scope', [{ name: 'mfe', poolCause: 'uncovered' }]],
+        ['22.0.8:scope', [{ name: 'mfe', poolCause: 'incompatible' }]],
         ['21.2.18:skip', [{ name: 'team/legacy' }]],
       ]);
       expect(copies(writtenFor('@framework/forms/signals'))).toEqual([
-        ['22.0.8:scope', [{ name: 'mfe', poolCause: 'uncovered' }]],
+        ['22.0.8:scope', [{ name: 'mfe', poolCause: 'incompatible' }]],
         ['21.2.18:share', [{ name: 'team/legacy' }]],
       ]);
       // The delta never published it globally, so the record must not either: it is scope-only now.
       expect(copies(writtenFor('@framework/animations'))).toEqual([
-        ['22.0.8:scope', [{ name: 'mfe', poolCause: 'uncovered' }]],
+        ['22.0.8:scope', [{ name: 'mfe', poolCause: 'incompatible' }]],
       ]);
     });
 
-    it('records the anchor a redirected copy dedups onto', async () => {
+    it('records the subpool build a redirected copy dedups onto', async () => {
       adapters.versionCheck.isCompatible = acceptsSameMajor();
       adapters.remoteInfoRepo.tryGet = vi.fn(name =>
         name === 'team/legacy'
@@ -691,6 +876,48 @@ describe('createPoolDynamicExternals', () => {
         ['21.2.18:skip', [{ name: 'mfe', servedBy: 'team/legacy' }]],
       ]);
       expect(writtenFor('@framework/cdk')!.versions[2]!.remotes[0]!.servedBy).toBe('team/legacy');
+    });
+
+    // The same portfolio with team/legacy gone from the remote cache. Its files cannot be mapped, so it is
+    // no subpool to join: left on update-cache's actions, mfe would run a member from each build.
+    it('serves the remote its whole family when the only fitting build is not in the cache', async () => {
+      adapters.versionCheck.isCompatible = acceptsSameMajor();
+      adapters.remoteInfoRepo.tryGet = vi.fn(() => Optional.empty<RemoteInfo>());
+      givenCommitted({
+        '@framework/core': committed(
+          '@framework/core',
+          { tag: '22.0.8', remotes: ['team/a'] },
+          { tag: '21.2.18', remotes: ['team/legacy'], action: 'scope' },
+          { tag: '21.2.18', remotes: ['mfe'] }
+        ),
+        '@framework/cdk': committed(
+          '@framework/cdk',
+          { tag: '22.0.6', remotes: ['team/b'] },
+          { tag: '21.2.18', remotes: ['team/legacy'], action: 'scope' },
+          { tag: '21.2.18', remotes: ['mfe'] }
+        ),
+      });
+      const actions: SharedInfoActions = {
+        '@framework/core': { action: 'skip' },
+        '@framework/cdk': { action: 'skip' },
+      };
+
+      await poolDynamicExternals({
+        entry: entryWith(shared('@framework/core'), shared('@framework/cdk')),
+        actions,
+      });
+
+      expect(actions['@framework/core']!.action).toBe('scope');
+      expect(actions['@framework/cdk']!.action).toBe('scope');
+      expect(copies(writtenFor('@framework/core'))).toEqual([
+        ['22.0.8:share', [{ name: 'team/a' }]],
+        // Its cause stays why it missed the map (its ^21 rejects 22): the missing build only took away the fix.
+        ['21.2.18:scope', [{ name: 'team/legacy' }, { name: 'mfe', poolCause: 'incompatible' }]],
+      ]);
+      expect(config.log.warn).toHaveBeenCalledWith(
+        8,
+        "[__GLOBAL__][mfe] 'team/legacy' is not in the cache, so its files cannot be mapped."
+      );
     });
 
     it('writes no verdict for a witnessed remote', async () => {

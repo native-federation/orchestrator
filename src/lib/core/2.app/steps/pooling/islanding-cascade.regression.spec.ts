@@ -9,6 +9,7 @@ import { createSharedExternalsRepository } from 'lib/core/3.adapters/storage/sha
 import { createVersionCheck } from 'lib/core/3.adapters/checks/version.check';
 import { globalThisStorageEntry } from 'lib/core/4.config/storage/global-this.storage';
 import { createDetermineSharedExternals } from '../determine-shared-externals';
+import { createMarkPoolsForReelection } from './mark-pools-for-reelection';
 import { createPoolSharedExternals } from './pool-shared-externals';
 import { tagStoredByNpmScope } from 'lib/testing/pooling/tag-by-npm-scope';
 
@@ -84,17 +85,25 @@ describe('pooling: islanding cascade', () => {
     );
 
   const runInit = async () => {
-    const touched = await createDetermineSharedExternals(config, adapters)();
+    const pooled = await createMarkPoolsForReelection(config, adapters)();
+    const touched = await createDetermineSharedExternals(config, adapters)(pooled);
     await createPoolSharedExternals(config, adapters)(touched);
   };
 
-  // Downloads for the pool: one per shared member, plus one per remote that self-serves a copy.
+  // Downloads for the pool: one per shared member, plus one per copy a remote runs from its own build —
+  // scoped, or a subpool build's (`servedBy` naming itself), which its subpool dedups onto.
   const downloads = () =>
     Object.values(adapters.sharedExternalsRepo.getFromScope(undefined)).reduce(
       (sum, external) =>
         sum +
         external.versions.reduce(
-          (n, v) => n + (v.action === 'share' ? 1 : v.action === 'scope' ? v.remotes.length : 0),
+          (n, v) =>
+            n +
+            (v.action === 'share'
+              ? 1
+              : v.action === 'scope'
+                ? v.remotes.length
+                : v.remotes.filter(r => r.servedBy === r.name).length),
           0
         ),
       0
@@ -102,7 +111,8 @@ describe('pooling: islanding cascade', () => {
 
   const winner = (member: string) =>
     adapters.sharedExternalsRepo
-      .getFromScope(undefined)[member]!.versions.find(v => v.action === 'share')?.tag;
+      .getFromScope(undefined)
+      [member]!.versions.find(v => v.action === 'share')?.tag;
 
   const islandedRemotes = () =>
     vi
@@ -142,7 +152,8 @@ describe('pooling: islanding cascade', () => {
 
       expect(winner('@angular/core')).toBe('22.0.8');
       expect(winner('@angular/router')).toBe('22.0.8');
-      expect(islandedRemotes()).toEqual(['team/legacy-a on @angular/core@21.2.18']);
+      // The warning names the elected tag the remote's range rejects, not the remote's own tag.
+      expect(islandedRemotes()).toEqual(['team/legacy-a on @angular/core@22.0.8']);
       expect(downloads()).toBe(4);
     });
 
@@ -163,8 +174,8 @@ describe('pooling: islanding cascade', () => {
 
       // Only the two genuinely cross-major remotes island, and each on a real range violation.
       expect(islandedRemotes()).toEqual([
-        'team/legacy-a on @angular/core@21.2.18',
-        'team/legacy-b on @angular/core@21.2.15',
+        'team/legacy-a on @angular/core@22.0.8',
+        'team/legacy-b on @angular/core@22.0.8',
       ]);
       expect(config.log.warn).not.toHaveBeenCalledWith(3, expect.stringContaining('disagree on'));
 
@@ -176,20 +187,19 @@ describe('pooling: islanding cascade', () => {
         )
       ).toBe(false);
 
-      // 4 downloads with one legacy remote, 6 with two — the honest price of two islands, not 9.
-      expect(downloads()).toBe(6);
+      // 4 downloads with one legacy remote and still 4 with two: legacy-b's range accepts legacy-a's 21.2.18
+      // build, so a later round places them in its subpool. Under the gate pipeline this was 6, two islands.
+      expect(downloads()).toBe(4);
     });
   });
 
   /**
-   * CHARACTERISATION of what remains open: the objective is exact per external, but it is still
-   * evaluated per external. When two members of one pool have their remote-count majority on opposite
-   * lines they elect opposite winners, and pooling amplifies the split. A failure here is probably
-   * good news — a pool-aware election would be the fix, so read the "Known limitation" note in
-   * `docs/version-resolver.md` §"3. Optimal Version Strategy" before "repairing" it.
+   * Formerly a CHARACTERISATION of an open defect: each member elected its own winner, so a pool whose
+   * members had their majorities on different lines split, and pooling amplified it (6 downloads, mfe-a
+   * islanded on router). Electing the pool as one family fixes it.
    */
-  describe('residual: per-member elections can still disagree across a pool', () => {
-    it('splits a family when each member has its majority on a different line', async () => {
+  describe('a pool elects as one family, whatever each member’s majority is', () => {
+    it('keeps a family whole when each member has its majority on a different line', async () => {
       // core's modern side is larger, router's legacy side is larger.
       seed('@angular/core', [
         version('22.0.8', '@angular/core', [
@@ -209,14 +219,15 @@ describe('pooling: islanding cascade', () => {
 
       await runInit();
 
-      // Each winner is the cheaper one for its own member, and together they cost mfe-a its family.
+      // mfe-a's build serves three remotes against legacy-a's two, so the whole family is 22; the legacy
+      // pair runs legacy-a's 21 build together.
       expect(winner('@angular/core')).toBe('22.0.8');
-      expect(winner('@angular/router')).toBe('21.2.18');
+      expect(winner('@angular/router')).toBe('22.0.8');
       expect(islandedRemotes()).toEqual([
-        'team/legacy-a on @angular/core@21.2.18',
-        'team/mfe-a on @angular/router@22.0.8',
+        'team/legacy-a on @angular/core@22.0.8',
+        'team/legacy-b on @angular/router@22.0.8',
       ]);
-      expect(downloads()).toBe(6);
+      expect(downloads()).toBe(4);
     });
   });
 });

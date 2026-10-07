@@ -1,4 +1,5 @@
 import type { ExternalName, RemoteName, SharedExternal, VersionName } from 'lib/core/1.domain';
+import type { SpecifierTags } from './pool-graph';
 
 // Unique per share scope: the most-declared of the names merged into the pool.
 export type PoolName = string;
@@ -18,17 +19,10 @@ export type FamilyInstance = Map<ExternalName, VersionName>;
 /** Every specifier a build serves, mapped to the file it serves it from. */
 export type Coverage = Map<Specifier, string>;
 
-/** One copy a remote holds, as it runs it itself: `scope` rows included. */
-export type OwnCopy = {
-  member: ExternalName;
-  tag: VersionName;
-  entries: Record<Specifier, string>;
-};
-
-/** One build, as every gate reads it. */
+/** One build, as the runtime path reads it. */
 export type BuildView = {
   coverage: Coverage;
-  tags: Map<Specifier, VersionName>;
+  tags: SpecifierTags;
   instance: FamilyInstance;
 };
 
@@ -37,6 +31,3 @@ export type CommittedView = {
   /** Per specifier, what the committed `imports` serves and from where. */
   global: Map<Specifier, { tag: VersionName; remote: RemoteName; file: string }>;
 };
-
-// Structurally either a Set of remote names or the step's Map of islanded remotes with their cause.
-export type Islanded = { has: (remote: RemoteName) => boolean };

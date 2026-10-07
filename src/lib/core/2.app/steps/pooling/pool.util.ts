@@ -1,18 +1,11 @@
-import type { ExternalName, RemoteName, shareScope } from 'lib/core/1.domain';
+import type { ExternalName, shareScope } from 'lib/core/1.domain';
 import type { ForSharedExternalsStorage } from '../../driving-ports/for-shared-externals-storage.port';
 import type { PoolMember, PoolName } from './pool.types';
 
-// A projection built at most once, and only if a gate gets far enough to ask for it. Both pooling steps
-// iterate to a fixed point over views that do not change between rounds.
+// A projection built at most once, and only if the decision gets far enough to ask for it.
 export function lazy<T>(make: () => T): () => T {
   let value: T | undefined;
   return () => (value ??= make());
-}
-
-export function remotesInPool(members: PoolMember[]): RemoteName[] {
-  return [
-    ...new Set(members.flatMap(m => m.external.versions.flatMap(v => v.remotes.map(r => r.name)))),
-  ];
 }
 
 /**
@@ -29,12 +22,8 @@ export function poolableScopes(
     .filter(scope => repo.scopeType(scope) !== 'strict' && repo.hasPoolState(scope));
 }
 
-/**
- * Write `poolName` onto every external of the scope that is in a pool under a different name, and clear it —
- * with every copy's `poolCause` — off one that is in none any more. Names are per scope (a suffix
- * disambiguates two pools sharing a tag), so a pool nobody re-elected can still be renamed by another.
- * `skip` names pools whose members the caller is rebuilding itself.
- */
+// Writes each external's current `poolName`, and clears it with every `poolCause` off one in no pool any more;
+// a pool nobody re-elected can still be renamed by another. `skip` names pools the caller rebuilds itself.
 export function syncPoolNames(
   sharedExternals: shareScope,
   pools: Map<PoolName, PoolMember[]>,

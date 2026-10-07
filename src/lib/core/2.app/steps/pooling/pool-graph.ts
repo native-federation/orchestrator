@@ -1,6 +1,6 @@
-import type { ExternalName, shareScope } from 'lib/core/1.domain';
+import type { ExternalName, shareScope, VersionName } from 'lib/core/1.domain';
 import type { LogHandler } from '../../config/log.contract';
-import type { PoolMember, PoolName } from './pool.types';
+import type { PoolMember, PoolName, Specifier } from './pool.types';
 
 // Disjoint-set union (union by size + iterative path halving — loop-based to avoid stack growth in
 // the browser). String node keys are interned to integers so the hot path indexes plain arrays.
@@ -69,6 +69,29 @@ export function owningPackage(name: ExternalName): ExternalName | undefined {
     if (cut === -1) return undefined;
   }
   return name.slice(0, cut);
+}
+
+// Tags per specifier that also pin an entrypoint nobody lists: a package is one version, so its tag is the
+// root's, else the first entrypoint's — a package can ship entrypoints only (`material/table`, no root).
+export class SpecifierTags extends Map<Specifier, VersionName> {
+  private readonly packages = new Map<ExternalName, VersionName>();
+
+  constructor(entries: Iterable<readonly [Specifier, VersionName]> = []) {
+    super();
+    for (const [specifier, tag] of entries) this.set(specifier, tag);
+  }
+
+  override set(specifier: Specifier, tag: VersionName): this {
+    super.set(specifier, tag);
+    const pkg = owningPackage(specifier);
+    if (pkg === undefined) this.packages.set(specifier, tag);
+    else if (!this.packages.has(pkg)) this.packages.set(pkg, tag);
+    return this;
+  }
+
+  tagOf(specifier: Specifier): VersionName | undefined {
+    return this.get(specifier) ?? this.packages.get(owningPackage(specifier) ?? specifier);
+  }
 }
 
 /**

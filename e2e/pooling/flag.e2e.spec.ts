@@ -48,18 +48,17 @@ test.describe('the flag: what switching it on changes', () => {
       '@angular/router': 'mfe1|@angular/router@22.1.0',
     });
 
-    // The `after` arm, same input: mfe1 gives up both dedups and serves its own family, so router loses
-    // its global entry and every remote holds one line.
+    // The `after` arm, same input: the family is elected whole. mfe1's 22.1.0 build is the global one and
+    // mfe2, whose ~22.0.5 rejects it, runs its own core — every remote holds one line.
     await nf.init(splitFamily(), { namespace: 'pooled' });
 
     const pooled = await nf.map();
-    expect(pooled.imports['@angular/core']).toBe('http://mfe2/@angular/core.js');
-    expect(pooled.imports['@angular/router']).toBeUndefined();
-    expect(pooled.scopes?.[SCOPE.mfe1]).toEqual({
-      '@angular/core': 'http://mfe1/@angular/core.js',
-      '@angular/router': 'http://mfe1/@angular/router.js',
+    expect(pooled.imports['@angular/core']).toBe('http://mfe1/@angular/core.js');
+    expect(pooled.imports['@angular/router']).toBe('http://mfe1/@angular/router.js');
+    expect(pooled.scopes?.[SCOPE.mfe2]).toEqual({
+      '@angular/core': 'http://mfe2/@angular/core.js',
     });
-    expect(await nf.islands()).toEqual(['team/mfe1 self-serves, no build covers @angular/router']);
+    expect(await nf.islands()).toEqual(['team/mfe2 on @angular/core@22.1.0']);
     expect((await nf.loadAll())['team/mfe1']!.seen).toEqual({
       '@angular/core': 'mfe1|@angular/core@22.1.0',
       '@angular/router': 'mfe1|@angular/router@22.1.0',
@@ -67,9 +66,9 @@ test.describe('the flag: what switching it on changes', () => {
   });
 
   test('buys the coherence for one extra download', async ({ nf }) => {
-    // The central trade, measured on the smallest possible portfolio: pooling never reduces downloads,
-    // it removes the incoherence. Unpooled the two members come from two builds for 2 downloads; pooled
-    // mfe1 self-serves both for 3.
+    // The central trade, measured on the smallest possible portfolio: here coherence costs a download.
+    // (Electing whole families can also save some — see `asymmetric.e2e.spec.ts`.) Unpooled the two members come from two builds for 2 downloads; pooled
+    // mfe1's family is elected and mfe2 runs its own core beside it, for 3.
     await nf.init(splitFamily(), { pooling: false, namespace: 'unpooled' });
     await nf.loadAll();
     expect(nf.downloads()).toHaveLength(2);
@@ -126,7 +125,7 @@ test.describe('the flag: what switching it on changes', () => {
       '@acme/framework': 'http://mfe2/@acme/framework.js',
       '@acme/ui': 'http://mfe2/@acme/ui.js',
     });
-    expect(await nf.islands()).toEqual(['team/mfe2 on @acme/framework@17.0.0']);
+    expect(await nf.islands()).toEqual(['team/mfe2 on @acme/framework@18.0.0']);
     await nf.loadAll();
     expect(await nf.buildsOf('@acme/ui')).toEqual(['mfe1|@acme/ui@1.0.0', 'mfe2|@acme/ui@1.0.0']);
   });
@@ -196,7 +195,7 @@ test.describe('the flag: what switching it on changes', () => {
     // The flag reaches the dynamic path as well. mfe2 arrives after the map is committed; unpooled it
     // dedups the committed router@22.1.0 and publishes its own forms@22.0.5 globally, so from then on
     // every remote in the app can import a family split across a minor line.
-    const anchor = () =>
+    const base = () =>
       remote('team/mfe1', SCOPE.mfe1, [
         dep('@angular/core', '22.1.0', { req: '^22.0.0' }),
         dep('@angular/router', '22.1.0', { req: '^22.0.0' }),
@@ -207,7 +206,7 @@ test.describe('the flag: what switching it on changes', () => {
         dep('@angular/forms', '22.0.5', { req: '^22.0.0' }),
       ]);
 
-    await nf.init([anchor()], { pooling: false, unlisted: [late()], namespace: 'unpooled' });
+    await nf.init([base()], { pooling: false, unlisted: [late()], namespace: 'unpooled' });
     await nf.initRemoteEntry(late().url);
 
     const unpooled = await nf.map();
@@ -220,7 +219,7 @@ test.describe('the flag: what switching it on changes', () => {
 
     // On, the gate is mirrored onto the newly loaded remote: it serves its whole family itself and its
     // sole-provided forms is not published globally off a build that disagrees with the committed one.
-    await nf.init([anchor()], { unlisted: [late()], namespace: 'pooled' });
+    await nf.init([base()], { unlisted: [late()], namespace: 'pooled' });
     await nf.initRemoteEntry(late().url);
 
     const pooled = await nf.map();
@@ -255,11 +254,10 @@ test.describe('the flag: what it does not change', () => {
       { pooling: false }
     );
 
-    expect((await nf.map()).scopes?.[SCOPE.mfe1]).toEqual({
-      '@angular/core': 'http://mfe1/@angular/core.js',
-      '@angular/router': 'http://mfe1/@angular/router.js',
+    expect((await nf.map()).scopes?.[SCOPE.mfe2]).toEqual({
+      '@angular/core': 'http://mfe2/@angular/core.js',
     });
-    expect(await nf.islands()).toEqual(['team/mfe1 self-serves, no build covers @angular/router']);
+    expect(await nf.islands()).toEqual(['team/mfe2 on @angular/core@22.1.0']);
   });
 
   test('decides entrypoint coverage the same way either way', async ({ nf }) => {

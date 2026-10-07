@@ -64,11 +64,11 @@ export function findVersionForTag(
 // that declares it — basis precedence first. See
 // docs/version-resolver.md#entrypoint-coverage-and-tearing.
 //
-// Only copies that publish their own files count. Pooling anchors a copy on a foreign build via
-// `servedBy`, and the import map then names the anchor's files for it, per consumer — so what such a
-// copy bundles answers for nobody but itself, and counting it would promise a specifier no consumer of
-// this version can resolve. Pooling keeps an anchored copy out of the basis slot for exactly this
-// reason, so a `share` version's basis always survives the skip.
+// Only copies that publish their own files count. Pooling places a copy in a subpool running a foreign
+// build via `servedBy`, and the import map then names that build's files for it, per consumer — so what
+// such a copy bundles answers for nobody but itself, and counting it would promise a specifier no
+// consumer of this version can resolve. Pooling keeps a subpool copy out of the basis slot for exactly
+// this reason, so a `share` version's basis always survives the skip.
 export function versionEntries(version: SharedVersion): Map<string, SharedVersionMeta> {
   return collectEntries(version, undefined);
 }
@@ -88,9 +88,9 @@ export function committedEntries(version: SharedVersion): Map<string, SharedVers
  * ask which build a consumer lands on, per specifier — reads the `servedBy` rule from here instead of
  * restating it. It deliberately does not dedup: the callers do, and this way the walk allocates nothing.
  *
- * `accepts` is for a caller with a further reason to discount a copy (pooling islands one, so it self-serves).
- * Filtering the *result* is not the same thing — that drops the specifier instead of letting the next copy
- * claim it.
+ * `accepts` is for a caller with a further reason to discount a copy (pooling islands one, so it
+ * self-serves). Filtering the *result* is not the same thing — that drops the specifier instead of letting
+ * the next copy claim it.
  */
 export function forEachVersionEntry(
   version: SharedVersion,

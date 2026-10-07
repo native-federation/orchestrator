@@ -116,22 +116,19 @@ test.describe('shapes: the same verdict, whatever the build emitted', () => {
   });
 
   for (const s of SHAPES) {
-    test(`islands the same remote on a split family — ${shapeName(s)}`, async ({ nf }) => {
+    test(`reaches the same verdict on a split family — ${shapeName(s)}`, async ({ nf }) => {
       await nf.init(splitFamily().map(entry => shape(entry, s)));
 
-      expect(await nf.islands()).toEqual([
-        'team/mfe1 self-serves, no build covers @angular/core/testing',
-      ]);
+      // mfe1's whole family is elected in every shape — the newer build, since neither serves the other —
+      // and the pinner runs its own core.
+      expect(await nf.islands()).toEqual(['team/mfe2 on @angular/core@22.1.0']);
 
       const map = await nf.map();
-      expect(map.imports['@angular/core']).toBe('http://mfe2/@angular/core.js');
-      expect(map.imports['@angular/router']).toBeUndefined();
-      expect(map.imports['@angular/core/testing']).toBeUndefined();
-      // The island's whole family plus, in either chunking shape, its own chunk graph.
+      expect(map.imports['@angular/core']).toBe('http://mfe1/@angular/core.js');
+      expect(map.imports['@angular/router']).toBe('http://mfe1/@angular/router.js');
+      expect(map.imports['@angular/core/testing']).toBe('http://mfe1/@angular/core/testing.js');
+      // In either chunking shape, the elected build's own chunk graph.
       expect(map.scopes?.[SCOPE.mfe1]).toEqual({
-        '@angular/core': 'http://mfe1/@angular/core.js',
-        '@angular/core/testing': 'http://mfe1/@angular/core/testing.js',
-        '@angular/router': 'http://mfe1/@angular/router.js',
         '@nf-internal/chunk-NG1': 'http://mfe1/chunk-NG1.js',
       });
 
@@ -325,7 +322,7 @@ test.describe('shapes: dense chunking maps a chunk per serving remote', () => {
       }),
     ]);
 
-    expect(await nf.islands()).toEqual(['team/mfe2 on @angular/core@17.0.0']);
+    expect(await nf.islands()).toEqual(['team/mfe2 on @angular/core@18.0.0']);
     const map = await nf.map();
     expect(map.scopes?.[SCOPE.mfe2]).toEqual({
       '@angular/core': 'http://mfe2/@angular/core.js',
@@ -452,7 +449,7 @@ test.describe('shapes: a recorded flat entry with `pool` tags', () => {
 
     // mfe3's `~4.2.0` cannot accept the 4.3.2 the other two ship, so the tag scopes its whole family —
     // including `@acme/widgets`, which only mfe1 and mfe3 ship and which mfe3 would otherwise dedup.
-    expect(await nf.islands()).toEqual(['team/mfe3 on @acme/platform@4.2.9']);
+    expect(await nf.islands()).toEqual(['team/mfe3 on @acme/platform@4.3.2']);
 
     const map = await nf.map();
     expect(map.imports['@acme/platform']).toBe('http://mfe1/_acme_platform.Bq1vX8kd7P.js');

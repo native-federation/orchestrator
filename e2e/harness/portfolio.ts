@@ -61,7 +61,7 @@ export type DepOptions = {
   /**
    * Specifiers this external's own code imports, e.g. `router` declaring `['@angular/core']`. The
    * compiled file really imports them, so what they bind to is decided by the *provider's* scope, not
-   * the consumer's — the second hop a torn anchor breaks. See `peersOf`.
+   * the consumer's — the second hop a torn subpool breaks. See `peersOf`.
    */
   peers?: string[];
 };

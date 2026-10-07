@@ -91,9 +91,9 @@ export type Federation = {
   warns: () => Promise<string[]>;
   debugs: () => Promise<string[]>;
   /**
-   * One entry per remote that ended up serving its whole family: `<remote> on <member>@<tag>` where a
-   * version was incompatible (gate 1), `<remote> self-serves, no build covers <gap>` where no build
-   * shipped the combination the shared set offered it (gate 2).
+   * One entry per remote the pool's elected build does not serve: `<remote> on <member>@<tag>` where its
+   * range rejects the elected tag, `<remote> self-serves, no build covers <gap>` where the elected build
+   * lacks an entrypoint it imports. A remote in a subpool is listed too.
    */
   islands: () => Promise<string[]>;
   /** Storage keys written during the last init — empty means the init decided nothing new. */
@@ -237,17 +237,11 @@ export const test = base.extend<{ nf: Federation }, Worker>({
           .map(msg => {
             // Tolerant of how the sentence between the two quotes is phrased: it has been reworded once
             // already, and three parsers of it went red for a change that altered no behaviour.
-            const gate1 = /'([^']+)' is islanded: .*?'([^']+)'/.exec(msg);
-            if (gate1) return `${gate1[1]} on ${gate1[2]}`;
-            const gate2 = /'([^']+)' serves its own family: .* '([^']+)' is the gap/.exec(msg);
-            if (gate2) return `${gate2[1]} self-serves, no build covers ${gate2[2]}`;
-            // The no-tear fallback. No portfolio is known to reach it, which is exactly why it is parsed:
-            // unreported, a torn remote would leave `islands()` empty and a test asserting that would pass.
-            const torn =
-              /'([^']+)' serves its own family: the mapping would have handed it (.*), which no build/.exec(
-                msg
-              );
-            return torn ? `${torn[1]} self-serves, torn on ${torn[2]}` : undefined;
+            const rejected = /'([^']+)' is islanded: .*?'([^']+)'/.exec(msg);
+            if (rejected) return `${rejected[1]} on ${rejected[2]}`;
+            const uncovered = /'([^']+)' serves its own family: .* '([^']+)' is the gap/.exec(msg);
+            if (uncovered) return `${uncovered[1]} self-serves, no build covers ${uncovered[2]}`;
+            return undefined;
           })
           .filter((entry): entry is string => entry !== undefined)
           .sort(),

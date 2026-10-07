@@ -66,6 +66,21 @@ describe('createMarkPoolsForReelection', () => {
     expect(dirt(externals)).toEqual({ '@scope/a': true, '@scope/b': true, '@scope/c': true });
   });
 
+  it('returns the members of every pool up for re-election, per scope, for determine to leave alone', async () => {
+    // @scope is up (a is dirty); @other is clean, and the untagged external is in no pool at all.
+    given({
+      '@scope/a': ext('@scope/a', true),
+      '@scope/b': ext('@scope/b', false),
+      '@other/x': ext('@other/x', false),
+      '@other/y': ext('@other/y', false),
+      plain: ext('plain', true, null),
+    });
+
+    const pooled = await markPoolsForReelection();
+
+    expect(pooled).toEqual(new Map([[GLOBAL_SCOPE, new Set(['@scope/a', '@scope/b'])]]));
+  });
+
   it('leaves a pool alone when no member is dirty — a plain reload must expand nothing', async () => {
     const externals = given({
       '@scope/a': ext('@scope/a', false),
@@ -136,7 +151,7 @@ describe('createMarkPoolsForReelection', () => {
   // Pool state outside a pool is stale by definition — only pooling writes it — and pooling never visits an
   // external it does not pool, so this step, which runs before `determine`, is the one that can drop it.
   // Regression for a leftover `servedBy` pointing a copy at a build after its pool had dissolved
-  // (e2e/pooling/lifecycle.e2e.spec.ts, "drops a stale anchor").
+  // (e2e/pooling/lifecycle.e2e.spec.ts, "drops a stale subpool").
   describe('clears pool state off an external that left every pool', () => {
     const withState = (external: SharedExternal): SharedExternal => {
       external.poolName = 'framework';
@@ -157,7 +172,7 @@ describe('createMarkPoolsForReelection', () => {
       expect(b.poolName).toBeUndefined();
       expect(b.versions[0]!.remotes[0]!.servedBy).toBeUndefined();
       expect(b.versions[0]!.remotes[0]!.poolCause).toBeUndefined();
-      // Re-elected, since `determine` treated the anchored copy as exempt from the coverage policy.
+      // Re-elected, since `determine` treated the subpool copy as exempt from the coverage policy.
       expect(b.dirty).toBe(true);
     });
 

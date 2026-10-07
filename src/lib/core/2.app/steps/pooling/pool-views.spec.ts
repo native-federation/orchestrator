@@ -1,20 +1,11 @@
 import type { SharedExternal, SharedVersion, SharedVersionAction } from 'lib/core/1.domain';
 import { mockVersionRemote } from 'lib/testing/domain/externals/version.mock';
-import {
-  consumedMembers,
-  consumedSpecifiers,
-  hostRemotes,
-  liveBuilds,
-  ownCopies,
-  servingBuilds,
-  sharedTagPerSpecifier,
-} from './pool-views';
+import { committedView, consumedMembers, hostRemotes } from './pool-views';
 import type { PoolMember } from './pool.types';
 
 /**
- * The projections every gate reads. Nothing here decides anything, so each test is about what the stored
- * record *says* — in particular which copies a build may offer others (`scope` copies may not) and which it
- * runs itself (`scope` copies are exactly what it runs).
+ * The projections the runtime path reads off a committed record. Nothing here decides anything, so each test
+ * is about what the stored record *says*: what each build serves, and what the committed map publishes.
  */
 
 // A remote's copy of one member: `req` is its own range, `entries` the specifiers it carries (defaulting to
@@ -71,47 +62,11 @@ const soleProviderIsland = (): PoolMember[] => [
   ]),
 ];
 
-const instances = (members: PoolMember[], islanded?: Set<string>) =>
-  Object.fromEntries(
-    [...liveBuilds(members, islanded)].map(([remote, build]) => [
-      remote,
-      Object.fromEntries(build.instance),
-    ])
-  );
-
-describe('liveBuilds', () => {
-  describe('the instance a build runs', () => {
-    it('maps every remote to the members it ships and the tag it ships them at', () => {
-      expect(instances(splitPair())).toEqual({
-        'mfe-a': { '@angular/core': '22.1.0', '@angular/router': '22.1.0' },
-        'mfe-b': { '@angular/core': '22.0.5' },
-      });
-    });
-
-    it('never counts a `scope` version: determine refused it, pooling does not promote it', () => {
-      expect(instances(soleProviderIsland())['form-overview']).toEqual({
-        '@angular/animations': '21.2.18',
-      });
-    });
-
-    it('drops an islanded remote entirely, including members it solely provides', () => {
-      // The capture's failure: without this, animations@21.2.18 stays shared beside core@22.0.8.
-      expect(liveBuilds(soleProviderIsland(), new Set(['form-overview'])).has('form-overview')).toBe(
-        false
-      );
-      expect(instances(soleProviderIsland(), new Set(['form-overview']))).toEqual({
-        approve: { '@angular/core': '22.0.8' },
-        mutations: { '@angular/core': '22.0.8' },
-      });
-    });
-  });
-
-  describe('coverage, keyed by specifier', () => {
-    // The lever worth the most on the eleven-remote capture. A flat remote declares `@ng/core/testing` as
-    // its own external; a dense one carries the same specifier as an entry of `@ng/core`. In external-name
-    // space those two build shapes are {core, core/testing} against {core}, so neither covers the other and
-    // both self-serve — for a build-tool reason with no provenance content whatsoever. In specifier space
-    // they serve the identical set and either can anchor the other.
+describe('committedView', () => {
+  describe('builds, keyed by specifier', () => {
+    // A flat remote declares `@ng/core/testing` as its own external; a dense one carries the same specifier
+    // as an entry of `@ng/core`. In external-name space the two shapes never cover each other, for a
+    // build-tool reason with no provenance content. In specifier space they serve the identical set.
     it('gathers every specifier a build serves, across members, with the file it serves it from', () => {
       const members = [
         member('@ng/core', [
@@ -126,7 +81,7 @@ describe('liveBuilds', () => {
         ]),
         member('@ng/core/testing', [{ tag: '22.0.5', copies: [{ remote: 'flat' }] }]),
       ];
-      const builds = liveBuilds(members);
+      const { builds } = committedView(members);
 
       expect([...builds.get('dense')!.coverage.keys()].sort()).toEqual([
         '@ng/core',
@@ -139,59 +94,64 @@ describe('liveBuilds', () => {
       expect(builds.get('dense')!.coverage.get('@ng/core/testing')).toBe('t.js');
     });
 
-    it('excludes a scoped copy, which is about to self-serve', () => {
-      const members = [
-        member('@ng/core', [
-          { tag: '22.0.5', action: 'share', copies: [{ remote: 'mfe1' }] },
-          { tag: '21.0.0', action: 'scope', copies: [{ remote: 'legacy' }] },
-        ]),
-      ];
+    // Committed, a scoped copy is a stable island: its files are in the map under its own scope and it
+    // demonstrably runs its own build, so a remote loaded later may take them.
+    it('includes a scoped copy, with the tag it runs', () => {
+      const { builds } = committedView(soleProviderIsland());
 
-      expect(liveBuilds(members).has('legacy')).toBe(false);
-      // Still consumed, though — it has to be able to import what it declares.
-      expect([...consumedSpecifiers(members).get('legacy')!]).toEqual(['@ng/core']);
+      expect(Object.fromEntries(builds.get('form-overview')!.instance)).toEqual({
+        '@angular/core': '21.2.18',
+        '@angular/animations': '21.2.18',
+      });
+      expect(builds.get('form-overview')!.tags.get('@angular/core')).toBe('21.2.18');
     });
   });
 
-  describe('the tag each specifier is served at', () => {
-    it('reads no tag from a scoped or islanded copy, mirroring coverage', () => {
+  describe('the global map', () => {
+    it('names the build behind each shared specifier', () => {
+      const { global } = committedView(splitPair());
+
+      expect(global.get('@angular/core')).toMatchObject({ tag: '22.0.5', remote: 'mfe-b' });
+      expect(global.get('@angular/router')).toMatchObject({ tag: '22.1.0', remote: 'mfe-a' });
+    });
+
+    // A package's secondary entrypoints are routinely published from a `skip` copy of the shared tag.
+    it('includes a specifier only a skipping copy publishes', () => {
       const members = [
         member('@ng/core', [
-          { tag: '22.0.5', action: 'share', copies: [{ remote: 'mfe1' }, { remote: 'mfe2' }] },
-          { tag: '21.0.0', action: 'scope', copies: [{ remote: 'legacy' }] },
+          { tag: '22.0.8', action: 'share', copies: [{ remote: 'mfe5' }] },
+          { tag: '22.0.8', copies: [{ remote: 'mfe2', entries: { '@ng/core/testing': 't.js' } }] },
         ]),
       ];
 
-      expect(liveBuilds(members).has('legacy')).toBe(false);
-      expect(liveBuilds(members, new Set(['mfe2'])).has('mfe2')).toBe(false);
-      expect(liveBuilds(members, new Set(['mfe2'])).get('mfe1')!.tags.get('@ng/core')).toBe(
-        '22.0.5'
-      );
+      expect(committedView(members).global.get('@ng/core/testing')).toMatchObject({
+        tag: '22.0.8',
+        remote: 'mfe2',
+      });
     });
-  });
-});
 
-describe('ownCopies', () => {
-  // The counterpart of `liveBuilds`: what a remote runs itself, `scope` copies included. Only this question
-  // can see a torn family, which is why `findTornRemotes` reads it rather than the instance. It carries the
-  // entries too, since the tear it looks for is a specifier resolving at a tag its package does not.
-  it('reads a scoped copy, which the instance omits', () => {
-    const own = ownCopies(soleProviderIsland());
+    // The map names a subpool copy's specifiers from its subpool's build, in its own scope, so counting it as
+    // a global publisher would describe a mapping that does not exist.
+    it('leaves out a copy served by another build', () => {
+      const members = [
+        member('@ng/core', [
+          {
+            tag: '22.0.8',
+            action: 'share',
+            copies: [
+              { remote: 'mfe5' },
+              {
+                remote: 'mfe2',
+                servedBy: 'mfe9',
+                entries: { '@ng/core': 'c.js', '@ng/core/testing': 't.js' },
+              },
+            ],
+          },
+        ]),
+      ];
 
-    expect(own.get('form-overview')!.map(c => `${c.member}@${c.tag}`)).toEqual([
-      '@angular/core@21.2.18',
-      '@angular/animations@21.2.18',
-    ]);
-  });
-
-  it('carries the specifiers each copy declares', () => {
-    const own = ownCopies(soleProviderIsland());
-
-    expect(Object.keys(own.get('form-overview')![0]!.entries)).toEqual(['@angular/core']);
-  });
-
-  it('reads only the remotes it was asked for', () => {
-    expect([...ownCopies(soleProviderIsland(), new Set(['approve'])).keys()]).toEqual(['approve']);
+      expect([...committedView(members).global.keys()]).toEqual(['@ng/core']);
+    });
   });
 });
 
@@ -203,86 +163,11 @@ describe('consumedMembers', () => {
     });
   });
 
-  it('includes members whose copy was scoped, which the instance excludes', () => {
+  it('includes members whose copy was scoped', () => {
     expect(consumedMembers(soleProviderIsland()).get('form-overview')).toEqual([
       '@angular/core',
       '@angular/animations',
     ]);
-  });
-});
-
-describe('servingBuilds', () => {
-  const none = new Set<string>();
-
-  it('names the build behind each shared member', () => {
-    expect(Object.fromEntries(servingBuilds(splitPair(), none))).toEqual({
-      '@angular/core': 'mfe-b',
-      '@angular/router': 'mfe-a',
-    });
-  });
-
-  it('leaves a member unserved once islanding took every copy that could serve it', () => {
-    const serving = servingBuilds(splitPair(), new Set(['mfe-a']));
-
-    expect(serving.get('@angular/core')).toBe('mfe-b');
-    expect(serving.has('@angular/router')).toBe(false);
-  });
-});
-
-describe('sharedTagPerSpecifier', () => {
-  it('reads the shared tag from a basis that islanding has not taken', () => {
-    const members = [
-      member('@ng/core', [
-        { tag: '22.0.5', action: 'share', copies: [{ remote: 'gone' }, { remote: 'mfe2' }] },
-      ]),
-    ];
-
-    expect(sharedTagPerSpecifier(members, new Set(['gone'])).get('@ng/core')).toBe('22.0.5');
-    // Nobody left to serve it: the member has no shared tag to witness against.
-    expect(sharedTagPerSpecifier(members, new Set(['gone', 'mfe2'])).size).toBe(0);
-  });
-
-  // Reading the winning version's basis alone understates the mapping, which islands remotes that were
-  // never at risk: a package's secondary entrypoints are routinely published from a `skip` copy.
-  it('includes a specifier only a skipping copy publishes', () => {
-    const members = [
-      member('@ng/core', [
-        { tag: '22.0.8', action: 'share', copies: [{ remote: 'mfe5' }] },
-        { tag: '22.0.8', copies: [{ remote: 'mfe2', entries: { '@ng/core/testing': 't.js' } }] },
-      ]),
-    ];
-
-    expect(Object.fromEntries(sharedTagPerSpecifier(members, new Set()))).toEqual({
-      '@ng/core': '22.0.8',
-      '@ng/core/testing': '22.0.8',
-    });
-  });
-
-  // The map names an anchored copy's specifiers from its anchor, in its own scope, so counting it as a global
-  // publisher would witness a remote against a mapping that does not exist. `versionEntries` — the rule the
-  // builders publish by — leaves it out for the same reason, and this walk reads that rule rather than its own.
-  it('leaves out a copy pooling anchored on a foreign build', () => {
-    const members = [
-      member('@ng/core', [
-        {
-          tag: '22.0.8',
-          action: 'share',
-          copies: [
-            { remote: 'mfe5' },
-            {
-              remote: 'mfe2',
-              servedBy: 'mfe9',
-              entries: { '@ng/core': 'c.js', '@ng/core/testing': 't.js' },
-            },
-          ],
-        },
-      ]),
-    ];
-
-    // `/testing` is the anchored copy's alone, so nothing publishes it globally.
-    expect(Object.fromEntries(sharedTagPerSpecifier(members, new Set()))).toEqual({
-      '@ng/core': '22.0.8',
-    });
   });
 });
 

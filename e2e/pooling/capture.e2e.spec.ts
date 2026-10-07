@@ -85,7 +85,7 @@ test.describe('capture: the captured seven', () => {
     // The cross-major remote cannot use the shared 22 build, so it serves its own 21.2.18 family.
     // Nothing else islands: several remotes legitimately draw from two or three builds that agree at
     // minor granularity, and those are left alone.
-    expect(await nf.islands()).toEqual(['team/mfe1 on @angular/common@21.2.18']);
+    expect(await nf.islands()).toEqual(['team/mfe1 on @angular/common@22.0.8']);
     // Nothing else self-serves either: every other remote is witnessed, so no coverage warning fires.
     expect((await nf.warns()).filter(msg => msg.includes('serves its own family'))).toEqual([]);
   });
@@ -144,29 +144,34 @@ test.describe('capture: one more previous-major remote joins', () => {
     // remotes' own copies became incompatible with it, and whole-family islanding spread that single
     // mis-election across five of eight remotes.
     //
-    // Counting copies, both sides cost the same and the newest tag keeps it, so only the two remotes
-    // that genuinely cannot use Angular 22 island.
+    // Electing the family, the 22 build serves the modern majority whatever the 21 side counts, so only the
+    // two remotes that genuinely cannot use Angular 22 leave round 1 — and they share one 21 build.
     await run(nf, [...CAPTURED_SEVEN, 'mfe8']);
 
     expect(await nf.islands()).toEqual([
-      'team/mfe1 on @angular/common@21.2.18',
-      'team/mfe8 on @angular/common@21.2.15',
+      'team/mfe1 on @angular/common@22.0.8',
+      'team/mfe8 on @angular/common@22.0.8',
     ]);
 
-    const scopedRemotes = Object.values(await nf.store('capture'))
-      .flatMap(externals => Object.values(externals))
-      .flatMap(external => external.versions.filter(v => v.action === 'scope'))
-      .flatMap(v => v.remotes.map(r => r.name));
-    expect([...new Set(scopedRemotes)].sort()).toEqual(['team/mfe1', 'team/mfe8']);
+    // mfe8's ~21.2.0 takes mfe1's 21.2.18, so a later round forms subpool 'team/mfe1': mfe1 runs its own
+    // build and mfe8 runs mfe1's. Nothing is scoped; both are served through `servedBy`.
+    const servedBy = Object.fromEntries(
+      Object.values(await nf.store('capture'))
+        .flatMap(externals => Object.values(externals))
+        .flatMap(external => external.versions.flatMap(v => v.remotes))
+        .filter(r => r.servedBy !== undefined)
+        .map(r => [r.name, r.servedBy])
+    );
+    expect(servedBy).toEqual({ 'team/mfe1': 'team/mfe1', 'team/mfe8': 'team/mfe1' });
 
     // The shared Angular set is untouched by their arrival.
     expect(new Set(Object.values(await angularTags(nf)))).toEqual(new Set(['22.0.8', '22.0.6']));
     expect(await splitPackages(nf)).toEqual({});
 
-    // The two islands are on distinct patch tags, so each runs its own build rather than sharing one.
+    // Two patch tags, one build: the gate pipeline ran each on its own.
     const loaded = await nf.loadAll();
     expect(loaded['team/mfe1']!.seen['@angular/core']).toBe('mfe1|@angular/core@21.2.18');
-    expect(loaded['team/mfe8']!.seen['@angular/core']).toBe('mfe8|@angular/core@21.2.15');
+    expect(loaded['team/mfe8']!.seen['@angular/core']).toBe('mfe1|@angular/core@21.2.18');
   });
 });
 
@@ -188,8 +193,9 @@ test.describe('capture: the synthetic siblings', () => {
     await run(nf, [...CAPTURED_SEVEN, 'mfe11']);
 
     expect(await nf.islands()).toEqual([
-      'team/mfe1 on @angular/common@21.2.18',
-      'team/mfe11 self-serves, no build covers @angular/material',
+      'team/mfe1 on @angular/common@22.0.8',
+      'team/mfe11 self-serves, no build covers @angular/cdk/dialog',
+      'team/mfe2 self-serves, no build covers @angular/cdk/dialog',
     ]);
     expect(await splitPackages(nf)).toEqual({});
 
@@ -201,9 +207,11 @@ test.describe('capture: the synthetic siblings', () => {
 
     const map = await nf.map();
     // The seven's shared platform-browser is unchanged, and its `/animations` entrypoints leave the global
-    // map with mfe11: the only build that carried them is now serving only itself.
-    expect(map.imports['@angular/platform-browser']).toBe(
-      'http://mfe2/_angular_platform_browser.djzJcPG8PR.js'
+    // map with mfe11: the only build that carried them is now serving only itself. Same file, whichever
+    // build serves it: mfe3, mfe4 and mfe5 tie on round 1 (each borrows `material/sort` at its own Material
+    // tag), and arrival breaks it.
+    expect(map.imports['@angular/platform-browser']).toMatch(
+      /^http:\/\/mfe\d+\/_angular_platform_browser\.djzJcPG8PR\.js$/
     );
     expect(map.imports['@angular/platform-browser/animations']).toBeUndefined();
     expect(map.scopes?.['http://mfe11/']?.['@angular/platform-browser/animations']).toContain(
@@ -225,7 +233,7 @@ test.describe('capture: the synthetic siblings', () => {
     await run(nf, [...CAPTURED_SEVEN, 'mfe9'], { namespace: 'pin' });
     const withPin = await sharedTags(nf, 'pin');
     expect(await nf.islands()).toEqual([
-      'team/mfe1 on @angular/common@21.2.18',
+      'team/mfe1 on @angular/common@22.0.8',
       'team/mfe9 self-serves, no build covers @angular/platform-browser/animations',
     ]);
 
@@ -250,7 +258,7 @@ test.describe('capture: the synthetic siblings', () => {
     // are not a coherence problem by themselves.
     await run(nf, [...CAPTURED_SEVEN, 'mfe10']);
 
-    expect(await nf.islands()).toEqual(['team/mfe1 on @angular/common@21.2.18']);
+    expect(await nf.islands()).toEqual(['team/mfe1 on @angular/common@22.0.8']);
     const tags = await sharedTags(nf);
     expect(tags['react']).toBe('18.3.1');
     expect(tags['react-dom']).toBe('18.3.1');
@@ -271,11 +279,15 @@ test.describe('capture: the synthetic siblings', () => {
   test('holds the whole eleven-remote portfolio coherent', async ({ nf }) => {
     await run(nf, [...CAPTURED_SEVEN, 'mfe8', 'mfe9', 'mfe10', 'mfe11']);
 
-    // Two islands, both cross-major; every remaining shared Angular external on one major; no package
-    // split across tags anywhere.
+    // The two cross-major remotes leave round 1, and mfe11, which runs 22.0.6 and ships the material root
+    // no 22.0.8 build carries. Every remaining shared Angular external on one major; no package split.
+    // mfe2's exact cdk 22.0.6 pins run on mfe11's build, so its cdk is not published globally: that is
+    // the gap both report, not material.
     expect(await nf.islands()).toEqual([
-      'team/mfe1 on @angular/common@21.2.18',
-      'team/mfe8 on @angular/common@21.2.15',
+      'team/mfe1 on @angular/common@22.0.8',
+      'team/mfe11 self-serves, no build covers @angular/cdk/dialog',
+      'team/mfe2 self-serves, no build covers @angular/cdk/dialog',
+      'team/mfe8 on @angular/common@22.0.8',
     ]);
     expect(new Set(Object.values(await angularTags(nf)))).toEqual(new Set(['22.0.8', '22.0.6']));
     expect(await splitPackages(nf)).toEqual({});

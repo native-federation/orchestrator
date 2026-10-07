@@ -1,8 +1,11 @@
-import type { ForMarkingPoolsForReelection } from '../../driver-ports/init/for-marking-pools-for-reelection.port';
+import type {
+  ForMarkingPoolsForReelection,
+  PooledExternals,
+} from '../../driver-ports/init/for-marking-pools-for-reelection.port';
 import type { DrivingContract } from '../../driving-ports/driving.contract';
 import type { LoggingConfig } from '../../config/log.contract';
 import type { ModeConfig } from '../../config/mode.contract';
-import type { SharedExternal } from 'lib/core/1.domain';
+import type { ExternalName, SharedExternal } from 'lib/core/1.domain';
 import { buildPools } from './pool-graph';
 import { poolableScopes } from './pool.util';
 
@@ -25,17 +28,17 @@ export function createMarkPoolsForReelection(
 ): ForMarkingPoolsForReelection {
   /**
    * Runs between process-remote-entries and determine-shared-externals: a pool is one unit of state, so
-   * whenever any member is dirty every member is marked dirty and `determine` re-elects the pool whole.
+   * whenever any member is dirty every member is marked dirty and the pool is elected whole.
    *
-   * Without this, pooling reads back its own `scope` verdicts for members no remote touched this init and
-   * gate 1 cannot tell them from a range violation `determine` just found. See
-   * docs/version-resolver.md §"How pooling resolves".
+   * Without this, a member no remote touched this init keeps the previous election's verdict beside the
+   * new one. See docs/version-resolver.md §"How the verdicts land in the record and the map".
    *
    * An external in no pool any more loses what pooling stored on it, and is re-elected. It has to happen
    * here rather than in pooling, which never visits it: a stale `servedBy` keeps the map pointing its copy
    * at a build nothing chose, and `determine` already exempts such a copy from the coverage policy.
    */
   return () => {
+    const reelected = new Map<string, Set<ExternalName>>();
     for (const scope of poolableScopes(ports.sharedExternalsRepo)) {
       const sharedExternals = ports.sharedExternalsRepo.getFromScope(scope);
 
@@ -52,6 +55,9 @@ export function createMarkPoolsForReelection(
       for (const [, members] of buildPools(sharedExternals)) {
         for (const member of members) pooled.add(member.name);
         if (!members.some(m => m.external.dirty)) continue;
+        let names = reelected.get(scope);
+        if (!names) reelected.set(scope, (names = new Set()));
+        for (const member of members) names.add(member.name);
         for (const member of members)
           if (!member.external.dirty) {
             member.external.dirty = true;
@@ -74,6 +80,6 @@ export function createMarkPoolsForReelection(
         );
     }
 
-    return Promise.resolve();
+    return Promise.resolve<PooledExternals>(reelected);
   };
 }

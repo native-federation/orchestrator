@@ -6,6 +6,7 @@ import type {
   VersionName,
 } from 'lib/core/1.domain';
 import * as _path from 'lib/utils/path';
+import { owningPackage } from 'lib/core/2.app/steps/pooling/pool-graph';
 
 type Specifier = string;
 
@@ -33,7 +34,9 @@ export type CoherenceInput = {
  * I3, the no-tear invariant, checked off the emitted import map rather than off the stored verdicts:
  * for every non-host remote, the `(specifier → tag)` combination it really resolves must be a subset of
  * some live build's own combination. Which remote *serves* a given tag is free — two builds at one tag
- * are interchangeable providers — so this compares tags only, never origins.
+ * are interchangeable providers — so this compares tags only, never origins. A build that ships a package
+ * at a tag also witnesses that package's other entrypoints at it: copies of one version merge their
+ * entries (docs/version-resolver.md §"Merging within a version").
  *
  * Reads the map the way a browser would (a remote's own scope entry wins over `imports`), so it fails on
  * exactly the combinations a page would really run. Deliberately not called `findTears`:
@@ -91,7 +94,10 @@ export function findIncoherentRemotes({
     let witnessed = false;
 
     for (const [build, ships] of builds) {
-      const matched = entries.filter(([specifier, tag]) => ships.get(specifier) === tag).length;
+      const matched = entries.filter(
+        ([specifier, tag]) =>
+          (ships.get(specifier) ?? ships.get(owningPackage(specifier) ?? specifier)) === tag
+      ).length;
       if (matched === entries.length) {
         witnessed = true;
         break;
@@ -114,4 +120,114 @@ export function emittedUrls(importMap: ImportMap): Set<string> {
     for (const url of Object.values(scope)) urls.add(url);
   }
   return urls;
+}
+
+export type Split = {
+  remote: RemoteName;
+  /** Specifiers the remote's import graph reaches at more than one tag, with every tag reached. */
+  specifiers: Record<Specifier, VersionName[]>;
+};
+
+/**
+ * The binding invariant, the second hop `findIncoherentRemotes` cannot see. A file's own imports resolve
+ * from **where the file lives** (its owner's scope, else `imports`), not from the remote that loaded it, so
+ * a remote resolving a coherent set directly can still run a second build one import in: a global
+ * `material@22.0.6` bound to the global `core@22.0.8` inside a remote that runs `core@22.0.6` itself.
+ *
+ * Walks every file a remote reaches and requires one tag per specifier, and per package, across the whole
+ * walk. Which peers a file really imports is unknown, so every specifier its owner ships counts as an edge:
+ * conservative, never blind. Tags, never origins, as in I3, and a host is exempt for the same reason.
+ *
+ * Pass **one pool's** members. Across pools the walk finds couplings no pool declares — e.g. a private
+ * library in its own pool binding the global framework inside a remote that runs its own — which pooling
+ * leaves to the portfolio by design (docs/version-resolver.md §"Declare the coupling you actually have").
+ */
+export function findSplitRemotes({
+  importMap,
+  members,
+  scopeUrls,
+  hosts = [],
+}: CoherenceInput): Split[] {
+  const builds: Builds = new Map();
+  const ownerOfUrl = new Map<string, RemoteName>();
+  const tagOfUrl = new Map<string, VersionName>();
+
+  for (const external of Object.values(members)) {
+    for (const version of external.versions) {
+      for (const meta of version.remotes) {
+        const scopeUrl = scopeUrls[meta.name];
+        if (scopeUrl === undefined) continue;
+
+        let own = builds.get(meta.name);
+        if (!own) builds.set(meta.name, (own = new Map()));
+        for (const [specifier, file] of Object.entries(meta.entries)) {
+          if (!own.has(specifier)) own.set(specifier, version.tag);
+          const url = _path.join(scopeUrl, file);
+          ownerOfUrl.set(url, meta.name);
+          tagOfUrl.set(url, version.tag);
+        }
+      }
+    }
+  }
+
+  const scopes = Object.keys(importMap.scopes ?? {}).sort((a, b) => b.length - a.length);
+  const resolveFrom = (base: string, specifier: Specifier): string | undefined => {
+    for (const prefix of scopes) {
+      if (!base.startsWith(prefix)) continue;
+      const hit = importMap.scopes![prefix]![specifier];
+      if (hit !== undefined) return hit;
+    }
+    return importMap.imports[specifier];
+  };
+
+  const exempt = new Set(hosts);
+  const split: Split[] = [];
+
+  for (const [remote, consumes] of builds) {
+    if (exempt.has(remote)) continue;
+
+    const reached = new Map<Specifier, Set<VersionName>>();
+    const seen = new Set<string>();
+    const queue: [Specifier, string][] = [];
+    const visit = (specifier: Specifier, url: string | undefined) => {
+      const tag = url === undefined ? undefined : tagOfUrl.get(url);
+      if (url === undefined || tag === undefined) return;
+      let tags = reached.get(specifier);
+      if (!tags) reached.set(specifier, (tags = new Set()));
+      tags.add(tag);
+      if (!seen.has(url)) {
+        seen.add(url);
+        queue.push([specifier, url]);
+      }
+    };
+
+    for (const specifier of consumes.keys())
+      visit(specifier, resolveFrom(scopeUrls[remote]!, specifier));
+    while (queue.length > 0) {
+      const [, url] = queue.shift()!;
+      for (const specifier of builds.get(ownerOfUrl.get(url)!)!.keys())
+        visit(specifier, resolveFrom(url, specifier));
+    }
+
+    // A package is one version, so two of its entrypoints at different tags are two builds of it even
+    // though each specifier alone reaches one tag (`material/sort@17.0.2` beside `material/table@17.0.0`).
+    // Reported under the package name.
+    const packages = new Map<Specifier, Set<VersionName>>();
+    for (const [specifier, tags] of reached) {
+      const pkg = owningPackage(specifier);
+      if (pkg === undefined) continue;
+      let all = packages.get(pkg);
+      if (!all) packages.set(pkg, (all = new Set(reached.get(pkg))));
+      for (const tag of tags) all.add(tag);
+    }
+
+    const torn = [...reached, ...packages].filter(([, tags]) => tags.size > 1);
+    if (torn.length > 0)
+      split.push({
+        remote,
+        specifiers: Object.fromEntries(torn.map(([s, t]) => [s, [...t].sort()])),
+      });
+  }
+
+  return split;
 }
