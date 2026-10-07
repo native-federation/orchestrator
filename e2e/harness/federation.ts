@@ -1,10 +1,11 @@
 import { test as base, type Browser, type Page } from '@playwright/test';
 import { build } from 'esbuild';
 import { resolve } from 'node:path';
-import type { ImportMap, RemoteEntry, SharedExternals } from 'lib/core/1.domain';
+import type { ImportMap, RemoteEntry, RemoteInfo, SharedExternals } from 'lib/core/1.domain';
 import { compile, startServer, MANIFEST_URL, PAGE_HOST, type Harness } from './server';
 import type { BootOptions, Session } from './boot';
 import { tagSharedInfoByNpmScope } from 'lib/testing/pooling/tag-by-npm-scope';
+import { type GroupTear, tearsByPool } from 'lib/testing/pooling/no-tear';
 
 /**
  * The test fixture. `nf.init` is one page load: the browser fetches the manifest and the remote
@@ -54,6 +55,8 @@ export type Copy = {
   boundTo: Record<string, string>;
 };
 
+export type Tear = GroupTear;
+
 export type Federation = {
   /** Serve these entries and run a full init over a manifest containing them. One page load. */
   init: (remotes: RemoteEntry[], opts?: InitOptions) => Promise<void>;
@@ -91,13 +94,22 @@ export type Federation = {
   warns: () => Promise<string[]>;
   debugs: () => Promise<string[]>;
   /**
-   * One entry per remote the pool's elected build does not serve: `<remote> on <member>@<tag>` where its
-   * range rejects the elected tag, `<remote> self-serves, no build covers <gap>` where the elected build
-   * lacks an entrypoint it imports. A remote in a subpool is listed too.
+   * Every remote the stored record keeps off an elected build, read live from the last init's namespace,
+   * so verdicts a later `initRemoteEntry` writes are included: `<remote> incompatible` / `<remote>
+   * uncovered` per `poolCause`, `<remote> subpool <build>` per `servedBy`, which stores no cause. A
+   * subpool's own build names itself and is listed too (`<build> subpool <build>`): the record cannot
+   * tell a build that missed round 1 from one that only keeps its subpool for others, and both run off
+   * the elected build. The warn sentences are for humans; this never parses them.
    */
   islands: () => Promise<string[]>;
   /** Storage keys written during the last init — empty means the init decided nothing new. */
   writes: () => Promise<string[]>;
+  /**
+   * The no-tear oracle (`lib/testing/pooling/no-tear`) per stored pool, and per npm package outside any
+   * pool, run on every map the document carries and the members as stored. Only torn groups are listed:
+   * `[]` is the coherent page.
+   */
+  tears: (namespace?: string) => Promise<Tear[]>;
   /** The committed shared-externals record, straight out of the browser's sessionStorage. */
   store: (namespace?: string) => Promise<SharedExternals>;
 };
@@ -144,6 +156,8 @@ export const test = base.extend<{ nf: Federation }, Worker>({
     harness.requests.length = 0;
     let shim = false;
     let listed: RemoteEntry[] = [];
+    let storedIn = 'e2e';
+    let hosts: string[] = [];
     // Network accounting is per init, so a warm init can assert it fetched nothing.
     let mark = 0;
 
@@ -155,6 +169,8 @@ export const test = base.extend<{ nf: Federation }, Worker>({
           : entry;
       shim = opts.shim ?? false;
       listed = remotes;
+      storedIn = opts.namespace ?? 'e2e';
+      hosts = hostEntry ? [hostEntry.name] : [];
       mark = harness.requests.length;
       harness.serve(compile([...remotes, ...(hostEntry ? [hostEntry] : [])].map(built)));
       if (unlisted?.length) harness.add(unlisted.map(built));
@@ -232,19 +248,30 @@ export const test = base.extend<{ nf: Federation }, Worker>({
       debugs: async () => (await session()).debugs,
       writes: async () => (await session()).writes,
 
-      islands: async () =>
-        (await nf.warns())
-          .map(msg => {
-            // Tolerant of how the sentence between the two quotes is phrased: it has been reworded once
-            // already, and three parsers of it went red for a change that altered no behaviour.
-            const rejected = /'([^']+)' is islanded: .*?'([^']+)'/.exec(msg);
-            if (rejected) return `${rejected[1]} on ${rejected[2]}`;
-            const uncovered = /'([^']+)' serves its own family: .* '([^']+)' is the gap/.exec(msg);
-            if (uncovered) return `${uncovered[1]} self-serves, no build covers ${uncovered[2]}`;
-            return undefined;
-          })
-          .filter((entry): entry is string => entry !== undefined)
-          .sort(),
+      islands: async () => {
+        const islands = new Set<string>();
+        for (const externals of Object.values(await nf.store(storedIn)))
+          for (const external of Object.values(externals))
+            for (const version of external.versions)
+              for (const remote of version.remotes) {
+                if (remote.poolCause) islands.add(`${remote.name} ${remote.poolCause}`);
+                if (remote.servedBy) islands.add(`${remote.name} subpool ${remote.servedBy}`);
+              }
+        return [...islands].sort();
+      },
+
+      tears: async (namespace = storedIn) => {
+        const storage = await call<Record<string, string>>(page, 'storage');
+        const remotes = JSON.parse(storage[`${namespace}.remotes`] ?? '{}') as Record<
+          string,
+          RemoteInfo
+        >;
+        const scopeUrls = Object.fromEntries(
+          Object.entries(remotes).map(([name, info]) => [name, info.scopeUrl])
+        );
+        const importMap = merge(await nf.maps());
+        return tearsByPool({ importMap, externals: await nf.store(namespace), scopeUrls, hosts });
+      },
 
       store: async (namespace = 'e2e') =>
         JSON.parse(
@@ -258,6 +285,17 @@ export const test = base.extend<{ nf: Federation }, Worker>({
 });
 
 export { expect } from '@playwright/test';
+
+// The maps a document carries, as the browser combines them: a key an earlier map set is never replaced.
+const merge = (maps: ImportMap[]): ImportMap => {
+  const merged: ImportMap = { imports: {}, scopes: {} };
+  for (const map of maps) {
+    merged.imports = { ...map.imports, ...merged.imports };
+    for (const [scope, entries] of Object.entries(map.scopes ?? {}))
+      merged.scopes![scope] = { ...entries, ...merged.scopes![scope] };
+  }
+  return merged;
+};
 
 /** Tags of every version of each member that is still globally shared, per the committed store. */
 export const sharedTags = (

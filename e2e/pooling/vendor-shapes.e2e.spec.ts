@@ -121,7 +121,7 @@ test.describe('shapes: the same verdict, whatever the build emitted', () => {
 
       // mfe1's whole family is elected in every shape — the newer build, since neither serves the other —
       // and the pinner runs its own core.
-      expect(await nf.islands()).toEqual(['team/mfe2 on @angular/core@22.1.0']);
+      expect(await nf.islands()).toEqual(['team/mfe2 incompatible']);
 
       const map = await nf.map();
       expect(map.imports['@angular/core']).toBe('http://mfe1/@angular/core.js');
@@ -152,10 +152,7 @@ test.describe('shapes: the same verdict, whatever the build emitted', () => {
       // shapes reach it identically. `asymmetric.e2e.spec.ts` owns the rule itself.
       await nf.init(raggedFamily().map(entry => shape(entry, s)));
 
-      expect(await nf.islands()).toEqual([
-        'team/mfe1 self-serves, no build covers @angular/only-1',
-        'team/mfe2 self-serves, no build covers @angular/only-2',
-      ]);
+      expect(await nf.islands()).toEqual(['team/mfe1 uncovered', 'team/mfe2 uncovered']);
 
       const map = await nf.map();
       expect(map.imports['@angular/core']).toBe('http://mfe3/@angular/core.js');
@@ -322,7 +319,7 @@ test.describe('shapes: dense chunking maps a chunk per serving remote', () => {
       }),
     ]);
 
-    expect(await nf.islands()).toEqual(['team/mfe2 on @angular/core@18.0.0']);
+    expect(await nf.islands()).toEqual(['team/mfe2 incompatible']);
     const map = await nf.map();
     expect(map.scopes?.[SCOPE.mfe2]).toEqual({
       '@angular/core': 'http://mfe2/@angular/core.js',
@@ -423,12 +420,14 @@ test.describe('shapes: flat chunking maps a chunk per declaring remote', () => {
     );
 
     // The Angular family is pooled — so the walk did run — and no pool was formed for the chunks.
-    const pools = (await nf.debugs()).filter(msg => msg.includes('[pool:'));
-    expect(pools.some(msg => msg.includes('[pool:angular]'))).toBe(true);
-    expect(pools.some(msg => msg.includes('@nf-internal'))).toBe(false);
+    const store = await nf.store();
+    const pools = Object.values(store).flatMap(scope =>
+      Object.values(scope).map(external => external.poolName)
+    );
+    expect(new Set(pools)).toEqual(new Set(['angular']));
 
     // Nor is a chunk anywhere in the committed shared set.
-    const shared = Object.keys((await nf.store())['__GLOBAL__'] ?? {});
+    const shared = Object.keys(store['__GLOBAL__'] ?? {});
     expect(shared.filter(name => name.startsWith('@nf-internal'))).toEqual([]);
     expect(shared.sort()).toEqual(['@angular/core', '@angular/router']);
   });
@@ -449,7 +448,7 @@ test.describe('shapes: a recorded flat entry with `pool` tags', () => {
 
     // mfe3's `~4.2.0` cannot accept the 4.3.2 the other two ship, so the tag scopes its whole family —
     // including `@acme/widgets`, which only mfe1 and mfe3 ship and which mfe3 would otherwise dedup.
-    expect(await nf.islands()).toEqual(['team/mfe3 on @acme/platform@4.3.2']);
+    expect(await nf.islands()).toEqual(['team/mfe3 incompatible']);
 
     const map = await nf.map();
     expect(map.imports['@acme/platform']).toBe('http://mfe1/_acme_platform.Bq1vX8kd7P.js');

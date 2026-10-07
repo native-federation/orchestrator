@@ -48,12 +48,7 @@ test.describe('provenance: the init path keeps a family on one build', () => {
       consumesBoth(),
     ]);
 
-    expect(await nf.islands()).toEqual(['team/mfe2 on @angular/router@22.0.5']);
-    expect(await nf.warns()).toEqual([
-      expect.stringContaining(
-        "'team/mfe2' is islanded: its range rejects '@angular/router@22.0.5' of the elected build 'team/mfe3'. All 1 members it imports are scoped for it."
-      ),
-    ]);
+    expect(await nf.islands()).toEqual(['team/mfe2 incompatible']);
 
     const map = await nf.map();
     expect(map.imports['@angular/core']).toBe('http://mfe3/@angular/core.js');
@@ -110,7 +105,7 @@ test.describe('provenance: the init path keeps a family on one build', () => {
       reports[label] = await nf.warns();
     }
 
-    const selfServes = ['team/mfe1 on @angular/router@22.0.5'];
+    const selfServes = ['team/mfe1 incompatible'];
     expect(verdicts).toEqual({
       'consumer, core, router': selfServes,
       'consumer, router, core': selfServes,
@@ -123,11 +118,8 @@ test.describe('provenance: the init path keeps a family on one build', () => {
     // Down to the sentence: one warning per ordering, naming the same gap and the same closest build.
     // A verdict that agreed while the report drifted would still churn the map across inits.
     expect(new Set(Object.values(reports).map(warns => JSON.stringify(warns))).size).toBe(1);
-    expect(reports['core, router, consumer']).toEqual([
-      expect.stringContaining(
-        "'team/mfe1' is islanded: its range rejects '@angular/router@22.0.5' of the elected build 'team/mfe3'. All 1 members it imports are scoped for it."
-      ),
-    ]);
+    // The wording itself is pinned in island-warnings.contract.spec.ts.
+    expect(reports['core, router, consumer']).toHaveLength(1);
   });
 
   test('gives way on the consumer, never on the host, when the host half-serves a family', async ({
@@ -158,20 +150,7 @@ test.describe('provenance: the init path keeps a family on one build', () => {
       }
     );
 
-    expect(await nf.islands()).toEqual([
-      'team/mfe1 self-serves, no build covers @angular/router',
-      'team/mfe2 self-serves, no build covers @angular/router',
-    ]);
-    // The host is the build both are measured against: shipping router from it is the portfolio owner's
-    // way out.
-    expect(await nf.warns()).toEqual([
-      expect.stringContaining(
-        `'team/mfe2' serves its own family: no elected build offers every entrypoint it imports at a version it accepts — '@angular/router' is the gap, closest is '${HOST_NAME}'.`
-      ),
-      expect.stringContaining(
-        `'team/mfe1' serves its own family: no elected build offers every entrypoint it imports at a version it accepts — '@angular/router' is the gap, closest is '${HOST_NAME}'.`
-      ),
-    ]);
+    expect(await nf.islands()).toEqual(['team/mfe1 uncovered', 'team/mfe2 uncovered']);
 
     // The host's pin owns the global mapping; router is in nobody's global set.
     const map = await nf.map();
@@ -297,20 +276,15 @@ test.describe('provenance: the cases no tag comparison can reach', () => {
       ]),
     ]);
 
-    expect(await nf.islands()).toEqual([
-      'team/mfe2 self-serves, no build covers @angular/cdk',
-      'team/mfe3 self-serves, no build covers @angular/cdk',
-    ]);
+    expect(await nf.islands()).toEqual(['team/mfe2 uncovered', 'team/mfe3 uncovered']);
 
-    // Note the pool name: material, cdk and core are one pool tagged `angular`.
-    expect(await nf.warns()).toEqual([
-      expect.stringContaining(
-        "[pool:angular] 'team/mfe2' serves its own family: no elected build offers every entrypoint it imports at a version it accepts — '@angular/cdk' is the gap, closest is 'team/mfe1'."
-      ),
-      expect.stringContaining(
-        "[pool:angular] 'team/mfe3' serves its own family: no elected build offers every entrypoint it imports at a version it accepts — '@angular/cdk' is the gap, closest is 'team/mfe1'."
-      ),
-    ]);
+    // material, cdk and core are one pool tagged `angular`.
+    const store = await nf.store();
+    expect(
+      ['@angular/core', '@angular/material', '@angular/cdk'].map(
+        name => store['__GLOBAL__']![name]!.poolName
+      )
+    ).toEqual(['angular', 'angular', 'angular']);
 
     // Each runs exactly the tags its own build shipped: the lockstep pair stays 22.0.5 for mfe3, and mfe2's
     // cdk@22.1.0 never meets mfe3's material.
@@ -418,7 +392,7 @@ test.describe('provenance: the second hop', () => {
     ]);
     await nf.loadAll();
 
-    expect(await nf.islands()).toEqual(['team/mfe1 on @angular/core@21.2.0']);
+    expect(await nf.islands()).toEqual(['team/mfe1 incompatible']);
     expect(await nf.bindings()).toEqual({
       'mfe1|@angular/router@22.0.6': { '@angular/core': 'mfe1|@angular/core@22.0.6' },
     });

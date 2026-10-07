@@ -376,8 +376,7 @@ export function createPoolDynamicExternals(
   }
 }
 
-// `nf.islands()` (e2e/harness/federation.ts) parses these with the init sentences of `missWarning`: keep
-// "is islanded: …'<gap>'" and "serves its own family: … '<gap>' is the gap" intact.
+// Wording is pinned in `island-warnings.contract.spec.ts` alone; tools read islands from the record.
 function selfServeWarning(remote: RemoteName, miss: Miss, members: number): string {
   const where = `All ${members} members it imports are scoped for it.`;
   return miss.cause === 'incompatible'

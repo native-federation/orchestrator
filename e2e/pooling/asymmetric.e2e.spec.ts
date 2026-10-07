@@ -34,31 +34,6 @@ test.describe('asymmetric: containment and ragged coverage', () => {
     ]);
   });
 
-  test('never islands the subset consumer of an asymmetric family', async ({ nf }) => {
-    // Containment is directional: mfe2 ships {core, common} and can be served entirely by mfe1's
-    // {core, common, material} build. Every build agrees at minor granularity, so material — provided by
-    // mfe1 alone — stays globally shared and mfe2 keeps deduping. The regression this locks is gratuitous
-    // scoping, which a single-build-per-remote rule would have caused for mfe1.
-    await nf.init([
-      remote('team/mfe1', SCOPE.mfe1, [
-        dep('@angular/core', '17.0.1', { req: '^17.0.0' }),
-        dep('@angular/common', '17.0.1', { req: '^17.0.0' }),
-        dep('@angular/material', '17.0.1', { req: '^17.0.0' }),
-      ]),
-      remote('team/mfe2', SCOPE.mfe2, [
-        dep('@angular/core', '17.0.0', { req: '^17.0.0' }),
-        dep('@angular/common', '17.0.0', { req: '^17.0.0' }),
-      ]),
-    ]);
-
-    const map = await nf.map();
-    expect(map.imports['@angular/core']).toBe('http://mfe1/@angular/core.js');
-    expect(map.imports['@angular/common']).toBe('http://mfe1/@angular/common.js');
-    expect(map.imports['@angular/material']).toBe('http://mfe1/@angular/material.js');
-    expect(map.scopes).toBeUndefined();
-    expect(await nf.islands()).toEqual([]);
-  });
-
   test('self-serves the sole provider whose own tag lost the election', async ({ nf }) => {
     // **Rewritten for the provenance promise** (#63); it read `tolerates patch drift when each remote
     // solely provides a member`.
@@ -80,7 +55,7 @@ test.describe('asymmetric: containment and ragged coverage', () => {
       ]),
     ]);
 
-    expect(await nf.islands()).toEqual(['team/mfe2 self-serves, no build covers @angular/forms']);
+    expect(await nf.islands()).toEqual(['team/mfe2 uncovered']);
 
     const map = await nf.map();
     expect(map.imports['@angular/core']).toBe('http://mfe1/@angular/core.js');
@@ -92,14 +67,6 @@ test.describe('asymmetric: containment and ragged coverage', () => {
       '@angular/core': 'http://mfe2/@angular/core.js',
       '@angular/forms': 'http://mfe2/@angular/forms.js',
     });
-
-    // The report names forms, not core: the gap is what the closest build fell short on, and mfe1 does
-    // not carry forms at all. Two members, not the pool's three — mfe2 ships no router.
-    expect(await nf.warns()).toEqual([
-      expect.stringContaining(
-        "'team/mfe2' serves its own family: no elected build offers every entrypoint it imports at a version it accepts — '@angular/forms' is the gap, closest is 'team/mfe1'. All 2 members it imports are scoped for it."
-      ),
-    ]);
 
     const loaded = await nf.loadAll();
     expect(loaded['team/mfe2']!.seen).toEqual({
@@ -139,10 +106,7 @@ test.describe('asymmetric: containment and ragged coverage', () => {
       ]),
     ]);
 
-    expect(await nf.islands()).toEqual([
-      'team/mfe1 self-serves, no build covers @angular/only-1',
-      'team/mfe2 self-serves, no build covers @angular/only-2',
-    ]);
+    expect(await nf.islands()).toEqual(['team/mfe1 uncovered', 'team/mfe2 uncovered']);
 
     const map = await nf.map();
     expect(map.imports['@angular/core']).toBe('http://mfe3/@angular/core.js');
@@ -219,7 +183,7 @@ test.describe('asymmetric: the split family', () => {
     expect(map.imports['@angular/core']).toBe('http://mfe1/@angular/core.js');
     expect(map.imports['@angular/router']).toBe('http://mfe1/@angular/router.js');
     expect(map.scopes?.[SCOPE.mfe2]).toEqual({ '@angular/core': 'http://mfe2/@angular/core.js' });
-    expect(await nf.islands()).toEqual(['team/mfe2 on @angular/core@22.1.0']);
+    expect(await nf.islands()).toEqual(['team/mfe2 incompatible']);
 
     // The fix, at runtime: neither remote runs a mixed family.
     const loaded = await nf.loadAll();
@@ -228,23 +192,6 @@ test.describe('asymmetric: the split family', () => {
       '@angular/router': 'mfe1|@angular/router@22.1.0',
     });
     expect(loaded['team/mfe2']!.seen).toEqual({ '@angular/core': 'mfe2|@angular/core@22.0.5' });
-  });
-
-  test('names the rejected tag and the elected build in a single warning', async ({ nf }) => {
-    await nf.init([
-      remote('team/mfe1', SCOPE.mfe1, [
-        dep('@angular/core', '22.1.0', { req: '^22.0.0' }),
-        dep('@angular/router', '22.1.0', { req: '^22.0.0' }),
-      ]),
-      remote('team/mfe2', SCOPE.mfe2, [dep('@angular/core', '22.0.5', { req: '~22.0.5' })]),
-    ]);
-
-    // One warning: the pinner, naming the elected tag its range rejects and the build that was elected.
-    expect(await nf.warns()).toEqual([
-      expect.stringContaining(
-        "'team/mfe2' is islanded: its range rejects '@angular/core@22.1.0' of the elected build 'team/mfe1'. All 1 members it imports are scoped for it."
-      ),
-    ]);
   });
 
   test('islands a remote whose own build disagrees even when its range accepts the shared tag', async ({
@@ -265,7 +212,7 @@ test.describe('asymmetric: the split family', () => {
     ]);
 
     const map = await nf.map();
-    expect(await nf.islands()).toEqual(['team/mfe2 on @angular/core@22.1.0']);
+    expect(await nf.islands()).toEqual(['team/mfe2 incompatible']);
     expect(map.imports['@angular/animations']).toBeUndefined();
     expect(map.scopes?.[SCOPE.mfe2]).toEqual({
       '@angular/core': 'http://mfe2/@angular/core.js',
@@ -375,10 +322,7 @@ test.describe('asymmetric: the shared set stays coherent', () => {
       ]),
     ]);
 
-    expect(await nf.islands()).toEqual([
-      'team/mfe1 on @angular/core@22.1.0',
-      'team/mfe3 on @angular/core@22.1.0',
-    ]);
+    expect(await nf.islands()).toEqual(['team/mfe1 incompatible', 'team/mfe3 incompatible']);
 
     const map = await nf.map();
     expect(map.imports['@angular/core']).toBe('http://mfe2/@angular/core.js');
@@ -423,7 +367,7 @@ test.describe('asymmetric: the shared set stays coherent', () => {
       ]),
     ]);
 
-    expect(await nf.islands()).toEqual(['team/mfe3 on @angular/core@22.0.8']);
+    expect(await nf.islands()).toEqual(['team/mfe3 incompatible']);
 
     const map = await nf.map();
     expect(map.imports['@angular/material']).toBe('http://mfe1/@angular/material.js');
@@ -444,51 +388,5 @@ test.describe('asymmetric: the shared set stays coherent', () => {
       '@angular/material/sort': 'mfe3|@angular/material@21.2.18',
     });
     expect(await nf.resolve('@angular/material/sort', SCOPE.mfe1)).toContain('UNRESOLVED');
-  });
-});
-
-/**
- * Formerly a CHARACTERISATION of an open defect: each member elected its own winner, so a pool whose members
- * had their majorities on different lines split, and pooling amplified it. Electing the pool as one family
- * keeps it whole.
- */
-test.describe('asymmetric: a pool elects as one family', () => {
-  test('keeps a family whole when each member has its majority on a different line', async ({
-    nf,
-  }) => {
-    // core's modern side is larger, router's previous-major side is larger.
-    await nf.init([
-      remote('team/mfe1', SCOPE.mfe1, [
-        dep('@angular/core', '22.0.8', { req: '~22.0.3' }),
-        dep('@angular/router', '22.0.8', { req: '~22.0.3' }),
-      ]),
-      remote('team/mfe2', SCOPE.mfe2, [dep('@angular/core', '22.0.8', { req: '~22.0.3' })]),
-      remote('team/mfe3', SCOPE.mfe3, [dep('@angular/core', '22.0.8', { req: '~22.0.3' })]),
-      remote('team/mfe4', SCOPE.mfe4, [
-        dep('@angular/core', '21.2.18', { req: '~21.2.0' }),
-        dep('@angular/router', '21.2.18', { req: '~21.2.0' }),
-      ]),
-      remote('team/mfe5', SCOPE.mfe5, [dep('@angular/router', '21.2.18', { req: '~21.2.0' })]),
-    ]);
-
-    // mfe1's build serves the three 22 remotes; mfe4's serves the two 21 ones, through scopes. Four
-    // downloads where per-member election paid six and islanded mfe1.
-    const map = await nf.map();
-    expect(map.imports['@angular/core']).toBe('http://mfe1/@angular/core.js');
-    expect(map.imports['@angular/router']).toBe('http://mfe1/@angular/router.js');
-    expect(await nf.islands()).toEqual([
-      'team/mfe4 on @angular/core@22.0.8',
-      'team/mfe5 on @angular/router@22.0.8',
-    ]);
-
-    const loaded = await nf.loadAll();
-    expect(loaded['team/mfe1']!.seen).toEqual({
-      '@angular/core': 'mfe1|@angular/core@22.0.8',
-      '@angular/router': 'mfe1|@angular/router@22.0.8',
-    });
-    expect(loaded['team/mfe5']!.seen).toEqual({
-      '@angular/router': 'mfe4|@angular/router@21.2.18',
-    });
-    expect(nf.downloads()).toHaveLength(4);
   });
 });

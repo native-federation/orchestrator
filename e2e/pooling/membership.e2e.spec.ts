@@ -40,7 +40,7 @@ test.describe('membership: npm scope', () => {
       '@angular/core': 'http://mfe2/@angular/core.js',
       '@angular/router': 'http://mfe2/@angular/router.js',
     });
-    expect(await nf.islands()).toEqual(['team/mfe2 on @angular/core@18.0.0']);
+    expect(await nf.islands()).toEqual(['team/mfe2 incompatible']);
 
     // What the island means at runtime: mfe2's code runs its own framework and the shared design
     // system, and only one @design/ui was ever instantiated for the page.
@@ -139,7 +139,7 @@ test.describe('membership: the `pool` tag', () => {
       react: 'http://mfe2/react.js',
       'react-dom': 'http://mfe2/react-dom.js',
     });
-    expect(await nf.islands()).toEqual(['team/mfe2 on react@18.2.0']);
+    expect(await nf.islands()).toEqual(['team/mfe2 incompatible']);
 
     // The point of the recipe: neither remote ends up with a mismatched pair.
     const loaded = await nf.loadAll();
@@ -166,11 +166,7 @@ test.describe('membership: the `pool` tag', () => {
       { pooling: false }
     );
 
-    expect(await nf.warns()).toContainEqual(
-      expect.stringContaining(
-        "[@angular/core] declares a 'pool' tag but no other external joined its pool"
-      )
-    );
+    expect((await nf.store())['__GLOBAL__']!['@angular/core']!.poolName).toBeUndefined();
     // And it really did not pool: mfe2 scopes only the member it rejects.
     expect((await nf.map()).scopes?.[SCOPE.mfe2]).toEqual({
       '@angular/core': 'http://mfe2/@angular/core.js',
@@ -211,8 +207,9 @@ test.describe('membership: shareScope and singleton', () => {
       '@angular/router': 'http://mfe2/@angular/router.js',
     });
 
-    // The warning is tagged with the shareScope it happened in.
-    expect(await nf.warns()).toContainEqual(expect.stringContaining('[widgets][pool:angular]'));
+    // The pool lives in the shareScope it was elected in.
+    expect(await nf.islands()).toEqual(['team/mfe2 incompatible']);
+    expect((await nf.store())['widgets']!['@angular/core']!.poolName).toBe('angular');
 
     // A named share scope is served entirely through import-map scopes, so a remote outside it must
     // resolve nothing — mfe3 dedups mfe1's build, but only because it declared the same scope.

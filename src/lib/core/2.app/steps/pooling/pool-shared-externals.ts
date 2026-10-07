@@ -279,8 +279,7 @@ function missWarning(
   route: Route,
   members: PoolMember[]
 ): string {
-  // Three test helpers parse these sentences: keep "is islanded: …'<gap>'" and "serves its own family: …
-  // '<gap>' is the gap" intact.
+  // Wording is pinned in `island-warnings.contract.spec.ts` alone; tools read islands from the record.
   const imports = members.filter(m =>
     m.external.versions.some(v => v.remotes.some(r => r.name === remote))
   ).length;

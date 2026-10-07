@@ -1,6 +1,6 @@
 import { test, expect, sharedTags } from '../harness/federation';
 import { dep, remote, SCOPE, fixture, CAPTURED_SEVEN } from '../harness/portfolio';
-import { angularLinesPerRemote, angularTags, splitPackages } from '../harness/coherence';
+import { angularLinesPerRemote, angularTags } from '../harness/coherence';
 
 /**
  * The harness `pooling` option — the only file that switches it. It stands in for the build's default of
@@ -58,7 +58,7 @@ test.describe('the flag: what switching it on changes', () => {
     expect(pooled.scopes?.[SCOPE.mfe2]).toEqual({
       '@angular/core': 'http://mfe2/@angular/core.js',
     });
-    expect(await nf.islands()).toEqual(['team/mfe2 on @angular/core@22.1.0']);
+    expect(await nf.islands()).toEqual(['team/mfe2 incompatible']);
     expect((await nf.loadAll())['team/mfe1']!.seen).toEqual({
       '@angular/core': 'mfe1|@angular/core@22.1.0',
       '@angular/router': 'mfe1|@angular/router@22.1.0',
@@ -125,7 +125,7 @@ test.describe('the flag: what switching it on changes', () => {
       '@acme/framework': 'http://mfe2/@acme/framework.js',
       '@acme/ui': 'http://mfe2/@acme/ui.js',
     });
-    expect(await nf.islands()).toEqual(['team/mfe2 on @acme/framework@18.0.0']);
+    expect(await nf.islands()).toEqual(['team/mfe2 incompatible']);
     await nf.loadAll();
     expect(await nf.buildsOf('@acme/ui')).toEqual(['mfe1|@acme/ui@1.0.0', 'mfe2|@acme/ui@1.0.0']);
   });
@@ -257,7 +257,7 @@ test.describe('the flag: what it does not change', () => {
     expect((await nf.map()).scopes?.[SCOPE.mfe2]).toEqual({
       '@angular/core': 'http://mfe2/@angular/core.js',
     });
-    expect(await nf.islands()).toEqual(['team/mfe2 on @angular/core@22.1.0']);
+    expect(await nf.islands()).toEqual(['team/mfe2 incompatible']);
   });
 
   test('decides entrypoint coverage the same way either way', async ({ nf }) => {
@@ -304,7 +304,7 @@ test.describe('the flag: what it does not change', () => {
     // binds a 21 member against a 22 one gets a mixed runtime, which is what scope tagging closes.
     await nf.init(CAPTURED_SEVEN.map(fixture), { pooling: false, namespace: 'partial' });
 
-    expect(await splitPackages(nf, 'partial')).toEqual({});
+    expect(await nf.tears('partial')).toEqual([]);
 
     const partialTags = await angularTags(nf, 'partial');
     expect(new Set(Object.values(partialTags).map(tag => tag.split('.')[0]))).toEqual(
@@ -335,7 +335,7 @@ test.describe('the flag: what it does not change', () => {
     // beside a 22 family.
     await nf.init(CAPTURED_SEVEN.map(fixture), { namespace: 'auto' });
 
-    expect(await splitPackages(nf, 'auto')).toEqual({});
+    expect(await nf.tears('auto')).toEqual([]);
     const autoTags = await angularTags(nf, 'auto');
     expect(new Set(Object.values(autoTags).map(tag => tag.split('.')[0]))).toEqual(new Set(['22']));
     expect(Object.keys(autoTags)).not.toContain('@angular/compiler');

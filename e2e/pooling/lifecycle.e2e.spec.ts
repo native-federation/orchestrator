@@ -90,7 +90,7 @@ test.describe('lifecycle: the warm start', () => {
       '@angular/core': 'http://mfe2/@angular/core.js',
       '@angular/router': 'http://mfe2/@angular/router.js',
     });
-    expect(await nf.islands()).toEqual(['team/mfe2 on @angular/core@22.0.8']);
+    expect(await nf.islands()).toEqual(['team/mfe2 incompatible']);
 
     // Four URLs in the map, and on a cold browser cache all four are fetched — "cached" in the
     // objective means "already in the import map", not "already in the browser".
@@ -308,11 +308,8 @@ test.describe('lifecycle: the dynamic path', () => {
     // forms is sole-provided by mfe4, but it is not published globally off a build that disagrees
     // with the committed one.
     expect(delta.imports['@angular/forms']).toBeUndefined();
-    expect(await nf.warns()).toContainEqual(
-      expect.stringContaining(
-        "'team/mfe4' serves its own family: no committed build offers every entrypoint it imports at a version it accepts — '@angular/forms' is the gap. All 2 members it imports are scoped for it."
-      )
-    );
+    // The dynamic verdict lands in the record exactly as an init one does.
+    expect(await nf.islands()).toEqual(['team/mfe4 uncovered']);
     expect((await nf.load('team/mfe4')).seen).toEqual({
       '@angular/router': 'mfe4|@angular/router@22.0.5',
       '@angular/forms': 'mfe4|@angular/forms@22.0.5',

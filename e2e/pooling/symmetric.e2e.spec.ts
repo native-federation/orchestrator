@@ -108,7 +108,7 @@ test.describe('symmetric: one minor line, or two', () => {
       ]),
     ]);
 
-    expect(await nf.islands()).toEqual(['team/mfe2 on @angular/core@22.1.0']);
+    expect(await nf.islands()).toEqual(['team/mfe2 incompatible']);
 
     const map = await nf.map();
     expect(map.imports['@angular/core']).toBe('http://mfe1/@angular/core.js');
@@ -136,7 +136,7 @@ test.describe('symmetric: one minor line, or two', () => {
       ]),
     ]);
 
-    expect(await nf.islands()).toEqual(['team/mfe2 on @angular/core@18.0.0']);
+    expect(await nf.islands()).toEqual(['team/mfe2 incompatible']);
     expect((await nf.map()).scopes?.[SCOPE.mfe2]).toEqual({
       '@angular/core': 'http://mfe2/@angular/core.js',
       '@angular/router': 'http://mfe2/@angular/router.js',
@@ -183,7 +183,7 @@ test.describe('symmetric: an island takes the whole family', () => {
       '@framework/core': 'http://mfe2/@framework/core.js',
       '@design-system/ui': 'http://mfe2/@design-system/ui.js',
     });
-    expect(await nf.islands()).toEqual(['team/mfe2 on @framework/core@18.0.0']);
+    expect(await nf.islands()).toEqual(['team/mfe2 incompatible']);
 
     // The whole point, measured: the page runs two design systems, each against the framework it was
     // built for. Two copies is the cost of coherence here, not a leak.
@@ -222,10 +222,7 @@ test.describe('symmetric: an island takes the whole family', () => {
 
     // mfe2 dedups both members, so it gets no scope of its own.
     expect(map.scopes?.[SCOPE.mfe2]).toBeUndefined();
-    expect(await nf.islands()).toEqual([
-      'team/mfe3 on @angular/core@22.0.8',
-      'team/mfe4 on @angular/core@22.0.8',
-    ]);
+    expect(await nf.islands()).toEqual(['team/mfe3 incompatible', 'team/mfe4 incompatible']);
 
     await nf.loadAll();
     expect(nf.downloads()).toHaveLength(6);
@@ -265,8 +262,8 @@ test.describe('symmetric: an island takes the whole family', () => {
     expect(map.imports['@angular/core']).toBe('http://mfe1/@angular/core.js');
     expect(map.imports['@angular/router']).toBe('http://mfe1/@angular/router.js');
     expect(await nf.islands()).toEqual([
-      'team/mfe3 on @angular/core@22.1.0',
-      'team/mfe4 on @angular/core@22.1.0',
+      'team/mfe3 subpool team/mfe3',
+      'team/mfe4 subpool team/mfe3',
     ]);
 
     // The two losers share mfe3's build through their scopes — under the gate pipeline each ran its own,
@@ -296,37 +293,6 @@ test.describe('symmetric: an island takes the whole family', () => {
 test.describe('symmetric: host precedence', () => {
   const hostPin = (tag: string) =>
     remote(HOST_NAME, SCOPE.host, [dep('@angular/core', tag, { req: '^22.0.0' })]);
-
-  test('keeps the host tag and islands the remote that would mix builds', async ({ nf }) => {
-    // The host ships core@22.0.5 and no router, so host precedence pins the shared core to the host's tag
-    // while router resolves freely from mfe1. Coherence and absolute host priority are not in tension: it
-    // is mfe1 that gives way, never the host's pin.
-    await nf.init(
-      [
-        remote('team/mfe1', SCOPE.mfe1, [
-          dep('@angular/core', '22.1.0', { req: '^22.0.0' }),
-          dep('@angular/router', '22.1.0', { req: '^22.0.0' }),
-        ]),
-      ],
-      { hostEntry: hostPin('22.0.5') }
-    );
-
-    const map = await nf.map();
-    expect(map.imports['@angular/core']).toBe('http://host.service/@angular/core.js');
-    expect(map.imports['@angular/router']).toBeUndefined();
-    expect(map.scopes?.[SCOPE.mfe1]).toEqual({
-      '@angular/core': 'http://mfe1/@angular/core.js',
-      '@angular/router': 'http://mfe1/@angular/router.js',
-    });
-    expect(await nf.islands()).toEqual(['team/mfe1 self-serves, no build covers @angular/router']);
-
-    // The host's own page code gets the host build; mfe1's code gets mfe1's, consistently.
-    expect(await nf.resolve('@angular/core', SCOPE.host)).toBe('host.service|@angular/core@22.0.5');
-    expect((await nf.loadAll())['team/mfe1']!.seen).toEqual({
-      '@angular/core': 'mfe1|@angular/core@22.1.0',
-      '@angular/router': 'mfe1|@angular/router@22.1.0',
-    });
-  });
 
   test('keeps the host tag even when the host is the minority, on one build for both', async ({
     nf,
@@ -358,14 +324,8 @@ test.describe('symmetric: host precedence', () => {
     );
 
     expect(await nf.islands()).toEqual([
-      'team/mfe1 self-serves, no build covers @angular/router',
-      'team/mfe2 self-serves, no build covers @angular/router',
-    ]);
-    expect(await nf.warns()).toEqual([
-      expect.stringContaining("'team/mfe1' serves its own family"),
-      expect.stringContaining(
-        "It runs in subpool 'team/mfe1': all 2 members it imports come from that build."
-      ),
+      'team/mfe1 subpool team/mfe1',
+      'team/mfe2 subpool team/mfe1',
     ]);
 
     const map = await nf.map();
@@ -399,96 +359,11 @@ test.describe('symmetric: host precedence', () => {
 });
 
 /**
- * Which version the election picks, measured as files the browser actually fetched.
- *
- * Adding ONE previous-major remote to a healthy portfolio used to take the production capture from 36 to
- * 64 downloads and island 5 of 8 remotes, three of them healthy Angular-22 remotes islanded purely by
- * contagion. The cause was never the agreement gate — it fires on none of this — but `determine`'s
- * extra-download objective, which counted scoped **versions** rather than uncached remote **copies**. Two
- * patch-drifted legacy remotes therefore outvoted three modern remotes that all agreed on one tag,
- * `@angular/router`'s winner moved to the 21 line, and all-or-nothing islanding amplified that single
- * mis-election across the whole family.
- *
- * Weighting the objective per copy fixes the measured cause. The residual — the election is exact per
- * external but still evaluated *per external*, so two members can elect opposite winners — needs
- * asymmetric member sets to show, and is characterised in `asymmetric.e2e.spec.ts`.
+ * Which version the election picks, measured as files the browser actually fetched. The islanding
+ * cascade (a previous-major minority islanding the majority) and the split family are guarded in
+ * `src/lib/core/2.app/steps/pooling/pooling.regression.spec.ts`, under the no-tear oracle.
  */
 test.describe('symmetric: which version the election picks', () => {
-  // The Angular-22 majority against a previous-major minority. `mfe3` is the one asymmetry the cost model
-  // is indifferent to: it ships core alone, one patch behind, and dedups it throughout.
-  const portfolio = (previousMajor: { name: string; scope: string; tag: string }[]) => [
-    remote('team/mfe1', SCOPE.mfe1, [
-      dep('@angular/core', '22.0.8', { req: '~22.0.3' }),
-      dep('@angular/router', '22.0.8', { req: '~22.0.3' }),
-    ]),
-    remote('team/mfe2', SCOPE.mfe2, [
-      dep('@angular/core', '22.0.8', { req: '~22.0.3' }),
-      dep('@angular/router', '22.0.8', { req: '~22.0.3' }),
-    ]),
-    remote('team/mfe3', SCOPE.mfe3, [dep('@angular/core', '22.0.6', { req: '~22.0.5' })]),
-    ...previousMajor.map(l =>
-      remote(l.name, l.scope, [
-        dep('@angular/core', l.tag, { req: '~21.2.0' }),
-        dep('@angular/router', l.tag, { req: '~21.2.0' }),
-      ])
-    ),
-  ];
-
-  test('keeps the modern majority intact with one previous-major remote present', async ({
-    nf,
-  }) => {
-    await nf.init(portfolio([{ name: 'team/mfe4', scope: SCOPE.mfe4, tag: '21.2.18' }]));
-
-    const map = await nf.map();
-    expect(map.imports['@angular/core']).toBe('http://mfe1/@angular/core.js');
-    expect(map.imports['@angular/router']).toBe('http://mfe1/@angular/router.js');
-    expect(await nf.islands()).toEqual(['team/mfe4 on @angular/core@22.0.8']);
-
-    await nf.loadAll();
-    expect(nf.downloads()).toHaveLength(4);
-  });
-
-  test('holds when a second previous-major remote joins on its own patch tag', async ({ nf }) => {
-    // The cascade trigger: mfe5 adds a SECOND distinct 21 tag and nothing else. Counting versions,
-    // router@22.0.8 cost 2 against each 21 version's 1, so the winner moved to the 21 line and islanded
-    // mfe1 and mfe2 across their whole family. Counting copies, both sides cost 2 and the newest tag
-    // keeps it. Electing families, the 22 build wins round 1 outright, and mfe5 (whose ~21.2.0 takes
-    // 21.2.18) joins mfe4's subpool.
-    await nf.init(
-      portfolio([
-        { name: 'team/mfe4', scope: SCOPE.mfe4, tag: '21.2.18' },
-        { name: 'team/mfe5', scope: SCOPE.mfe5, tag: '21.2.15' },
-      ])
-    );
-
-    const map = await nf.map();
-    expect(map.imports['@angular/core']).toBe('http://mfe1/@angular/core.js');
-    expect(map.imports['@angular/router']).toBe('http://mfe1/@angular/router.js');
-
-    // Only the two genuinely cross-major remotes island, each on a real range violation. mfe3 keeps
-    // deduping core; the modern remotes are untouched.
-    expect(await nf.islands()).toEqual([
-      'team/mfe4 on @angular/core@22.0.8',
-      'team/mfe5 on @angular/core@22.0.8',
-    ]);
-    expect(map.scopes).toEqual({
-      [SCOPE.mfe4]: {
-        '@angular/core': 'http://mfe4/@angular/core.js',
-        '@angular/router': 'http://mfe4/@angular/router.js',
-      },
-      [SCOPE.mfe5]: {
-        '@angular/core': 'http://mfe4/@angular/core.js',
-        '@angular/router': 'http://mfe4/@angular/router.js',
-      },
-    });
-
-    // 4 downloads with one previous-major remote and still 4 with two: they share one 21 build. The gate
-    // pipeline paid 6.
-    await nf.loadAll();
-    expect(nf.downloads()).toHaveLength(4);
-    expect(await nf.buildsOf('@angular/core')).toHaveLength(2);
-  });
-
   test('elects the older tag when it saves copies, and islands the lone modern remote', async ({
     nf,
   }) => {

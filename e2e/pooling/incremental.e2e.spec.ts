@@ -34,7 +34,7 @@ test.describe('incremental: a pool is re-elected as a unit', () => {
 
     // mfe1 wins `core` with its own build and ships the only `router`, so it is coherent here. It used
     // to stay islanded on the `router` verdict pooling wrote during the first init.
-    expect(await nf.islands()).toEqual(['team/mfe2 on @angular/core@22.1.0']);
+    expect(await nf.islands()).toEqual(['team/mfe2 incompatible']);
 
     // And `router` is still a shared member rather than a leftover scope with no provider.
     const store = await nf.store();
@@ -76,7 +76,7 @@ test.describe('incremental: a pool is re-elected as a unit', () => {
     const map = await nf.map();
     expect(map.imports['@angular/core']).toBe('http://mfe1/@angular/core.js');
     expect(map.imports['@angular/router']).toBe('http://mfe1/@angular/router.js');
-    expect(await nf.islands()).not.toContain('team/mfe1 on @angular/router@22.1.0');
+    expect(await nf.islands()).not.toContain('team/mfe1 incompatible');
   });
 
   test('reaches a fixed point: a third load re-decides nothing', async ({ nf }) => {
@@ -132,7 +132,7 @@ test.describe('incremental: a tag-formed pool on a warm cache', () => {
 
     const store = await nf.store();
     expect(storedActions(store, 'router-pkg')).toEqual(['22.1.0:share']);
-    expect(await nf.islands()).toEqual(['team/mfe2 on core-pkg@22.1.0']);
+    expect(await nf.islands()).toEqual(['team/mfe2 incompatible']);
 
     await nf.loadAll();
     expect(nf.downloads()).toHaveLength(3);
