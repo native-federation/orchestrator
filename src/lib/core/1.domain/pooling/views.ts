@@ -62,12 +62,13 @@ function walkBuilds(members: PoolMember[]): Map<RemoteName, BuildView> {
           );
         }
 
-        // A remote ships one copy per member, so a second row is a record it cannot produce; first tag
-        // wins so such a record still reads deterministically.
+        // A remote ships one copy per member, so a second row is a record it cannot produce; the first row
+        // wins, tag and file alike, as in `generate-import-map`, so such a record reads as the map serves it.
         if (!own.instance.has(member.name)) own.instance.set(member.name, version.tag);
         for (const specifier in meta.entries) {
+          if (own.coverage.has(specifier)) continue;
           own.coverage.set(specifier, meta.entries[specifier]!);
-          if (!own.tags.has(specifier)) own.tags.set(specifier, version.tag);
+          own.tags.set(specifier, version.tag);
         }
       }
     }

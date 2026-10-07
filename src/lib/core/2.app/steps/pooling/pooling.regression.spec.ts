@@ -678,7 +678,64 @@ describe('pooling regressions', () => {
   });
 
   /**
-   * D16, dynamic init. `update-cache` filed a runtime-loaded copy into whatever row `findVersionForTag`
+   * Found by the property suite: two equal builds tying for a subpool were told apart by arrival order,
+   * so a permuted manifest renamed the subpool, and a re-election, which reads arrival from the record pooling
+   * rewrote, could pick the other build and move a remote off the global map. A subpool tie now goes by name.
+   *
+   * The host ships the family at 18.0.0, which neither `^17` remote accepts. team/b and team/a ship one 17.0.0
+   * build, so each one's build serves both; team/b arrives first and still runs team/a's build.
+   */
+  describe('equal subpool builds are told apart by name, not arrival', () => {
+    const SCOPE = { 'team/host': 'http://host/', 'team/a': 'http://a/', 'team/b': 'http://b/' };
+    const MEMBERS = ['@fam/m0', '@fam/m1'];
+
+    let p: ReturnType<typeof portfolio>;
+    beforeEach(() => {
+      p = portfolio(SCOPE, { hosts: ['team/host'], storage: 'nf-regression-d10' });
+      for (const name of MEMBERS)
+        p.seed(name, [
+          p.version('18.0.0', name, [{ remote: 'team/host', req: '^18.0.0', host: true }]),
+          p.version('17.0.0', name, [
+            { remote: 'team/b', req: '^17.0.0' },
+            { remote: 'team/a', req: '^17.0.0' },
+          ]),
+        ]);
+    });
+
+    const servedBy = () =>
+      Object.fromEntries(
+        MEMBERS.flatMap(name =>
+          p
+            .record(name)
+            .versions.flatMap(v => v.remotes)
+            .filter(r => r.name !== 'team/host')
+            .map(r => [`${name}|${r.name}`, r.servedBy])
+        )
+      );
+
+    it('runs the subpool on the build whose remote sorts first, on init and on re-election', async () => {
+      const coldMap = await p.runInit();
+      const coldRecord = structuredClone(p.stored());
+
+      expect(servedBy()).toEqual({
+        '@fam/m0|team/a': 'team/a',
+        '@fam/m0|team/b': 'team/a',
+        '@fam/m1|team/a': 'team/a',
+        '@fam/m1|team/b': 'team/a',
+      });
+      expect(coldMap.scopes?.[SCOPE['team/b']]?.['@fam/m0']).toBe('http://a/@fam/m0.js');
+
+      for (const [name, external] of Object.entries(p.stored()))
+        p.adapters.sharedExternalsRepo.addOrUpdate(name, { ...external, dirty: true }, undefined);
+      const warmMap = await p.runInit();
+
+      expect(p.stored()).toEqual(coldRecord);
+      expect(warmMap).toEqual(coldMap);
+    });
+  });
+
+  /**
+   * Dynamic init. `update-cache` filed a runtime-loaded copy into whatever row `findVersionForTag`
    * returned for its tag, which falls back to a `scope` row, and joined a `skip` row even when nothing shared
    * the external. Both left the record disagreeing with the map the page was handed.
    *
@@ -876,6 +933,49 @@ describe('pooling regressions', () => {
       p.reload();
       const warm = await p.runInit([...remotes, mfeD]);
       expect(page(warm, [mfeD])).toEqual(page(merged, [mfeD]));
+    });
+  });
+
+  /**
+   * A record the orchestrator never writes itself: team/mfe-s lists `@fw/core` twice, at 1.0.1 and
+   * at 1.0.0 with another file. The runtime gate read the build's tags first-wins but its files last-wins, while
+   * the import map publishes the first row's file. So mfe-d, which pins 1.0.1, was accepted onto the subpool at
+   * 1.0.1 and handed the 1.0.0 file: a split between its two packages. Both now read the first row.
+   */
+  describe('N2: a duplicated row reads its first file, as the import map does', () => {
+    it("hands a remote accepted at the first row's tag that row's file", async () => {
+      const p = portfolio({}, { storage: 'nf-regression-n2', realRepositories: true });
+      const latest = (name: string) =>
+        entry(name, shared('@fw/core', '2.0.0', '^2.0.0'), shared('@fw/common', '2.0.0', '^2.0.0'));
+
+      await p.runInit([
+        latest('team/mfe-w'),
+        latest('team/mfe-w2'),
+        latest('team/mfe-w3'),
+        entry(
+          'team/mfe-s',
+          shared('@fw/core', '1.0.1', '~1.0.0'),
+          { ...shared('@fw/core', '1.0.0', '~1.0.0'), entries: { '@fw/core': 'core-100.js' } },
+          shared('@fw/common', '1.0.0', '~1.0.0')
+        ),
+        entry(
+          'team/mfe-s2',
+          shared('@fw/core', '1.0.1', '~1.0.0'),
+          shared('@fw/common', '1.0.0', '~1.0.0')
+        ),
+      ]);
+      expect(p.islands()['team/mfe-s2']).toBe('subpool team/mfe-s');
+
+      p.reload();
+      const { merged } = await p.runDynamic(
+        entry(
+          'team/mfe-d',
+          shared('@fw/core', '1.0.1', '1.0.1', false),
+          shared('@fw/common', '1.0.0', '~1.0.0', false)
+        )
+      );
+      expect(resolves(merged, 'team/mfe-d', '@fw/core')).toBe(file('team/mfe-s', '@fw/core'));
+      expect(resolves(merged, 'team/mfe-d', '@fw/common')).toBe(file('team/mfe-s', '@fw/common'));
     });
   });
 });

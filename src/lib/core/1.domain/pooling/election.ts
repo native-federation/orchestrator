@@ -197,7 +197,7 @@ export function electVariants(input: ElectionInput): Election {
   const remotes = [...own.keys()].sort(byArrival);
 
   type Candidate = { variant: Variant; served: RemoteName[] };
-  // Highest first on every key, then the newer build; the input is in arrival order and the sort is stable.
+  // Highest first on every key, then the newer build; the sort is stable, so the input order breaks the rest.
   const rank = (candidates: Candidate[], keys: ((c: Candidate) => number)[]) => {
     const scored = candidates.map(c => ({ c, k: keys.map(key => key(c)) }));
     scored.sort((a, b) => {
@@ -276,7 +276,9 @@ export function electVariants(input: ElectionInput): Election {
   // two.
   let pending = remotes.filter(r => !election.global.has(r));
   for (;;) {
-    const candidates = pending
+    // A tie goes by name, never arrival; see docs/version-resolver.md §"How pooling resolves", step 3.
+    const candidates = [...pending]
+      .sort(compareStrings)
       .map(owner => {
         const variant = variantOf(owner);
         const keepsLoans = agrees(owner, coverage);

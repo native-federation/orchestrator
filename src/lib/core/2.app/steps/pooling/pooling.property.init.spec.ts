@@ -96,9 +96,8 @@ describe('pooling properties: init (generated portfolios)', { timeout: TIMEOUT }
       expect(warm.record).toEqual(init.result.record);
     }));
 
-  // Offset 5 reaches the re-election flip pinned at the bottom (D10); it moves back once D10 lands.
   it('idempotence: re-electing every pool on a warm page reproduces the record and the map', () =>
-    run(13, portfolioArbitrary(), 200, async spec => {
+    run(5, portfolioArbitrary(), 200, async spec => {
       const init = await initOrRefuse(spec);
       if (!init.ok) return;
       const again = await init.rig.reelect();
@@ -305,9 +304,9 @@ describe('pooling properties: init (generated portfolios)', { timeout: TIMEOUT }
     ));
 });
 
-// Shrunk counterexamples the properties found on the current code. Each is `it.fails` until fixed: once a fix
-// lands it starts passing, vitest reports it, and it moves into the regression suite as a plain `it`.
-describe('pooling properties: known counterexamples', () => {
+// Shrunk counterexamples the properties found. Each is `it.fails` until fixed, so vitest reports the fix, then
+// stays here as a plain `it`; the bug's explicit guard goes in `pooling.regression.spec.ts`.
+describe('pooling properties: shrunk counterexamples', () => {
   const pool = (
     major: number,
     minor: number,
@@ -320,55 +319,50 @@ describe('pooling properties: known counterexamples', () => {
     extra: null,
   });
 
-  // order independence, found at POOLING_PROPERTY_SEED=1 POOLING_PROPERTY_SCALE=5. The host r0 holds m0@17,
-  // so r1 and r2 (two 18.1.1 builds, each with one member the other lacks) both miss round 1, and either can run
-  // the subpool that serves r3. They tie on every key and `byArrival` picks whichever registered first: the
-  // same tags run either way, but the stored verdicts (which one is `incompatible`) follow registration order.
-  it.fails(
-    'order independence: two equal subpool builds are told apart by registration order',
-    async () => {
-      const spec: PortfolioSpec = {
-        poolSizes: [4],
-        remotes: [
-          pool(0, 0, 0, ['root', null, null, null]),
-          pool(1, 1, 1, ['root', 'root', 'root', null]),
-          pool(1, 1, 1, ['root', 'root', null, 'root']),
-          pool(1, 0, 0, [null, 'root', null, null]),
-        ],
-        host: 0,
-        strict: false,
-      };
-      const entries = toRemoteEntries(spec);
-      const a = await openPortfolio({ host: 'r0' }).init(entries);
-      const b = await openPortfolio({ host: 'r0' }).init([0, 2, 1, 3].map(i => entries[i]!));
-      expect(outcome(b.importMap, b.record)).toEqual(outcome(a.importMap, a.record));
-    }
-  );
+  // order independence, found at POOLING_PROPERTY_SEED=1 POOLING_PROPERTY_SCALE=5. The host r0 holds
+  // m0@17, so r1 and r2 (two 18.1.1 builds, each with one member the other lacks) both miss round 1, and either
+  // can run the subpool that serves r3. They tie on every key, and arrival used to pick whichever registered
+  // first: the same tags ran either way, but the stored verdicts (which one is `incompatible`) followed it.
+  it('order independence: two equal subpool builds are not told apart by registration order', async () => {
+    const spec: PortfolioSpec = {
+      poolSizes: [4],
+      remotes: [
+        pool(0, 0, 0, ['root', null, null, null]),
+        pool(1, 1, 1, ['root', 'root', 'root', null]),
+        pool(1, 1, 1, ['root', 'root', null, 'root']),
+        pool(1, 0, 0, [null, 'root', null, null]),
+      ],
+      host: 0,
+      strict: false,
+    };
+    const entries = toRemoteEntries(spec);
+    const a = await openPortfolio({ host: 'r0' }).init(entries);
+    const b = await openPortfolio({ host: 'r0' }).init([0, 2, 1, 3].map(i => entries[i]!));
+    expect(outcome(b.importMap, b.record)).toEqual(outcome(a.importMap, a.record));
+  });
 
-  // re-election idempotence, found at the CI seed once the generator redeployed builds (D10 again). r2 and r3
-  // are one 17.1.0 build; round 1 (the host r0) serves neither, and each one's build serves both, so they tie
-  // for the subpool and `byArrival` picks. The first election reads arrival from update-cache (r2 first): r2's
-  // subpool dissolves once the extension moves r3 global. The re-election reads it from the record pooling
-  // rewrote, whose `skip` row (r3) precedes the `scope` row (r2): r3 keeps a subpool for r2 and leaves the global
-  // map, so a warm page re-electing on equal terms runs r3 on 17.1.0 instead of 17.1.1.
-  it.fails(
-    're-election idempotence: a tie between equal subpool builds flips on re-election',
-    async () => {
-      const spec: PortfolioSpec = {
-        poolSizes: [3],
-        remotes: [
-          pool(0, 1, 1, ['root', null, 'root'], 'major'),
-          pool(0, 1, 1, [null, 'root', 'sub'], 'major'),
-          pool(0, 1, 0, [null, 'root', 'root'], 'drift'),
-          pool(0, 1, 0, [null, 'root', 'root'], 'major'),
-        ],
-        host: 0,
-        strict: false,
-      };
-      const rig = openPortfolio({ host: 'r0' });
-      const init = await rig.init(toRemoteEntries(spec));
-      const again = await rig.reelect();
-      expect(again.importMap).toEqual(init.importMap);
-    }
-  );
+  // re-election idempotence, found at the CI seed once the generator redeployed builds. r2 and r3 are one
+  // 17.1.0 build; round 1 (the host r0) serves neither, and each one's build serves both, so they tie for the
+  // subpool. Arrival used to pick: the first election read it from update-cache (r2 first), and r2's subpool
+  // dissolved once the extension moved r3 global. The re-election read it from the record pooling rewrote,
+  // whose `skip` row (r3) precedes the `scope` row (r2): r3 kept a subpool for r2 and left the global map, so a
+  // warm page re-electing on equal terms ran r3 on 17.1.0 instead of 17.1.1.
+  it('re-election idempotence: a tie between equal subpool builds does not flip on re-election', async () => {
+    const spec: PortfolioSpec = {
+      poolSizes: [3],
+      remotes: [
+        pool(0, 1, 1, ['root', null, 'root'], 'major'),
+        pool(0, 1, 1, [null, 'root', 'sub'], 'major'),
+        pool(0, 1, 0, [null, 'root', 'root'], 'drift'),
+        pool(0, 1, 0, [null, 'root', 'root'], 'major'),
+      ],
+      host: 0,
+      strict: false,
+    };
+    const rig = openPortfolio({ host: 'r0' });
+    const init = await rig.init(toRemoteEntries(spec));
+    const again = await rig.reelect();
+    expect(again.importMap).toEqual(init.importMap);
+    expect(again.record).toEqual(init.record);
+  });
 });

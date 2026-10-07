@@ -693,9 +693,11 @@ subpool of a build that disagrees with the winner.
 
 **3. Later rounds form subpools.** Among the remotes round 1 does not serve, each one's **own** build is a
 candidate (no same-tag borrowing), and the one serving the most waiting remotes — itself included — forms a
-**subpool**: those remotes run that one build, and the subpool is named after its remote. Rounds repeat while
-some build serves at least two; earlier rounds never change. A subpool runs its build's files through scopes
-(`servedBy`).
+**subpool**: those remotes run that one build, and the subpool is named after its remote. A tie goes to the
+newer variant, then to the name that sorts first (code-unit order), never to arrival: no stored winner keeps
+a subpool, and the record pooling rewrites reorders arrival, so a re-election would flip between equal
+builds. Rounds repeat while some build serves at least two; earlier rounds never change. A subpool runs its
+build's files through scopes (`servedBy`).
 
 **4. Extension.** A package the winner does not ship at all is published globally when every remote outside
 round 1 that agrees with the coverage, and whose files would resolve globally, ships it at one tag. Every
