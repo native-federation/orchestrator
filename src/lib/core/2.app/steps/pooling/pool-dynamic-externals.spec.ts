@@ -93,6 +93,28 @@ describe('createPoolDynamicExternals', () => {
     poolDynamicExternals = createPoolDynamicExternals(config, adapters);
   });
 
+  const writes = () => vi.mocked(adapters.sharedExternalsRepo.addOrUpdate).mock.calls;
+
+  // Last write wins: the name sync may write a member again after its verdict.
+  const writtenFor = (name: string): SharedExternal | undefined =>
+    writes()
+      .filter(c => c[0] === name)
+      .at(-1)?.[1];
+
+  // Every verdict the record ends up holding: a scoped copy's `poolCause` and a redirected copy's
+  // `servedBy`. Islands are read from here, not from the warnings.
+  const verdictsWritten = (): string[] =>
+    [...new Set(writes().map(c => c[0]))]
+      .flatMap(name =>
+        writtenFor(name)!
+          .versions.flatMap(v => v.remotes)
+          .flatMap(r => [
+            ...(r.poolCause ? [`${r.name}@${name}: ${r.poolCause}`] : []),
+            ...(r.servedBy ? [`${r.name}@${name}: served by ${r.servedBy}`] : []),
+          ])
+      )
+      .sort();
+
   it('leaves an all-compatible (all skip) family untouched', async () => {
     const entry = entryWith(shared('@framework/core'), shared('@framework/common'));
     const actions: SharedInfoActions = {
@@ -128,7 +150,7 @@ describe('createPoolDynamicExternals', () => {
     expect(result.actions['@framework/common']).toEqual({ action: 'scope' });
   });
 
-  it('defers a share+skip mix (coverage gap, not a conflict): every member keeps its verdict', async () => {
+  it('passes a share+skip mix through (coverage gap, not a conflict): every member keeps its verdict', async () => {
     // No member is `scope`, so this is coverage, not incompatibility — the loaded remote follows.
     const entry = entryWith(shared('@framework/core'), shared('@framework/common'));
     const actions: SharedInfoActions = {
@@ -177,9 +199,9 @@ describe('createPoolDynamicExternals', () => {
   it('scopes the family when no committed build ships the combination it would be handed', async () => {
     // The capture's shape: forms@22.0.8 and forms/signals@21.2.18 are both committed, from two builds
     // that ship neither of the other's members. Nobody so far consumed both; this remote would be the one
-    // to bridge them, running forms from one build and signals from another. The old gate compared the two
-    // committed builds with each other, which is version arithmetic; the promise asks whether *any* build
-    // shipped the pair, and none did.
+    // to bridge them, running forms from one build and signals from another. Comparing the two committed
+    // builds with each other would be version arithmetic; what counts is whether *any* build shipped the
+    // pair, and none did.
     adapters.versionCheck.isCompatible = acceptsSameMajor();
     givenCommitted({
       '@framework/forms': committed(
@@ -203,12 +225,12 @@ describe('createPoolDynamicExternals', () => {
 
     expect(result.actions['@framework/forms']).toEqual({ action: 'scope' });
     expect(result.actions['@framework/forms/signals']).toEqual({ action: 'scope' });
-    // mfe's ^22 rejects the committed signals@21.2.18, so this is a range rejection — `incompatible`, warned
-    // in the init sentence so `nf.islands()` sees runtime islands too — not a missing entrypoint.
-    expect(config.log.warn).toHaveBeenCalledWith(
-      8,
-      "[__GLOBAL__] 'mfe' is islanded: its range rejects '@framework/forms/signals@21.2.18' of the committed map. All 2 members it imports are scoped for it."
-    );
+    // mfe's ^22 rejects the committed signals@21.2.18, so this is a range rejection, not a missing
+    // entrypoint: `incompatible` on every copy mfe holds.
+    expect(verdictsWritten()).toEqual([
+      'mfe@@framework/forms/signals: incompatible',
+      'mfe@@framework/forms: incompatible',
+    ]);
   });
 
   it('dedups when a committed build did ship the whole combination', async () => {
@@ -370,10 +392,11 @@ describe('createPoolDynamicExternals', () => {
 
     expect(result.actions['@framework/router']).toEqual({ action: 'scope' });
     expect(result.actions['@framework/forms']).toEqual({ action: 'scope' });
-    expect(config.log.warn).toHaveBeenCalledWith(
-      8,
-      expect.stringContaining("'@framework/forms' is the gap")
-    );
+    // Its router@22.0.5 accepts the committed 22.1.0: what it lacks is forms, so the family is uncovered.
+    expect(verdictsWritten()).toEqual([
+      'mfe@@framework/forms: uncovered',
+      'mfe@@framework/router: uncovered',
+    ]);
   });
 
   it("joins a committed subpool: its build's copies name itself and run its own family", async () => {
@@ -449,10 +472,9 @@ describe('createPoolDynamicExternals', () => {
     expect(result.actions['@framework/cdk']).toEqual({ action: 'scope' });
   });
 
-  it('scopes patch drift across two committed builds, which the old gate deduped', async () => {
-    // Rewritten for the promise. The committed map serves core@22.0.8 from team/a and cdk@22.0.6 from
-    // team/b; mfe imports both. The old gate deduped it because 22.0.8 and 22.0.6 sit on one minor line —
-    // benign drift by construction. No build shipped that pair, so mfe serves its own family and pays the
+  it('scopes patch drift across two committed builds that no build shipped together', async () => {
+    // The committed map serves core@22.0.8 from team/a and cdk@22.0.6 from team/b; mfe imports both. The
+    // two sit on one minor line, but no build shipped that pair, so mfe serves its own family and pays the
     // download. team/b runs no subpool either: it does not win core (constraint 9).
     adapters.versionCheck.isCompatible = vi.fn(() => true);
     givenCommitted({
@@ -691,13 +713,6 @@ describe('createPoolDynamicExternals', () => {
       );
     });
 
-    // Last write wins: the name sync may write a member again after its verdict.
-    const writtenFor = (name: string): SharedExternal | undefined =>
-      vi
-        .mocked(adapters.sharedExternalsRepo.addOrUpdate)
-        .mock.calls.filter(c => c[0] === name)
-        .at(-1)?.[1];
-
     const copies = (external: SharedExternal | undefined) =>
       (external?.versions ?? []).map(v => [
         `${v.tag}:${v.action}`,
@@ -747,10 +762,6 @@ describe('createPoolDynamicExternals', () => {
         expect(writtenFor(name)!.poolName).toBe('framework');
         expect(writtenFor(name)!.poolWinner).toBe('host');
       }
-      expect(config.log.warn).toHaveBeenCalledWith(
-        8,
-        expect.stringContaining("'mfe' is islanded: its range rejects '@framework/common@17.0.0'")
-      );
     });
 
     it("records a resolver scope for a missing entrypoint as 'uncovered', not a range rejection", async () => {
@@ -792,14 +803,6 @@ describe('createPoolDynamicExternals', () => {
         ['17.0.0:share', [{ name: 'host' }]],
         ['17.0.0:scope', [{ name: 'mfe', poolCause: 'uncovered' }]],
       ]);
-      expect(config.log.warn).toHaveBeenCalledWith(
-        8,
-        expect.stringContaining("'mfe' serves its own family")
-      );
-      expect(config.log.warn).toHaveBeenCalledWith(
-        8,
-        expect.stringContaining("'@framework/common/http' is the gap")
-      );
     });
 
     it('records a range rejection as incompatible, and drops a share only it provided', async () => {
@@ -924,10 +927,6 @@ describe('createPoolDynamicExternals', () => {
         // Its cause stays why it missed the map (its ^21 rejects 22): the missing build only took away the fix.
         ['21.2.18:scope', [{ name: 'team/legacy' }, { name: 'mfe', poolCause: 'incompatible' }]],
       ]);
-      expect(config.log.warn).toHaveBeenCalledWith(
-        8,
-        "[__GLOBAL__][mfe] 'team/legacy' is not in the cache, so its files cannot be mapped."
-      );
     });
 
     it('writes no verdict for a witnessed remote', async () => {

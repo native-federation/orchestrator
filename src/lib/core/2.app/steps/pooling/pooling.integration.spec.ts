@@ -1,30 +1,9 @@
-import type { DrivingContract } from '../../driving-ports/driving.contract';
-import type { ConfigContract } from 'lib/core/2.app/config';
-import { mockConfig } from 'lib/testing/config.mock';
-import { mockAdapters } from 'lib/testing/adapters.mock';
+import type { RemoteEntry, SharedExternal } from 'lib/core/1.domain';
 import { mockSharedInfo } from 'lib/testing/domain/remote-entry/shared-info.mock';
-import { mockVersionRemote, newestFirst } from 'lib/testing/domain/externals/version.mock';
-import { Optional } from 'lib/utils/optional';
-import {
-  type RemoteEntry,
-  type RemoteInfo,
-  type SharedExternal,
-  type SharedVersion,
-} from 'lib/core/1.domain';
-import { createSharedExternalsRepository } from 'lib/core/3.adapters/storage/shared-externals.repository';
-import { createVersionCheck } from 'lib/core/3.adapters/checks/version.check';
-import { globalThisStorageEntry } from 'lib/core/4.config/storage/global-this.storage';
-import { createDetermineSharedExternals } from '../determine-shared-externals';
-import { createMarkPoolsForReelection } from './mark-pools-for-reelection';
-import { createPoolSharedExternals } from './pool-shared-externals';
-import { createGenerateImportMap } from '../generate-import-map';
-import { createUpdateCache } from '../update-cache';
-import { createPoolDynamicExternals } from './pool-dynamic-externals';
-import { createConvertToImportMap } from '../convert-to-import-map';
-import { createProcessRemoteEntries } from '../process-remote-entries';
+import { mockVersionRemote } from 'lib/testing/domain/externals/version.mock';
+import { portfolio } from 'lib/testing/pooling/portfolio';
+import { tagSharedInfoByNpmScope } from 'lib/testing/pooling/tag-by-npm-scope';
 import { committedView } from './pool-views';
-import { findIncoherentRemotes, findSplitRemotes } from 'lib/testing/pooling/no-tear';
-import { tagSharedInfoByNpmScope, tagStoredByNpmScope } from 'lib/testing/pooling/tag-by-npm-scope';
 
 /**
  * End-to-end coherence through determine → pooling → import map. Pooling does not make a family resolve
@@ -33,8 +12,9 @@ import { tagSharedInfoByNpmScope, tagStoredByNpmScope } from 'lib/testing/poolin
  * disagreeing remote serves its whole `@framework/*` family from its own build, with no dedup, so a
  * foreign runtime cannot leak in through a shared sibling.
  *
- * Family coherence proper (the two #63 cases, patch-drift tolerance, asymmetric coverage) is locked in
- * `family-coherence.regression.spec.ts`.
+ * Every init and dynamic load runs through the portfolio harness, which asserts no-tear on the emitted
+ * map. None of these portfolios has a host. Family coherence proper (the two #63 cases, patch-drift
+ * tolerance, asymmetric coverage) is locked in `pooling.regression.spec.ts`.
  */
 describe('pooling (integration)', () => {
   const SCOPE = {
@@ -42,98 +22,30 @@ describe('pooling (integration)', () => {
     'team/mfe-b': 'http://mfe-b/',
     'team/mfe-c': 'http://mfe-c/',
     'team/mfe-d': 'http://mfe-d/',
-  } as const;
+  };
 
-  let config: ConfigContract;
-  let adapters: DrivingContract;
-
+  let p: ReturnType<typeof portfolio>;
   beforeEach(() => {
-    config = mockConfig();
-    adapters = mockAdapters();
-    adapters.versionCheck = createVersionCheck();
-    adapters.sharedExternalsRepo = createSharedExternalsRepository({
-      storage: globalThisStorageEntry('nf-pool-integration'),
-      clearStorage: true,
-    });
-
-    adapters.remoteInfoRepo.getAll = vi.fn(() => ({}));
-    adapters.scopedExternalsRepo.getAll = vi.fn(() => ({}));
-    adapters.sharedChunksRepo.tryGet = vi.fn(() => Optional.empty());
-    adapters.remoteInfoRepo.tryGet = vi.fn((name: string) =>
-      name in SCOPE
-        ? Optional.of({ scopeUrl: SCOPE[name as keyof typeof SCOPE], exposes: [] } as RemoteInfo)
-        : Optional.empty<RemoteInfo>()
-    );
+    p = portfolio(SCOPE, { storage: 'nf-pool-integration' });
   });
 
   const meta = (remote: string, external: string, req: string) =>
     mockVersionRemote(remote, external, { requiredVersion: req, strictVersion: true });
 
-  const version = (
-    tag: string,
-    external: string,
-    remotes: { remote: string; req: string }[]
-  ): SharedVersion => ({
-    tag,
-    host: false,
-    action: 'skip',
-    remotes: remotes.map(r => meta(r.remote, external, r.req)),
-  });
-
-  // Sorts like commit() does, so the fixtures below read in whatever order is clearest without
-  // seeding an order production could never hand to determine.
-  const seed = (name: string, versions: SharedVersion[]) =>
-    adapters.sharedExternalsRepo.addOrUpdate(
-      name,
-      // The build tags every scoped package with its npm scope by default; `tagStoredByNpmScope` stands in.
-      tagStoredByNpmScope({
-        [name]: { dirty: true, versions: newestFirst(versions, adapters.versionCheck.compare) },
-      })[name]!,
-      undefined
-    );
-
-  // Threads mark → determine → pooling exactly as init.flow does.
-  // I3 holds for every fixture here too, so it is asserted centrally: no remote may resolve a combination
-  // of tags that no single build shipped. None of these portfolios has a host.
-  const runInit = async () => {
-    const pooled = await createMarkPoolsForReelection(config, adapters)();
-    const touched = await createDetermineSharedExternals(config, adapters)(pooled);
-    await createPoolSharedExternals(config, adapters)(touched);
-    const importMap = await createGenerateImportMap(config, adapters)();
-
-    expect(
-      findIncoherentRemotes({
-        importMap,
-        members: adapters.sharedExternalsRepo.getFromScope(undefined),
-        scopeUrls: SCOPE,
-      })
-    ).toEqual([]);
-    // The second hop: no remote's import graph may reach a specifier at two tags.
-    expect(
-      findSplitRemotes({
-        importMap,
-        members: adapters.sharedExternalsRepo.getFromScope(undefined),
-        scopeUrls: SCOPE,
-      })
-    ).toEqual([]);
-
-    return importMap;
-  };
-
   it('keeps an entire compatible @framework family on a single remote build', async () => {
     // Both remotes accept either tag, so both candidates cost one download and the tie breaks toward
     // the newest: mfe-b's 17.1.0 wins the whole family and mfe-a's older tag dedups onto it, so the
     // family stays single-source rather than splitting.
-    seed('@framework/core', [
-      version('17.0.0', '@framework/core', [{ remote: 'team/mfe-a', req: '^17.0.0' }]),
-      version('17.1.0', '@framework/core', [{ remote: 'team/mfe-b', req: '^17.0.0' }]),
+    p.seed('@framework/core', [
+      p.version('17.0.0', '@framework/core', [{ remote: 'team/mfe-a', req: '^17.0.0' }]),
+      p.version('17.1.0', '@framework/core', [{ remote: 'team/mfe-b', req: '^17.0.0' }]),
     ]);
-    seed('@framework/common', [
-      version('17.0.0', '@framework/common', [{ remote: 'team/mfe-a', req: '^17.0.0' }]),
-      version('17.1.0', '@framework/common', [{ remote: 'team/mfe-b', req: '^17.0.0' }]),
+    p.seed('@framework/common', [
+      p.version('17.0.0', '@framework/common', [{ remote: 'team/mfe-a', req: '^17.0.0' }]),
+      p.version('17.1.0', '@framework/common', [{ remote: 'team/mfe-b', req: '^17.0.0' }]),
     ]);
 
-    const importMap = await runInit();
+    const importMap = await p.runInit();
 
     expect(importMap.imports['@framework/core']).toContain(SCOPE['team/mfe-b']);
     expect(importMap.imports['@framework/common']).toContain(SCOPE['team/mfe-b']);
@@ -143,18 +55,18 @@ describe('pooling (integration)', () => {
   });
 
   it('scopes an incompatible remote whole family, keeping the global family single-source', async () => {
-    seed('@framework/core', [
-      version('17.0.0', '@framework/core', [{ remote: 'team/mfe-a', req: '^17.0.0' }]),
-      version('17.1.0', '@framework/core', [{ remote: 'team/mfe-b', req: '^17.0.0' }]),
-      version('18.0.0', '@framework/core', [{ remote: 'team/mfe-c', req: '^18.0.0' }]),
+    p.seed('@framework/core', [
+      p.version('17.0.0', '@framework/core', [{ remote: 'team/mfe-a', req: '^17.0.0' }]),
+      p.version('17.1.0', '@framework/core', [{ remote: 'team/mfe-b', req: '^17.0.0' }]),
+      p.version('18.0.0', '@framework/core', [{ remote: 'team/mfe-c', req: '^18.0.0' }]),
     ]);
-    seed('@framework/common', [
-      version('17.0.0', '@framework/common', [{ remote: 'team/mfe-a', req: '^17.0.0' }]),
-      version('17.1.0', '@framework/common', [{ remote: 'team/mfe-b', req: '^17.0.0' }]),
-      version('18.0.0', '@framework/common', [{ remote: 'team/mfe-c', req: '^18.0.0' }]),
+    p.seed('@framework/common', [
+      p.version('17.0.0', '@framework/common', [{ remote: 'team/mfe-a', req: '^17.0.0' }]),
+      p.version('17.1.0', '@framework/common', [{ remote: 'team/mfe-b', req: '^17.0.0' }]),
+      p.version('18.0.0', '@framework/common', [{ remote: 'team/mfe-c', req: '^18.0.0' }]),
     ]);
 
-    const importMap = await runInit();
+    const importMap = await p.runInit();
 
     // Global family stays single-source (mfe-b, the newest of the two 17 builds), none of it served
     // from the incompatible mfe-c.
@@ -170,19 +82,19 @@ describe('pooling (integration)', () => {
 
   it('shares every member of a compatible ragged family, including a single-provider one', async () => {
     // Ragged portfolio, all on 17: mfe-a has core+common, mfe-b has common+forms. Nothing is
-    // incompatible, so pooling defers to the base resolver — every member is shared, forms included.
-    seed('@framework/core', [
-      version('17.0.0', '@framework/core', [{ remote: 'team/mfe-a', req: '^17.0.0' }]),
+    // incompatible, so nobody serves its own family — every member is shared, forms included.
+    p.seed('@framework/core', [
+      p.version('17.0.0', '@framework/core', [{ remote: 'team/mfe-a', req: '^17.0.0' }]),
     ]);
-    seed('@framework/common', [
-      version('17.0.0', '@framework/common', [{ remote: 'team/mfe-a', req: '^17.0.0' }]),
-      version('17.0.0', '@framework/common', [{ remote: 'team/mfe-b', req: '^17.0.0' }]),
+    p.seed('@framework/common', [
+      p.version('17.0.0', '@framework/common', [{ remote: 'team/mfe-a', req: '^17.0.0' }]),
+      p.version('17.0.0', '@framework/common', [{ remote: 'team/mfe-b', req: '^17.0.0' }]),
     ]);
-    seed('@framework/forms', [
-      version('17.0.0', '@framework/forms', [{ remote: 'team/mfe-b', req: '^17.0.0' }]),
+    p.seed('@framework/forms', [
+      p.version('17.0.0', '@framework/forms', [{ remote: 'team/mfe-b', req: '^17.0.0' }]),
     ]);
 
-    const importMap = await runInit();
+    const importMap = await p.runInit();
 
     expect(importMap.imports['@framework/core']).toContain(SCOPE['team/mfe-a']);
     expect(importMap.imports['@framework/common']).toContain(SCOPE['team/mfe-a']);
@@ -206,7 +118,7 @@ describe('pooling (integration)', () => {
         strictVersion: true,
         pool: 'framework',
       });
-    seed('@framework/core', [
+    p.seed('@framework/core', [
       {
         tag: '18.0.0',
         host: false,
@@ -220,7 +132,7 @@ describe('pooling (integration)', () => {
         remotes: [tagged('team/mfe-b', '@framework/core', '^17.0.0')],
       },
     ]);
-    seed('@design-system/ui', [
+    p.seed('@design-system/ui', [
       {
         tag: '1.0.0',
         host: false,
@@ -235,7 +147,7 @@ describe('pooling (integration)', () => {
       },
     ]);
 
-    const importMap = await runInit();
+    const importMap = await p.runInit();
 
     // Shared family (core + ds) is single-source on mfe-a.
     expect(importMap.imports['@framework/core']).toContain(SCOPE['team/mfe-a']);
@@ -249,7 +161,7 @@ describe('pooling (integration)', () => {
 
     // The committed record says so too: both members carry the pool's name (the one tag every copy
     // declared), and each of mfe-b's copies records why it self-serves. mfe-a's copies carry no cause.
-    const record = adapters.sharedExternalsRepo.getFromScope();
+    const record = p.adapters.sharedExternalsRepo.getFromScope();
     const causes = (name: string) =>
       Object.fromEntries(
         record[name]!.versions.flatMap(v => v.remotes.map(r => [r.name, r.poolCause]))
@@ -269,20 +181,20 @@ describe('pooling (integration)', () => {
   it('shares a single-provider member while an incompatible remote scopes its whole family', async () => {
     // mfe-b is compatible (core@17 matches) and sole provider of cdk. mfe-c is incompatible (core@18)
     // and islanded across its whole family.
-    seed('@framework/core', [
-      version('17.0.0', '@framework/core', [{ remote: 'team/mfe-a', req: '^17.0.0' }]),
-      version('17.0.0', '@framework/core', [{ remote: 'team/mfe-b', req: '^17.0.0' }]),
-      version('18.0.0', '@framework/core', [{ remote: 'team/mfe-c', req: '^18.0.0' }]),
+    p.seed('@framework/core', [
+      p.version('17.0.0', '@framework/core', [{ remote: 'team/mfe-a', req: '^17.0.0' }]),
+      p.version('17.0.0', '@framework/core', [{ remote: 'team/mfe-b', req: '^17.0.0' }]),
+      p.version('18.0.0', '@framework/core', [{ remote: 'team/mfe-c', req: '^18.0.0' }]),
     ]);
-    seed('@framework/common', [
-      version('17.0.0', '@framework/common', [{ remote: 'team/mfe-a', req: '^17.0.0' }]),
-      version('17.0.0', '@framework/common', [{ remote: 'team/mfe-c', req: '^17.0.0' }]),
+    p.seed('@framework/common', [
+      p.version('17.0.0', '@framework/common', [{ remote: 'team/mfe-a', req: '^17.0.0' }]),
+      p.version('17.0.0', '@framework/common', [{ remote: 'team/mfe-c', req: '^17.0.0' }]),
     ]);
-    seed('@framework/cdk', [
-      version('17.0.0', '@framework/cdk', [{ remote: 'team/mfe-b', req: '^17.0.0' }]),
+    p.seed('@framework/cdk', [
+      p.version('17.0.0', '@framework/cdk', [{ remote: 'team/mfe-b', req: '^17.0.0' }]),
     ]);
 
-    const importMap = await runInit();
+    const importMap = await p.runInit();
 
     // core: shared at 17 — mfe-a's and mfe-b's builds tie, both agree with each other, and either serves
     // both through the global map; neither keeps a scoped copy. mfe-c scopes (incompatible).
@@ -308,22 +220,22 @@ describe('pooling (integration)', () => {
     // Nothing is dirty the second time, so determine re-elects nothing and pooling has no signal to
     // act on. Its verdicts are already in storage — it wrote them itself — so recomputing them can
     // only reproduce them.
-    seed('@framework/core', [
-      version('17.0.0', '@framework/core', [{ remote: 'team/mfe-a', req: '^17.0.0' }]),
-      version('18.0.0', '@framework/core', [{ remote: 'team/mfe-c', req: '^18.0.0' }]),
+    p.seed('@framework/core', [
+      p.version('17.0.0', '@framework/core', [{ remote: 'team/mfe-a', req: '^17.0.0' }]),
+      p.version('18.0.0', '@framework/core', [{ remote: 'team/mfe-c', req: '^18.0.0' }]),
     ]);
-    seed('@framework/common', [
-      version('17.0.0', '@framework/common', [{ remote: 'team/mfe-a', req: '^17.0.0' }]),
-      version('18.0.0', '@framework/common', [{ remote: 'team/mfe-c', req: '^18.0.0' }]),
+    p.seed('@framework/common', [
+      p.version('17.0.0', '@framework/common', [{ remote: 'team/mfe-a', req: '^17.0.0' }]),
+      p.version('18.0.0', '@framework/common', [{ remote: 'team/mfe-c', req: '^18.0.0' }]),
     ]);
 
-    const first = await runInit();
+    const first = await p.runInit();
     // The first pass really did island a remote — mfe-c@18 wins the equal-cost tie on the newest tag,
     // so it is mfe-a that gives way — leaving a non-trivial result to preserve.
     expect(first.scopes?.[SCOPE['team/mfe-a']]?.['@framework/core']).toContain(SCOPE['team/mfe-a']);
 
-    const writes = vi.spyOn(adapters.sharedExternalsRepo, 'addOrUpdate');
-    const second = await runInit();
+    const writes = vi.spyOn(p.adapters.sharedExternalsRepo, 'addOrUpdate');
+    const second = await p.runInit();
 
     expect(writes).not.toHaveBeenCalled();
     expect(second).toEqual(first);
@@ -342,12 +254,12 @@ describe('pooling (integration)', () => {
         },
       ],
     });
-    adapters.sharedExternalsRepo.addOrUpdate(
+    p.adapters.sharedExternalsRepo.addOrUpdate(
       '@framework/core',
       shareVersion('@framework/core'),
       undefined
     );
-    adapters.sharedExternalsRepo.addOrUpdate(
+    p.adapters.sharedExternalsRepo.addOrUpdate(
       '@framework/common',
       shareVersion('@framework/common'),
       undefined
@@ -374,9 +286,7 @@ describe('pooling (integration)', () => {
       ]),
     } as RemoteEntry;
 
-    const updated = await createUpdateCache(config, adapters)(entryC);
-    const pooled = await createPoolDynamicExternals(config, adapters)(updated);
-    const importMap = await createConvertToImportMap(config, adapters)(pooled);
+    const { importMap } = await p.runDynamic(entryC);
 
     // The new remote serves its whole family from its own scope; nothing added to the global family.
     const cScope = importMap.scopes?.[SCOPE['team/mfe-c']];
@@ -395,8 +305,8 @@ describe('pooling (integration)', () => {
     //
     // The two winners come from two remotes on purpose: mfe-a wins core@18.0.0 and mfe-d wins
     // common@18.1.0, so no build shipped the pair the map would hand mfe-c and the witness cannot clear
-    // it. `strictVersion: false` is what makes it a `skip` rather than a gate-1 island — it would accept
-    // whatever is shared, and the promise is the only thing stopping it from mixing the two.
+    // it. `strictVersion: false` is what makes update-cache mark it `skip` rather than `scope` — it would
+    // accept whatever is shared, and only pooling's no-tear placement stops it from mixing the two.
     const withIsland = (external: string, winner: string, tag: string): SharedExternal => ({
       dirty: false,
       versions: [
@@ -414,12 +324,12 @@ describe('pooling (integration)', () => {
         },
       ],
     });
-    adapters.sharedExternalsRepo.addOrUpdate(
+    p.adapters.sharedExternalsRepo.addOrUpdate(
       '@framework/core',
       withIsland('@framework/core', 'team/mfe-a', '18.0.0'),
       undefined
     );
-    adapters.sharedExternalsRepo.addOrUpdate(
+    p.adapters.sharedExternalsRepo.addOrUpdate(
       '@framework/common',
       withIsland('@framework/common', 'team/mfe-d', '18.1.0'),
       undefined
@@ -446,9 +356,7 @@ describe('pooling (integration)', () => {
       ]),
     } as RemoteEntry;
 
-    const updated = await createUpdateCache(config, adapters)(entryC);
-    const pooled = await createPoolDynamicExternals(config, adapters)(updated);
-    const importMap = await createConvertToImportMap(config, adapters)(pooled);
+    const { importMap } = await p.runDynamic(entryC);
 
     // Every entrypoint it imports resolves to the island's files, not its own and not the 18 winner's.
     expect(importMap.scopes?.[SCOPE['team/mfe-c']]).toEqual({
@@ -463,7 +371,7 @@ describe('pooling (integration)', () => {
     // that model. If the two ever drift the gate mis-decides silently, so this pins them against each
     // other on the shape that makes them differ: `@framework/core`'s winner is mfe-b, which does not carry
     // the `/testing` entrypoint, so the map publishes that one from a sibling copy of the same tag.
-    seed('@framework/core', [
+    p.seed('@framework/core', [
       {
         tag: '17.1.0',
         host: false,
@@ -480,12 +388,12 @@ describe('pooling (integration)', () => {
         ],
       },
     ]);
-    seed('@framework/common', [
-      version('17.1.0', '@framework/common', [{ remote: 'team/mfe-b', req: '^17.0.0' }]),
+    p.seed('@framework/common', [
+      p.version('17.1.0', '@framework/common', [{ remote: 'team/mfe-b', req: '^17.0.0' }]),
     ]);
 
-    const importMap = await runInit();
-    const stored = adapters.sharedExternalsRepo.getFromScope(undefined);
+    const importMap = await p.runInit();
+    const stored = p.adapters.sharedExternalsRepo.getFromScope(undefined);
     const { global } = committedView(
       Object.entries(stored).map(([name, external]) => ({ name, external }))
     );
@@ -496,203 +404,5 @@ describe('pooling (integration)', () => {
       expect(url).toContain(SCOPE[global.get(specifier)!.remote as keyof typeof SCOPE]);
     }
     expect(global.get('@framework/core/testing')!.remote).toBe('team/mfe-c');
-  });
-
-  // What each row of a member holds, in record order, as `[tag, action, remotes]`.
-  const rows = (name: string) =>
-    adapters.sharedExternalsRepo
-      .getFromScope(undefined)
-      [name]!.versions.map(v => [v.tag, v.action, v.remotes.map(r => r.name)]);
-
-  // Threads update-cache → pool → convert exactly as init-remote-entry.flow does.
-  const runDynamic = async (entry: RemoteEntry) => {
-    const updated = await createUpdateCache(config, adapters)(entry);
-    const pooled = await createPoolDynamicExternals(config, adapters)(updated);
-    return {
-      actions: pooled.actions,
-      importMap: await createConvertToImportMap(config, adapters)(pooled),
-    };
-  };
-
-  const dynamicEntry = (
-    name: string,
-    shared: (readonly [string, Parameters<typeof mockSharedInfo>[1]])[]
-  ): RemoteEntry =>
-    ({
-      name,
-      url: `${SCOPE[name as keyof typeof SCOPE]}remoteEntry.json`,
-      exposes: [],
-      // Tagged by npm scope, as the build does by default.
-      shared: tagSharedInfoByNpmScope(shared.map(([pkg, o]) => mockSharedInfo(pkg, o))),
-    }) as RemoteEntry;
-
-  it('keeps a dynamically-added skip copy out of an island row at its tag (dynamic init path)', async () => {
-    // The committed record: mfe-a's 17.1.1 is shared, mfe-b self-serves 17.1.0 as an island. mfe-c is
-    // loaded at runtime with 17.1.0 under `^17.1.0`: it accepts the shared 17.1.1, so the page maps it
-    // onto `imports`. Filed into mfe-b's `scope` row (the only row at its tag), the reloaded map would
-    // scope mfe-c to its own 17.1.0 instead — a tear, and a page that differs before and after a reload.
-    adapters.sharedExternalsRepo.addOrUpdate(
-      '@framework/core',
-      {
-        dirty: false,
-        versions: [
-          {
-            tag: '17.1.1',
-            host: false,
-            action: 'share',
-            remotes: [{ ...meta('team/mfe-a', '@framework/core', '^17.1.0'), cached: true }],
-          },
-          {
-            tag: '17.1.0',
-            host: false,
-            action: 'scope',
-            remotes: [
-              {
-                ...meta('team/mfe-b', '@framework/core', '17.1.0'),
-                cached: true,
-                poolCause: 'uncovered',
-              },
-            ],
-          },
-        ],
-      },
-      undefined
-    );
-
-    const { actions, importMap } = await runDynamic(
-      dynamicEntry('team/mfe-c', [
-        [
-          '@framework/core',
-          { requiredVersion: '^17.1.0', version: '17.1.0', singleton: true, strictVersion: false },
-        ],
-      ])
-    );
-
-    // The delta: mfe-c resolves through the committed `imports`, mapping nothing of its own.
-    expect(actions['@framework/core']).toEqual({ action: 'skip', covered: ['@framework/core'] });
-    expect(importMap.scopes?.[SCOPE['team/mfe-c']]).toBeUndefined();
-
-    // The record files mfe-c in a `skip` row of its own, beside the island row rather than inside it.
-    expect(rows('@framework/core')).toEqual([
-      ['17.1.1', 'share', ['team/mfe-a']],
-      ['17.1.0', 'scope', ['team/mfe-b']],
-      ['17.1.0', 'skip', ['team/mfe-c']],
-    ]);
-
-    // The reload: the map rebuilt from that record agrees with the page mfe-c ran on.
-    const reloaded = await createGenerateImportMap(config, adapters)();
-    expect(reloaded.imports['@framework/core']).toBe(`${SCOPE['team/mfe-a']}@framework/core.js`);
-    expect(reloaded.scopes?.[SCOPE['team/mfe-c']]).toBeUndefined();
-
-    // A warm init: by default a remote cached at the URL it was fetched from is not refetched, so the
-    // full init flow runs over the post-load record as it stands (`runInit` asserts no tear or split).
-    const warm = await runInit();
-    expect(warm.imports['@framework/core']).toBe(`${SCOPE['team/mfe-a']}@framework/core.js`);
-    expect(warm.scopes?.[SCOPE['team/mfe-c']]).toBeUndefined();
-  });
-
-  it('shares a dynamically-added copy of a member no row shares (dynamic init path)', async () => {
-    // mfe-a is the host on 19.2.0 and ships no anim. mfe-b and mfe-c pin 19.1.0 exactly, so they form a
-    // subpool on mfe-b's build: anim's only row is a `skip` both copies dedup onto mfe-b through
-    // per-consumer overrides, and `imports` never names anim. mfe-d is then loaded at runtime with only
-    // anim@19.1.0. Joined onto that `skip` row, it would get `skip` with nothing `covered`, and since its
-    // tags agree with the global map the pool gate leaves it there: a bare specifier nothing resolves.
-    const host = (v: SharedVersion): SharedVersion => ({ ...v, host: true });
-    seed('@framework/core', [
-      host(version('19.2.0', '@framework/core', [{ remote: 'team/mfe-a', req: '^19.2.0' }])),
-      version('19.1.0', '@framework/core', [
-        { remote: 'team/mfe-b', req: '19.1.0' },
-        { remote: 'team/mfe-c', req: '19.1.0' },
-      ]),
-    ]);
-    seed('@framework/common', [
-      host(version('19.2.0', '@framework/common', [{ remote: 'team/mfe-a', req: '^19.2.0' }])),
-    ]);
-    seed('@framework/anim', [
-      version('19.1.0', '@framework/anim', [
-        { remote: 'team/mfe-b', req: '19.1.0' },
-        { remote: 'team/mfe-c', req: '19.1.0' },
-      ]),
-    ]);
-
-    const committed = await runInit();
-    expect(committed.imports['@framework/anim']).toBeUndefined();
-    expect(rows('@framework/anim')).toEqual([['19.1.0', 'skip', ['team/mfe-b', 'team/mfe-c']]]);
-
-    const { actions, importMap } = await runDynamic(
-      dynamicEntry('team/mfe-d', [
-        [
-          '@framework/anim',
-          { requiredVersion: '^19.1.0', version: '19.1.0', singleton: true, strictVersion: true },
-        ],
-      ])
-    );
-
-    // Nothing shares anim, so mfe-d shares its own copy and the delta publishes it on `imports`.
-    expect(actions['@framework/anim']!.action).toBe('share');
-    expect(importMap.imports['@framework/anim']).toBe(`${SCOPE['team/mfe-d']}@framework/anim.js`);
-    expect(rows('@framework/anim')).toEqual([
-      ['19.1.0', 'skip', ['team/mfe-b', 'team/mfe-c']],
-      ['19.1.0', 'share', ['team/mfe-d']],
-    ]);
-
-    // The reload maps it the same way, and the subpool keeps its own build.
-    const reloaded = await createGenerateImportMap(config, adapters)();
-    expect(reloaded.imports['@framework/anim']).toBe(`${SCOPE['team/mfe-d']}@framework/anim.js`);
-    expect(reloaded.scopes?.[SCOPE['team/mfe-c']]).toEqual(committed.scopes?.[SCOPE['team/mfe-c']]);
-
-    // A warm init over the post-load record: no remote is refetched at an unchanged URL, so pooling
-    // re-reads the `skip` and `share` rows side by side at 19.1.0 (`runInit` asserts no tear or split).
-    const warm = await runInit();
-    expect(warm.imports['@framework/anim']).toBe(`${SCOPE['team/mfe-d']}@framework/anim.js`);
-    expect(warm).toEqual(reloaded);
-
-    // And a warm init that does refetch all four (an override evicts each and merges it back in), so
-    // process-remote-entries files every copy again against that record and the pool is re-elected.
-    const pinned = (pkg: string) =>
-      [
-        pkg,
-        { requiredVersion: '19.1.0', version: '19.1.0', singleton: true, strictVersion: true },
-      ] as const;
-    const latest = (pkg: string) =>
-      [
-        pkg,
-        { requiredVersion: '^19.2.0', version: '19.2.0', singleton: true, strictVersion: true },
-      ] as const;
-    await createProcessRemoteEntries(
-      config,
-      adapters
-    )([
-      {
-        ...dynamicEntry('team/mfe-a', [latest('@framework/core'), latest('@framework/common')]),
-        host: true,
-        override: true,
-      },
-      {
-        ...dynamicEntry('team/mfe-b', [pinned('@framework/core'), pinned('@framework/anim')]),
-        override: true,
-      },
-      {
-        ...dynamicEntry('team/mfe-c', [pinned('@framework/core'), pinned('@framework/anim')]),
-        override: true,
-      },
-      {
-        ...dynamicEntry('team/mfe-d', [
-          [
-            '@framework/anim',
-            { requiredVersion: '^19.1.0', version: '19.1.0', singleton: true, strictVersion: true },
-          ],
-        ]),
-        override: true,
-      },
-    ]);
-    const refetched = await runInit();
-    // Re-elected from scratch, mfe-d dedups onto the subpool build its exact tag matches, like its peers.
-    expect(refetched.scopes?.[SCOPE['team/mfe-d']]).toEqual({
-      '@framework/anim': `${SCOPE['team/mfe-b']}@framework/anim.js`,
-    });
-    expect(rows('@framework/anim')).toEqual([
-      ['19.1.0', 'skip', ['team/mfe-b', 'team/mfe-c', 'team/mfe-d']],
-    ]);
   });
 });

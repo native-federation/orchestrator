@@ -14,8 +14,8 @@ import { mockSharedInfo } from 'lib/testing/domain/remote-entry/shared-info.mock
 
 /**
  * Verdict granularity: `applyWinner` marks the copies that objected, not the rows they sit in. The whole
- * portfolio effect is in `pooling/per-copy-verdicts.regression.spec.ts`; this file is the mechanics —
- * what splits, what does not, and what the resulting record looks like.
+ * portfolio effect is in `pooling/pooling.regression.spec.ts` (per-copy verdicts); this file is the
+ * mechanics — what splits, what does not, and what the resulting record looks like.
  */
 describe('determine: splitting a version on election', () => {
   let config: ConfigContract;

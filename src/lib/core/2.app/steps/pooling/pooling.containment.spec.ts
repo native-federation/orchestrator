@@ -1,21 +1,8 @@
-import type { DrivingContract } from '../../driving-ports/driving.contract';
-import type { ConfigContract } from 'lib/core/2.app/config';
-import { mockConfig } from 'lib/testing/config.mock';
-import { mockAdapters } from 'lib/testing/adapters.mock';
+import type { RemoteEntry, SharedVersion } from 'lib/core/1.domain';
 import { mockSharedInfo } from 'lib/testing/domain/remote-entry/shared-info.mock';
-import { mockVersionRemote, newestFirst } from 'lib/testing/domain/externals/version.mock';
-import { Optional } from 'lib/utils/optional';
-import type { RemoteEntry, RemoteInfo, SharedVersion } from 'lib/core/1.domain';
-import { createSharedExternalsRepository } from 'lib/core/3.adapters/storage/shared-externals.repository';
-import { createVersionCheck } from 'lib/core/3.adapters/checks/version.check';
-import { globalThisStorageEntry } from 'lib/core/4.config/storage/global-this.storage';
-import { createDetermineSharedExternals } from '../determine-shared-externals';
-import { createMarkPoolsForReelection } from './mark-pools-for-reelection';
-import { createPoolSharedExternals } from './pool-shared-externals';
+import { portfolio } from 'lib/testing/pooling/portfolio';
+import { tagSharedInfoByNpmScope } from 'lib/testing/pooling/tag-by-npm-scope';
 import { createPoolDynamicExternals } from './pool-dynamic-externals';
-import { createGenerateImportMap } from '../generate-import-map';
-import { findIncoherentRemotes, findSplitRemotes } from 'lib/testing/pooling/no-tear';
-import { tagSharedInfoByNpmScope, tagStoredByNpmScope } from 'lib/testing/pooling/tag-by-npm-scope';
 
 /**
  * A bug inside one pool's election must not fail the whole init, nor leave that pool half-placed. Both
@@ -49,27 +36,11 @@ describe('pooling contains a failure to the pool it happened in', () => {
     'team/a': 'http://a/',
     'team/b': 'http://b/',
     'team/c': 'http://c/',
-  } as const;
+  };
 
-  let config: ConfigContract;
-  let adapters: DrivingContract;
-
+  let p: ReturnType<typeof portfolio>;
   beforeEach(() => {
-    config = mockConfig();
-    adapters = mockAdapters();
-    adapters.versionCheck = createVersionCheck();
-    adapters.sharedExternalsRepo = createSharedExternalsRepository({
-      storage: globalThisStorageEntry('nf-pool-containment'),
-      clearStorage: true,
-    });
-    adapters.remoteInfoRepo.getAll = vi.fn(() => ({}));
-    adapters.scopedExternalsRepo.getAll = vi.fn(() => ({}));
-    adapters.sharedChunksRepo.tryGet = vi.fn(() => Optional.empty());
-    adapters.remoteInfoRepo.tryGet = vi.fn((name: string) =>
-      name in SCOPE
-        ? Optional.of({ scopeUrl: SCOPE[name as keyof typeof SCOPE], exposes: [] } as RemoteInfo)
-        : Optional.empty<RemoteInfo>()
-    );
+    p = portfolio(SCOPE, { storage: 'nf-pool-containment' });
   });
 
   const version = (
@@ -77,43 +48,36 @@ describe('pooling contains a failure to the pool it happened in', () => {
     external: string,
     remotes: string[],
     action: SharedVersion['action'] = 'skip'
-  ): SharedVersion => ({
-    tag,
-    host: false,
-    action,
-    remotes: remotes.map(r =>
-      mockVersionRemote(r, external, {
-        requiredVersion: `^${tag.split('.')[0]}.0.0`,
+  ): SharedVersion =>
+    p.version(
+      tag,
+      external,
+      remotes.map(remote => ({
+        remote,
+        req: `^${tag.split('.')[0]}.0.0`,
         cached: action === 'share',
-      })
-    ),
-  });
-
-  const seed = (name: string, versions: SharedVersion[], dirty = true) =>
-    adapters.sharedExternalsRepo.addOrUpdate(
-      name,
-      tagStoredByNpmScope({
-        [name]: { dirty, versions: newestFirst(versions, adapters.versionCheck.compare) },
-      })[name]!,
-      undefined
+      })),
+      action
     );
 
-  const record = (name: string) => adapters.sharedExternalsRepo.getFromScope(undefined)[name]!;
   const rows = (name: string) =>
-    record(name).versions.map(v => [
-      `${v.tag}:${v.action}`,
-      v.remotes.map(r => (r.poolCause ? `${r.name}(${r.poolCause})` : r.name)),
-    ]);
+    p
+      .record(name)
+      .versions.map(v => [
+        `${v.tag}:${v.action}`,
+        v.remotes.map(r => (r.poolCause ? `${r.name}(${r.poolCause})` : r.name)),
+      ]);
 
   it('elects the healthy pool and gives the failed one the placement that cannot tear (init)', async () => {
     for (const family of ['@ok', '@broken'])
       for (const name of [`${family}/core`, `${family}/common`])
-        seed(name, [version('17.0.0', name, ['team/a', 'team/b']), version('16.0.0', name, ['team/c'])]);
+        p.seed(name, [
+          version('17.0.0', name, ['team/a', 'team/b']),
+          version('16.0.0', name, ['team/c']),
+        ]);
 
-    const pooled = await createMarkPoolsForReelection(config, adapters)();
-    const touched = await createDetermineSharedExternals(config, adapters)(pooled);
-    await createPoolSharedExternals(config, adapters)(touched);
-    const importMap = await createGenerateImportMap(config, adapters)();
+    // The harness asserts no-tear on the map, so the fallback placement is checked to be tear-free too.
+    await p.runInit();
 
     expect(rows('@ok/core')).toEqual([
       ['17.0.0:share', ['team/a', 'team/b']],
@@ -125,24 +89,20 @@ describe('pooling contains a failure to the pool it happened in', () => {
       ['17.0.0:scope', ['team/b(uncovered)']],
       ['16.0.0:scope', ['team/c(uncovered)']],
     ]);
-    expect(record('@broken/core').poolName).toBe('broken');
+    expect(p.record('@broken/core').poolName).toBe('broken');
     // An emergency placement is no election: it must not break the next healthy election's tie.
-    expect(record('@broken/core').poolWinner).toBeUndefined();
-    expect(config.log.error).toHaveBeenCalledWith(
+    expect(p.record('@broken/core').poolWinner).toBeUndefined();
+    expect(p.config.log.error).toHaveBeenCalledWith(
       3,
       "[__GLOBAL__][pool:broken] could not elect the pool; only 'team/a' resolves globally, every other remote serves its own family.",
       expect.objectContaining({ message: 'election bug' })
     );
-
-    const members = adapters.sharedExternalsRepo.getFromScope(undefined);
-    expect(findIncoherentRemotes({ importMap, members, scopeUrls: SCOPE })).toEqual([]);
-    expect(findSplitRemotes({ importMap, members, scopeUrls: SCOPE })).toEqual([]);
   });
 
   it('lets the joiner serve its own family when its pool cannot be judged (dynamic)', async () => {
     for (const family of ['@ok', '@broken'])
       for (const name of [`${family}/core`, `${family}/common`])
-        seed(name, [version('17.0.0', name, ['team/a', 'team/b'], 'share')], false);
+        p.seed(name, [version('17.0.0', name, ['team/a', 'team/b'], 'share')], false);
 
     const entry = {
       name: 'team/b',
@@ -156,8 +116,8 @@ describe('pooling contains a failure to the pool it happened in', () => {
     } as RemoteEntry;
 
     const { actions } = await createPoolDynamicExternals(
-      config,
-      adapters
+      p.config,
+      p.adapters
     )({
       entry,
       actions: Object.fromEntries(
@@ -175,7 +135,7 @@ describe('pooling contains a failure to the pool it happened in', () => {
       ['17.0.0:share', ['team/a']],
       ['17.0.0:scope', ['team/b(uncovered)']],
     ]);
-    expect(config.log.error).toHaveBeenCalledWith(
+    expect(p.config.log.error).toHaveBeenCalledWith(
       8,
       '[__GLOBAL__][team/b] could not judge its pool; it serves its own family.',
       expect.objectContaining({ message: 'gate bug' })

@@ -1,6 +1,6 @@
 import type { SharedExternal } from 'lib/core/1.domain';
 import { mockVersionRemote } from '../domain/externals/version.mock';
-import { emittedUrls, findIncoherentRemotes, findSplitRemotes } from './no-tear';
+import { emittedUrls, findIncoherentRemotes, findSplitRemotes, tearsByPool } from './no-tear';
 
 /**
  * The guard's own test. A checker that cannot fail is worse than no checker, so the torn case comes
@@ -128,6 +128,122 @@ describe('findIncoherentRemotes', () => {
     });
 
     expect(incoherent).toEqual([]);
+  });
+
+  // A build ships each package at one tag whichever entrypoints it lists, so one entrypoint at a tag witnesses
+  // the package's root and its other entrypoints at that tag too. mfe-c consumes core and router at 18.0.0
+  // and resolves core@18.0.1 from mfe-b and router@18.0.1 from mfe-w; the question is whether mfe-w's build
+  // witnesses core@18.0.1 although it lists a different entrypoint of core than the one served.
+  describe('package-level witnesses', () => {
+    const SCOPES = {
+      'team/mfe-b': 'http://mfe-b/',
+      'team/mfe-c': 'http://mfe-c/',
+      'team/mfe-w': 'http://mfe-w/',
+    };
+    const copy = (remote: string, external: string, entries: string[]) => ({
+      ...mockVersionRemote(remote, external, { requiredVersion: '^18.0.0' }),
+      entries: Object.fromEntries(entries.map(e => [e, `${e}.js`])),
+    });
+    const record = (witness: { tag: string; core: string[] }): Record<string, SharedExternal> => ({
+      '@angular/core': {
+        dirty: false,
+        versions: [
+          ...(witness.tag === '18.0.1'
+            ? []
+            : [
+                {
+                  tag: witness.tag,
+                  host: false,
+                  action: 'skip' as const,
+                  remotes: [copy('team/mfe-w', '@angular/core', witness.core)],
+                },
+              ]),
+          {
+            tag: '18.0.1',
+            host: false,
+            action: 'share',
+            remotes: [
+              copy('team/mfe-b', '@angular/core', ['@angular/core']),
+              ...(witness.tag === '18.0.1'
+                ? [copy('team/mfe-w', '@angular/core', witness.core)]
+                : []),
+            ],
+          },
+          {
+            tag: '18.0.0',
+            host: false,
+            action: 'skip',
+            remotes: [
+              copy('team/mfe-c', '@angular/core', ['@angular/core', '@angular/core/testing']),
+            ],
+          },
+        ],
+      },
+      '@angular/router': {
+        dirty: false,
+        versions: [
+          {
+            tag: '18.0.1',
+            host: false,
+            action: 'share',
+            remotes: [copy('team/mfe-w', '@angular/router', ['@angular/router'])],
+          },
+          {
+            tag: '18.0.0',
+            host: false,
+            action: 'skip',
+            remotes: [copy('team/mfe-c', '@angular/router', ['@angular/router'])],
+          },
+        ],
+      },
+    });
+    const importMap = (testing: string) => ({
+      imports: {
+        '@angular/core': 'http://mfe-b/@angular/core.js',
+        '@angular/core/testing': testing,
+        '@angular/router': 'http://mfe-w/@angular/router.js',
+      },
+    });
+    const torn = (witness: { tag: string; core: string[] }, testing: string) =>
+      findIncoherentRemotes({
+        importMap: importMap(testing),
+        members: record(witness),
+        scopeUrls: SCOPES,
+      }).map(i => i.remote);
+
+    it('counts a build shipping only a secondary entrypoint as shipping its root at that tag', () => {
+      // mfe-w lists only core/testing@18.0.1, which mfe-c also resolves from it: core@18.0.1 is witnessed.
+      expect(
+        torn(
+          { tag: '18.0.1', core: ['@angular/core/testing'] },
+          'http://mfe-w/@angular/core/testing.js'
+        )
+      ).toEqual([]);
+    });
+
+    it('counts a build shipping the root as shipping its secondary entrypoints at that tag', () => {
+      // mfe-w lists only the core root, yet witnesses the core/testing@18.0.1 mfe-c takes from mfe-b's tag.
+      const members = record({ tag: '18.0.1', core: ['@angular/core'] });
+      members['@angular/core']!.versions[0]!.remotes[0]!.entries['@angular/core/testing'] =
+        '@angular/core/testing.js';
+      expect(
+        findIncoherentRemotes({
+          importMap: importMap('http://mfe-b/@angular/core/testing.js'),
+          members,
+          scopeUrls: SCOPES,
+        }).map(i => i.remote)
+      ).toEqual([]);
+    });
+
+    it('still flags the pairing when the entrypoint the build lists is at another tag', () => {
+      // mfe-w ships core/testing at 18.0.0, so no build shipped core@18.0.1 beside router@18.0.1.
+      expect(
+        torn(
+          { tag: '18.0.0', core: ['@angular/core/testing'] },
+          'http://mfe-c/@angular/core/testing.js'
+        )
+      ).toContain('team/mfe-c');
+    });
   });
 
   it('counts every file the map can fetch, deduped', () => {
@@ -311,5 +427,113 @@ describe('findSplitRemotes', () => {
     expect(
       findSplitRemotes({ importMap, members: members(), scopeUrls: SCOPE, hosts: ['team/mfe-a'] })
     ).toEqual([]);
+  });
+});
+
+describe('tearsByPool', () => {
+  const SCOPE = { 'team/mfe-a': 'http://mfe-a/', 'team/mfe-b': 'http://mfe-b/' };
+
+  // One stored external: per version, its tag and the copies shipping it, each with the specifiers it lists.
+  const external = (
+    poolName: string | undefined,
+    versions: [tag: string, copies: [remote: string, specifiers: string[]][]][]
+  ): SharedExternal => ({
+    dirty: false,
+    ...(poolName === undefined ? {} : { poolName }),
+    versions: versions.map(([tag, copies]) => ({
+      tag,
+      host: false,
+      action: 'skip',
+      remotes: copies.map(([remote, specifiers]) => ({
+        ...mockVersionRemote(remote, specifiers[0]!, { requiredVersion: `^${tag}` }),
+        entries: Object.fromEntries(specifiers.map(s => [s, `${s}.js`])),
+      })),
+    })),
+  });
+
+  // mfe-a ships the fw pool at 2.0.0, mfe-b only core at 1.0.0; the map hands mfe-a core@1.0.0 beside its own
+  // router@2.0.0. The ds pool is served wholly from mfe-b, and the flat package `lib` is split across builds.
+  const externals = () => ({
+    __GLOBAL__: {
+      '@fw/core': external('fw', [
+        ['2.0.0', [['team/mfe-a', ['@fw/core']]]],
+        ['1.0.0', [['team/mfe-b', ['@fw/core']]]],
+      ]),
+      '@fw/router': external('fw', [['2.0.0', [['team/mfe-a', ['@fw/router']]]]]),
+      '@ds/kit': external('ds', [
+        ['4.0.0', [['team/mfe-b', ['@ds/kit']]]],
+        ['3.0.0', [['team/mfe-a', ['@ds/kit']]]],
+      ]),
+      '@ds/icons': external('ds', [['4.0.0', [['team/mfe-b', ['@ds/icons']]]]]),
+      lib: external(undefined, [
+        ['1.1.0', [['team/mfe-b', ['lib']]]],
+        ['1.0.0', [['team/mfe-a', ['lib']]]],
+      ]),
+      'lib/sub': external(undefined, [['1.0.0', [['team/mfe-a', ['lib/sub']]]]]),
+    },
+  });
+
+  const importMap = {
+    imports: {
+      '@fw/core': 'http://mfe-b/@fw/core.js',
+      '@fw/router': 'http://mfe-a/@fw/router.js',
+      '@ds/kit': 'http://mfe-b/@ds/kit.js',
+      '@ds/icons': 'http://mfe-b/@ds/icons.js',
+      lib: 'http://mfe-b/lib.js',
+      'lib/sub': 'http://mfe-a/lib/sub.js',
+    },
+  };
+
+  it('reports each torn group once, named by share scope and pool, and leaves coherent pools out', () => {
+    const tears = tearsByPool({ importMap, externals: externals(), scopeUrls: SCOPE });
+    expect(tears.map(t => t.pool).sort()).toEqual(['__GLOBAL__|fw', '__GLOBAL__|package:lib']);
+    expect(tears.find(t => t.pool === '__GLOBAL__|fw')!.incoherent).toEqual([
+      expect.objectContaining({
+        remote: 'team/mfe-a',
+        resolved: { '@fw/core': '1.0.0', '@fw/router': '2.0.0' },
+      }),
+    ]);
+  });
+
+  it('judges one pool at a time: a remote on another build per pool is no tear', () => {
+    // mfe-a runs ds@4.0.0 from mfe-b beside fw from wherever: across pools nothing is promised.
+    const coherentFw = { ...importMap.imports, '@fw/core': 'http://mfe-a/@fw/core.js' };
+    expect(
+      tearsByPool({
+        importMap: { imports: coherentFw },
+        externals: externals(),
+        scopeUrls: SCOPE,
+      }).map(t => t.pool)
+    ).toEqual(['__GLOBAL__|package:lib']);
+  });
+
+  it('groups the flat externals of one unpooled package, which alone would each look coherent', () => {
+    // `lib@1.1.0` and `lib/sub@1.0.0` are two builds of one package; judged per external name, neither tears.
+    const lib = tearsByPool({ importMap, externals: externals(), scopeUrls: SCOPE }).find(
+      t => t.pool === '__GLOBAL__|package:lib'
+    )!;
+    expect(lib.incoherent.map(i => i.remote)).toEqual(['team/mfe-a']);
+    expect(
+      findIncoherentRemotes({
+        importMap,
+        members: { lib: externals().__GLOBAL__.lib },
+        scopeUrls: SCOPE,
+      })
+    ).toEqual([]);
+  });
+
+  it('exempts hosts', () => {
+    expect(
+      tearsByPool({ importMap, externals: externals(), scopeUrls: SCOPE, hosts: ['team/mfe-a'] })
+    ).toEqual([]);
+  });
+
+  it('keeps share scopes apart', () => {
+    const tears = tearsByPool({
+      importMap,
+      externals: { custom: externals().__GLOBAL__ },
+      scopeUrls: SCOPE,
+    });
+    expect(tears.map(t => t.pool).sort()).toEqual(['custom|fw', 'custom|package:lib']);
   });
 });

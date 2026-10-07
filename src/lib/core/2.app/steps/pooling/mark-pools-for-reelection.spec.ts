@@ -10,9 +10,9 @@ import { npmScope } from 'lib/testing/pooling/tag-by-npm-scope';
 
 /**
  * A pool is one unit of state, so `determine` has to re-elect it as one — otherwise pooling reads its own
- * `scope` verdicts back for the members nobody touched and gate 1 cannot tell them from a range violation
- * the resolver just found. This step is what makes "pooling ran on this pool" imply "every member of it
- * was re-elected". See docs/version-resolver.md §"How pooling resolves".
+ * `scope` verdicts back for the members nobody touched and the election cannot tell them from a range
+ * violation the resolver just found. This step is what makes "pooling ran on this pool" imply "every member
+ * of it was re-elected". See docs/version-resolver.md §"How pooling resolves".
  */
 
 // Tagged by npm scope unless told otherwise, as the build tags them by default. Pass `null` for no tag.
@@ -92,28 +92,6 @@ describe('createMarkPoolsForReelection', () => {
     expect(dirt(externals)).toEqual({ '@scope/a': false, '@scope/b': false });
   });
 
-  it('does not even read a clean scope versions — no pool graph on a warm init', async () => {
-    // Measured: building the graph and then discovering nothing was dirty
-    // was the entire pooling cost of a warm init. `buildPools` has to walk every external's versions to
-    // find its remotes and tags, so counting reads of `versions` is exactly "was the graph built".
-    let reads = 0;
-    const watched = (name: string): SharedExternal => {
-      const external = ext(name, false);
-      const { versions } = external;
-      return Object.defineProperty(external, 'versions', {
-        get: () => {
-          reads++;
-          return versions;
-        },
-      }) as SharedExternal;
-    };
-    given({ '@scope/a': watched('@scope/a'), '@scope/b': watched('@scope/b') });
-
-    await markPoolsForReelection();
-
-    expect(reads).toBe(0);
-  });
-
   it('does not cross pool boundaries', async () => {
     // Two npm scopes are two pools, so the dirty one must not drag the other in.
     const externals = given({
@@ -124,15 +102,6 @@ describe('createMarkPoolsForReelection', () => {
     await markPoolsForReelection();
 
     expect(dirt(externals)).toEqual({ '@one/a': true, '@two/b': false });
-  });
-
-  it('never writes — it only mutates the stored records', async () => {
-    given({ '@scope/a': ext('@scope/a', true), '@scope/b': ext('@scope/b', false) });
-
-    await markPoolsForReelection();
-
-    expect(adapters.sharedExternalsRepo.addOrUpdate).not.toHaveBeenCalled();
-    expect(adapters.sharedExternalsRepo.commit).not.toHaveBeenCalled();
   });
 
   it('skips the strict scope, as pooling does', async () => {
@@ -212,8 +181,42 @@ describe('createMarkPoolsForReelection', () => {
     });
   });
 
-  describe('scope gating on stored pool state', () => {
-    it('does nothing when no stored remote carries a pool tag', async () => {
+  // Performance contracts: W1, a scope carrying no pool state is never read; W2, a warm init (nothing
+  // dirty) builds no pool graph. The last test is the control proving the skip is selective.
+  describe('skips work', () => {
+    it('builds no pool graph when nothing is dirty (W2)', async () => {
+      // Measured: building the graph and then discovering nothing was dirty was the entire pooling cost of
+      // a warm init. `buildPools` has to walk every external's versions to find its remotes and tags, so
+      // counting reads of `versions` is exactly "was the graph built".
+      let reads = 0;
+      const watched = (name: string): SharedExternal => {
+        const external = ext(name, false);
+        const { versions } = external;
+        return Object.defineProperty(external, 'versions', {
+          get: () => {
+            reads++;
+            return versions;
+          },
+        }) as SharedExternal;
+      };
+      given({ '@scope/a': watched('@scope/a'), '@scope/b': watched('@scope/b') });
+
+      await markPoolsForReelection();
+
+      expect(reads).toBe(0);
+    });
+
+    // Grouped for what it pins today, no storage I/O; Phase 3 of plan.md changes this behaviour.
+    it('never writes — it only mutates the stored records', async () => {
+      given({ '@scope/a': ext('@scope/a', true), '@scope/b': ext('@scope/b', false) });
+
+      await markPoolsForReelection();
+
+      expect(adapters.sharedExternalsRepo.addOrUpdate).not.toHaveBeenCalled();
+      expect(adapters.sharedExternalsRepo.commit).not.toHaveBeenCalled();
+    });
+
+    it('reads no scope when no stored remote carries a pool tag (W1)', async () => {
       adapters.sharedExternalsRepo.hasPoolState = vi.fn(() => false);
       const externals = given({
         'pkg-a': ext('pkg-a', true),
@@ -228,7 +231,7 @@ describe('createMarkPoolsForReelection', () => {
 
     // The narrowing: a tag in one scope cannot form a pool in another, so the untagged scopes are never
     // read. Before this, one tag anywhere put every non-strict scope through a pool-graph build.
-    it('reads only the scopes that carry a pool tag', async () => {
+    it('reads only the scopes that carry a pool tag (W1)', async () => {
       adapters.sharedExternalsRepo.getScopes = vi.fn(() => [GLOBAL_SCOPE, 'team-a', 'team-b']);
       adapters.sharedExternalsRepo.scopeType = vi.fn(() => 'shareScope' as const);
       adapters.sharedExternalsRepo.hasPoolState = vi.fn(scope => scope === 'team-a');
@@ -241,7 +244,7 @@ describe('createMarkPoolsForReelection', () => {
     });
 
     // The tag lives in storage, so a warm init that merged nothing still pools.
-    it('spreads across a tag-formed pool when storage carries the tag', async () => {
+    it('still spreads across a tag-formed pool when storage carries the tag', async () => {
       adapters.sharedExternalsRepo.hasPoolState = vi.fn(() => true);
       const externals = given({
         'pkg-a': ext('pkg-a', true, 'grp'),

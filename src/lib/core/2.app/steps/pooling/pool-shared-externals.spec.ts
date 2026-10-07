@@ -50,8 +50,7 @@ describe('createPoolSharedExternals', () => {
   // Stands in for the build's default tag: every untagged scoped package is tagged with its npm scope,
   // which is what `useAutoExternalPooling` used to do at runtime.
   let autoTag: boolean;
-  // What `givenExternals` seeded, by name: a write of the same object is a name-only write
-  // (`syncPoolNames`), a new object is a rebuilt verdict.
+  // A deep copy of what `givenExternals` seeded, so a test can compare the stored outcome against it.
   let seeded: Record<string, SharedExternal>;
 
   beforeEach(() => {
@@ -61,8 +60,7 @@ describe('createPoolSharedExternals', () => {
     adapters = mockAdapters();
     adapters.sharedExternalsRepo.getScopes = vi.fn(() => [GLOBAL_SCOPE]);
     adapters.sharedExternalsRepo.scopeType = vi.fn(() => 'global' as const);
-    adapters.versionCheck.isCompatible = vi.fn(() => true);
-    adapters.versionCheck.compare = vi.fn((a, b) => a.localeCompare(b));
+    adapters.versionCheck = createVersionCheck();
 
     poolSharedExternals = createPoolSharedExternals(config, adapters);
   });
@@ -81,17 +79,34 @@ describe('createPoolSharedExternals', () => {
       }
     }
     if (autoTag) tagStoredByNpmScope(externals);
-    seeded = { ...externals };
+    seeded = structuredClone(externals);
     adapters.sharedExternalsRepo.getFromScope = vi.fn(() => externals);
   };
 
   const writes = () => vi.mocked(adapters.sharedExternalsRepo.addOrUpdate).mock.calls;
-  // A name-only write keeps the seeded `versions` array; a rebuild always emits a fresh one.
-  const rebuilds = () => writes().filter(c => c[1].versions !== seeded[c[0]]?.versions);
-  const nameWrites = () => writes().filter(c => c[1].versions === seeded[c[0]]?.versions);
 
-  const rebuiltFor = (name: string): SharedExternal | undefined =>
-    rebuilds().find(c => c[0] === name)?.[1];
+  // What storage holds for `name` once the step ran: the last write wins, as in the real repo.
+  const writtenFor = (name: string): SharedExternal | undefined =>
+    writes()
+      .filter(c => c[0] === name)
+      .at(-1)?.[1];
+
+  const causeOf = (external: SharedExternal, remote: string) =>
+    external.versions.flatMap(v => v.remotes).find(r => r.name === remote)?.poolCause;
+
+  // Every verdict the written record ends up holding: a scoped copy's `poolCause` and a subpool copy's
+  // `servedBy`. Islands are read from here, not from the warnings (D4 in plan.md).
+  const verdictsWritten = (): string[] =>
+    [...new Set(writes().map(c => c[0]))]
+      .flatMap(name =>
+        writtenFor(name)!
+          .versions.flatMap(v => v.remotes)
+          .flatMap(r => [
+            ...(r.poolCause ? [`${r.name}@${name}: ${r.poolCause}`] : []),
+            ...(r.servedBy ? [`${r.name}@${name}: served by ${r.servedBy}`] : []),
+          ])
+      )
+      .sort();
 
   const namesOf = (external: SharedExternal, action: SharedVersion['action']): string[] =>
     external.versions
@@ -106,10 +121,6 @@ describe('createPoolSharedExternals', () => {
         .filter(r => r.servedBy !== undefined)
         .map(r => [r.name, r.servedBy!])
     );
-
-  // The debug line is what proves a pool was formed.
-  const expectPooled = (poolName: string) =>
-    expect(config.log.debug).toHaveBeenCalledWith(3, expect.stringContaining(`pool:${poolName}`));
 
   // a's build serves the majority (core + common). c and d agree on core but lack common, and ship cdk at
   // two tags their strict ranges keep apart.
@@ -134,8 +145,10 @@ describe('createPoolSharedExternals', () => {
   describe('when inert', () => {
     it('does nothing when pooling is disabled and no pool tags are present', async () => {
       givenExternals({
-        '@framework/core': external([sharedVersion('17', [meta('mfe1')], { action: 'share' })]),
-        '@framework/common': external([sharedVersion('17', [meta('mfe1')], { action: 'share' })]),
+        '@framework/core': external([sharedVersion('17.0.0', [meta('mfe1')], { action: 'share' })]),
+        '@framework/common': external([
+          sharedVersion('17.0.0', [meta('mfe1')], { action: 'share' }),
+        ]),
       });
 
       await poolSharedExternals();
@@ -147,12 +160,12 @@ describe('createPoolSharedExternals', () => {
       autoTag = true;
       givenExternals({
         '@framework/core': {
-          ...external([sharedVersion('17', [meta('mfe1')], { action: 'share' })]),
+          ...external([sharedVersion('17.0.0', [meta('mfe1')], { action: 'share' })]),
           poolName: 'framework',
           poolWinner: 'mfe1',
         },
         '@framework/common': {
-          ...external([sharedVersion('17', [meta('mfe1')], { action: 'share' })]),
+          ...external([sharedVersion('17.0.0', [meta('mfe1')], { action: 'share' })]),
           poolName: 'framework',
           poolWinner: 'mfe1',
         },
@@ -160,16 +173,17 @@ describe('createPoolSharedExternals', () => {
 
       await poolSharedExternals();
 
-      // Every elected pool is written back (it was marked dirty), but to exactly what it already holds.
-      for (const [name, stored] of Object.entries(seeded)) expect(rebuiltFor(name)).toEqual(stored);
+      // The stored name is already right, so the name sync writes nothing: a write here is the election
+      // rebuilding the pool (it was marked dirty), and it lands on exactly what storage already held.
+      for (const [name, stored] of Object.entries(seeded)) expect(writtenFor(name)).toEqual(stored);
     });
 
     it('is a no-op for a single-member pool', async () => {
       autoTag = true;
       givenExternals({
         '@framework/core': external([
-          sharedVersion('17', [meta('mfe1')], { action: 'share' }),
-          sharedVersion('18', [meta('mfe2', { req: '18' })]),
+          sharedVersion('17.0.0', [meta('mfe1')], { action: 'share' }),
+          sharedVersion('18.0.0', [meta('mfe2', { req: '18' })]),
         ]),
       });
 
@@ -190,8 +204,51 @@ describe('createPoolSharedExternals', () => {
     });
   });
 
-  describe('has-pool early-out', () => {
-    it('skips the scope walk entirely when the scope carries no pool state', async () => {
+  // Performance contracts: W1, a scope carrying no pool state builds no pool graph; W2, a pool none of
+  // whose members was re-elected (a warm init) is not elected again. Each skip has a control beside it
+  // proving the skip is selective.
+  describe('skips work', () => {
+    const taggedPair = () =>
+      givenExternals({
+        foo: external([
+          sharedVersion('17.0.0', [meta('mfe1', { pool: 'grp' }), meta('mfe2', { pool: 'grp' })], {
+            action: 'share',
+          }),
+        ]),
+        bar: external([
+          sharedVersion('17.0.0', [meta('mfe1', { pool: 'grp' }), meta('mfe2', { pool: 'grp' })], {
+            action: 'share',
+          }),
+        ]),
+      });
+
+    // W2: determine clears `dirty`, so its per-scope set of re-elected externals is the only signal for
+    // what changed. This pool islands `c` on every member when elected (its core range rejects the 17 a's
+    // build serves), so a stored `poolCause` on c proves the pool was elected and its absence that it was not.
+    // A record a previous election wrote: `a` won it, which pooling stores as `poolWinner` and which decides
+    // the tie between `a` and `c` again.
+    const islandingPool = () => {
+      autoTag = true;
+      givenExternals({
+        '@framework/core': {
+          ...external([
+            sharedVersion('17.0.0', [meta('a', { req: '17' })], { action: 'share' }),
+            sharedVersion('18.0.0', [meta('c', { req: '18' })], { action: 'scope' }),
+          ]),
+          poolWinner: 'a',
+        },
+        '@framework/common': {
+          ...external([
+            sharedVersion('17.0.0', [meta('a', { req: '17' }), meta('c', { req: '17' })], {
+              action: 'share',
+            }),
+          ]),
+          poolWinner: 'a',
+        },
+      });
+    };
+
+    it('reads no scope that carries no pool state (W1)', async () => {
       adapters.sharedExternalsRepo.hasPoolState = vi.fn(() => false);
 
       await poolSharedExternals();
@@ -203,17 +260,11 @@ describe('createPoolSharedExternals', () => {
 
     // The narrowing: only a scope carrying a tag (or a stored pool) is read. One tag used to make every
     // non-strict scope build a pool graph.
-    it('reads only the scopes that carry pool state', async () => {
+    it('reads only the scopes that carry pool state (W1)', async () => {
       adapters.sharedExternalsRepo.getScopes = vi.fn(() => [GLOBAL_SCOPE, 'team-a', 'team-b']);
       adapters.sharedExternalsRepo.scopeType = vi.fn(() => 'shareScope' as const);
       adapters.sharedExternalsRepo.hasPoolState = vi.fn(scope => scope === 'team-a');
-      givenExternals({
-        foo: external([
-          sharedVersion('17', [meta('mfe1', { pool: 'grp' }), meta('mfe2', { pool: 'grp' })], {
-            action: 'share',
-          }),
-        ]),
-      });
+      taggedPair();
 
       await poolSharedExternals();
 
@@ -221,69 +272,17 @@ describe('createPoolSharedExternals', () => {
       expect(adapters.sharedExternalsRepo.getFromScope).toHaveBeenCalledWith('team-a');
     });
 
-    it('pools a scope that carries pool state', async () => {
+    it('still pools a scope that carries pool state', async () => {
       adapters.sharedExternalsRepo.hasPoolState = vi.fn(() => true);
-      givenExternals({
-        foo: external([
-          sharedVersion('17', [meta('mfe1', { pool: 'grp' }), meta('mfe2', { pool: 'grp' })], {
-            action: 'share',
-          }),
-        ]),
-        bar: external([
-          sharedVersion('17', [meta('mfe1', { pool: 'grp' }), meta('mfe2', { pool: 'grp' })], {
-            action: 'share',
-          }),
-        ]),
-      });
+      taggedPair();
 
       await poolSharedExternals();
 
-      expect(adapters.sharedExternalsRepo.getFromScope).toHaveBeenCalled();
-      expectPooled('grp');
-    });
-  });
-
-  // W2: determine clears `dirty`, so its per-scope set of re-elected externals is the only signal
-  // for what changed. A pool nothing touched resolves to what storage already holds.
-  describe('touched-externals gate', () => {
-    // Would island `c` on every member, so any write at all proves the pool was processed.
-    const islandingPool = () =>
-      givenExternals({
-        '@framework/core': external([
-          sharedVersion('17', [meta('a', { req: '17' })], { action: 'share' }),
-          sharedVersion('18', [meta('c', { req: '18' })], { action: 'scope' }),
-        ]),
-        '@framework/common': external([
-          sharedVersion('17', [meta('a', { req: '17' }), meta('c', { req: '17' })], {
-            action: 'share',
-          }),
-        ]),
-      });
-
-    beforeEach(() => {
-      autoTag = true;
+      expect(writtenFor('foo')!.poolName).toBe('grp');
+      expect(writtenFor('bar')!.poolName).toBe('grp');
     });
 
-    it('skips a pool no member of which was re-elected', async () => {
-      islandingPool();
-
-      await poolSharedExternals(new Map([[GLOBAL_SCOPE, new Set(['unrelated-dep'])]]));
-
-      // Named (`syncPoolNames` runs for the whole touched scope), but no verdict is decided.
-      expect(rebuilds()).toEqual([]);
-      expect(config.log.debug).not.toHaveBeenCalledWith(3, expect.stringContaining('pool:'));
-    });
-
-    it('processes the whole pool when any single member was re-elected', async () => {
-      islandingPool();
-
-      await poolSharedExternals(new Map([[GLOBAL_SCOPE, new Set(['@framework/core'])]]));
-
-      // Both members, not just the re-elected one: islanding `c` scopes its whole family.
-      expect(adapters.sharedExternalsRepo.addOrUpdate).toHaveBeenCalledTimes(2);
-    });
-
-    it('does not even read a scope with nothing re-elected', async () => {
+    it('reads no scope with nothing re-elected (W2)', async () => {
       islandingPool();
 
       await poolSharedExternals(new Map([['other-scope', new Set(['@framework/core'])]]));
@@ -292,12 +291,38 @@ describe('createPoolSharedExternals', () => {
       expect(adapters.sharedExternalsRepo.addOrUpdate).not.toHaveBeenCalled();
     });
 
-    it('processes every pool when called without a signal', async () => {
+    it('elects no pool none of whose members was re-elected (W2)', async () => {
+      islandingPool();
+
+      await poolSharedExternals(new Map([[GLOBAL_SCOPE, new Set(['unrelated-dep'])]]));
+
+      // Named (`syncPoolNames` runs for the whole touched scope), but every verdict stays as stored.
+      for (const [name, stored] of Object.entries(seeded))
+        expect(writtenFor(name)).toEqual({ ...stored, poolName: 'framework' });
+      expect(verdictsWritten()).toEqual([]);
+    });
+
+    it('still re-elects the whole pool when any single member was re-elected', async () => {
+      islandingPool();
+
+      await poolSharedExternals(new Map([[GLOBAL_SCOPE, new Set(['@framework/core'])]]));
+
+      // Both members, not just the re-elected one: islanding `c` scopes its whole family.
+      expect(verdictsWritten()).toEqual([
+        'c@@framework/common: incompatible',
+        'c@@framework/core: incompatible',
+      ]);
+    });
+
+    it('still re-elects every pool when called without a signal', async () => {
       islandingPool();
 
       await poolSharedExternals();
 
-      expect(adapters.sharedExternalsRepo.addOrUpdate).toHaveBeenCalledTimes(2);
+      expect(verdictsWritten()).toEqual([
+        'c@@framework/common: incompatible',
+        'c@@framework/core: incompatible',
+      ]);
     });
   });
 
@@ -305,12 +330,12 @@ describe('createPoolSharedExternals', () => {
     it('pools via an explicit remote pool tag', async () => {
       givenExternals({
         foo: external([
-          sharedVersion('17', [meta('mfe1', { pool: 'grp' }), meta('mfe2', { pool: 'grp' })], {
+          sharedVersion('17.0.0', [meta('mfe1', { pool: 'grp' }), meta('mfe2', { pool: 'grp' })], {
             action: 'share',
           }),
         ]),
         bar: external([
-          sharedVersion('17', [meta('mfe2', { pool: 'grp' }), meta('mfe1', { pool: 'grp' })], {
+          sharedVersion('17.0.0', [meta('mfe2', { pool: 'grp' }), meta('mfe1', { pool: 'grp' })], {
             action: 'share',
           }),
         ]),
@@ -319,10 +344,10 @@ describe('createPoolSharedExternals', () => {
       await poolSharedExternals();
 
       // Both builds serve both remotes; which one wins the tie does not matter here.
-      expect(config.log.debug).toHaveBeenCalledWith(
-        3,
-        expect.stringMatching(/\[pool:grp\] round 1: 'mfe[12]' serves 2/)
-      );
+      for (const name of ['foo', 'bar']) {
+        expect(writtenFor(name)!.poolName).toBe('grp');
+        expect(namesOf(writtenFor(name)!, 'share')).toEqual(['mfe1', 'mfe2']);
+      }
     });
   });
 
@@ -335,13 +360,11 @@ describe('createPoolSharedExternals', () => {
   describe('variant election', () => {
     beforeEach(() => {
       autoTag = true;
-      adapters.versionCheck = createVersionCheck();
-      poolSharedExternals = createPoolSharedExternals(config, adapters);
     });
 
-    const shareOf = (name: string) => rebuiltFor(name)!.versions.find(v => v.action === 'share');
+    const shareOf = (name: string) => writtenFor(name)!.versions.find(v => v.action === 'share');
     const rowsOf = (name: string) =>
-      rebuiltFor(name)!.versions.map(v => `${v.tag}:${v.action}:[${v.remotes.map(r => r.name)}]`);
+      writtenFor(name)!.versions.map(v => `${v.tag}:${v.action}:[${v.remotes.map(r => r.name)}]`);
 
     it('elects the build that serves the most remotes, even an older one', async () => {
       // a ships core + forms at 17.0.0, b only core at 17.1.0. Both ranges take either, but only a's
@@ -358,7 +381,7 @@ describe('createPoolSharedExternals', () => {
 
       expect(rowsOf('@framework/core')).toEqual(['17.1.0:skip:[b]', '17.0.0:share:[a]']);
       expect(rowsOf('@framework/forms')).toEqual(['17.0.0:share:[a]']);
-      expect(config.log.warn).not.toHaveBeenCalled();
+      expect(verdictsWritten()).toEqual([]);
     });
 
     it("forces the host's build as round 1 whatever it serves", async () => {
@@ -408,7 +431,7 @@ describe('createPoolSharedExternals', () => {
       await poolSharedExternals();
 
       expect(rowsOf('@framework/core')).toEqual(['17.0.0:share:[host]', '17.0.0:scope:[x]']);
-      expect(rebuiltFor('@framework/core')!.versions.map(v => v.host)).toEqual([true, false]);
+      expect(writtenFor('@framework/core')!.versions.map(v => v.host)).toEqual([true, false]);
       expect(shareOf('@framework/common')).toMatchObject({ tag: '17.0.0', host: true });
     });
 
@@ -437,7 +460,7 @@ describe('createPoolSharedExternals', () => {
       await poolSharedExternals();
 
       expect(shareOf('@framework/core')!.tag).toBe('17.0.0');
-      expect(rebuiltFor('@framework/core')!.poolWinner).toBe('b');
+      expect(writtenFor('@framework/core')!.poolWinner).toBe('b');
     });
 
     it('ignores a stored winner the members disagree on', async () => {
@@ -447,7 +470,7 @@ describe('createPoolSharedExternals', () => {
 
       // No previous winner, so arrival order breaks the tie.
       expect(shareOf('@framework/core')!.tag).toBe('18.0.0');
-      expect(rebuiltFor('@framework/common')!.poolWinner).toBe('a');
+      expect(writtenFor('@framework/common')!.poolWinner).toBe('a');
     });
 
     it('keeps the stored winner when a member that joined since carries none', async () => {
@@ -456,7 +479,7 @@ describe('createPoolSharedExternals', () => {
       await poolSharedExternals();
 
       expect(shareOf('@framework/core')!.tag).toBe('17.0.0');
-      expect(rebuiltFor('@framework/common')!.poolWinner).toBe('b');
+      expect(writtenFor('@framework/common')!.poolWinner).toBe('b');
     });
 
     it('ignores a stored winner that ships no member any more', async () => {
@@ -465,38 +488,40 @@ describe('createPoolSharedExternals', () => {
       await poolSharedExternals();
 
       expect(shareOf('@framework/core')!.tag).toBe('18.0.0');
-      expect(rebuiltFor('@framework/core')!.poolWinner).toBe('a');
+      expect(writtenFor('@framework/core')!.poolWinner).toBe('a');
     });
 
     it('takes the newest build first under latestSharedExternal (D3)', async () => {
       config.profile.latestSharedExternal = true;
-      // a's 17.0.0 build serves both remotes, b's 17.1.0 only b; the flag puts the newest first anyway.
+      // a's 17.9.0 build serves both remotes, b's 17.10.0 only b; the flag puts the newest first anyway.
+      // Newest by semver: compared as strings, 17.9.0 would sort above 17.10.0.
       givenExternals({
         '@framework/core': external([
-          sharedVersion('17.1.0', [meta('b', { req: '^17.0.0' })]),
-          sharedVersion('17.0.0', [meta('a', { req: '^17.0.0' })]),
+          sharedVersion('17.10.0', [meta('b', { req: '^17.0.0' })]),
+          sharedVersion('17.9.0', [meta('a', { req: '^17.0.0' })]),
         ]),
-        '@framework/forms': external([sharedVersion('17.0.0', [meta('a', { req: '^17.0.0' })])]),
+        '@framework/forms': external([sharedVersion('17.9.0', [meta('a', { req: '^17.0.0' })])]),
       });
 
       await poolSharedExternals();
 
-      expect(shareOf('@framework/core')!.tag).toBe('17.1.0');
+      expect(shareOf('@framework/core')!.tag).toBe('17.10.0');
       // a cannot take b's build (b ships no forms), so it serves its own family.
-      expect(config.log.warn).toHaveBeenCalledWith(
-        3,
-        expect.stringContaining("'a' serves its own family")
-      );
+      expect(verdictsWritten()).toEqual([
+        'a@@framework/core: uncovered',
+        'a@@framework/forms: uncovered',
+      ]);
     });
 
     describe('which build is newer', () => {
-      // x runs core@17 with zz@9, y runs core@16 with zz@99. The highest tag either ships is y's zz@99, but
-      // that line has nothing to do with core's: builds compare member by member, and core (first by name)
-      // decides — x is newer. Tilde ranges keep each build serving only itself.
+      // x runs core@17.10 with zz@9, y runs core@17.9 with zz@99. The highest tag either ships is y's zz@99,
+      // but that line has nothing to do with core's: builds compare member by member, and core (first by
+      // name) decides — x is newer by semver, though '17.9.0' sorts above '17.10.0' as a string. Tilde
+      // ranges keep each build serving only itself.
       const portfolio = () => ({
         '@framework/core': external([
-          sharedVersion('17.0.0', [meta('x', { req: '~17.0.0' })]),
-          sharedVersion('16.0.0', [meta('y', { req: '~16.0.0' })]),
+          sharedVersion('17.10.0', [meta('x', { req: '~17.10.0' })]),
+          sharedVersion('17.9.0', [meta('y', { req: '~17.9.0' })]),
         ]),
         '@framework/zz': external([
           sharedVersion('99.0.0', [meta('y', { req: '~99.0.0' })]),
@@ -516,7 +541,7 @@ describe('createPoolSharedExternals', () => {
         config.profile.latestSharedExternal = true;
         const externals = portfolio();
         // y now serves a second remote, which would win it round 1 without the flag.
-        externals['@framework/core']!.versions[1]!.remotes.push(meta('w', { req: '~16.0.0' }));
+        externals['@framework/core']!.versions[1]!.remotes.push(meta('w', { req: '~17.9.0' }));
         givenExternals(externals);
 
         await poolSharedExternals();
@@ -542,7 +567,7 @@ describe('createPoolSharedExternals', () => {
       await poolSharedExternals();
 
       expect(shareOf('@framework/core')!.tag).toBe('17.0.0');
-      expect(namesOf(rebuiltFor('@framework/core')!, 'scope')).toEqual(['c']);
+      expect(namesOf(writtenFor('@framework/core')!, 'scope')).toEqual(['c']);
     });
 
     it('places what round 1 left in a subpool running one build, through scopes', async () => {
@@ -562,27 +587,13 @@ describe('createPoolSharedExternals', () => {
       await poolSharedExternals();
 
       // The subpool's build names itself so its own scope maps its family; its members name the build.
-      expect(servedByOf(rebuiltFor('@framework/core')!)).toEqual({
-        'legacy-a': 'legacy-a',
-        'legacy-b': 'legacy-a',
-      });
-      expect(namesOf(rebuiltFor('@framework/core')!, 'scope')).toEqual([]);
-      expect(config.log.debug).toHaveBeenCalledWith(
-        3,
-        expect.stringContaining("round 1: 'a' serves 2; subpool 'legacy-a' serves 2")
-      );
-      expect(config.log.warn).toHaveBeenCalledWith(
-        3,
-        expect.stringContaining(
-          "'legacy-a' is islanded: its range rejects '@framework/core@22.0.8'"
-        )
-      );
-      expect(config.log.warn).toHaveBeenCalledWith(
-        3,
-        expect.stringContaining(
-          "It runs in subpool 'legacy-a': all 1 members it imports come from that build."
-        )
-      );
+      // Neither is scoped: a subpool copy carries `servedBy`, never a `poolCause`.
+      expect(namesOf(writtenFor('@framework/core')!, 'scope')).toEqual([]);
+      expect(verdictsWritten()).toEqual([
+        'legacy-a@@framework/core: served by legacy-a',
+        'legacy-a@@framework/router: served by legacy-a',
+        'legacy-b@@framework/core: served by legacy-a',
+      ]);
     });
 
     it('forms no subpool of one: a lone remote serves itself', async () => {
@@ -599,9 +610,12 @@ describe('createPoolSharedExternals', () => {
 
       await poolSharedExternals();
 
-      expect(namesOf(rebuiltFor('@framework/core')!, 'scope')).toEqual(['legacy']);
-      expect(namesOf(rebuiltFor('@framework/router')!, 'scope')).toEqual(['legacy']);
-      expect(servedByOf(rebuiltFor('@framework/core')!)).toEqual({});
+      expect(namesOf(writtenFor('@framework/core')!, 'scope')).toEqual(['legacy']);
+      expect(namesOf(writtenFor('@framework/router')!, 'scope')).toEqual(['legacy']);
+      expect(verdictsWritten()).toEqual([
+        'legacy@@framework/core: incompatible',
+        'legacy@@framework/router: incompatible',
+      ]);
     });
 
     it('never lets a disagreeing remote take a same-version global file', async () => {
@@ -619,8 +633,8 @@ describe('createPoolSharedExternals', () => {
 
       await poolSharedExternals();
 
-      expect(namesOf(rebuiltFor('@framework/common')!, 'scope')).toEqual(['c']);
-      expect(namesOf(rebuiltFor('@framework/common')!, 'share')).toEqual(['a']);
+      expect(namesOf(writtenFor('@framework/common')!, 'scope')).toEqual(['c']);
+      expect(namesOf(writtenFor('@framework/common')!, 'share')).toEqual(['a']);
     });
 
     it('lets an agreeing remote take the elected files and serve only the rest itself', async () => {
@@ -643,12 +657,12 @@ describe('createPoolSharedExternals', () => {
 
       await poolSharedExternals();
 
-      expect(namesOf(rebuiltFor('@framework/core')!, 'share')).toEqual(['a', 'b', 'c']);
-      expect(namesOf(rebuiltFor('@framework/cdk')!, 'scope')).toEqual(['b', 'c']);
-      expect(config.log.warn).toHaveBeenCalledWith(
-        3,
-        expect.stringContaining('It takes the elected files where its versions match')
-      );
+      expect(namesOf(writtenFor('@framework/core')!, 'share')).toEqual(['a', 'b', 'c']);
+      expect(namesOf(writtenFor('@framework/cdk')!, 'scope')).toEqual(['b', 'c']);
+      expect(verdictsWritten()).toEqual([
+        'b@@framework/cdk: uncovered',
+        'c@@framework/cdk: uncovered',
+      ]);
     });
 
     it('shares a package the winner ships only as secondary entrypoints', async () => {
@@ -715,10 +729,10 @@ describe('createPoolSharedExternals', () => {
         await poolSharedExternals();
 
         expect(rowsOf(material)).toEqual(['17.0.2:share:[b,c]', '17.0.0:scope:[a]']);
-        expect(config.log.warn).toHaveBeenCalledWith(
-          3,
-          expect.stringContaining(`'a' serves its own family`)
-        );
+        expect(verdictsWritten()).toEqual([
+          'a@@framework/core: uncovered',
+          'a@@framework/material: uncovered',
+        ]);
       });
 
       it('publishes a sibling entrypoint shipped at the elected tag', async () => {
@@ -748,9 +762,9 @@ describe('createPoolSharedExternals', () => {
 
         // Every build borrows the other entrypoint at the same tag in round 1, so all three serve everyone
         // and which copy leads the row is only the tiebreak; one row is the point.
-        expect(rebuiltFor(material)!.versions).toHaveLength(1);
-        expect(namesOf(rebuiltFor(material)!, 'share')).toEqual(['a', 'b', 'c']);
-        expect(config.log.warn).not.toHaveBeenCalled();
+        expect(writtenFor(material)!.versions).toHaveLength(1);
+        expect(namesOf(writtenFor(material)!, 'share')).toEqual(['a', 'b', 'c']);
+        expect(verdictsWritten()).toEqual([]);
       });
     });
 
@@ -798,16 +812,12 @@ describe('createPoolSharedExternals', () => {
 
       await poolSharedExternals();
 
-      expect(config.log.debug).toHaveBeenCalledWith(
-        3,
-        expect.stringMatching(/round 1: 'w' serves 7$/)
-      );
       expect(rowsOf(core)).toEqual([
         '1.2.0:skip:[a]',
         '1.1.0:share:[w,w2,w3,w4,b]',
         '1.0.0:skip:[r]',
       ]);
-      expect(servedByOf(rebuiltFor(core)!)).toEqual({});
+      expect(verdictsWritten()).toEqual([]);
     });
 
     describe('a subpool the extension serves', () => {
@@ -841,12 +851,8 @@ describe('createPoolSharedExternals', () => {
 
         await poolSharedExternals();
 
-        expect(config.log.debug).toHaveBeenCalledWith(
-          3,
-          expect.stringMatching(/round 1: 'w' serves 5$/)
-        );
         expect(rowsOf('@framework/animations')).toEqual(['17.0.0:share:[a,r]']);
-        expect(servedByOf(rebuiltFor('@framework/core')!)).toEqual({});
+        expect(verdictsWritten()).toEqual([]);
         expect(config.log.warn).not.toHaveBeenCalled();
       });
 
@@ -863,19 +869,12 @@ describe('createPoolSharedExternals', () => {
 
         await poolSharedExternals();
 
-        expect(config.log.debug).toHaveBeenCalledWith(
-          3,
-          expect.stringMatching(/round 1: 'w' serves 4; alone: \{a, c\}$/)
-        );
         expect(rowsOf('@framework/animations')).toEqual(['17.0.0:share:[a,r]']);
-        expect(namesOf(rebuiltFor('@framework/cdk')!, 'scope')).toEqual(['a', 'c']);
-        expect(servedByOf(rebuiltFor('@framework/core')!)).toEqual({});
-        const warned = vi.mocked(config.log.warn).mock.calls.map(c => String(c[1]));
-        expect(warned).toHaveLength(2);
-        expect(warned.some(w => w.includes("'r'"))).toBe(false);
-        expect(warned.find(w => w.includes("'a'"))).toContain(
-          "'@framework/cdk' is the gap, closest is 'w'. It takes the elected files where its versions match"
-        );
+        expect(namesOf(writtenFor('@framework/cdk')!, 'scope')).toEqual(['a', 'c']);
+        expect(verdictsWritten()).toEqual([
+          'a@@framework/cdk: uncovered',
+          'c@@framework/cdk: uncovered',
+        ]);
       });
 
       it('keeps a subpool whose build the extension serves while another member still needs it', async () => {
@@ -912,21 +911,17 @@ describe('createPoolSharedExternals', () => {
 
         await poolSharedExternals();
 
-        expect(config.log.debug).toHaveBeenCalledWith(
-          3,
-          expect.stringMatching(/round 1: 'w' serves 4; subpool 'a' serves 2$/)
-        );
-        expect(servedByOf(rebuiltFor('@framework/core')!)).toEqual({ a: 'a', r: 'a' });
-        expect(config.log.warn).toHaveBeenCalledWith(
-          3,
-          expect.stringContaining("'r' is islanded: its range rejects '@framework/core@17.0.0'")
-        );
-        expect(config.log.warn).toHaveBeenCalledWith(
-          3,
-          expect.stringContaining(
-            "'a' keeps subpool 'a': the elected build would serve it, but 1 other remote(s) in it need its build."
-          )
-        );
+        expect(verdictsWritten()).toEqual([
+          'a@@framework/animations: served by a',
+          'a@@framework/core: served by a',
+          'r@@framework/animations: served by a',
+          'r@@framework/core: served by a',
+        ]);
+        // a stays on its own core although the elected build would serve it: r still needs a's build.
+        expect(rowsOf('@framework/core')).toEqual([
+          '17.1.0:skip:[a,r]',
+          '17.0.0:share:[w,w2,w3,x]',
+        ]);
       });
     });
 
@@ -945,7 +940,7 @@ describe('createPoolSharedExternals', () => {
 
       expect(rowsOf('@framework/forms')).toEqual(['17.0.0:share:[b]']);
       expect(rowsOf('@framework/common')).toEqual(['17.0.0:share:[a,b]']);
-      expect(config.log.warn).not.toHaveBeenCalled();
+      expect(verdictsWritten()).toEqual([]);
     });
   });
 
@@ -953,7 +948,6 @@ describe('createPoolSharedExternals', () => {
   describe('strict compatibility', () => {
     beforeEach(() => {
       autoTag = true;
-      adapters.versionCheck = createVersionCheck();
       config.strict.strictExternalCompatibility = true;
       poolSharedExternals = createPoolSharedExternals(config, adapters);
     });
@@ -1012,19 +1006,16 @@ describe('createPoolSharedExternals', () => {
       givenExternals(coverageMiss());
 
       await expect(poolSharedExternals()).resolves.toBeUndefined();
-      expect(config.log.warn).toHaveBeenCalledWith(
-        3,
-        expect.stringContaining("'c' serves its own family")
-      );
+      expect(verdictsWritten()).toEqual([
+        'c@@framework/cdk: uncovered',
+        'd@@framework/cdk: uncovered',
+      ]);
     });
   });
 
   // What pooling stores for tools to read: the pool an external is in (`SharedExternal.poolName`) and, per
   // scoped copy, why it self-serves (`poolCause`). See docs/version-resolver.md §"What pooling stores".
   describe('stored pool state', () => {
-    const causeOf = (external: SharedExternal, remote: string) =>
-      external.versions.flatMap(v => v.remotes).find(r => r.name === remote)?.poolCause;
-
     // mfe3 is islanded on core@18 and ships the matching common@17 too; mfe2 makes 17 the majority.
     const islanding = () => ({
       '@framework/core': external([
@@ -1059,55 +1050,51 @@ describe('createPoolSharedExternals', () => {
 
       await poolSharedExternals();
 
-      expect(rebuiltFor('@framework/core')!.poolName).toBe('framework');
-      expect(rebuiltFor('@framework/common')!.poolName).toBe('framework');
-      expect(rebuiltFor('@framework/core')!.poolWinner).toBe('mfe1');
-      expect(rebuiltFor('@framework/common')!.poolWinner).toBe('mfe1');
+      expect(writtenFor('@framework/core')!.poolName).toBe('framework');
+      expect(writtenFor('@framework/common')!.poolName).toBe('framework');
+      expect(writtenFor('@framework/core')!.poolWinner).toBe('mfe1');
+      expect(writtenFor('@framework/common')!.poolWinner).toBe('mfe1');
     });
 
     it("marks every copy of an islanded remote 'incompatible', and no clean copy", async () => {
-      adapters.versionCheck = createVersionCheck();
-      poolSharedExternals = createPoolSharedExternals(config, adapters);
       givenExternals(islanding());
 
       await poolSharedExternals();
 
       // Including common@17, which matched the winner: it is scoped because of core, not itself.
-      expect(causeOf(rebuiltFor('@framework/core')!, 'mfe3')).toBe('incompatible');
-      expect(causeOf(rebuiltFor('@framework/common')!, 'mfe3')).toBe('incompatible');
-      expect(causeOf(rebuiltFor('@framework/core')!, 'mfe1')).toBeUndefined();
-      expect(causeOf(rebuiltFor('@framework/common')!, 'mfe1')).toBeUndefined();
+      expect(causeOf(writtenFor('@framework/core')!, 'mfe3')).toBe('incompatible');
+      expect(causeOf(writtenFor('@framework/common')!, 'mfe3')).toBe('incompatible');
+      expect(causeOf(writtenFor('@framework/core')!, 'mfe1')).toBeUndefined();
+      expect(causeOf(writtenFor('@framework/common')!, 'mfe1')).toBeUndefined();
     });
 
     it("marks a remote that misses round 1 for lack of coverage 'uncovered'", async () => {
-      adapters.versionCheck = createVersionCheck();
-      poolSharedExternals = createPoolSharedExternals(config, adapters);
       givenExternals(coverageMiss());
 
       await poolSharedExternals();
 
-      expect(causeOf(rebuiltFor('@framework/cdk')!, 'c')).toBe('uncovered');
+      expect(causeOf(writtenFor('@framework/cdk')!, 'c')).toBe('uncovered');
       // Its core is the elected tag and it agrees, so that copy resolves globally with no cause.
-      expect(causeOf(rebuiltFor('@framework/core')!, 'c')).toBeUndefined();
+      expect(causeOf(writtenFor('@framework/core')!, 'c')).toBeUndefined();
     });
 
     it('clears a stale poolCause on a re-election that otherwise needs nothing', async () => {
       // A healthy pool would take the no-op path, but the record still says mfe2 self-served last time.
       givenExternals({
         '@framework/core': external([
-          sharedVersion('17', [meta('mfe1'), { ...meta('mfe2'), poolCause: 'uncovered' }], {
+          sharedVersion('17.0.0', [meta('mfe1'), { ...meta('mfe2'), poolCause: 'uncovered' }], {
             action: 'share',
           }),
         ]),
         '@framework/common': external([
-          sharedVersion('17', [meta('mfe1'), meta('mfe2')], { action: 'share' }),
+          sharedVersion('17.0.0', [meta('mfe1'), meta('mfe2')], { action: 'share' }),
         ]),
       });
 
       await poolSharedExternals();
 
-      expect(causeOf(rebuiltFor('@framework/core')!, 'mfe2')).toBeUndefined();
-      expect(namesOf(rebuiltFor('@framework/core')!, 'share')).toEqual(['mfe1', 'mfe2']);
+      expect(causeOf(writtenFor('@framework/core')!, 'mfe2')).toBeUndefined();
+      expect(namesOf(writtenFor('@framework/core')!, 'share')).toEqual(['mfe1', 'mfe2']);
     });
 
     it('clears a stale subpool and poolCause off a pool that shrank to one remote', async () => {
@@ -1115,17 +1102,17 @@ describe('createPoolSharedExternals', () => {
       // two-remote pool gave them: H's subpool (whose files are gone) and an island cause.
       givenExternals({
         '@framework/core': external([
-          sharedVersion('17', [{ ...meta('R'), servedBy: 'H' }], { action: 'share' }),
+          sharedVersion('17.0.0', [{ ...meta('R'), servedBy: 'H' }], { action: 'share' }),
         ]),
         '@framework/common': external([
-          sharedVersion('17', [{ ...meta('R'), poolCause: 'uncovered' }], { action: 'share' }),
+          sharedVersion('17.0.0', [{ ...meta('R'), poolCause: 'uncovered' }], { action: 'share' }),
         ]),
       });
 
       await poolSharedExternals();
 
-      const core = rebuiltFor('@framework/core')!;
-      const common = rebuiltFor('@framework/common')!;
+      const core = writtenFor('@framework/core')!;
+      const common = writtenFor('@framework/common')!;
       expect(servedByOf(core)).toEqual({});
       expect(causeOf(common, 'R')).toBeUndefined();
       expect(namesOf(core, 'share')).toEqual(['R']);
@@ -1136,12 +1123,12 @@ describe('createPoolSharedExternals', () => {
     it('writes a healthy re-election back exactly as stored', async () => {
       givenExternals({
         '@framework/core': {
-          ...external([sharedVersion('17', [meta('mfe1'), meta('mfe2')], { action: 'share' })]),
+          ...external([sharedVersion('17.0.0', [meta('mfe1'), meta('mfe2')], { action: 'share' })]),
           poolName: 'framework',
           poolWinner: 'mfe1',
         },
         '@framework/common': {
-          ...external([sharedVersion('17', [meta('mfe1'), meta('mfe2')], { action: 'share' })]),
+          ...external([sharedVersion('17.0.0', [meta('mfe1'), meta('mfe2')], { action: 'share' })]),
           poolName: 'framework',
           poolWinner: 'mfe1',
         },
@@ -1149,9 +1136,13 @@ describe('createPoolSharedExternals', () => {
 
       await poolSharedExternals();
 
-      expectPooled('framework');
-      for (const [name, stored] of Object.entries(seeded)) expect(rebuiltFor(name)).toEqual(stored);
-      expect(nameWrites()).toEqual([]);
+      // The stored name is already right, so every write is the election's rebuild, one per member.
+      expect(
+        writes()
+          .map(c => c[0])
+          .sort()
+      ).toEqual(['@framework/common', '@framework/core']);
+      for (const [name, stored] of Object.entries(seeded)) expect(writtenFor(name)).toEqual(stored);
     });
 
     it('renames an untouched pool whose stored name differs, without rebuilding it', async () => {
@@ -1165,18 +1156,23 @@ describe('createPoolSharedExternals', () => {
       // The scope is touched, the pool is not: its verdicts stand, only the name is brought up to date.
       await poolSharedExternals(new Map([[GLOBAL_SCOPE, new Set(['unrelated-dep'])]]));
 
-      expect(rebuilds()).toEqual([]);
-      expect(nameWrites().map(c => [c[0], c[1].poolName, c[1].poolWinner])).toEqual([
-        ['@framework/core', 'framework', 'mfe1'],
-        ['@framework/common', 'framework', 'mfe1'],
-      ]);
+      // A rebuild would island mfe3 (its ^18 rejects the elected 17); the stored record still does not. The
+      // stored poolWinner rides along: a rename is no election.
+      expect(
+        writes()
+          .map(c => c[0])
+          .sort()
+      ).toEqual(['@framework/common', '@framework/core']);
+      for (const [name, stored] of Object.entries(seeded))
+        expect(writtenFor(name)).toEqual({ ...stored, poolName: 'framework' });
+      expect(verdictsWritten()).toEqual([]);
     });
 
     it('clears pool and poolCause off an external that is in no pool any more', async () => {
       // `lonely` was pooled by an earlier portfolio; nothing tags it now (unscoped, so no scope tag).
       const lonely: SharedExternal = {
         ...external([
-          sharedVersion('1', [{ ...meta('mfe1', { req: '1' }), poolCause: 'incompatible' }], {
+          sharedVersion('1.0.0', [{ ...meta('mfe1', { req: '1' }), poolCause: 'incompatible' }], {
             action: 'scope',
           }),
         ]),
@@ -1187,7 +1183,7 @@ describe('createPoolSharedExternals', () => {
 
       await poolSharedExternals();
 
-      const written = writes().find(c => c[0] === 'lonely')?.[1];
+      const written = writtenFor('lonely');
       expect(written).toBeDefined();
       expect(written!.poolName).toBeUndefined();
       expect(written!.poolWinner).toBeUndefined();

@@ -161,7 +161,7 @@ describe('the host stays at remotes[0]', () => {
         { pkg: `${FAMILY}/core`, version: '22.1.0' },
         { pkg: `${FAMILY}/router`, version: '22.1.0' },
       ]),
-      // Previous major: incompatible, so gate 1 islands it family-wide.
+      // Previous major: its range rejects the elected build, so it serves its whole family itself.
       entry('team/mfe3', [
         { pkg: `${FAMILY}/core`, version: '21.0.0', req: '~21.0.0' },
         { pkg: `${FAMILY}/router`, version: '21.0.0', req: '~21.0.0' },

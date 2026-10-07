@@ -3,10 +3,14 @@ import type {
   ImportMap,
   RemoteName,
   SharedExternal,
+  shareScope,
   VersionName,
 } from 'lib/core/1.domain';
 import * as _path from 'lib/utils/path';
 import { owningPackage } from 'lib/core/2.app/steps/pooling/pool-graph';
+
+// Re-exported so harnesses outside `src` depend on `lib/testing` only, not on where the step code lives.
+export { owningPackage };
 
 type Specifier = string;
 
@@ -69,6 +73,19 @@ export function findIncoherentRemotes({
     }
   }
 
+  // A build ships each package at one tag, whichever of its entrypoints it lists: the root's tag, else the
+  // first entrypoint's. So `pkg/sub@T` witnesses `pkg@T` and `pkg/other@T`, as `SpecifierTags` reads it.
+  const packageTags = new Map<RemoteName, Map<Specifier, VersionName>>();
+  for (const [build, ships] of builds) {
+    const packages = new Map<Specifier, VersionName>();
+    for (const [specifier, tag] of ships) {
+      const pkg = owningPackage(specifier);
+      if (pkg === undefined) packages.set(specifier, tag);
+      else if (!packages.has(pkg)) packages.set(pkg, tag);
+    }
+    packageTags.set(build, packages);
+  }
+
   const exempt = new Set(hosts);
   const incoherent: Incoherence[] = [];
 
@@ -94,9 +111,10 @@ export function findIncoherentRemotes({
     let witnessed = false;
 
     for (const [build, ships] of builds) {
+      const packages = packageTags.get(build)!;
       const matched = entries.filter(
         ([specifier, tag]) =>
-          (ships.get(specifier) ?? ships.get(owningPackage(specifier) ?? specifier)) === tag
+          (ships.get(specifier) ?? packages.get(owningPackage(specifier) ?? specifier)) === tag
       ).length;
       if (matched === entries.length) {
         witnessed = true;
@@ -230,4 +248,46 @@ export function findSplitRemotes({
   }
 
   return split;
+}
+
+/** One torn group: a stored pool (`<scope>|<poolName>`) or an unpooled npm package (`<scope>|package:<pkg>`). */
+export type GroupTear = { pool: string; incoherent: Incoherence[]; split: Split[] };
+
+export type TearsInput = {
+  importMap: ImportMap;
+  /** The stored record per share scope, as `SharedExternals` holds it. */
+  externals: Record<string, shareScope>;
+  scopeUrls: Record<RemoteName, string>;
+  hosts?: RemoteName[];
+};
+
+/**
+ * Both oracles, run the way they must be: one group at a time. A group is a stored pool, by `poolName`;
+ * outside any pool, an npm package is still one version, so its entrypoints (separate flat externals or
+ * not) are judged together. Across groups the walk would find couplings no pool declares, which pooling
+ * leaves to the portfolio by design. Only torn groups are listed: `[]` is a coherent page.
+ */
+export function tearsByPool({
+  importMap,
+  externals,
+  scopeUrls,
+  hosts = [],
+}: TearsInput): GroupTear[] {
+  const groups = new Map<string, Record<ExternalName, SharedExternal>>();
+  for (const [scope, record] of Object.entries(externals))
+    for (const [name, external] of Object.entries(record)) {
+      const group =
+        external.poolName !== undefined
+          ? `${scope}|${external.poolName}`
+          : `${scope}|package:${owningPackage(name) ?? name}`;
+      groups.set(group, { ...groups.get(group), [name]: external });
+    }
+
+  const tears: GroupTear[] = [];
+  for (const [pool, members] of groups) {
+    const input = { importMap, members, scopeUrls, hosts };
+    const tear = { pool, incoherent: findIncoherentRemotes(input), split: findSplitRemotes(input) };
+    if (tear.incoherent.length > 0 || tear.split.length > 0) tears.push(tear);
+  }
+  return tears;
 }

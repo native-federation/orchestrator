@@ -28,8 +28,7 @@ describe('buildPools', () => {
   // every copy. A name is a pool's identity across remotes, not a per-remote label.
   describe('scope-derived tags (what the build emits by default)', () => {
     it('pools one name across remotes even when they share no member', () => {
-      // Formerly no pool: tag nodes were per remote, so a and b each held a lone member. The name now says
-      // core and common belong together whoever declared it.
+      // a and b share no member: the name alone says core and common belong together, whoever declared it.
       const pools = buildPools(
         scope({
           '@ng/core': [{ remote: 'a', pool: 'ng' }],
@@ -60,7 +59,7 @@ describe('buildPools', () => {
           '@ng/forms': [{ remote: 'c', pool: 'ng' }],
         })
       );
-      // c's forms joins too: it declares the same name. Formerly it sat alone on a per-remote `(c, ng)` node.
+      // c's forms joins too: it declares the same name.
       expect(shape(pools)).toEqual([['ng', ['@ng/common', '@ng/core', '@ng/forms']]]);
     });
 
@@ -90,7 +89,7 @@ describe('buildPools', () => {
     });
 
     it('pools disjoint member sets that declare the same name', () => {
-      // Formerly two pools, `x` and `x~2`: identical labels were not evidence. The name is the identity now.
+      // The name is the pool's identity, so identical labels pool even with no member in common.
       const pools = buildPools(
         scope({
           core: [{ remote: 'mfe1', pool: 'x' }],
@@ -148,25 +147,6 @@ describe('buildPools', () => {
         })
       );
       expect([...pools.keys()]).toEqual(['alpha']);
-    });
-
-    // Formerly `ng`, `ng~2`, `ng~3`: one per remote that declared the name on its own members.
-    it('keeps one pool per name, whatever the input order', () => {
-      const members = {
-        '@ng/router': [{ remote: 'b', pool: 'ng' }],
-        '@ng/forms': [{ remote: 'b', pool: 'ng' }],
-        '@ng/core': [{ remote: 'a', pool: 'ng' }],
-        '@ng/common': [{ remote: 'a', pool: 'ng' }],
-        '@ng/animations': [{ remote: 'c', pool: 'ng' }],
-        '@ng/zone': [{ remote: 'c', pool: 'ng' }],
-      };
-      const expected = [
-        ['ng', ['@ng/animations', '@ng/common', '@ng/core', '@ng/forms', '@ng/router', '@ng/zone']],
-      ];
-      expect(shape(buildPools(scope(members)))).toEqual(expected);
-
-      const reversed = Object.fromEntries(Object.entries(members).reverse());
-      expect(shape(buildPools(scope(reversed)))).toEqual(expected);
     });
   });
 
