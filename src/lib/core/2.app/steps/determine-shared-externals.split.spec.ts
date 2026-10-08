@@ -8,6 +8,9 @@ import { createSharedExternalsRepository } from 'lib/core/3.adapters/storage/sha
 import { createVersionCheck } from 'lib/core/3.adapters/checks/version.check';
 import { globalThisStorageEntry } from 'lib/core/4.config/storage/global-this.storage';
 import { createDetermineSharedExternals } from './determine-shared-externals';
+import { createGenerateImportMap } from './generate-import-map';
+import { Optional } from 'lib/utils/optional';
+import type { RemoteInfo } from 'lib/core/1.domain';
 import { createProcessRemoteEntries } from './process-remote-entries';
 import { mockRemoteEntry_MFE2 } from 'lib/testing/domain/remote-entry/remote-entry.mock';
 import { mockSharedInfo } from 'lib/testing/domain/remote-entry/shared-info.mock';
@@ -307,6 +310,41 @@ describe('determine: splitting a version on election', () => {
       await createDetermineSharedExternals(config, adapters)();
 
       expect(rows()).toEqual(['2.3.0:share:[team/a1]', '2.1.0:skip:[team/b1,team/b2]']);
+    });
+  });
+
+  it("keeps the winner's share row when it is the second row at its tag", async () => {
+    // [share T, skip T] at one tag is what a dissolved pool leaves behind: the subpool row `rebuildMember`
+    // wrote beside the share row stays once `withoutPoolResults` strips its copies' servedBy. team/c's row
+    // exposes more entrypoints, so the tear tie-break (same tag, same cost) elects it. Merging the tag's
+    // rows must fold team/a into the winner, not the winner into team/a's row — or no row is `share`.
+    const share = version('2.0.0', [
+      { remote: 'team/a', req: '^2.0.0', entries: { 'dep-a': 'a.js' } },
+    ]);
+    share.action = 'share';
+    const skip = version('2.0.0', [
+      { remote: 'team/c', req: '^2.0.0', entries: { 'dep-a': 'a.js', 'dep-a/extra': 'extra.js' } },
+    ]);
+    seed([share, skip]);
+
+    await createDetermineSharedExternals(config, adapters)();
+
+    // The winner's copy first: `remotes[0]` is the build that serves the tag.
+    expect(rows()).toEqual(['2.0.0:share:[team/c,team/a]']);
+
+    // So the map serves dep-a globally, every entrypoint from team/c's build.
+    adapters.remoteInfoRepo.getAll = vi.fn(() => ({}));
+    adapters.scopedExternalsRepo.getAll = vi.fn(() => ({}));
+    adapters.remoteInfoRepo.tryGet = vi.fn(remote =>
+      Optional.of({
+        scopeUrl: `http://${remote.slice('team/'.length)}/`,
+        exposes: [],
+      } as RemoteInfo)
+    );
+    const importMap = await createGenerateImportMap(config, adapters)();
+    expect(importMap.imports).toEqual({
+      'dep-a': 'http://c/a.js',
+      'dep-a/extra': 'http://c/extra.js',
     });
   });
 

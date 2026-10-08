@@ -79,9 +79,11 @@ export function createApplyWinner(config: LoggingConfig & ModeConfig) {
       // produces — a joiner lands in the deduping row of a split tag and re-splits out of it — and both
       // `findVersionForTag` and `rebuildMember` read a tag as at most one row per action. Merged after the
       // loop, not during it: a row's verdict is not final until the winner has been applied to it.
-      const merged = new Map<string, SharedVersion>();
+      // The winner absorbs its tag's other rows, or the `share` below would land on a row merged away.
+      const merged = new Map([[`${winner.tag}|${winner.action}`, winner]]);
       external.versions = rebuilt.filter(v => {
         const first = merged.get(`${v.tag}|${v.action}`);
+        if (first === v) return true;
         if (!first) {
           merged.set(`${v.tag}|${v.action}`, v);
           return true;
