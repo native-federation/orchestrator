@@ -565,6 +565,45 @@ describe('createPoolSharedExternals', () => {
       expect(verdicts()).toEqual(['b@@framework/cdk: uncovered', 'c@@framework/cdk: uncovered']);
     });
 
+    it('keeps a subpool copy off a claimed global file at its tag when round 1 serves another', async () => {
+      // The host a serves m/sub at 18.2.1. b agrees with it (m/sub at 18.2.1) and runs a subpool for c,
+      // as b alone ships n at a tag c accepts; w ships n at another tag, so n is never published. d is
+      // served globally and lists m/sub at 18.1.0, c's tag, so that file is claimable at 18.1.0. But round 1
+      // serves m/sub at 18.2.1: taking the 18.1.0 file from the map would bind d's build into c's, so c
+      // keeps b's file.
+      page({ hosts: ['a'] });
+      p.seed('@x/m', [
+        at('18.2.1', '@x/m', [
+          copy('a', '^18.2.0', {
+            host: true,
+            entries: { '@x/m': 'm.js', '@x/m/sub': 'm-sub.js' },
+          }),
+          copy('b', '^18.2.0', { entries: { '@x/m/sub': 'm-sub.js' } }),
+        ]),
+        at('18.1.0', '@x/m', [
+          copy('c', '^18.1.0', { entries: { '@x/m/sub': 'm-sub.js' } }),
+          copy('d', '^18.0.0', { entries: { '@x/m/sub': 'm-sub.js' } }),
+        ]),
+      ]);
+      p.seed('@x/n', [
+        at('1.2.0', '@x/n', [copy('w', '~1.2.0')]),
+        at('1.1.0', '@x/n', [copy('b', '^1.1.0')]),
+        at('1.0.0', '@x/n', [copy('c', '^1.0.0')]),
+      ]);
+
+      await p.runInit();
+
+      const c = p
+        .record('@x/m')
+        .versions.flatMap(v => v.remotes.map(r => ({ tag: v.tag, action: v.action, ...r })))
+        .find(r => r.name === 'c')!;
+      expect({ tag: c.tag, action: c.action, servedBy: c.servedBy }).toEqual({
+        tag: '18.1.0',
+        action: 'skip',
+        servedBy: 'b',
+      });
+    });
+
     describe('a package shipped only as secondary entrypoints', () => {
       const material = '@framework/material';
       const entrypoint = (remote: string, name: string) =>

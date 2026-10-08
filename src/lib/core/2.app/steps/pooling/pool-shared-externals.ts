@@ -1,35 +1,40 @@
 import type { ForPoolingSharedExternals } from '../../driver-ports/init/for-pooling-shared-externals.port';
-import type {
-  PoolCause,
-  RemoteName,
-  SharedExternal,
-  SharedVersion,
-  SharedVersionMeta,
-  VersionName,
-} from 'lib/core/1.domain';
+import type { ExternalName, RemoteName, SharedExternal } from 'lib/core/1.domain';
 import { NFError } from 'lib/core/native-federation.error';
 import type { DrivingContract } from '../../driving-ports/driving.contract';
 import type { LoggingConfig } from '../../config/log.contract';
 import type { ModeConfig } from '../../config/mode.contract';
 import { acceptsTag } from 'lib/core/1.domain/externals/compatibility';
 import { arrivalOrder, hostRemotes } from 'lib/core/1.domain/pooling/views';
+import { type Copy, copiesByRemote } from 'lib/core/1.domain/pooling/builds';
 import { electVariants, type Election } from 'lib/core/1.domain/pooling/election';
 import type { PoolMember, PoolName } from 'lib/core/1.domain/pooling/membership';
 import { type ElectionPlan, planElection } from 'lib/core/1.domain/pooling/plan';
+import {
+  electedPlacement,
+  memberRecord,
+  missesOf,
+  type PlacedPool,
+  type PoolMiss,
+  previousWinner,
+  safePlacement,
+} from 'lib/core/1.domain/pooling/placement';
 import { writePoolNames } from './pool.util';
-import { byTag, mergeRows } from 'lib/core/1.domain/externals/rows';
-import { type Specifier, SpecifierTags } from 'lib/core/1.domain/externals/specifier';
+import type { Specifier } from 'lib/core/1.domain/externals/specifier';
 
-type Route = { kind: 'global' } | { kind: 'subpool'; build: RemoteName } | { kind: 'own' };
-
-// Why a remote missed round 1, worded for the log and stored as `poolCause` on what it scopes.
-// `with`: the specifiers no build shipped together with `gap`, for a remote the map serves but no build witnesses.
-type Miss = { cause: PoolCause; gap: string; strict: boolean; with?: Specifier[] };
+type Decision = {
+  election: Election;
+  misses: Map<RemoteName, PoolMiss | undefined>;
+  placed: PlacedPool;
+  records: [ExternalName, SharedExternal][];
+};
 
 export function createPoolSharedExternals(
   config: LoggingConfig & ModeConfig,
   ports: Pick<DrivingContract, 'sharedExternalsRepo' | 'versionCheck'>
 ): ForPoolingSharedExternals {
+  const { compare } = ports.versionCheck;
+
   // See docs/version-resolver.md §"How pooling resolves".
   return () => {
     const repo = ports.sharedExternalsRepo;
@@ -38,14 +43,9 @@ export function createPoolSharedExternals(
       try {
         const plan = planElection(sharedExternals, repo.scopeType(scope) !== 'strict');
         logPlan(plan, scope);
-        for (const [poolName, members] of plan.dirtyPools) {
-          try {
-            electPool(poolName, members, scope);
-          } catch (error) {
-            if (error instanceof NFError) throw error;
-            placeSafely(poolName, members, scope, error);
-          }
-        }
+        for (const [poolName, members] of plan.dirtyPools)
+          for (const [name, record] of poolRecords(poolName, members, scope))
+            repo.addOrUpdate(name, record, scope);
         for (const [name, external] of plan.dissolved) repo.addOrUpdate(name, external, scope);
         writePoolNames(sharedExternals, plan.renames, repo, scope);
       } catch (error) {
@@ -80,18 +80,50 @@ export function createPoolSharedExternals(
       );
   }
 
-  function electPool(poolName: PoolName, members: PoolMember[], scope: string): void {
+  // Containment (D3) wraps only the decision, so a failure leaves nothing of the pool written.
+  function poolRecords(
+    poolName: PoolName,
+    members: PoolMember[],
+    scope: string
+  ): [ExternalName, SharedExternal][] {
+    let decision: Decision;
+    try {
+      decision = decide(poolName, members);
+    } catch (error) {
+      if (error instanceof NFError) throw error;
+      return contain(poolName, members, scope, error);
+    }
+    report(poolName, members, decision, scope);
+    return decision.records;
+  }
+
+  function decide(poolName: PoolName, members: PoolMember[]): Decision {
     const hosts = hostRemotes(members);
     const election = electVariants({
       members,
-      acceptsTag: acceptsTag(ports.versionCheck.isCompatible, ports.versionCheck.compare),
+      acceptsTag: acceptsTag(ports.versionCheck.isCompatible, compare),
       hosts,
       arrival: arrivalOrder(members),
-      compare: ports.versionCheck.compare,
+      compare,
       previous: previousWinner(members),
       latestFirst: config.profile.latestSharedExternal,
     });
+    const misses = missesOf(election);
+    const placed = electedPlacement(poolName, election, misses, hosts, compare);
+    const records = members.map((m): [ExternalName, SharedExternal] => [
+      m.name,
+      { ...memberRecord(m, placed), poolWinner: election.winner },
+    ]);
+    return { election, misses, placed, records };
+  }
 
+  // The round-1 summary, then the strict refusal, then why each remote missed round 1.
+  function report(
+    poolName: PoolName,
+    members: PoolMember[],
+    { election, misses, placed }: Decision,
+    scope: string
+  ): void {
     config.log.debug(
       3,
       `[${scope}][pool:${poolName}] round 1: '${election.winner}' serves ${election.global.size}` +
@@ -99,40 +131,18 @@ export function createPoolSharedExternals(
         (election.alone.length ? `; alone: {${election.alone.join(', ')}}` : '')
     );
 
-    const routes = routesOf(election);
-    const misses = new Map<RemoteName, Miss>();
-    for (const remote of routes.keys()) {
-      if (election.global.has(remote)) continue;
-      const miss = election.missOf(remote);
-      if (miss === undefined) {
-        const others = election.subpools.find(p => p.build === remote)!.members.length - 1;
+    const subpoolSizes = new Map(election.subpools.map(p => [p.build, p.members.length]));
+    for (const [remote, miss] of misses)
+      if (miss === undefined)
         config.log.warn(
           3,
-          `[${scope}][pool:${poolName}] '${remote}' keeps subpool '${remote}': the elected build would serve it, but ${others} other remote(s) in it need its build.`
+          `[${scope}][pool:${poolName}] '${remote}' keeps subpool '${remote}': the elected build would serve it, but ${subpoolSizes.get(remote)! - 1} other remote(s) in it need its build.`
         );
-        continue;
-      }
-      misses.set(
-        remote,
-        'rejected' in miss
-          ? {
-              cause: 'incompatible',
-              gap: `${miss.rejected.member}@${miss.rejected.tag}`,
-              strict: miss.rejected.strict,
-            }
-          : 'unwitnessed' in miss
-            ? {
-                cause: 'uncovered',
-                gap: miss.unwitnessed.gap,
-                with: miss.unwitnessed.with,
-                strict: false,
-              }
-            : { cause: 'uncovered', gap: miss.gap, strict: false }
-      );
-    }
 
     // A range rejecting the elected build is what this flag refuses; a coverage miss never is.
-    const rejecting = [...misses].filter(([, miss]) => miss.strict).map(([remote]) => remote);
+    const rejecting = [...misses]
+      .filter(([, miss]) => miss?.cause === 'incompatible' && miss.strict)
+      .map(([remote]) => remote);
     if (config.strict.strictExternalCompatibility && rejecting.length > 0) {
       config.log.error(
         3,
@@ -141,205 +151,61 @@ export function createPoolSharedExternals(
       throw new NFError(`Could not pool '${poolName}' in scope ${scope}.`);
     }
 
-    for (const [remote, miss] of misses)
+    let shipped: Map<RemoteName, Copy[]> | undefined;
+    for (const [remote, miss] of misses) {
+      if (miss === undefined) continue;
+      shipped ??= copiesByRemote(members);
+      const counts = {
+        imports: shipped.get(remote)!.length,
+        subpoolSize: subpoolSizes.get(remote) ?? 0,
+      };
       config.log.warn(
         3,
-        `[${scope}][pool:${poolName}] ${missWarning(remote, miss, election, routes.get(remote)!, members)}`
-      );
-
-    for (const member of members) {
-      ports.sharedExternalsRepo.addOrUpdate(
-        member.name,
-        {
-          ...rebuildMember(poolName, member, election, routes, misses, hosts),
-          poolWinner: election.winner,
-        },
-        scope
+        `[${scope}][pool:${poolName}] ${missWarning(remote, miss, placed, counts)}`
       );
     }
   }
 
-  // A failure elects one pool by the one placement that cannot tear: the host's build, else the first
-  // arrival's, stays global and every other remote serves its whole family itself. It stores no `poolWinner`:
-  // it was not an election, so it must not break the next one's tie.
-  function placeSafely(poolName: PoolName, members: PoolMember[], scope: string, error: unknown) {
-    const hosts = hostRemotes(members);
-    const remotes = [...arrivalOrder(members).keys()];
-    const winner = remotes.find(r => hosts.has(r)) ?? remotes[0];
+  // An unexpected failure stays in its pool (D3). It stores no `poolWinner`: it was not an election, so it
+  // must not break the next one's tie.
+  function contain(
+    poolName: PoolName,
+    members: PoolMember[],
+    scope: string,
+    error: unknown
+  ): [ExternalName, SharedExternal][] {
+    const placed = safePlacement(poolName, members, compare);
     config.log.error(
       3,
-      `[${scope}][pool:${poolName}] could not elect the pool; only '${winner}' resolves globally, every other remote serves its own family.`,
+      `[${scope}][pool:${poolName}] could not elect the pool; only '${placed.winner}' resolves globally, every other remote serves its own family.`,
       error
     );
-    if (winner === undefined) return;
-
-    const coverage = new SpecifierTags();
-    for (const member of members)
-      for (const version of member.external.versions)
-        for (const meta of version.remotes)
-          if (meta.name === winner)
-            for (const s in meta.entries) if (!coverage.has(s)) coverage.set(s, version.tag);
-
-    const alone = remotes.filter(r => r !== winner);
-    const election: Election = {
-      winner,
-      coverage,
-      global: new Set([winner]),
-      subpools: [],
-      alone,
-      agreeing: new Set(),
-      publishing: new Set(),
-      tagOf: s => coverage.tagOf(s),
-      missOf: () => undefined,
-    };
-    const routes = routesOf(election);
-    const misses = new Map<RemoteName, Miss>(
-      alone.map(r => [r, { cause: 'uncovered', gap: '', strict: false }])
-    );
-    for (const member of members)
-      ports.sharedExternalsRepo.addOrUpdate(
-        member.name,
-        rebuildMember(poolName, member, election, routes, misses, hosts),
-        scope
-      );
+    return members.map(m => [m.name, memberRecord(m, placed)]);
   }
-
-  function routesOf(election: Election): Map<RemoteName, Route> {
-    const routes = new Map<RemoteName, Route>();
-    for (const remote of election.global) routes.set(remote, { kind: 'global' });
-    for (const { build, members } of election.subpools)
-      for (const remote of members)
-        routes.set(remote, remote === build ? { kind: 'own' } : { kind: 'subpool', build });
-    for (const remote of election.alone) routes.set(remote, { kind: 'own' });
-    return routes;
-  }
-
-  // One member's record from the election, one row per `(tag, action)`; see docs/version-resolver.md
-  // §"How the verdicts land in the record and the map".
-  function rebuildMember(
-    poolName: PoolName,
-    member: PoolMember,
-    election: Election,
-    routes: Map<RemoteName, Route>,
-    misses: Map<RemoteName, Miss>,
-    hosts: ReadonlySet<RemoteName>
-  ): SharedExternal {
-    // A package can ship only secondary entrypoints (`material/table` without `material`), so its published
-    // tag is whatever round 1 serves any of its entrypoints at.
-    // An entrypoint round 1 does not serve itself still has its package's tag, which is what rule 5 compares.
-    let published: VersionName | undefined;
-    let pinned: VersionName | undefined;
-    for (const version of member.external.versions)
-      for (const meta of version.remotes)
-        for (const s in meta.entries) {
-          published ??= election.coverage.get(s);
-          pinned ??= election.tagOf(s);
-        }
-    const builds = new Set(election.subpools.map(p => p.build));
-    const placed: SharedVersion[] = [];
-    let winnerRow: SharedVersion | undefined;
-
-    const place = (tag: VersionName, action: SharedVersion['action'], meta: SharedVersionMeta) => {
-      const row = { tag, host: false, action, remotes: [meta] };
-      placed.push(row);
-      if (meta.name !== election.winner) return;
-      // The winner's copy leads its row: `remotes[0]` is the basis the global map publishes.
-      winnerRow = row;
-      row.host = hosts.has(meta.name);
-    };
-
-    const runsOf = (name: RemoteName) => {
-      const route = routes.get(name)!;
-      return route.kind === 'subpool' ? route.build : name;
-    };
-    const publishes = (name: RemoteName) =>
-      routes.get(name)!.kind === 'global' || election.publishing.has(runsOf(name));
-    // What those copies of this member ship, per tag. The import map maps a specifier from whichever external
-    // reaches it first, so a publisher in another member's record cannot stop a copy of this one claiming it.
-    const publishedAt = new Map<VersionName, Set<Specifier>>();
-    for (const version of member.external.versions)
-      for (const { name, entries } of version.remotes)
-        if (publishes(name)) {
-          let specifiers = publishedAt.get(version.tag);
-          if (!specifiers) publishedAt.set(version.tag, (specifiers = new Set()));
-          for (const s in entries) specifiers.add(s);
-        }
-
-    for (const version of member.external.versions) {
-      for (const stored of version.remotes) {
-        const { servedBy: _servedBy, poolCause: _poolCause, ...meta } = stored;
-        const route = routes.get(meta.name)!;
-        const runs = runsOf(meta.name);
-        // Rule 5: a build agreeing with round 1 takes its files wherever round 1 publishes this package; one
-        // that serves some member itself only where a publishing copy at its tag lists every file it takes.
-        const global =
-          route.kind === 'global' ||
-          (election.agreeing.has(runs) &&
-            pinned !== undefined &&
-            (election.publishing.has(runs) ||
-              Object.keys(meta.entries).every(
-                s =>
-                  election.coverage.get(s) === version.tag &&
-                  publishedAt.get(version.tag)?.has(s) === true
-              )));
-
-        if (global) place(version.tag, version.tag === published ? 'share' : 'skip', meta);
-        else if (route.kind === 'subpool' || builds.has(meta.name))
-          place(version.tag, 'skip', { ...meta, servedBy: runs });
-        else place(version.tag, 'scope', { ...meta, poolCause: misses.get(meta.name)!.cause });
-      }
-    }
-
-    const rows = mergeRows(placed, winnerRow);
-    // Stable, so the winner still leads; the import map publishes the first copy listing a specifier.
-    for (const row of rows)
-      row.remotes.sort((a, b) => Number(!publishes(a.name)) - Number(!publishes(b.name)));
-
-    // Within a tag `share`, `skip`, then `scope`.
-    const order = { share: 0, skip: 1, scope: 2 };
-    const newest = byTag(ports.versionCheck.compare);
-    const versions = rows.sort((a, b) => newest(a, b) || order[a.action] - order[b.action]);
-
-    return { dirty: false, poolName, versions };
-  }
-}
-
-// A member that joined since carries no winner yet; only two stored winners that conflict void it.
-function previousWinner(members: PoolMember[]): RemoteName | undefined {
-  const winners = new Set(members.flatMap(m => m.external.poolWinner ?? []));
-  const [winner] = winners;
-  if (winners.size !== 1) return undefined;
-  const ships = members.some(m =>
-    m.external.versions.some(v => v.remotes.some(r => r.name === winner))
-  );
-  return ships ? winner : undefined;
 }
 
 function missWarning(
   remote: RemoteName,
-  miss: Miss,
-  election: Election,
-  route: Route,
-  members: PoolMember[]
+  miss: PoolMiss,
+  placed: PlacedPool,
+  counts: { imports: number; subpoolSize: number }
 ): string {
   // Wording is pinned in `island-warnings.contract.spec.ts` alone; tools read islands from the record.
-  const imports = members.filter(m =>
-    m.external.versions.some(v => v.remotes.some(r => r.name === remote))
-  ).length;
-  const serves = election.subpools.find(p => p.build === remote)?.members.length ?? 0;
+  const { imports, subpoolSize } = counts;
+  const placement = placed.placements.get(remote)!;
   const where =
-    route.kind === 'subpool'
-      ? `It runs in subpool '${route.build}': all ${imports} members it imports come from that build.`
-      : serves > 1
-        ? `Its build runs subpool '${remote}' for its ${imports} members and ${serves - 1} other remote(s).`
-        : election.agreeing.has(remote)
+    placement.kind === 'runs' && placement.build !== remote
+      ? `It runs in subpool '${placement.build}': all ${imports} members it imports come from that build.`
+      : subpoolSize > 1
+        ? `Its build runs subpool '${remote}' for its ${imports} members and ${subpoolSize - 1} other remote(s).`
+        : placed.agreeing.has(remote)
           ? `It takes the elected files where its versions match and serves the rest of its ${imports} members itself.`
           : `All ${imports} members it imports are scoped for it.`;
 
-  const at = (s: Specifier) => `'${s}@${election.tagOf(s)!}'`;
+  const at = (s: Specifier) => `'${s}@${placed.coverage.tagOf(s)!}'`;
   if (miss.cause === 'incompatible')
-    return `'${remote}' is islanded: its range rejects '${miss.gap}' of the elected build '${election.winner}'. ${where}`;
+    return `'${remote}' is islanded: its range rejects '${miss.member}@${miss.tag}' of the elected build '${placed.winner}'. ${where}`;
   if (miss.with)
-    return `'${remote}' serves its own family: no build shipped ${miss.with.map(at).join(', ')} together with ${at(miss.gap)} — '${miss.gap}' is the gap, closest is '${election.winner}'. ${where}`;
-  return `'${remote}' serves its own family: no elected build offers every entrypoint it imports at a version it accepts — '${miss.gap}' is the gap, closest is '${election.winner}'. ${where}`;
+    return `'${remote}' serves its own family: no build shipped ${miss.with.map(at).join(', ')} together with ${at(miss.gap)} — '${miss.gap}' is the gap, closest is '${placed.winner}'. ${where}`;
+  return `'${remote}' serves its own family: no elected build offers every entrypoint it imports at a version it accepts — '${miss.gap}' is the gap, closest is '${placed.winner}'. ${where}`;
 }

@@ -108,45 +108,75 @@ describe('pooling contains a failure to the pool it happened in', () => {
     expect(p.record('@broken/core').poolWinner).toBeUndefined();
   });
 
-  // D28: a malformed record (one remote, two rows of one member) is read as the remote's first row, whole,
-  // as the election reads it. The fallback still reads every row: the host's second row lends `x/testing` at
-  // 16.0.0, so b's `x/testing` makes 16.0.0 the shared tag of a build whose first `x` row is 17.0.0.
-  it.fails(
-    'reads a malformed winner as its first row per member when its pool cannot be judged (init)',
-    async () => {
-      const p = portfolio(
-        { 'team/b': 'http://b/', 'team/h': 'http://h/' },
-        { hosts: ['team/h'], storage: 'nf-pool-containment-malformed', assertNoTear: false }
+  // D14: the fallback writes no winner of its own, and must not keep the one the last election stored either.
+  it('clears the stored winner when a re-elected pool cannot be judged (init)', async () => {
+    const p = portfolio(
+      { 'team/a': 'http://a/', 'team/b': 'http://b/' },
+      { storage: 'nf-pool-containment-stored-winner' }
+    );
+    breakRange(p);
+    for (const name of ['@broken/core', '@broken/common'])
+      p.seed(
+        name,
+        [
+          p.version('17.0.0', name, [
+            { remote: 'team/a', req: BROKEN },
+            { remote: 'team/b', req: BROKEN },
+          ]),
+        ],
+        true,
+        { poolName: 'broken', poolWinner: 'team/b' }
       );
-      breakRange(p);
-      p.seed('@broken/x', [
-        p.version('18.0.0', '@broken/x', [
-          { remote: 'team/b', req: BROKEN, entries: { '@broken/x/testing': 'b-testing.js' } },
-        ]),
-        p.version('17.0.0', '@broken/x', [
-          { remote: 'team/h', req: BROKEN, host: true, entries: { '@broken/x': 'h-x-17.js' } },
-        ]),
-        p.version('16.0.0', '@broken/x', [
-          {
-            remote: 'team/h',
-            req: BROKEN,
-            entries: { '@broken/x': 'h-x-16.js', '@broken/x/testing': 'h-testing-16.js' },
-          },
-        ]),
-      ]);
-      p.seed('@broken/y', [
-        p.version('17.0.0', '@broken/y', [{ remote: 'team/h', req: BROKEN, host: true }]),
-      ]);
 
-      await p.runInit();
+    await p.runInit();
 
-      expect(rows(p, '@broken/x')).toEqual([
-        ['18.0.0:scope', ['team/b(uncovered)']],
-        ['17.0.0:share', ['team/h']],
-        ['16.0.0:skip', ['team/h']],
-      ]);
+    for (const name of ['@broken/core', '@broken/common']) {
+      expect(p.record(name).poolWinner).toBeUndefined();
+      expect(p.record(name).poolName).toBe('broken');
     }
-  );
+    // The first arrival keeps the map, not the stored winner.
+    expect(rows(p, '@broken/core')).toEqual([
+      ['17.0.0:share', ['team/a']],
+      ['17.0.0:scope', ['team/b(uncovered)']],
+    ]);
+  });
+
+  // D28: a malformed record (one remote, two rows of one member) is read as the remote's first row, whole,
+  // as the election reads it. Reading every row, the host's second row would lend `x/testing` at 16.0.0, and
+  // b's `x/testing` would make 16.0.0 the shared tag of a build whose first `x` row is 17.0.0.
+  it('reads a malformed winner as its first row per member when its pool cannot be judged (init)', async () => {
+    const p = portfolio(
+      { 'team/b': 'http://b/', 'team/h': 'http://h/' },
+      { hosts: ['team/h'], storage: 'nf-pool-containment-malformed', assertNoTear: false }
+    );
+    breakRange(p);
+    p.seed('@broken/x', [
+      p.version('18.0.0', '@broken/x', [
+        { remote: 'team/b', req: BROKEN, entries: { '@broken/x/testing': 'b-testing.js' } },
+      ]),
+      p.version('17.0.0', '@broken/x', [
+        { remote: 'team/h', req: BROKEN, host: true, entries: { '@broken/x': 'h-x-17.js' } },
+      ]),
+      p.version('16.0.0', '@broken/x', [
+        {
+          remote: 'team/h',
+          req: BROKEN,
+          entries: { '@broken/x': 'h-x-16.js', '@broken/x/testing': 'h-testing-16.js' },
+        },
+      ]),
+    ]);
+    p.seed('@broken/y', [
+      p.version('17.0.0', '@broken/y', [{ remote: 'team/h', req: BROKEN, host: true }]),
+    ]);
+
+    await p.runInit();
+
+    expect(rows(p, '@broken/x')).toEqual([
+      ['18.0.0:scope', ['team/b(uncovered)']],
+      ['17.0.0:share', ['team/h']],
+      ['16.0.0:skip', ['team/h']],
+    ]);
+  });
 
   it('lets the joiner serve its own family when its pool cannot be judged (dynamic)', async () => {
     const p = portfolio({}, { storage: 'nf-pool-containment-dynamic', realRepositories: true });

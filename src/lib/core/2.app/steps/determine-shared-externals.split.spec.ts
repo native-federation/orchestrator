@@ -155,7 +155,7 @@ describe('determine: splitting a version on election', () => {
     await createDetermineSharedExternals(config, adapters)();
 
     // Host precedence makes the host row the winner, so the winner exemption covers it — which is what
-    // keeps a host copy out of a `scope` row, where `rebuildMember` would drop its `host` bit.
+    // keeps a host copy out of a `scope` row, where `memberRecord` would drop its `host` bit.
     expect(rows()).toEqual(['22.1.0:share:[team/host,team/mfe2]', '21.0.0:scope:[team/mfe3]']);
   });
 
@@ -314,7 +314,7 @@ describe('determine: splitting a version on election', () => {
   });
 
   it("keeps the winner's share row when it is the second row at its tag", async () => {
-    // [share T, skip T] at one tag is what a dissolved pool leaves behind: the subpool row `rebuildMember`
+    // [share T, skip T] at one tag is what a dissolved pool leaves behind: the subpool row `memberRecord`
     // wrote beside the share row stays once `withoutPoolResults` strips its copies' servedBy. team/c's row
     // exposes more entrypoints, so the tear tie-break (same tag, same cost) elects it. Merging the tag's
     // rows must fold team/a into the winner, not the winner into team/a's row — or no row is `share`.
@@ -388,7 +388,7 @@ describe('determine: splitting a version on election', () => {
     await createDetermineSharedExternals(config, adapters)();
 
     // Re-split, and merged with the scope row that was already there rather than left as a second one at
-    // the same tag: `findVersionForTag` and `rebuildMember` both read a tag as at most one row per action.
+    // the same tag: `findVersionForTag` and `memberRecord` both read a tag as at most one row per action.
     // Within a scope row the order is immaterial — every copy self-serves, so `remotes[0]` is not a basis.
     expect(rows()).toEqual([
       majorityRow('2.2.0', 4),

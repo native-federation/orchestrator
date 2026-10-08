@@ -36,9 +36,7 @@ export type Election = {
   // Remotes outside round 1 that agree with the winner on everything both ship (rule 5).
   agreeing: Set<RemoteName>;
   // Those of `agreeing` that take every member they ship from the global map, so may publish its files.
-  publishing: Set<RemoteName>;
-  // Falls back to the specifier's package tag: what rule 5 compares against.
-  tagOf: (specifier: Specifier) => VersionName | undefined;
+  publishers: Set<RemoteName>;
   // A rejected tag (a strict range's first, as `strictExternalCompatibility` refuses that), else a gap,
   // else specifiers no one build shipped together. Undefined only for a subpool's build the global map
   // would serve.
@@ -170,8 +168,7 @@ export function electVariants(input: ElectionInput): Election {
     subpools: [],
     alone: [],
     agreeing: new Set(),
-    publishing: new Set(),
-    tagOf: s => coverage.tagOf(s),
+    publishers: new Set(),
     missOf: remote => {
       let rejected: { member: ExternalName; tag: VersionName; strict: boolean } | undefined;
       for (const copy of shipped.get(remote) ?? [])
@@ -336,7 +333,7 @@ export function electVariants(input: ElectionInput): Election {
   for (const remote of [...election.subpools.map(p => p.build), ...election.alone])
     if (agrees(shipped.get(remote)!, coverage)) {
       election.agreeing.add(remote);
-      if (runsAll(remote)) election.publishing.add(remote);
+      if (runsAll(remote)) election.publishers.add(remote);
     }
 
   return election;
