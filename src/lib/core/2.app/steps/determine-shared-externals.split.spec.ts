@@ -220,78 +220,27 @@ describe('determine: splitting a version on election', () => {
     await expect(createDetermineSharedExternals(config, adapters)()).rejects.toThrow();
   });
 
-  /**
-   * A warm init reads `servedBy` written by the previous portfolio's pooling — determine runs before
-   * `poolSharedExternals` (init.flow.ts), so these subpools are always already in the record. A subpool
-   * copy resolves through its subpool's build, not through the shared version, which cuts both ways: what it
-   * bundles cannot cover anyone else, and the shared version cannot tear it.
-   */
-  describe("copies pooling placed in a foreign build's subpool", () => {
-    it('scopes a torn copy a subpool sibling only appeared to cover', async () => {
-      config.profile.scopeUncoveredEntrypoints = true;
-      const winner = majority('2.2.0', 4);
-      // The widest copy of the winner is the subpool one, so only it declares `/extra`.
-      Object.assign(winner.remotes[3]!, {
-        servedBy: 'team/mfe9',
-        entries: { 'dep-a': 'a.js', 'dep-a/extra': 'x.js' },
-      });
-      seed([
-        winner,
-        version('2.1.0', [
-          {
-            remote: 'team/mfe-a',
-            req: '^2.1.0',
-            entries: { 'dep-a': 'a.js', 'dep-a/extra': 'x.js' },
-          },
-        ]),
-      ]);
+  // Pooling runs first and leaves nothing dirty with pool results (plan.spec.ts, the portfolio harness), so
+  // determine never reads a `servedBy`. Should a stale one reach it anyway, it means nothing here: the copy
+  // is priced and scoped like any other.
+  it('elects a copy carrying a stale servedBy as if it carried none', async () => {
+    config.profile.scopeUncoveredEntrypoints = true;
+    seed([
+      majority('2.2.0', 4),
+      version('2.1.0', [
+        {
+          remote: 'team/mfe-a',
+          req: '^2.1.0',
+          servedBy: 'team/mfe9',
+          entries: { 'dep-a': 'a.js', 'dep-a/extra': 'x.js' },
+        },
+      ]),
+    ]);
 
-      await createDetermineSharedExternals(config, adapters)();
+    await createDetermineSharedExternals(config, adapters)();
 
-      // The subpool copy bundles `/extra`, but the map serves it mfe9's file in its own scope only —
-      // nothing publishes `/extra` for mfe-a, so mfe-a is genuinely torn and takes its own build.
-      expect(rows()).toEqual([majorityRow('2.2.0', 4), '2.1.0:scope:[team/mfe-a]']);
-    });
-
-    it("keeps a subpool copy deduping, since its subpool's build already serves it", async () => {
-      config.profile.scopeUncoveredEntrypoints = true;
-      seed([
-        majority('2.2.0', 4),
-        version('2.1.0', [
-          {
-            remote: 'team/mfe-a',
-            req: '^2.1.0',
-            servedBy: 'team/mfe9',
-            entries: { 'dep-a': 'a.js', 'dep-a/extra': 'x.js' },
-          },
-        ]),
-      ]);
-
-      await createDetermineSharedExternals(config, adapters)();
-
-      // Scoping it would throw away the dedup pooling arranged, to fix a tear that does not exist: the
-      // map names mfe9's files for both of its specifiers.
-      expect(rows()).toEqual([majorityRow('2.2.0', 4), '2.1.0:skip:[team/mfe-a]']);
-    });
-
-    it('does not refuse the portfolio for a subpool copy under strictEntryPointCoverage', async () => {
-      config.strict.strictEntryPointCoverage = true;
-      seed([
-        majority('2.2.0', 4),
-        version('2.1.0', [
-          {
-            remote: 'team/mfe-a',
-            req: '^2.1.0',
-            servedBy: 'team/mfe9',
-            entries: { 'dep-a': 'a.js', 'dep-a/extra': 'x.js' },
-          },
-        ]),
-      ]);
-
-      // The throw happens before pooling runs, so nothing downstream can walk it back.
-      await expect(createDetermineSharedExternals(config, adapters)()).resolves.toBeDefined();
-      expect(rows()).toEqual([majorityRow('2.2.0', 4), '2.1.0:skip:[team/mfe-a]']);
-    });
+    // Nothing the shared 2.2.0 ships covers `/extra`, so mfe-a is torn and takes its own build.
+    expect(rows()).toEqual([majorityRow('2.2.0', 4), '2.1.0:scope:[team/mfe-a]']);
   });
 
   // The objective has to price a rejected row at the copies that really self-serve. Charging it for every

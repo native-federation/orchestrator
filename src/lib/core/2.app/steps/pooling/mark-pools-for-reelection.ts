@@ -1,11 +1,7 @@
-import type {
-  ForMarkingPoolsForReelection,
-  PooledExternals,
-} from '../../driver-ports/init/for-marking-pools-for-reelection.port';
+import type { ForMarkingPoolsForReelection } from '../../driver-ports/init/for-marking-pools-for-reelection.port';
 import type { DrivingContract } from '../../driving-ports/driving.contract';
 import type { LoggingConfig } from '../../config/log.contract';
 import type { ModeConfig } from '../../config/mode.contract';
-import type { ExternalName } from 'lib/core/1.domain';
 import { hasPoolResults, withoutPoolResults } from 'lib/core/1.domain/pooling/pool-state';
 import { buildPools } from 'lib/core/1.domain/pooling/membership';
 import { reelectedNames } from 'lib/core/1.domain/pooling/reelection';
@@ -19,7 +15,6 @@ export function createMarkPoolsForReelection(
   // its pool results here, since pooling never visits it. See docs/version-resolver.md §"How the verdicts
   // land in the record and the map".
   return () => {
-    const reelected = new Map<string, Set<ExternalName>>();
     for (const [scope, sharedExternals] of poolableScopes(ports.sharedExternalsRepo)) {
       // Nothing dirty in the scope ⇒ no pool has a dirty member ⇒ nothing to spread, so skip before
       // building the graph. Measured, this was the whole pooling cost of a warm init.
@@ -33,15 +28,12 @@ export function createMarkPoolsForReelection(
 
       // Mutates the stored records in place; nothing is written, so a scope with nothing dirty stays
       // untouched and `commit()` has no reason to fire.
-      let names: Set<ExternalName> | undefined;
       for (const name of reelectedNames(sharedExternals, pools)) {
-        if (pooled.has(name)) (names ??= new Set()).add(name);
         const external = sharedExternals[name]!;
         if (external.dirty) continue;
         external.dirty = true;
         if (pooled.has(name)) spread++;
       }
-      if (names) reelected.set(scope, names);
 
       for (const [name, external] of Object.entries(sharedExternals)) {
         if (pooled.has(name) || !hasPoolResults(external)) continue;
@@ -61,6 +53,6 @@ export function createMarkPoolsForReelection(
         );
     }
 
-    return Promise.resolve<PooledExternals>(reelected);
+    return Promise.resolve();
   };
 }

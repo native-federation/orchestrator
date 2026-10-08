@@ -1,5 +1,4 @@
 import type { ForPoolingSharedExternals } from '../../driver-ports/init/for-pooling-shared-externals.port';
-import type { TouchedExternals } from '../../driver-ports/init/for-determining-shared-externals.port';
 import type {
   PoolCause,
   RemoteName,
@@ -30,11 +29,10 @@ export function createPoolSharedExternals(
   ports: Pick<DrivingContract, 'sharedExternalsRepo' | 'versionCheck'>
 ): ForPoolingSharedExternals {
   // See docs/version-resolver.md §"How pooling resolves". A pool is marked dirty as a whole, so one with no
-  // touched member is what storage already holds.
-  return (touched?: TouchedExternals) => {
-    const inTouched = (scope: string) => !touched || touched.has(scope);
-    for (const [scope, sharedExternals] of poolableScopes(ports.sharedExternalsRepo, inTouched)) {
-      const touchedInScope = touched?.get(scope);
+  // dirty member is what storage already holds.
+  return () => {
+    for (const [scope, sharedExternals] of poolableScopes(ports.sharedExternalsRepo)) {
+      if (!Object.values(sharedExternals).some(external => external.dirty)) continue;
 
       try {
         const { pools, lonelyTags } = buildPools(sharedExternals);
@@ -45,7 +43,7 @@ export function createPoolSharedExternals(
           );
         const rebuilt = new Set<PoolName>();
         for (const [poolName, members] of pools) {
-          if (touchedInScope && !members.some(m => touchedInScope.has(m.name))) continue;
+          if (!members.some(m => m.external.dirty)) continue;
           try {
             electPool(poolName, members, scope);
           } catch (error) {

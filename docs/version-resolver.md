@@ -1281,8 +1281,8 @@ sequenceDiagram
 
 **Why this matters**: The dirty flag prevents unnecessary re-resolution of dependencies that haven't changed within their scope, improving performance when the same micro frontends are loaded repeatedly.
 
-Step 3 clears the flag on everything it resolves, so it hands the set of externals it re-elected on to
-step 4 (pooling), which skips any pool none of whose members appear in it. A warm init — every remote
+Pooling runs before step 3. It skips any scope with no dirty external, re-elects every pool with a dirty
+member and writes those members clean; step 3 then elects whatever is still dirty. A warm init — every remote
 already cached, nothing dirty — therefore costs neither resolution nor pooling.
 
 ## Understanding "strictVersion"
