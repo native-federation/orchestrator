@@ -55,6 +55,8 @@ export type PortfolioSpec = {
   strict: boolean;
   // The named share scope every shared external of the portfolio declares; global when absent.
   shareScope?: string;
+  // `profile.latestSharedExternal`: round 1 takes the newest build first.
+  latestSharedExternal?: boolean;
 };
 
 /** What one build ships of a pool: everything a `RemotePoolSpec` says except the range its remote declares. */
@@ -120,7 +122,8 @@ const freshRemoteArbitrary = (poolSizes: number[]): fc.Arbitrary<RemoteSpec> =>
  * straggler's build of its own, which keeps ragged one-off families in the mix. `labelNoise` has one remote
  * in five mislabel a member (`Relabel`); off, the portfolios are the ones the seeds have always produced.
  * `flat` has each remote ship flat or dense at random; `shareScope` puts every shared external in that named
- * scope. Both draw nothing when absent, so the default stream is unchanged.
+ * scope. Both draw nothing when absent, so the default stream is unchanged. `latestSharedExternal` turns the
+ * profile flag on or off at random, drawn last, so the portfolio itself is the one the seed draws without it.
  */
 export const portfolioArbitrary = (
   o: {
@@ -129,6 +132,7 @@ export const portfolioArbitrary = (
     labelNoise?: boolean;
     flat?: boolean;
     shareScope?: string;
+    latestSharedExternal?: boolean;
   } = {}
 ): fc.Arbitrary<PortfolioSpec> =>
   fc
@@ -190,12 +194,14 @@ export const portfolioArbitrary = (
               strict ? fc.integer({ min: 0, max: 3 }).map(n => n === 0) : fc.constant(true)
             )
           ),
+          ...(o.latestSharedExternal ? { latest: fc.boolean() } : {}),
         })
-        .map(({ templates, remotes, host, mixedMajors }) => ({
+        .map(({ templates, remotes, host, mixedMajors, latest }) => ({
           poolSizes,
           strict,
           host,
           ...(o.shareScope === undefined ? {} : { shareScope: o.shareScope }),
+          ...(latest === undefined ? {} : { latestSharedExternal: latest }),
           remotes: remotes.map(remote => ({
             ...remote,
             pools: remote.pools.map((pick, p) => {

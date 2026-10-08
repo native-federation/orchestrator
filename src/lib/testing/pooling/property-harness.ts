@@ -134,12 +134,15 @@ const REFUSALS = [
 
 // One page sequence on `portfolio()`: every `init` after the first opens a warm page that skips what it has
 // cached, as get-remote-entries does; `load` adds a remote at runtime on a new page.
-export function openPortfolio(o: { host?: string; strict?: boolean; scope?: string } = {}) {
+export function openPortfolio(
+  o: { host?: string; strict?: boolean; scope?: string; latestSharedExternal?: boolean } = {}
+) {
   const p = portfolio(
     {},
     {
       hosts: o.host === undefined ? [] : [o.host],
       strict: o.strict,
+      latestSharedExternal: o.latestSharedExternal,
       ...(o.scope === undefined ? {} : { scope: o.scope }),
       storage: `nf-pooling-property-${namespaces++}`,
       realRepositories: true,
@@ -183,7 +186,12 @@ export function openPortfolio(o: { host?: string; strict?: boolean; scope?: stri
 export async function initOrRefuse(spec: PortfolioSpec) {
   const entries = toRemoteEntries(spec);
   const host = hostOf(spec);
-  const rig = openPortfolio({ strict: spec.strict, host, scope: spec.shareScope });
+  const rig = openPortfolio({
+    strict: spec.strict,
+    host,
+    scope: spec.shareScope,
+    latestSharedExternal: spec.latestSharedExternal,
+  });
   try {
     const result = await rig.init(entries);
     return { ok: true as const, result, rig, entries, host };

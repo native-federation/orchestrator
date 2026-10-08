@@ -42,7 +42,9 @@ import { committedView } from 'lib/core/1.domain/pooling/views';
  * The generator covers 1-20 remotes, 1-3 pools of 2-6 members with 2-4 builds each that remotes redeploy
  * (plus one-off stragglers), two majors x three minors (plus patches and rare prereleases), `^`/`~`/exact
  * ranges, `^<major>.0.0` and "drifted" ranges that exclude the remote's own tag, ragged member and entrypoint
- * sets, an optional host, and `strictVersion` / `strictExternalCompatibility` on or off.
+ * sets, an optional host, and `strictVersion` / `strictExternalCompatibility` on or off. The properties that
+ * draw `latestSharedExternal` judge the round-1 order it changes (newest build first) and the stored winner a
+ * warm page keeps under it.
  *
  * A deeper local search: POOLING_PROPERTY_SEED=<n> POOLING_PROPERTY_SCALE=<factor> (CI uses the defaults).
  */
@@ -50,7 +52,7 @@ import { committedView } from 'lib/core/1.domain/pooling/views';
 describe('pooling properties: init (generated portfolios)', { timeout: TIMEOUT }, () => {
   // The two oracles run as separate properties, so a failure names which of them broke.
   it('no-tear (resolution): no remote resolves a combination no build shipped', () =>
-    run(1, portfolioArbitrary(), 150, async spec => {
+    run(1, portfolioArbitrary({ latestSharedExternal: true }), 150, async spec => {
       const init = await initOrRefuse(spec);
       if (!init.ok) return;
       const { importMap, record } = init.result;
@@ -62,13 +64,18 @@ describe('pooling properties: init (generated portfolios)', { timeout: TIMEOUT }
     }));
 
   it('no-tear (binding): no file a remote reaches binds a second tag of any specifier', () =>
-    run(2, portfolioArbitrary({ labelNoise: true }), 300, async spec => {
-      const init = await initOrRefuse(spec);
-      if (!init.ok) return;
-      const { importMap, record } = init.result;
-      for (const tear of poolTears(importMap, record, scopeUrlsOf(init.entries), init.host))
-        expect({ pool: tear.pool, split: tear.split }).toEqual({ pool: tear.pool, split: [] });
-    }));
+    run(
+      2,
+      portfolioArbitrary({ labelNoise: true, latestSharedExternal: true }),
+      300,
+      async spec => {
+        const init = await initOrRefuse(spec);
+        if (!init.ok) return;
+        const { importMap, record } = init.result;
+        for (const tear of poolTears(importMap, record, scopeUrlsOf(init.entries), init.host))
+          expect({ pool: tear.pool, split: tear.split }).toEqual({ pool: tear.pool, split: [] });
+      }
+    ));
 
   // A build without `feature.convertFlatSharedInfo` ships an entrypoint as a package of its own, so one
   // specifier is an entry of one external and a package of another. In a named share scope every remote maps
@@ -115,7 +122,7 @@ describe('pooling properties: init (generated portfolios)', { timeout: TIMEOUT }
     ));
 
   it('idempotence: a warm init writes nothing and yields the same map', () =>
-    run(4, portfolioArbitrary(), 100, async spec => {
+    run(4, portfolioArbitrary({ latestSharedExternal: true }), 100, async spec => {
       const init = await initOrRefuse(spec);
       if (!init.ok) return;
       const warm = await init.rig.init(init.entries);
@@ -125,7 +132,7 @@ describe('pooling properties: init (generated portfolios)', { timeout: TIMEOUT }
     }));
 
   it('idempotence: re-electing every pool on a warm page reproduces the record and the map', () =>
-    run(5, portfolioArbitrary(), 200, async spec => {
+    run(5, portfolioArbitrary({ latestSharedExternal: true }), 200, async spec => {
       const init = await initOrRefuse(spec);
       if (!init.ok) return;
       const again = await init.rig.reelect();
@@ -245,7 +252,7 @@ describe('pooling properties: init (generated portfolios)', { timeout: TIMEOUT }
     }));
 
   it('cause justified: incompatible only for a rejected elected tag, uncovered only for a gap or no witness', () =>
-    run(9, portfolioArbitrary(), 250, async spec => {
+    run(9, portfolioArbitrary({ latestSharedExternal: true }), 250, async spec => {
       const init = await initOrRefuse(spec);
       if (!init.ok) return;
       const { importMap, record } = init.result;
@@ -273,7 +280,7 @@ describe('pooling properties: init (generated portfolios)', { timeout: TIMEOUT }
     }));
 
   it('no needless island: a remote the elected build serves and witnesses is never placed off it', () =>
-    run(10, portfolioArbitrary(), 250, async spec => {
+    run(10, portfolioArbitrary({ latestSharedExternal: true }), 250, async spec => {
       const init = await initOrRefuse(spec);
       if (!init.ok) return;
       const { importMap, record } = init.result;
@@ -399,8 +406,9 @@ describe('pooling properties: init (generated portfolios)', { timeout: TIMEOUT }
  * left a part of the pool clean. Those offsets stay pinned to the CI stream that found them.
  */
 describe('pooling properties: redeploys (generated portfolios)', { timeout: TIMEOUT }, () => {
-  const redeploys = () =>
-    portfolioArbitrary({ maxRemotes: 12, labelNoise: true }).chain(spec =>
+  // The fixed offsets below replay the stream that found them, so only offset 16 draws the profile flag.
+  const redeploys = (latestSharedExternal = false) =>
+    portfolioArbitrary({ maxRemotes: 12, labelNoise: true, latestSharedExternal }).chain(spec =>
       fc.tuple(fc.constant(lenient(spec)), redeployArbitrary(spec))
     );
 
@@ -415,7 +423,10 @@ describe('pooling properties: redeploys (generated portfolios)', { timeout: TIME
   // instead; that is no partial re-election. `outcome` leaves `poolWinner` out, which a stale election keeps
   // (P1), so the winners are compared too.
   const warmEqualsReelected = async ([spec, redeployed]: [PortfolioSpec, Redeploy[]]) => {
-    const rig = openPortfolio({ host: hostOf(spec) });
+    const rig = openPortfolio({
+      host: hostOf(spec),
+      latestSharedExternal: spec.latestSharedExternal,
+    });
     await rig.init(toRemoteEntries(spec));
     const warm = await rig.init(redeployedEntries(spec, redeployed));
     expect(poolNameDrift(warm.record)).toEqual([]);
@@ -431,7 +442,7 @@ describe('pooling properties: redeploys (generated portfolios)', { timeout: TIME
   };
 
   it('redeploy: a warm init runs and places what re-electing every pool of its state does', () =>
-    run(16, redeploys(), 100, warmEqualsReelected));
+    run(16, redeploys(true), 100, warmEqualsReelected));
 
   // Found at offset 202: a redeploy relabels an external out of its pool; the half that keeps its stored
   // name has no dirty member, so only the spread by stored name re-elects it.

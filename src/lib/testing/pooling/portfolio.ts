@@ -54,6 +54,8 @@ export type PortfolioOptions = {
   assertNoTear?: boolean;
   /** `strict.strictExternalCompatibility`. */
   strict?: boolean;
+  /** `profile.latestSharedExternal`. */
+  latestSharedExternal?: boolean;
   /**
    * Remote info, scoped externals and chunks real on the namespace too, rather than mocked off `scopeUrls`:
    * needed to init from remote entries and to `reload`.
@@ -81,6 +83,7 @@ export const portfolio = (
     storage = 'nf-pooling-portfolio',
     assertNoTear: checkTear = true,
     strict = false,
+    latestSharedExternal = false,
     realRepositories = false,
     scope = GLOBAL_SCOPE,
   }: PortfolioOptions = {}
@@ -95,6 +98,7 @@ export const portfolio = (
   const wire = (clearStorage: boolean) => {
     const config: ConfigContract = mockConfig();
     config.strict.strictExternalCompatibility = strict;
+    config.profile.latestSharedExternal = latestSharedExternal;
     const adapters: DrivingContract = mockAdapters();
     const storageConfig = { storage: globalThisStorageEntry(storage), clearStorage };
     adapters.versionCheck = createVersionCheck();
