@@ -5,7 +5,7 @@ import { portfolio } from 'lib/testing/pooling/portfolio';
 import { tagSharedInfoByNpmScope } from 'lib/testing/pooling/tag-by-npm-scope';
 
 /**
- * End-to-end coherence through determine → pooling → import map. Pooling does not make a family resolve
+ * End-to-end coherence through pool → determine → import map. Pooling does not make a family resolve
  * from one build — different members may legitimately be served from different remotes. What it
  * guarantees is that no single remote ends up drawing on builds that disagree: an incompatible or
  * disagreeing remote serves its whole `@framework/*` family from its own build, with no dedup, so a

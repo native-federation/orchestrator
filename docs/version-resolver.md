@@ -795,9 +795,9 @@ the file.
 the `skip` copies, so flat and dense builds of one specifier cannot race on external order. A copy carrying a
 `servedBy` never fills the global map: it runs another build.
 
-A pool is re-elected as a **unit**, and every member of a re-elected pool is written back:
-`mark-pools-for-reelection` marks every member dirty as soon as one is, so pooling never reads back half of
-its own previous verdict.
+A pool is re-elected as a **unit**, and every member of a re-elected pool is written back: pooling's election
+plan (`planElection`) re-elects every member as soon as one is dirty, so pooling never reads back half of its
+own previous verdict.
 
 #### Declare the coupling you actually have
 
@@ -894,8 +894,9 @@ have to re-derive them. Every field is omitted when it does not apply.
 | `SharedVersionMeta` | `poolCause` | why pooling made this copy serve itself: `incompatible` (a range rejects a tag of the elected build) or `uncovered` (the elected build does not serve every specifier it imports) |
 
 Only pooling writes these, so an external in no pool any more has nothing left to explain: when a pool dissolves
-— the remote whose tag formed it redeployed without it, say — `mark-pools-for-reelection` drops `poolName`,
-`poolWinner`, `servedBy` and `poolCause` from its former members before `determine` runs, and re-elects them. A leftover
+— the remote whose tag formed it redeployed without it, say — pooling drops `poolName`, `poolWinner`,
+`servedBy` and `poolCause` from its former members and writes them dirty, so `determine`, which runs after it,
+re-elects them. A leftover
 `servedBy` would otherwise keep mapping that copy onto a build nothing chose any more.
 
 `poolCause` is the one thing the `scope` action cannot say on its own: a copy scoped for a range violation and

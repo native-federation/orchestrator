@@ -168,7 +168,7 @@ describe('createPoolSharedExternals', () => {
 
   // W1: a scope carrying no pool state is not pooled. Pooling's work shows up as storage writes of the scope it
   // pools, so a scope without pool state must cost exactly what it costs on a page with no pool anywhere. Which
-  // scopes are pooled at all is pinned by the `poolableScopes` spec in pool.util.spec.ts.
+  // scopes are pooled at all is pinned by plan.spec.ts.
   describe('skips work', () => {
     // team-b holds foo and bar, tagged into one pool or not; `pooledElsewhere` adds a pool to the global
     // scope. Counts team-b's storage writes over one init, and those that carry a pool result.
@@ -212,7 +212,7 @@ describe('createPoolSharedExternals', () => {
       expect(besidePool.writes).toBe(alone.writes);
       expect(besidePool.poolNames).toBe(0);
       // The control: pooling the scope itself does show up in its writes. Not in their number, since pooling
-      // rewrites the members `determine` left to it, but in the `poolName` they carry.
+      // writes the members `determine` would otherwise write, but in the `poolName` they carry.
       expect(pooled.poolNames).toBeGreaterThan(alone.poolNames);
     });
   });

@@ -276,7 +276,7 @@ describe('pooling re-election', () => {
      * to keep as a stale election a full re-election of the same state would not make. The oracle is that
      * equivalence: warm after the redeploy ≡ every pool re-elected on the next page (`settled`). They pass
      * because a dirty external spreads dirty to every external with the same stored `poolName` (read before
-     * mark-pools clears it) and `removeFromAllScopes` marks the same-`poolName` survivors of an external it
+     * pooling clears it) and `removeFromAllScopes` marks the same-`poolName` survivors of an external it
      * deletes dirty.
      *
      * The equivalence alone holds vacuously when nothing stores a `poolName` (`reelect()` then re-elects
@@ -344,8 +344,8 @@ describe('pooling re-election', () => {
       // N3. W, W2 and W3 ship `@x/core/testing` 2.0.0; R ships `@x/core` 1.0.0 with that entrypoint, which
       // makes them one pool `x`; S ships `@x/core/testing` 1.0.0 under a strict `~1.0.0`. R's build serves S
       // as a subpool. R redeploys shipping nothing: eviction deletes `@x/core`, the last external of the pool
-      // R shipped. Unless eviction marks `@x/core/testing` dirty, nothing dirty is left, mark-pools and
-      // pooling skip the scope, and S keeps `servedBy: R` from a remote that serves nothing, resolving the
+      // R shipped. Unless eviction marks `@x/core/testing` dirty, nothing dirty is left, pooling skips
+      // the scope, and S keeps `servedBy: R` from a remote that serves nothing, resolving the
       // global 2.0.0 its strict range rejects; a re-election scopes S on its own 1.0.0.
       it('re-elects the rest of a pool when eviction empties the scope of its last shipper', async () => {
         const W = (name: string) =>
@@ -370,7 +370,7 @@ describe('pooling re-election', () => {
       // labelling c `y`: the pool splits into {a, b} and a lone c, but only c (whose copies changed) is
       // dirty. Unless dirty spreads by stored name, the untouched half keeps the merged election: Q's a and b
       // stay in `scope` rows (a second download of the global 2.0.0, `incompatible`) where a re-election
-      // shares them. The stored names must be read before mark-pools clears them.
+      // shares them. The stored names must be read before pooling clears them.
       it('re-elects both halves when a label change splits a pool', async () => {
         const W = remote(
           'W',

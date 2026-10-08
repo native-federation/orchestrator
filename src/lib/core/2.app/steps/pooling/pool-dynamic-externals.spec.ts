@@ -1111,7 +1111,7 @@ describe('createPoolDynamicExternals', () => {
 
       await poolDynamicExternals({ entry, actions: { rxjs: { action: 'skip' } } });
 
-      // mark-pools spreads dirty by the stored name before it strips it, so the name must survive the load.
+      // The next init spreads dirty by the stored name before it strips it, so the name must survive the load.
       expect(adapters.sharedExternalsRepo.addOrUpdate).not.toHaveBeenCalled();
     });
   });

@@ -2,7 +2,7 @@ import type { DenseSharedInfo, ImportMap, RemoteEntry, SharedVersion } from 'lib
 import { portfolio } from 'lib/testing/pooling/portfolio';
 
 /**
- * Permanent regression guards for pooling, end to end through mark → determine → pool → import map. One
+ * Permanent regression guards for pooling, end to end through pool → determine → import map. One
  * `describe` per bug. Every init runs through the portfolio harness, which asserts the no-tear oracle
  * (`findIncoherentRemotes` + `findSplitRemotes`) on the emitted map, so each case below is also a no-tear
  * case. Islands are read off the stored `poolCause`, never off the warn text.
@@ -678,7 +678,7 @@ describe('pooling regressions', () => {
    *
    * Every page below is a real one: the init and the load register remote entries, `reload` opens the next
    * page over what the last committed, and the warm init skips every remote it has cached, as
-   * get-remote-entries does, so it runs mark → determine → pool → import map over the record the load left.
+   * get-remote-entries does, so it runs pool → determine → import map over the record the load left.
    */
   const shared = (
     packageName: string,

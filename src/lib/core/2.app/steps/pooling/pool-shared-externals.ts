@@ -14,9 +14,10 @@ import type { ModeConfig } from '../../config/mode.contract';
 import { acceptsTag } from 'lib/core/1.domain/externals/compatibility';
 import { arrivalOrder, hostRemotes } from 'lib/core/1.domain/pooling/views';
 import { electVariants, type Election } from 'lib/core/1.domain/pooling/election';
-import { buildPools, type PoolMember, type PoolName } from 'lib/core/1.domain/pooling/membership';
+import type { PoolMember, PoolName } from 'lib/core/1.domain/pooling/membership';
+import { type ElectionPlan, planElection } from 'lib/core/1.domain/pooling/plan';
+import { writePoolNames } from './pool.util';
 import { type Specifier, SpecifierTags } from 'lib/core/1.domain/externals/specifier';
-import { poolableScopes, writePoolNames } from './pool.util';
 
 type Route = { kind: 'global' } | { kind: 'subpool'; build: RemoteName } | { kind: 'own' };
 
@@ -28,31 +29,24 @@ export function createPoolSharedExternals(
   config: LoggingConfig & ModeConfig,
   ports: Pick<DrivingContract, 'sharedExternalsRepo' | 'versionCheck'>
 ): ForPoolingSharedExternals {
-  // See docs/version-resolver.md §"How pooling resolves". A pool is marked dirty as a whole, so one with no
-  // dirty member is what storage already holds.
+  // See docs/version-resolver.md §"How pooling resolves".
   return () => {
-    for (const [scope, sharedExternals] of poolableScopes(ports.sharedExternalsRepo)) {
-      if (!Object.values(sharedExternals).some(external => external.dirty)) continue;
-
+    const repo = ports.sharedExternalsRepo;
+    for (const scope of repo.getScopes()) {
+      const sharedExternals = repo.getFromScope(scope);
       try {
-        const { pools, lonelyTags } = buildPools(sharedExternals);
-        for (const name of lonelyTags)
-          config.log.warn(
-            3,
-            `[${name}] declares a 'pool' tag but no other external joined its pool; likely a typo or a missing sibling.`
-          );
-        const rebuilt = new Set<PoolName>();
-        for (const [poolName, members] of pools) {
-          if (!members.some(m => m.external.dirty)) continue;
+        const plan = planElection(sharedExternals, repo.scopeType(scope) !== 'strict');
+        logPlan(plan, scope);
+        for (const [poolName, members] of plan.dirtyPools) {
           try {
             electPool(poolName, members, scope);
           } catch (error) {
             if (error instanceof NFError) throw error;
             placeSafely(poolName, members, scope, error);
           }
-          rebuilt.add(poolName);
         }
-        writePoolNames(sharedExternals, pools, ports.sharedExternalsRepo, scope, rebuilt);
+        for (const [name, external] of plan.dissolved) repo.addOrUpdate(name, external, scope);
+        writePoolNames(sharedExternals, plan.renames, repo, scope);
       } catch (error) {
         if (error instanceof NFError) return Promise.reject(error);
         config.log.error(3, `[${scope}] failed to pool shared externals.`, {
@@ -66,6 +60,24 @@ export function createPoolSharedExternals(
     }
     return Promise.resolve();
   };
+
+  function logPlan(plan: ElectionPlan, scope: string): void {
+    let spread = 0;
+    for (const members of plan.dirtyPools.values())
+      spread += members.filter(m => !m.external.dirty).length;
+    if (spread > 0)
+      config.log.debug(3, `[${scope}] ${spread} clean pool member(s) re-elected with their pool.`);
+    if (plan.dissolved.size > 0)
+      config.log.debug(
+        3,
+        `[${scope}] ${plan.dissolved.size} external(s) left every pool; cleared their pool state for re-election.`
+      );
+    for (const name of plan.taggedAlone)
+      config.log.warn(
+        3,
+        `[${name}] declares a 'pool' tag but no other external joined its pool; likely a typo or a missing sibling.`
+      );
+  }
 
   function electPool(poolName: PoolName, members: PoolMember[], scope: string): void {
     const hosts = hostRemotes(members);

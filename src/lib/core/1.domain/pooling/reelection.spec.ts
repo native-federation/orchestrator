@@ -63,7 +63,7 @@ describe('reelectedNames', () => {
     ]);
   });
 
-  // An external that left every pool keeps its stale stored name until mark-pools clears it; the spread
+  // An external that left every pool keeps its stale stored name until pooling clears it; the spread
   // still reaches it through that name, and from it nothing further.
   it('reaches an external in no computed pool through its stale stored name', () => {
     const scope = { a: record(true, 'P'), stale: record(false, 'P'), b: record(false) };

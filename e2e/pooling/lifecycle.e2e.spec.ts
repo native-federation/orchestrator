@@ -61,7 +61,7 @@ test.describe('lifecycle: the warm start', () => {
 
   test('re-pools when a new remote joins a cached portfolio', async ({ nf }) => {
     // The incremental case: the first init is coherent and islands nobody. Adding a cross-major remote
-    // makes its members dirty, so determine re-elects them and pooling runs again — the cached remote
+    // makes its members dirty, so pooling re-elects the pool — the cached remote
     // is re-read from storage, not refetched.
     //
     // Note WHICH side islands. Neither build serves the other remote and nobody agrees with either, so

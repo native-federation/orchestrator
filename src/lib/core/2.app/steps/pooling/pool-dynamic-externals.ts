@@ -13,6 +13,7 @@ import {
   type SharedVersionMeta,
 } from 'lib/core/1.domain';
 import { buildPools, type PoolMember } from 'lib/core/1.domain/pooling/membership';
+import { renamesOf } from 'lib/core/1.domain/pooling/plan';
 import { scopeHasPoolState } from 'lib/core/1.domain/pooling/pool-state';
 import { type Specifier, SpecifierTags } from 'lib/core/1.domain/externals/specifier';
 import {
@@ -147,7 +148,8 @@ export function createPoolDynamicExternals(
         written[name] = recordVerdict(committed[name]!, entry.name, verdict);
         ports.sharedExternalsRepo.addOrUpdate(name, written[name], shareScope);
       }
-      writePoolNames({ ...committed, ...written }, pools, ports.sharedExternalsRepo, shareScope);
+      const merged = { ...committed, ...written };
+      writePoolNames(merged, renamesOf(merged, pools), ports.sharedExternalsRepo, shareScope);
     }
 
     return Promise.resolve({ entry, actions });
