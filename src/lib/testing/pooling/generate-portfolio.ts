@@ -46,6 +46,9 @@ export type RemoteSpec = {
   // One per pool: `null` means the remote does not ship that pool at all.
   pools: (RemotePoolSpec | null)[];
   relabel?: Relabel | null;
+  // Ships each secondary entrypoint as a package of its own (flat), as a build without
+  // `feature.convertFlatSharedInfo` emits it, rather than as an entry of its package (dense).
+  flat?: boolean;
   strictVersion: boolean;
   // An unpooled singleton beside the pools, at one of two minors.
   extra: number | null;
@@ -59,6 +62,8 @@ export type PortfolioSpec = {
   // Index into `remotes`; resolved modulo its length.
   host: number | null;
   strict: boolean;
+  // The named share scope every shared external of the portfolio declares; global when absent.
+  shareScope?: string;
 };
 
 /** What one build ships of a pool: everything a `RemotePoolSpec` says except the range its remote declares. */
@@ -123,9 +128,17 @@ const freshRemoteArbitrary = (poolSizes: number[]): fc.Arbitrary<RemoteSpec> =>
  * byte-identical (the subpool tie) and lets a remote join another's subpool. One pool in five is a
  * straggler's build of its own, which keeps ragged one-off families in the mix. `labelNoise` has one remote
  * in five mislabel a member (`Relabel`); off, the portfolios are the ones the seeds have always produced.
+ * `flat` has each remote ship flat or dense at random; `shareScope` puts every shared external in that named
+ * scope. Both draw nothing when absent, so the default stream is unchanged.
  */
 export const portfolioArbitrary = (
-  o: { minRemotes?: number; maxRemotes?: number; labelNoise?: boolean } = {}
+  o: {
+    minRemotes?: number;
+    maxRemotes?: number;
+    labelNoise?: boolean;
+    flat?: boolean;
+    shareScope?: string;
+  } = {}
 ): fc.Arbitrary<PortfolioSpec> =>
   fc
     .record({
@@ -175,6 +188,7 @@ export const portfolioArbitrary = (
                     ),
                   }
                 : {}),
+              ...(o.flat ? { flat: fc.boolean() } : {}),
             }),
             { minLength: o.minRemotes ?? 1, maxLength: o.maxRemotes ?? 20 }
           ),
@@ -190,6 +204,7 @@ export const portfolioArbitrary = (
           poolSizes,
           strict,
           host,
+          ...(o.shareScope === undefined ? {} : { shareScope: o.shareScope }),
           remotes: remotes.map(remote => ({
             ...remote,
             pools: remote.pools.map((pick, p) => {
@@ -351,8 +366,8 @@ export function redeployedEntries(spec: PortfolioSpec, redeploys: Redeploy[]): R
   return spec.remotes.map((remote, i) => {
     const changes = redeploys.find(r => r.remote === i)?.changes;
     return changes
-      ? toRemoteEntry(changes.reduce(redeploy, remote), i, 1)
-      : toRemoteEntry(remote, i);
+      ? toRemoteEntry(changes.reduce(redeploy, remote), i, 1, spec.shareScope)
+      : toRemoteEntry(remote, i, 0, spec.shareScope);
   });
 }
 
@@ -383,7 +398,12 @@ function rangeOf(p: RemotePoolSpec): string {
 export const memberName = (pool: number, member: number): string => `@p${pool}/m${member}`;
 
 // `deploy` > 0 serves the remote from a new URL (`Redeploy`).
-export function toRemoteEntry(spec: RemoteSpec, index: number, deploy = 0): RemoteEntry {
+export function toRemoteEntry(
+  spec: RemoteSpec,
+  index: number,
+  deploy = 0,
+  shareScope?: string
+): RemoteEntry {
   const name = remoteName(index);
   const shared: DenseSharedInfo[] = [];
   const shipped = spec.pools.flatMap((pool, p) => (pool ? [p] : []));
@@ -409,15 +429,20 @@ export function toRemoteEntry(spec: RemoteSpec, index: number, deploy = 0): Remo
       const entries: Record<string, string> = {};
       if (shape !== 'sub') entries[pkg] = `${pkg.slice(1).replace('/', '_')}.js`;
       if (shape !== 'root') entries[`${pkg}/sub`] = `${pkg.slice(1).replace('/', '_')}_sub.js`;
-      shared.push({
-        packageName: pkg,
-        version: versionOf(pool),
-        requiredVersion: rangeOf(pool),
-        singleton: true,
-        strictVersion: spec.strictVersion,
-        pool: labelOf(m),
-        entries,
-      } as DenseSharedInfo);
+      const info = (packageName: string, entries: Record<string, string>) =>
+        shared.push({
+          packageName,
+          version: versionOf(pool),
+          requiredVersion: rangeOf(pool),
+          singleton: true,
+          strictVersion: spec.strictVersion,
+          pool: labelOf(m),
+          ...(shareScope === undefined ? {} : { shareScope }),
+          entries,
+        } as DenseSharedInfo);
+      if (!spec.flat) return void info(pkg, entries);
+      for (const [specifier, file] of Object.entries(entries))
+        info(specifier, { [specifier]: file });
     });
   });
 
@@ -428,6 +453,7 @@ export function toRemoteEntry(spec: RemoteSpec, index: number, deploy = 0): Remo
       requiredVersion: spec.extraRange === 'caret' ? '^1.0.0' : `~1.${spec.extra}.0`,
       singleton: true,
       strictVersion: spec.strictVersion,
+      ...(shareScope === undefined ? {} : { shareScope }),
       entries: { extra: 'extra.js' },
     } as DenseSharedInfo);
   }
@@ -441,7 +467,7 @@ export function toRemoteEntry(spec: RemoteSpec, index: number, deploy = 0): Remo
 }
 
 export const toRemoteEntries = (spec: PortfolioSpec): RemoteEntry[] =>
-  spec.remotes.map((remote, i) => toRemoteEntry(remote, i));
+  spec.remotes.map((remote, i) => toRemoteEntry(remote, i, 0, spec.shareScope));
 
 export const hostOf = (spec: PortfolioSpec): string | undefined =>
   spec.host === null ? undefined : remoteName(spec.host % spec.remotes.length);

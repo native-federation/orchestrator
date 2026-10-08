@@ -1,9 +1,16 @@
-import type { SharedVersion } from 'lib/core/1.domain';
+import {
+  GLOBAL_SCOPE,
+  type DenseSharedInfo,
+  type RemoteEntry,
+  type SharedVersion,
+} from 'lib/core/1.domain';
+import type { ImportMap } from 'lib/core/1.domain/import-map/import-map.contract';
+import { tearsByPool } from 'lib/testing/pooling/no-tear';
 import { portfolio } from 'lib/testing/pooling/portfolio';
 
 /**
  * Pooling in a named share scope, through to the import map. `generate-import-map.ts` maps a subpool's
- * `servedBy` copies for named scopes in `processshareScope`, a re-implementation of the global path's
+ * `servedBy` copies for named scopes in `processShareScope`, a re-implementation of the global path's
  * `collectServed`/`flushServed`. Nothing else covers it.
  *
  * This pins today's behaviour, quirks included. Reusing the global helpers there would change the
@@ -111,4 +118,91 @@ describe('pooling in a named share scope', () => {
     });
     expect(p.config.log.warn).not.toHaveBeenCalled();
   });
+});
+
+/**
+ * One pool shipped dense by W and W2 (`@fw/core` with the entry `@fw/core/testing`) and flat by G (each
+ * entrypoint a package of its own). In the global scope `imports` gives every remote one file per specifier;
+ * a named scope must map each remote's own scope the same way.
+ *
+ * The no-tear oracle runs explicitly on each map (the harness's own check is off), so every case fails on a
+ * tear even before its mapping expectation.
+ */
+describe('flat and dense builds of one pool in a share scope', () => {
+  const shared = (packageName: string, version: string, range: string, shareScope?: string) =>
+    ({
+      packageName,
+      version,
+      requiredVersion: range,
+      singleton: true,
+      strictVersion: true,
+      pool: 'fw',
+      ...(shareScope && { shareScope }),
+      entries: Object.fromEntries(
+        (packageName === '@fw/core' && version === '2.0.0'
+          ? ['@fw/core', '@fw/core/testing']
+          : [packageName]
+        ).map(s => [s, `${s.replace(/\//g, '_')}.js`])
+      ),
+    }) as DenseSharedInfo;
+  const entry = (name: string, ...info: DenseSharedInfo[]) =>
+    ({
+      name,
+      url: `http://${name}/remoteEntry.json`,
+      exposes: [],
+      shared: info,
+    }) as unknown as RemoteEntry;
+  const remotes = (range: string, shareScope?: string) => [
+    entry('W', shared('@fw/core', '2.0.0', range, shareScope)),
+    entry('W2', shared('@fw/core', '2.0.0', range, shareScope)),
+    entry(
+      'G',
+      shared('@fw/core', '2.0.1', '^2.0.0', shareScope),
+      shared('@fw/core/testing', '2.0.1', '^2.0.0', shareScope)
+    ),
+  ];
+  const rig = (shareScope?: string) =>
+    portfolio(
+      {},
+      { realRepositories: true, assertNoTear: false, ...(shareScope && { scope: shareScope }) }
+    );
+  const tears = (p: ReturnType<typeof portfolio>, importMap: ImportMap, shareScope?: string) =>
+    tearsByPool({
+      importMap,
+      externals: { [shareScope ?? GLOBAL_SCOPE]: p.stored() },
+      scopeUrls: p.scopeUrls(),
+    });
+
+  for (const shareScope of [undefined, 'team']) {
+    const own = (importMap: ImportMap, remote: string) =>
+      shareScope ? importMap.scopes?.[`http://${remote}/`] : importMap.imports;
+
+    it(`the flat build elected: the dense remotes take its flat entrypoint (${shareScope ?? 'global'})`, async () => {
+      const p = rig(shareScope);
+
+      const importMap = await p.runInit(remotes('^2.0.0', shareScope));
+
+      expect(tears(p, importMap, shareScope)).toEqual([]);
+      expect(own(importMap, 'W')).toEqual({
+        '@fw/core': 'http://G/@fw_core.js',
+        '@fw/core/testing': 'http://G/@fw_core_testing.js',
+      });
+    });
+
+    for (const strictImportMap of [false, true])
+      it(`the dense build elected: the flat remote takes its entry (${shareScope ?? 'global'}, strictImportMap ${strictImportMap})`, async () => {
+        const p = rig(shareScope);
+        // Elects W's dense 2.0.0 over G's newer 2.0.1 (W and W2 pin 2.0.0 exactly); latest-first would elect G.
+        p.config.profile.latestSharedExternal = false;
+        p.config.strict.strictImportMap = strictImportMap;
+
+        const importMap = await p.runInit(remotes('2.0.0', shareScope));
+
+        expect(tears(p, importMap, shareScope)).toEqual([]);
+        expect(own(importMap, 'G')).toEqual({
+          '@fw/core': 'http://W/@fw_core.js',
+          '@fw/core/testing': 'http://W/@fw_core_testing.js',
+        });
+      });
+  }
 });

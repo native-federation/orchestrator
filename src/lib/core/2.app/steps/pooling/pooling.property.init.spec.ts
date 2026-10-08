@@ -70,6 +70,28 @@ describe('pooling properties: init (generated portfolios)', { timeout: TIMEOUT }
         expect({ pool: tear.pool, split: tear.split }).toEqual({ pool: tear.pool, split: [] });
     }));
 
+  // A build without `feature.convertFlatSharedInfo` ships an entrypoint as a package of its own, so one
+  // specifier is an entry of one external and a package of another. In a named share scope every remote maps
+  // in its own scope, so the import map must still give each the specifier the global path's `imports` would.
+  for (const [offset, shareScope] of [
+    [20, undefined],
+    [21, 'team'],
+  ] as const)
+    it(`no-tear with flat and dense builds in one pool, ${shareScope ?? 'global'} share scope`, () =>
+      run(
+        offset,
+        portfolioArbitrary({ flat: true, labelNoise: true, ...(shareScope && { shareScope }) }),
+        200,
+        async spec => {
+          const init = await initOrRefuse(spec);
+          if (!init.ok) return;
+          const { importMap, record } = init.result;
+          expect(
+            poolTears(importMap, record, scopeUrlsOf(init.entries), init.host, shareScope)
+          ).toEqual([]);
+        }
+      ));
+
   it('order independence: any registration order runs the same tags with the same verdicts', () =>
     run(
       3,

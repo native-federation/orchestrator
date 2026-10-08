@@ -35,7 +35,7 @@ export function createGenerateImportMap(
     const chunkBundles: Record<string, Set<string>> = {};
     try {
       addScopedExternals(importMap, chunkBundles);
-      addshareScopeExternals(importMap, chunkBundles);
+      addShareScopeExternals(importMap, chunkBundles);
       addGlobalSharedExternals(importMap, chunkBundles);
       addRemoteInfos(importMap, chunkBundles);
 
@@ -91,31 +91,33 @@ export function createGenerateImportMap(
     return modules;
   }
 
-  /**
-   * Step 4.2: Added the shareScope externals, overriding the scoped externals that are shared
-   * @param importMap
-   * @returns
-   */
-  function addshareScopeExternals(
+  // Runs after the scoped externals, so a remote's shared mappings overwrite its scoped ones in its scope.
+  function addShareScopeExternals(
     importMap: ImportMap,
     chunkBundles: Record<string, Set<string>>
   ): ImportMap {
     const shareScopes = ports.sharedExternalsRepo.getScopes({ includeGlobal: false });
 
     for (const shareScope of shareScopes) {
-      processshareScope(importMap, shareScope, chunkBundles);
+      processShareScope(importMap, shareScope, chunkBundles);
     }
 
     return importMap;
   }
 
-  function processshareScope(
+  function processShareScope(
     importMap: ImportMap,
     shareScope: string,
     chunkBundles: Record<string, Set<string>>
   ): void {
     const sharedExternals = ports.sharedExternalsRepo.getFromScope(shareScope);
     const index = buildServedIndex(sharedExternals);
+
+    const claims = claimsOf(sharedExternals, shareScope);
+    const claimedElsewhere = (externalName: string, specifier: string): Mapping | undefined => {
+      const claim = claims.get(specifier);
+      return claim?.external === externalName ? undefined : claim;
+    };
 
     for (const [externalName, external] of Object.entries(sharedExternals)) {
       let override: SharedVersion | undefined | 'NOT_AVAILABLE' = undefined;
@@ -136,8 +138,6 @@ export function createGenerateImportMap(
           continue;
         }
 
-        version.remotes[0]!.cached = true;
-
         // Serve every entrypoint from one version: this one, or the override version when a
         // 'skip' is redirected elsewhere. Within a version the copies merge, so the surface is
         // the union of what they bundle, each specifier from the copy that declares it.
@@ -145,7 +145,10 @@ export function createGenerateImportMap(
 
         if (version.action === 'skip') {
           if (!override) {
-            override = findOverride(external, shareScope, externalName) ?? 'NOT_AVAILABLE';
+            override =
+              findOverride(external, shareScope, externalName, s =>
+                Boolean(claimedElsewhere(externalName, s))
+              ) ?? 'NOT_AVAILABLE';
           }
           if (override !== 'NOT_AVAILABLE') {
             serving = override;
@@ -154,9 +157,15 @@ export function createGenerateImportMap(
         }
 
         const provided = versionEntries(serving);
-        const mappings: { packageName: string; url: string; name: RemoteName; file: string }[] = [];
+        const mappings: (Mapping & { packageName: string })[] = [];
 
         for (const [packageName, provider] of provided) {
+          // The claiming external maps, marks and registers that copy; this one only points at it.
+          const claim = claimedElsewhere(externalName, packageName);
+          if (claim) {
+            mappings.push({ packageName, ...claim });
+            continue;
+          }
           const file = provider.entries[packageName]!;
           mappings.push({
             packageName,
@@ -194,6 +203,11 @@ export function createGenerateImportMap(
           // Entrypoints no copy of the serving version has are served from this remote's own build.
           for (const [packageName, file] of Object.entries(r.entries)) {
             if (provided.has(packageName)) continue;
+            const claim = claimedElsewhere(externalName, packageName);
+            if (claim) {
+              addToScope(importMap, rScope, { [packageName]: claim.url });
+              continue;
+            }
             if (
               config.strict.strictEntryPointCoverage ||
               config.profile.scopeUncoveredEntrypoints
@@ -221,10 +235,12 @@ export function createGenerateImportMap(
     return external.versions.map(v => v.remotes.map(r => (r.cached ? 1 : 0)).join('')).join('|');
   }
 
+  // A skip-only external whose specifiers another external's shared version maps is served all the same.
   function findOverride(
     external: SharedExternal,
     shareScope: string,
-    externalName: string
+    externalName: string,
+    servedElsewhere: (specifier: string) => boolean
   ): SharedVersion | undefined {
     const sharedVersions = external.versions.filter(v => v.action === 'share');
     const scopedExternalName = `${shareScope}.${externalName}`;
@@ -233,7 +249,12 @@ export function createGenerateImportMap(
       handleMultipleSharedVersions(scopedExternalName);
     }
 
-    if (sharedVersions.length < 1) {
+    const servedByClaims = () =>
+      external.versions
+        .filter(v => v.action === 'skip')
+        .every(v => [...versionEntries(v).keys()].every(servedElsewhere));
+
+    if (sharedVersions.length < 1 && !servedByClaims()) {
       if (config.strict.strictImportMap) {
         config.log.error(4, `[${shareScope}][${externalName}] shareScope has no override version.`);
         throw new NFError('Could not create ImportMap.');
@@ -293,6 +314,31 @@ export function createGenerateImportMap(
       }
     }
     return index;
+  }
+
+  type Mapping = { url: string; name: RemoteName; file: string };
+
+  // What `imports` holds on the global path: a specifier can be an entry of one external and a package of
+  // its own in another (flat vs dense), and the first shared version listing it serves every remote.
+  function claimsOf(
+    externals: Record<string, SharedExternal>,
+    shareScope: string
+  ): Map<string, Mapping & { external: string }> {
+    const claims = new Map<string, Mapping & { external: string }>();
+    for (const [externalName, external] of Object.entries(externals))
+      for (const version of external.versions)
+        if (version.action === 'share')
+          for (const [specifier, provider] of versionEntries(version)) {
+            if (claims.has(specifier)) continue;
+            const file = provider.entries[specifier]!;
+            claims.set(specifier, {
+              url: _path.join(getScope(shareScope, provider.name, externalName), file),
+              name: provider.name,
+              file,
+              external: externalName,
+            });
+          }
+    return claims;
   }
 
   // A cross-build scope entry, held back until every global mapping is in place so that a scope which

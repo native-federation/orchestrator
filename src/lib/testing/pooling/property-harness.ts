@@ -64,14 +64,15 @@ export function poolTears(
   importMap: ImportMap,
   record: shareScope,
   scopeUrls: Record<string, string>,
-  host?: string
+  host?: string,
+  scope = GLOBAL_SCOPE
 ): GroupTear[] {
   return tearsByPool({
     importMap,
-    externals: { [GLOBAL_SCOPE]: record },
+    externals: { [scope]: record },
     scopeUrls,
     hosts: host === undefined ? [] : [host],
-  }).filter(tear => !tear.pool.startsWith(`${GLOBAL_SCOPE}|package:`));
+  }).filter(tear => !tear.pool.startsWith(`${scope}|package:`));
 }
 
 // Every `pool|remote|oracle` that tears, for comparing two maps rather than asserting on one.
@@ -90,25 +91,31 @@ export function torn(
 }
 
 // `strictExternalCompatibility` may only refuse a portfolio in which some strict copy's range rejects a tag
-// of its external other than the one it ships itself (a copy never rejects its own version).
+// shipped by another copy of its package or of a specifier it ships (a copy never rejects its own version).
+// Both keys: the resolver compares copies of one package, and a flat build ships an entrypoint as a package
+// of its own that pooling still judges by specifier.
 function hasForeignRejection(entries: RemoteEntry[]): boolean {
+  const keys = (s: RemoteEntry['shared'][number]) => [s.packageName, ...Object.keys(s.entries)];
   const tags = new Map<string, Set<string>>();
   for (const entry of entries)
     for (const s of entry.shared)
-      if (s.singleton && s.version) {
-        if (!tags.has(s.packageName)) tags.set(s.packageName, new Set());
-        tags.get(s.packageName)!.add(s.version);
-      }
+      if (s.singleton && s.version)
+        for (const key of keys(s)) {
+          if (!tags.has(key)) tags.set(key, new Set());
+          tags.get(key)!.add(s.version);
+        }
 
   return entries.some(entry =>
     entry.shared.some(
       s =>
         s.singleton &&
         s.strictVersion &&
-        [...(tags.get(s.packageName) ?? [])].some(
-          tag =>
-            versionCheck.compare(tag, s.version!) !== 0 &&
-            !versionCheck.isCompatible(tag, s.requiredVersion)
+        keys(s).some(key =>
+          [...(tags.get(key) ?? [])].some(
+            tag =>
+              versionCheck.compare(tag, s.version!) !== 0 &&
+              !versionCheck.isCompatible(tag, s.requiredVersion)
+          )
         )
     )
   );
@@ -124,12 +131,13 @@ const REFUSALS = [
 
 // One page sequence on `portfolio()`: every `init` after the first opens a warm page that skips what it has
 // cached, as get-remote-entries does; `load` adds a remote at runtime on a new page.
-export function openPortfolio(o: { host?: string; strict?: boolean } = {}) {
+export function openPortfolio(o: { host?: string; strict?: boolean; scope?: string } = {}) {
   const p = portfolio(
     {},
     {
       hosts: o.host === undefined ? [] : [o.host],
       strict: o.strict,
+      ...(o.scope === undefined ? {} : { scope: o.scope }),
       storage: `nf-pooling-property-${namespaces++}`,
       realRepositories: true,
       assertNoTear: false,
@@ -172,7 +180,7 @@ export function openPortfolio(o: { host?: string; strict?: boolean } = {}) {
 export async function initOrRefuse(spec: PortfolioSpec) {
   const entries = toRemoteEntries(spec);
   const host = hostOf(spec);
-  const rig = openPortfolio({ strict: spec.strict, host });
+  const rig = openPortfolio({ strict: spec.strict, host, scope: spec.shareScope });
   try {
     const result = await rig.init(entries);
     return { ok: true as const, result, rig, entries, host };
