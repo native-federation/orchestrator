@@ -80,9 +80,10 @@ export function torn(
   importMap: ImportMap,
   record: shareScope,
   scopeUrls: Record<string, string>,
-  host?: string
+  host?: string,
+  scope = GLOBAL_SCOPE
 ): string[] {
-  return poolTears(importMap, record, scopeUrls, host)
+  return poolTears(importMap, record, scopeUrls, host, scope)
     .flatMap(({ pool, incoherent, split }) => [
       ...incoherent.map(({ remote }) => `${pool}|${remote}|incoherent`),
       ...split.map(({ remote }) => `${pool}|${remote}|split`),

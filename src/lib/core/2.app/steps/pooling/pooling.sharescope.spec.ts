@@ -6,6 +6,7 @@ import {
 } from 'lib/core/1.domain';
 import type { ImportMap } from 'lib/core/1.domain/import-map/import-map.contract';
 import { tearsByPool } from 'lib/testing/pooling/no-tear';
+import { outcome } from 'lib/testing/pooling/property-harness';
 import { portfolio } from 'lib/testing/pooling/portfolio';
 
 /**
@@ -205,4 +206,180 @@ describe('flat and dense builds of one pool in a share scope', () => {
         });
       });
   }
+});
+
+/**
+ * A remote loaded at runtime into a pool where one build ships an entrypoint as a package of its own (flat)
+ * and another as an entry of its package (dense). The pool's verdict for the load is global: a committed
+ * build witnesses every tag the map would hand it. So the load must run the map's files for every specifier
+ * the map serves, though `update-cache` judges per external and sees those specifiers as uncovered (a skip)
+ * or the package as nobody's (a share). And the record it leaves must rebuild the same page: a load that
+ * points at the map is recorded as a skip, never as a new shared version.
+ */
+describe('a load into a pool of flat and dense builds, and the page after it', () => {
+  const shared = (packageName: string, version: string, entries: string[], shareScope?: string) =>
+    ({
+      packageName,
+      version,
+      requiredVersion: `^${version.split('.')[0]}.0.0`,
+      singleton: true,
+      strictVersion: false,
+      pool: 'fw',
+      ...(shareScope && { shareScope }),
+      entries: Object.fromEntries(entries.map(s => [s, `${s.replace(/\//g, '_')}.js`])),
+    }) as DenseSharedInfo;
+  const entry = (name: string, ...info: DenseSharedInfo[]) =>
+    ({
+      name,
+      url: `http://${name}/remoteEntry.json`,
+      exposes: [],
+      shared: info,
+    }) as unknown as RemoteEntry;
+
+  type Case = { committed: RemoteEntry[]; load: RemoteEntry };
+  const cases: [string, (shareScope?: string) => Case][] = [
+    [
+      // G ships `@fw/core/testing` as a package of its own, so the shared version of `@fw/core` the
+      // resolver reads lacks it: L's `@fw/core` is a skip that would self-fill testing from its own 2.0.0.
+      "a skipped package takes the entrypoint the flat build's own package serves",
+      shareScope => ({
+        committed: [
+          entry('W', shared('@fw/core', '2.0.0', ['@fw/core', '@fw/core/testing'], shareScope)),
+          entry(
+            'G',
+            shared('@fw/core', '2.0.1', ['@fw/core'], shareScope),
+            shared('@fw/core/testing', '2.0.1', ['@fw/core/testing'], shareScope)
+          ),
+        ],
+        load: entry('L', shared('@fw/core', '2.0.0', ['@fw/core', '@fw/core/testing'], shareScope)),
+      }),
+    ],
+    [
+      // Nobody shares a package `@fw/http`, only the flat `@fw/http/testing`: L's `@fw/http` is a share,
+      // which in a named scope maps its own 17.1.1 beside the 17.0.0 `@fw/core` it skips onto.
+      'a package nobody shares points at the flat package serving its entrypoint',
+      shareScope => ({
+        committed: [
+          entry(
+            'F',
+            shared('@fw/core', '17.0.0', ['@fw/core'], shareScope),
+            shared('@fw/http/testing', '17.0.0', ['@fw/http/testing'], shareScope)
+          ),
+        ],
+        load: entry(
+          'L',
+          shared('@fw/core', '17.1.1', ['@fw/core'], shareScope),
+          shared('@fw/http', '17.1.1', ['@fw/http/testing'], shareScope)
+        ),
+      }),
+    ],
+    [
+      // As above, but D's `@fw/http` is committed as a skip-only package (F's build was elected, and D's
+      // 17.0.1 runs F's files), stored ahead of `@fw/http/testing`. A new shared version of `@fw/http`
+      // would claim `@fw/http/testing` first on the next page and hand every remote L's 17.1.1.
+      'a skip-only package stays skip-only, so the next page keeps the flat package serving',
+      shareScope => ({
+        committed: [
+          entry('D', shared('@fw/http', '17.0.1', ['@fw/http/testing'], shareScope)),
+          entry(
+            'F',
+            shared('@fw/core', '17.0.0', ['@fw/core'], shareScope),
+            shared('@fw/http/testing', '17.0.0', ['@fw/http/testing'], shareScope)
+          ),
+        ],
+        load: entry(
+          'L',
+          shared('@fw/core', '17.1.1', ['@fw/core'], shareScope),
+          shared('@fw/http', '17.1.1', ['@fw/http/testing'], shareScope)
+        ),
+      }),
+    ],
+  ];
+
+  for (const shareScope of [undefined, 'team'])
+    for (const [name, fixture] of cases)
+      it(`${name} (${shareScope ?? 'global'})`, async () => {
+        const { committed, load } = fixture(shareScope);
+        const p = portfolio(
+          {},
+          { realRepositories: true, assertNoTear: false, ...(shareScope && { scope: shareScope }) }
+        );
+        const tears = (importMap: ImportMap) =>
+          tearsByPool({
+            importMap,
+            externals: { [shareScope ?? GLOBAL_SCOPE]: p.stored() },
+            scopeUrls: p.scopeUrls(),
+          });
+        await p.runInit(committed);
+        p.reload();
+
+        const { merged } = await p.runDynamic(load);
+        const page = outcome(merged, p.stored()).runs;
+
+        expect(tears(merged)).toEqual([]);
+        expect(
+          Object.entries(p.stored()).flatMap(([external, { versions }]) =>
+            versions
+              .filter(v => v.action === 'share' && v.remotes.some(r => r.name === 'L'))
+              .map(v => `${external}@${v.tag}`)
+          )
+        ).toEqual([]);
+
+        p.reload();
+        const warm = await p.runInit([...committed, load]);
+
+        expect(tears(warm)).toEqual([]);
+        expect(outcome(warm, p.stored()).runs).toEqual(page);
+      });
+
+  // L's `@fw/http` 17.0.0 ships its root, which nobody serves, beside `@fw/http/testing`, which F's flat
+  // package serves. Under `strictImportMap` a named scope's next page refuses a skip-only package with an
+  // entrypoint no shared version serves, so the share stays. Stored after D's skip-only `@fw/http`, ahead of
+  // `@fw/http/testing`, it claims testing on the next page: harmless, since L reached the global verdict by
+  // agreeing with the map, so it claims F's tag.
+  it('a share served in part stays a share under strictImportMap, and the next page stays whole (team)', async () => {
+    const shareScope = 'team';
+    const p = portfolio({}, { realRepositories: true, assertNoTear: false, scope: shareScope });
+    const strict = () => (p.config.strict.strictImportMap = true);
+    const tears = (importMap: ImportMap) =>
+      tearsByPool({
+        importMap,
+        externals: { [shareScope]: p.stored() },
+        scopeUrls: p.scopeUrls(),
+      });
+    const committed = [
+      entry('D', shared('@fw/http', '17.0.1', ['@fw/http/testing'], shareScope)),
+      entry(
+        'F',
+        shared('@fw/core', '17.0.0', ['@fw/core'], shareScope),
+        shared('@fw/http/testing', '17.0.0', ['@fw/http/testing'], shareScope)
+      ),
+    ];
+    const load = entry(
+      'L',
+      shared('@fw/core', '17.0.0', ['@fw/core'], shareScope),
+      shared('@fw/http', '17.0.0', ['@fw/http', '@fw/http/testing'], shareScope)
+    );
+    strict();
+    await p.runInit(committed);
+    p.reload();
+    strict();
+
+    const { actions, merged } = await p.runDynamic(load);
+    const page = outcome(merged, p.stored()).runs;
+
+    expect(actions['@fw/http']!.action).toBe('share');
+    expect(tears(merged)).toEqual([]);
+    expect(Object.keys(p.stored()).indexOf('@fw/http')).toBeLessThan(
+      Object.keys(p.stored()).indexOf('@fw/http/testing')
+    );
+
+    p.reload();
+    strict();
+    const warm = await p.runInit([...committed, load]);
+
+    expect(tears(warm)).toEqual([]);
+    expect(outcome(warm, p.stored()).runs).toEqual(page);
+    expect(page['D|@fw/http/testing']).toBe('17.0.0');
+  });
 });

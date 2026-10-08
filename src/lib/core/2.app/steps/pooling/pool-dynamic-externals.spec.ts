@@ -856,6 +856,238 @@ describe('createPoolDynamicExternals', () => {
     });
   });
 
+  /**
+   * Flat and dense builds of one pool: a specifier can be an entry of one external and a package of its own
+   * in another. On a global verdict the load runs the map's file for every specifier the map serves, which
+   * `update-cache`'s per-external `covered` and `share` cannot see. `F` ships `@fw/core` and, flat, the
+   * package `@fw/http/testing` at 17.0.0; mfe loads 17.1.1, which its `^17.0.0` takes, so F's build
+   * witnesses the global verdict.
+   */
+  describe('a global verdict serves the load by specifier', () => {
+    const file = (specifier: string) => `${specifier.slice(1).replace(/\//g, '_')}.js`;
+    const copy = (remote: string, specifiers: string[], cached = false) =>
+      mockVersionRemote(remote, specifiers[0], {
+        requiredVersion: '^17.0.0',
+        strictVersion: false,
+        cached,
+        entries: Object.fromEntries(specifiers.map(s => [s, file(s)])),
+      });
+    const row = (
+      tag: string,
+      action: SharedVersion['action'],
+      ...remotes: ReturnType<typeof copy>[]
+    ): SharedVersion => ({ tag, action, host: false, remotes });
+    const external = (...versions: SharedVersion[]): SharedExternal => ({ dirty: false, versions });
+
+    const copies = (name: string) =>
+      (writtenFor(name)?.versions ?? []).map(v => [
+        `${v.tag}:${v.action}`,
+        v.remotes.map(r => ({
+          name: r.name,
+          cached: r.cached,
+          ...(r.poolCause && { poolCause: r.poolCause }),
+          ...(r.servedBy && { servedBy: r.servedBy }),
+        })),
+      ]);
+
+    const scopeUrls = (...remotes: string[]) => {
+      adapters.remoteInfoRepo.tryGet = vi.fn(name =>
+        remotes.includes(name)
+          ? Optional.of({ scopeUrl: `http://${name}/`, exposes: [] } as RemoteInfo)
+          : Optional.empty<RemoteInfo>()
+      );
+    };
+
+    // mfe's `@fw/http` ships only `@fw/http/testing` (plus `extra` when given). Nobody shares a package
+    // `@fw/http`, so `update-cache` opened a share row for mfe's copy, as it does for a package it introduces.
+    const givenHttp = (o: { tag?: string; extra?: string[]; skipOnly?: string } = {}) =>
+      givenCommitted({
+        '@fw/core': external(
+          row('17.1.1', 'skip', copy('mfe', ['@fw/core'])),
+          row('17.0.0', 'share', copy('F', ['@fw/core'], true))
+        ),
+        '@fw/http/testing': external(row('17.0.0', 'share', copy('F', ['@fw/http/testing'], true))),
+        '@fw/http': external(
+          row(
+            o.tag ?? '17.1.1',
+            'share',
+            copy('mfe', [...(o.extra ?? []), '@fw/http/testing'], true)
+          ),
+          ...(o.skipOnly ? [row(o.skipOnly, 'skip', copy('D', ['@fw/http/testing']))] : [])
+        ),
+      });
+    const load = (shareScope?: string) => ({
+      entry: entryWith(shared('@fw/core', { shareScope }), shared('@fw/http', { shareScope })),
+      actions: {
+        '@fw/core': { action: 'skip', covered: ['@fw/core'] },
+        '@fw/http': { action: 'share' },
+      } as SharedInfoActions,
+    });
+
+    it('turns a share the map serves into a skip covering what it serves', async () => {
+      givenHttp();
+
+      const { actions } = await poolDynamicExternals(load());
+
+      expect(actions['@fw/http']).toEqual({ action: 'skip', covered: ['@fw/http/testing'] });
+      // The share row `update-cache` opened becomes the skip row: a copy that points at the map publishes
+      // nothing, so the next page must not read it as a shared version.
+      expect(copies('@fw/http')).toEqual([['17.1.1:skip', [{ name: 'mfe', cached: false }]]]);
+    });
+
+    it('points a share the map serves at the serving file in a named scope', async () => {
+      givenHttp();
+      scopeUrls('F');
+
+      const { actions } = await poolDynamicExternals(load('team'));
+
+      // A named scope has no `imports` to inherit from: the override is the only mapping it gets.
+      expect(actions['@fw/http']).toEqual({
+        action: 'skip',
+        covered: ['@fw/http/testing'],
+        override: { '@fw/http/testing': 'http://F/fw_http_testing.js' },
+      });
+    });
+
+    it('joins the skip row already at its tag rather than adding a second one', async () => {
+      // D's `@fw/http` 17.1.1 is committed skip-only: it runs F's flat package through the map's claims.
+      givenHttp({ skipOnly: '17.1.1' });
+
+      await poolDynamicExternals(load());
+
+      expect(copies('@fw/http')).toEqual([
+        [
+          '17.1.1:skip',
+          [
+            { name: 'D', cached: false },
+            { name: 'mfe', cached: false },
+          ],
+        ],
+      ]);
+    });
+
+    it('skips a share the map serves in part; the rest self-fills', async () => {
+      // mfe ships `@fw/http` 17.0.0 with its root, which nobody serves, so it only reaches a global
+      // verdict by agreeing: F serves its testing entrypoint at the same 17.0.0.
+      givenCommitted({
+        '@fw/core': external(
+          row('17.0.0', 'share', copy('F', ['@fw/core'], true), copy('mfe', ['@fw/core']))
+        ),
+        '@fw/http/testing': external(row('17.0.0', 'share', copy('F', ['@fw/http/testing'], true))),
+        '@fw/http': external(
+          row('17.0.0', 'share', copy('mfe', ['@fw/http', '@fw/http/testing'], true))
+        ),
+      });
+
+      const { actions } = await poolDynamicExternals(load());
+
+      expect(actions['@fw/http']).toEqual({ action: 'skip', covered: ['@fw/http/testing'] });
+    });
+
+    // Under a coverage policy a skip refuses what it does not cover, and a named scope under `strictImportMap`
+    // refuses a skip-only package with an entrypoint no shared version serves on the next page. A partial
+    // share keeps publishing its own files instead: it agrees with the map, so they are the map's tags.
+    it.each([
+      [
+        'strictEntryPointCoverage',
+        undefined,
+        (c: ConfigContract) => (c.strict.strictEntryPointCoverage = true),
+      ],
+      [
+        'scopeUncoveredEntrypoints',
+        undefined,
+        (c: ConfigContract) => (c.profile.scopeUncoveredEntrypoints = true),
+      ],
+      ['strictImportMap', 'team', (c: ConfigContract) => (c.strict.strictImportMap = true)],
+    ] as const)('keeps a partly served share under %s (%s)', async (_policy, shareScope, set) => {
+      set(config);
+      scopeUrls('F');
+      givenCommitted({
+        '@fw/core': external(
+          row('17.0.0', 'share', copy('F', ['@fw/core'], true), copy('mfe', ['@fw/core']))
+        ),
+        '@fw/http/testing': external(row('17.0.0', 'share', copy('F', ['@fw/http/testing'], true))),
+        '@fw/http': external(
+          row('17.0.0', 'share', copy('mfe', ['@fw/http', '@fw/http/testing'], true))
+        ),
+      });
+
+      const { actions } = await poolDynamicExternals(load(shareScope));
+
+      expect(actions['@fw/http']).toEqual({ action: 'share' });
+      expect(writtenFor('@fw/http')?.versions.map(v => `${v.tag}:${v.action}`) ?? []).not.toContain(
+        '17.0.0:skip'
+      );
+    });
+
+    describe('a skip whose entrypoint another package serves', () => {
+      // G ships `@fw/core` 17.0.1 and, flat, `@fw/core/testing`. The shared version of `@fw/core` lacks
+      // testing, so `update-cache` covered only the root, and mfe would self-fill testing from its 17.0.0.
+      beforeEach(() =>
+        givenCommitted({
+          '@fw/core': external(
+            row('17.0.1', 'share', copy('G', ['@fw/core'], true)),
+            row('17.0.0', 'skip', copy('mfe', ['@fw/core', '@fw/core/testing']))
+          ),
+          '@fw/core/testing': external(
+            row('17.0.1', 'share', copy('G', ['@fw/core/testing'], true))
+          ),
+        })
+      );
+      const loadCore = (shareScope?: string, override?: Record<string, string>) => ({
+        entry: entryWith(shared('@fw/core', { shareScope })),
+        actions: {
+          '@fw/core': { action: 'skip', covered: ['@fw/core'], ...(override && { override }) },
+        } as SharedInfoActions,
+      });
+
+      it('covers it', async () => {
+        const { actions } = await poolDynamicExternals(loadCore());
+
+        expect(actions['@fw/core']).toEqual({
+          action: 'skip',
+          covered: ['@fw/core', '@fw/core/testing'],
+        });
+        // The copy keeps its place in the record: only the actions change.
+        expect(verdictsWritten()).toEqual([]);
+      });
+
+      it('maps it beside the resolver override in a named scope', async () => {
+        scopeUrls('G');
+
+        const { actions } = await poolDynamicExternals(
+          loadCore('team', { '@fw/core': 'http://G/fw_core.js' })
+        );
+
+        expect(actions['@fw/core']).toEqual({
+          action: 'skip',
+          covered: ['@fw/core', '@fw/core/testing'],
+          override: {
+            '@fw/core': 'http://G/fw_core.js',
+            '@fw/core/testing': 'http://G/fw_core_testing.js',
+          },
+        });
+      });
+
+      it('serves its own family in a named scope when the serving build cannot be mapped', async () => {
+        // mfe reaches the global verdict through G's witness, at a tag of its own: self-filling testing
+        // from its 17.0.0 beside G's 17.0.1 core would tear it, so no member runs the map's files.
+        scopeUrls();
+
+        const { actions } = await poolDynamicExternals(
+          loadCore('team', { '@fw/core': 'http://G/fw_core.js' })
+        );
+
+        expect(actions['@fw/core']).toEqual({ action: 'scope' });
+        expect(verdictsWritten()).toEqual(['mfe@@fw/core: uncovered']);
+        expect(config.log.warn).toHaveBeenCalledWith(
+          8,
+          "[team][mfe] 'G' is not in the cache, so its files cannot be mapped."
+        );
+      });
+    });
+  });
+
   describe('pool names in the record', () => {
     const namesWritten = () =>
       Object.fromEntries(

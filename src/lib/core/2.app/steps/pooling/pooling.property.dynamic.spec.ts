@@ -75,6 +75,56 @@ describe('pooling properties: dynamic loads (generated portfolios)', { timeout: 
       }
     ));
 
+  // 101 with flat and dense builds in one pool: a specifier can be an entry of the loaded remote's package
+  // and a package of its own in the committed map, so what serves the load is read per specifier, not per
+  // external. In a named share scope the load maps in its own scope, with no `imports` to inherit.
+  for (const [offset, shareScope] of [
+    [107, undefined],
+    [108, 'team'],
+  ] as const)
+    it(`dynamic additivity with flat and dense builds in one pool, ${shareScope ?? 'global'} share scope`, () =>
+      run(
+        offset,
+        portfolioArbitrary({
+          maxRemotes: 12,
+          labelNoise: true,
+          flat: true,
+          ...(shareScope && { shareScope }),
+        }).chain(spec => fc.tuple(fc.constant(lenient(spec)), extraRemotesArbitrary(spec))),
+        150,
+        async ([spec, extras]) => {
+          const entries = toRemoteEntries(spec);
+          const host = hostOf(spec);
+          const rig = openPortfolio({ host, ...(shareScope && { scope: shareScope }) });
+          let committed = (await rig.init(entries)).importMap;
+          const loaded = [...entries];
+
+          for (const extra of extras) {
+            const added = toRemoteEntry(extra, loaded.length, 0, shareScope);
+            const { delta, merged, record } = await rig.load(added);
+
+            for (const key of Object.keys(delta.imports))
+              expect({ key, committed: key in committed.imports }).toEqual({
+                key,
+                committed: false,
+              });
+            for (const [scope, imports] of Object.entries(delta.scopes ?? {}))
+              for (const key of Object.keys(imports))
+                expect({
+                  scope,
+                  key,
+                  committed: key in (committed.scopes?.[scope] ?? {}),
+                }).toEqual({ scope, key, committed: false });
+
+            const before = torn(committed, record, scopeUrlsOf(loaded), host, shareScope);
+            loaded.push(added);
+            const after = torn(merged, record, scopeUrlsOf(loaded), host, shareScope);
+            expect(after.filter(t => !before.includes(t))).toEqual([]);
+            committed = merged;
+          }
+        }
+      ));
+
   // The record a load leaves is what the next page rebuilds its map from, so it must rebuild the page the
   // load handed the browser. Compared as the tag each remote runs per specifier, since which of two copies of
   // one tag publishes a file is arrival order.
@@ -118,6 +168,36 @@ describe('pooling properties: dynamic loads (generated portfolios)', { timeout: 
         expect(outcome(warm.importMap, warm.record).runs).toEqual(outcome(merged, record).runs);
       }
     ));
+
+  // 102 with flat and dense builds in one pool: the record a load leaves must not let a copy that ran the
+  // map's files claim a specifier on the next page.
+  for (const [offset, shareScope] of [
+    [109, undefined],
+    [110, 'team'],
+  ] as const)
+    it(`dynamic reload with flat and dense builds in one pool, ${shareScope ?? 'global'} share scope`, () =>
+      run(
+        offset,
+        portfolioArbitrary({
+          maxRemotes: 12,
+          labelNoise: true,
+          flat: true,
+          ...(shareScope && { shareScope }),
+        }).chain(spec => fc.tuple(fc.constant(lenient(spec)), extraRemoteArbitrary(spec))),
+        150,
+        async ([spec, extra]) => {
+          const entries = toRemoteEntries(spec);
+          const rig = openPortfolio({
+            host: hostOf(spec),
+            ...(shareScope && { scope: shareScope }),
+          });
+          await rig.init(entries);
+          const added = toRemoteEntry(extra, entries.length, 0, shareScope);
+          const { merged, record } = await rig.load(added);
+          const warm = await rig.init([...entries, added]);
+          expect(outcome(warm.importMap, warm.record).runs).toEqual(outcome(merged, record).runs);
+        }
+      ));
 
   // The gate's rules against a committed map (docs/version-resolver.md §"Scope and dynamic init"): a range
   // rejecting a committed tag is `incompatible`; otherwise the remote resolves globally when it agrees with the
