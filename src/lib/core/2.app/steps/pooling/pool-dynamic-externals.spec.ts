@@ -16,6 +16,8 @@ import { mockAdapters } from 'lib/testing/adapters.mock';
 import { Optional } from 'lib/utils/optional';
 import type { RemoteInfo } from 'lib/core/1.domain';
 import type { DrivingContract } from '../../driving-ports/driving.contract';
+import { createConvertToImportMap } from '../convert-to-import-map';
+import { mockChunkRepository } from 'lib/testing/adapters/chunk.repository.mock';
 import { createVersionCheck } from 'lib/core/3.adapters/checks/version.check';
 
 // A committed external: the first version is the `share` one, i.e. `remotes[0]` of it is the build
@@ -384,6 +386,55 @@ describe('createPoolDynamicExternals', () => {
       action: 'skip',
       override: { '@framework/router': 'http://legacy-a/@framework/router.js' },
     });
+  });
+
+  it('rewrites only the members it declares in this scope when it joins a subpool', async () => {
+    // `actions` is keyed by package name alone, so a pool member mfe declares in *another* share scope has
+    // an action here too — the one that scope's resolver gave it. Joining legacy's global subpool via core
+    // must not touch mfe's team-x cdk: turned into a skip with no override, the import map has nothing to
+    // point it at, and under `strictImportMap` the whole dynamic load is refused.
+    adapters.remoteInfoRepo.tryGet = vi.fn(name =>
+      name === 'team/legacy'
+        ? Optional.of({ scopeUrl: 'http://legacy/', exposes: [] } as RemoteInfo)
+        : Optional.empty<RemoteInfo>()
+    );
+    // Global pool {core, cdk}: mfe's global copy is core only; its cdk was committed to team-x instead.
+    const global = {
+      '@framework/core': committed(
+        '@framework/core',
+        { tag: '22.0.8', remotes: ['team/a'] },
+        { tag: '21.2.18', remotes: ['team/legacy'], action: 'scope' },
+        { tag: '21.2.18', remotes: ['mfe'] }
+      ),
+      '@framework/cdk': committed(
+        '@framework/cdk',
+        { tag: '22.0.6', remotes: ['team/b'] },
+        { tag: '21.2.18', remotes: ['team/legacy'], action: 'scope' }
+      ),
+    };
+    tagStoredByNpmScope(global);
+    adapters.sharedExternalsRepo.getFromScope = vi.fn(scope => (scope === 'team-x' ? {} : global));
+    const entry = entryWith(
+      shared('@framework/core'),
+      shared('@framework/cdk', { shareScope: 'team-x' })
+    );
+    const actions: SharedInfoActions = {
+      '@framework/core': { action: 'skip' },
+      '@framework/cdk': { action: 'share' },
+    };
+
+    const result = await poolDynamicExternals({ entry, actions });
+
+    expect(result.actions['@framework/core']).toMatchObject({
+      action: 'skip',
+      override: { '@framework/core': 'http://legacy/@framework/core.js' },
+    });
+    expect(result.actions['@framework/cdk']).toEqual({ action: 'share' });
+    // The symptom the user sees: the map for this load builds under `strictImportMap`, without errors.
+    config.strict.strictImportMap = true;
+    const convert = createConvertToImportMap(config, { sharedChunksRepo: mockChunkRepository() });
+    await expect(convert(result)).resolves.toBeDefined();
+    expect(config.log.error).not.toHaveBeenCalled();
   });
 
   it("refuses to join a build's subpool when that build is itself deduping", async () => {

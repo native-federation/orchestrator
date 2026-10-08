@@ -130,7 +130,7 @@ export function createPoolDynamicExternals(
             continue;
           }
 
-          for (const name of redirect(entry.name, subpool, pool, asked.view, actions))
+          for (const name of redirect(entry.name, subpool, pool, mine, asked.view, actions))
             verdicts.set(name, { servedBy: subpool.build });
         } catch (error) {
           // Its own build is the one family this remote can always resolve coherently.
@@ -309,6 +309,7 @@ export function createPoolDynamicExternals(
     remote: RemoteName,
     { build, scopeUrl }: { build: RemoteName; scopeUrl: string },
     pool: PoolMember[],
+    mine: PoolMember[],
     view: CommittedView,
     actions: SharedInfoActions
   ): ExternalName[] {
@@ -316,9 +317,8 @@ export function createPoolDynamicExternals(
     const basis = basisPerMember(pool);
     const served: ExternalName[] = [];
 
-    for (const member of pool) {
-      const action = actions[member.name];
-      if (!action) continue;
+    for (const member of mine) {
+      const action = actions[member.name]!;
       // The build covers everything the remote imports, so a copy the resolver scoped or would have shared
       // dedups onto it too: left as it was, it would run the remote's own file beside the build's.
       action.action = 'skip';
