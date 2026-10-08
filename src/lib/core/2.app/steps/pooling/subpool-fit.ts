@@ -1,6 +1,5 @@
 import type { ExternalName, RemoteName, VersionName } from 'lib/core/1.domain';
 import type { AcceptsTag } from 'lib/core/1.domain/externals/compatibility';
-import type { Coverage, FamilyInstance } from 'lib/core/1.domain/pooling/views';
 import type { PoolMember } from 'lib/core/1.domain/pooling/membership';
 import type { Specifier } from 'lib/core/1.domain/externals/specifier';
 
@@ -37,14 +36,17 @@ export function acceptanceTable(members: PoolMember[], acceptsTag: AcceptsTag): 
   return table;
 }
 
-export function covers(coverage: Coverage, consumed: Iterable<Specifier>): boolean {
-  for (const specifier of consumed) if (!coverage.has(specifier)) return false;
+export function covers(
+  tags: ReadonlyMap<Specifier, VersionName>,
+  consumed: Iterable<Specifier>
+): boolean {
+  for (const specifier of consumed) if (!tags.has(specifier)) return false;
   return true;
 }
 
 export function acceptsAll(
   acceptance: Acceptance,
-  build: FamilyInstance,
+  tagByMember: ReadonlyMap<ExternalName, VersionName>,
   consumer: RemoteName,
   consumed: readonly ExternalName[]
 ): boolean {
@@ -52,7 +54,7 @@ export function acceptsAll(
   if (!byMember) return false;
 
   for (let i = 0; i < consumed.length; i++) {
-    const offered = build.get(consumed[i]!);
+    const offered = tagByMember.get(consumed[i]!);
     if (offered === undefined) return false;
     if (!byMember.get(consumed[i]!)?.has(offered)) return false;
   }

@@ -72,10 +72,10 @@ describe('acceptance', () => {
 
     // mfe3 accepts router@22.1.0 under ^22.0.0, so mfe2's tag is fine on acceptance alone — coverage is
     // what stops it. Reverse the question: mfe2 cannot take mfe3's 22.0.5.
-    expect(acceptsAll(table, builds.get('mfe3')!.instance, 'mfe2', consumed.get('mfe2')!)).toBe(
+    expect(acceptsAll(table, builds.get('mfe3')!.tagByMember, 'mfe2', consumed.get('mfe2')!)).toBe(
       false
     );
-    expect(acceptsAll(table, builds.get('mfe2')!.instance, 'mfe3', ['@ng/router'])).toBe(true);
+    expect(acceptsAll(table, builds.get('mfe2')!.tagByMember, 'mfe3', ['@ng/router'])).toBe(true);
   });
 
   it('refuses a build that does not offer a consumed member at all', () => {
@@ -83,7 +83,7 @@ describe('acceptance', () => {
     const table = acceptanceTable(members, accepts);
 
     expect(
-      acceptsAll(table, committedView(members).builds.get('mfe1')!.instance, 'mfe3', [
+      acceptsAll(table, committedView(members).builds.get('mfe1')!.tagByMember, 'mfe3', [
         '@ng/core',
         '@ng/router',
       ])
@@ -96,7 +96,7 @@ describe('acceptance', () => {
     const table = acceptanceTable(members, accepts);
 
     expect(
-      acceptsAll(table, committedView(members).builds.get('mfe1')!.instance, 'stranger', [
+      acceptsAll(table, committedView(members).builds.get('mfe1')!.tagByMember, 'stranger', [
         '@ng/core',
       ])
     ).toBe(false);

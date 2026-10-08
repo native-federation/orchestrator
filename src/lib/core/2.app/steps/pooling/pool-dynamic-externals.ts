@@ -12,6 +12,7 @@ import {
   type SharedInfoActions,
   type SharedVersionMeta,
 } from 'lib/core/1.domain';
+import { filesOf } from 'lib/core/1.domain/pooling/builds';
 import { buildPools, type PoolMember } from 'lib/core/1.domain/pooling/membership';
 import { renamesOf } from 'lib/core/1.domain/pooling/plan';
 import { scopeHasPoolState } from 'lib/core/1.domain/pooling/pool-state';
@@ -235,8 +236,8 @@ export function createPoolDynamicExternals(
           if (meta.name === remote)
             for (const s in meta.entries) wanted.push([s, view.global.get(s)!.tag]);
 
-    for (const [, build] of view.builds)
-      if (wanted.every(([s, tag]) => build.tags.tagOf(s) === tag)) return true;
+    for (const candidate of view.builds.values())
+      if (wanted.every(([s, tag]) => candidate.tags.tagOf(s) === tag)) return true;
     return false;
   }
 
@@ -252,8 +253,8 @@ export function createPoolDynamicExternals(
       if (build === remote) continue;
       const candidate = view.builds.get(build)!;
       if (!servesItsOwnFamily(build, pool, basis)) continue;
-      if (!covers(candidate.coverage, specifiers)) continue;
-      if (!acceptsAll(acceptance(), candidate.instance, remote, wants)) continue;
+      if (!covers(candidate.tags, specifiers)) continue;
+      if (!acceptsAll(acceptance(), candidate.tagByMember, remote, wants)) continue;
       // Unmappable, it would leave the remote on its own actions: half its family from its own build.
       const scopeUrl = scopeUrlOf(build);
       if (!scopeUrl) {
@@ -314,7 +315,7 @@ export function createPoolDynamicExternals(
     view: CommittedView,
     actions: SharedInfoActions
   ): ExternalName[] {
-    const files = view.builds.get(build)!.coverage;
+    const files = filesOf(pool, build);
     const basis = basisPerMember(pool);
     const served: ExternalName[] = [];
 

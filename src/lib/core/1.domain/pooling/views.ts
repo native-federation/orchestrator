@@ -6,26 +6,15 @@ import type {
   VersionName,
 } from 'lib/core/1.domain';
 import { forEachVersionEntry } from 'lib/core/1.domain/externals/basis';
-import { type Specifier, SpecifierTags } from 'lib/core/1.domain/externals/specifier';
+import type { Specifier } from 'lib/core/1.domain/externals/specifier';
+import { type Build, buildOf, copiesByRemote } from './builds';
 import type { PoolMember } from './membership';
 
 // Read-only projections of one pool's stored record, keyed by specifier rather than external name so flat and
 // dense builds of one package compare; see docs/version-resolver.md §"How pooling resolves".
 
-// One remote's whole build of a pool: the unit of decision, as a build is consistent by construction.
-export type FamilyInstance = Map<ExternalName, VersionName>;
-
-// Specifier -> the file a build serves it from.
-export type Coverage = Map<Specifier, string>;
-
-export type BuildView = {
-  coverage: Coverage;
-  tags: SpecifierTags;
-  instance: FamilyInstance;
-};
-
 export type CommittedView = {
-  builds: Map<RemoteName, BuildView>;
+  builds: Map<RemoteName, Build>;
   // What the committed `imports` serves, per specifier.
   global: Map<Specifier, { tag: VersionName; remote: RemoteName; file: string }>;
 };
@@ -40,44 +29,13 @@ export function committedView(members: PoolMember[]): CommittedView {
       global.set(specifier, { tag, remote: meta.name, file: meta.entries[specifier]! });
   });
 
-  return { builds: walkBuilds(members), global };
+  const builds = new Map<RemoteName, Build>();
+  for (const [owner, copies] of copiesByRemote(members)) builds.set(owner, buildOf(owner, copies));
+
+  return { builds, global };
 }
 
-function walkBuilds(members: PoolMember[]): Map<RemoteName, BuildView> {
-  const builds = new Map<RemoteName, BuildView>();
-
-  for (const member of members) {
-    const versions = member.external.versions;
-    for (let v = 0; v < versions.length; v++) {
-      const version = versions[v]!;
-
-      const remotes = version.remotes;
-      for (let r = 0; r < remotes.length; r++) {
-        const meta = remotes[r]!;
-        let own = builds.get(meta.name);
-        if (!own) {
-          builds.set(
-            meta.name,
-            (own = { coverage: new Map(), tags: new SpecifierTags(), instance: new Map() })
-          );
-        }
-
-        // A remote ships one copy per member, so a second row is a record it cannot produce; the first row
-        // wins, tag and file alike, as in `generate-import-map`, so such a record reads as the map serves it.
-        if (!own.instance.has(member.name)) own.instance.set(member.name, version.tag);
-        for (const specifier in meta.entries) {
-          if (own.coverage.has(specifier)) continue;
-          own.coverage.set(specifier, meta.entries[specifier]!);
-          own.tags.set(specifier, version.tag);
-        }
-      }
-    }
-  }
-
-  return builds;
-}
-
-// Per remote, what it must be served. Wider than its instance: a copy marked `scope` is excluded there
+// Per remote, what it must be served. Wider than its build: a copy marked `scope` is excluded there
 // but still consumed.
 export function consumedMembers(members: PoolMember[]): Map<RemoteName, ExternalName[]> {
   const consumed = new Map<RemoteName, ExternalName[]>();
