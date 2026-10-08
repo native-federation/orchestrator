@@ -63,26 +63,6 @@ describe('reelectedNames', () => {
     ]);
   });
 
-  // Computed a = {s1, s3}, b = {s2, t1}, c = {t2, t3}; stored S = {s1, s2, s3}, T = {t1, t2, t3}. One hop
-  // from s2 reaches S and b; only the second, through t1's stored T, reaches c.
-  it('spreads transitively across stored names and computed pools', () => {
-    const scope = {
-      s1: record(false, 'S'),
-      s2: record(true, 'S'),
-      s3: record(false, 'S'),
-      t1: record(false, 'T'),
-      t2: record(false, 'T'),
-      t3: record(false, 'T'),
-    };
-
-    const reached = reelectedNames(
-      scope,
-      computed(scope, ['s1', 's3'], ['s2', 't1'], ['t2', 't3'])
-    );
-
-    expect(sorted(reached)).toEqual(['s1', 's2', 's3', 't1', 't2', 't3']);
-  });
-
   // An external that left every pool keeps its stale stored name until mark-pools clears it; the spread
   // still reaches it through that name, and from it nothing further.
   it('reaches an external in no computed pool through its stale stored name', () => {

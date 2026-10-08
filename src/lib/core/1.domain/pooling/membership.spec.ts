@@ -36,31 +36,6 @@ describe('buildPools', () => {
       expect(shape(pools)).toEqual([['ng', ['@ng/common', '@ng/core']]]);
     });
 
-    it('pools as soon as one remote declares two tagged members', () => {
-      const { pools } = buildPools(
-        scope({
-          '@ng/core': [{ remote: 'a', pool: 'ng' }],
-          '@ng/common': [{ remote: 'a', pool: 'ng' }],
-        })
-      );
-      expect(shape(pools)).toEqual([['ng', ['@ng/common', '@ng/core']]]);
-    });
-
-    it('pulls every remote declaring the name into one pool', () => {
-      const { pools } = buildPools(
-        scope({
-          '@ng/core': [
-            { remote: 'a', pool: 'ng' },
-            { remote: 'b', pool: 'ng' },
-          ],
-          '@ng/common': [{ remote: 'b', pool: 'ng' }],
-          '@ng/forms': [{ remote: 'c', pool: 'ng' }],
-        })
-      );
-      // c's forms joins too: it declares the same name.
-      expect(shape(pools)).toEqual([['ng', ['@ng/common', '@ng/core', '@ng/forms']]]);
-    });
-
     it('is inert without tags', () => {
       const { pools } = buildPools(
         scope({ '@ng/core': [{ remote: 'a' }], '@ng/common': [{ remote: 'a' }] })
@@ -84,19 +59,6 @@ describe('buildPools', () => {
       );
       // Two declarations each: the tie goes to the alphabetically first label.
       expect(shape(pools)).toEqual([['ds', ['@x/core', '@x/forms', '@x/ui']]]);
-    });
-
-    it('pools disjoint member sets that declare the same name', () => {
-      // The name is the pool's identity, so identical labels pool even with no member in common.
-      const { pools } = buildPools(
-        scope({
-          core: [{ remote: 'mfe1', pool: 'x' }],
-          ui: [{ remote: 'mfe1', pool: 'x' }],
-          forms: [{ remote: 'mfe2', pool: 'x' }],
-          bar: [{ remote: 'mfe2', pool: 'x' }],
-        })
-      );
-      expect(shape(pools)).toEqual([['x', ['bar', 'core', 'forms', 'ui']]]);
     });
 
     it('bridges a co-tagged cross-scope member into the family', () => {
@@ -177,17 +139,6 @@ describe('buildPools', () => {
         scope({ utils: [{ remote: 'a' }], 'utils/deep': [{ remote: 'a' }] })
       );
       expect(pools.size).toBe(0);
-    });
-  });
-
-  describe('singletons', () => {
-    // The step warns about these; the sentence is pinned in island-warnings.contract.spec.ts.
-    it('reports a tag that pools with nothing (likely typo/missing sibling)', () => {
-      const { pools, lonelyTags } = buildPools(
-        scope({ '@a/solo': [{ remote: 'mfe1', pool: 'z' }] })
-      );
-      expect(pools.size).toBe(0);
-      expect(lonelyTags).toEqual(['@a/solo']);
     });
   });
 

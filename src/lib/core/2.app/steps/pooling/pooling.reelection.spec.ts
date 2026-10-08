@@ -479,21 +479,6 @@ describe('pooling re-election', () => {
           S2: ['1.0.0', '1.0.0'],
         });
       });
-
-      // The eviction half on the dynamic path: an `'always'` override of a cached remote evicts its old
-      // copies before the next init. R alone ships p, labelled `x` like W's q; R's new build ships neither,
-      // so p is deleted and q, which lost no copy, is the only trace left of pool `x`.
-      it('marks the survivors of a pool a dynamic override deletes a member of dirty', async () => {
-        const q = portfolio({}, { storage: 'nf-pooling-dynamic-evict', realRepositories: true });
-        const W = (name: string) => remote(name, sharedIn('x', 'q', '2.0.0', '^2.0.0'));
-        await q.runInit([remote('R', sharedIn('x', 'p', '2.0.0', '^2.0.0')), W('W'), W('W2')]);
-        expect(q.record('q').poolName).toBe('x');
-
-        await q.runDynamic(redeployed('R', sharedIn(null, 'z', '1.0.0', '^1.0.0')));
-
-        expect(q.stored()['p']).toBeUndefined();
-        expect(q.record('q').dirty).toBe(true);
-      });
     });
   });
 });

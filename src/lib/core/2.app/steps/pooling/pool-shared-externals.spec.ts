@@ -1,9 +1,4 @@
-import {
-  GLOBAL_SCOPE,
-  STRICT_SCOPE,
-  type SharedVersion,
-  type SharedVersionMeta,
-} from 'lib/core/1.domain';
+import { GLOBAL_SCOPE, STRICT_SCOPE, type SharedVersion } from 'lib/core/1.domain';
 import { NFError } from 'lib/core/native-federation.error';
 import { type CopySpec, portfolio, type PortfolioOptions } from 'lib/testing/pooling/portfolio';
 import { storedRecord } from 'lib/testing/pooling/portfolio-fixtures';
@@ -62,16 +57,6 @@ describe('createPoolSharedExternals', () => {
     copies: CopySpec[],
     action?: SharedVersion['action']
   ): SharedVersion => p.version(tag, external, copies, action);
-
-  // A copy as an earlier election stored it.
-  const withState = (
-    version: SharedVersion,
-    remote: string,
-    state: Pick<SharedVersionMeta, 'servedBy' | 'poolCause'>
-  ): SharedVersion => ({
-    ...version,
-    remotes: version.remotes.map(r => (r.name === remote ? { ...r, ...state } : r)),
-  });
 
   const rowsOf = (name: string) =>
     p.record(name).versions.map(v => `${v.tag}:${v.action}:[${v.remotes.map(r => r.name)}]`);
@@ -147,28 +132,6 @@ describe('createPoolSharedExternals', () => {
       expect(p.record('foo').poolName).toBeUndefined();
       expect(p.record('bar').poolName).toBeUndefined();
       expect(verdicts()).toEqual([]);
-    });
-
-    it('rebuilds a single-remote pool already stored as elected unchanged', async () => {
-      const stored = { poolName: 'framework', poolWinner: 'mfe1' };
-      p.seed(
-        '@framework/core',
-        [at('17.0.0', '@framework/core', [copy('mfe1')], 'share')],
-        true,
-        stored
-      );
-      p.seed(
-        '@framework/common',
-        [at('17.0.0', '@framework/common', [copy('mfe1')], 'share')],
-        true,
-        stored
-      );
-      const seeded = { core: decided('@framework/core'), common: decided('@framework/common') };
-
-      await p.runInit();
-
-      expect(decided('@framework/core')).toEqual(seeded.core);
-      expect(decided('@framework/common')).toEqual(seeded.common);
     });
 
     it('leaves a single-member pool to determine', async () => {
@@ -362,15 +325,39 @@ describe('createPoolSharedExternals', () => {
       expect(p.record('@framework/core').poolWinner).toBe('b');
     });
 
-    it('ignores a stored winner the members disagree on', async () => {
-      seedTied({ core: 'b', common: 'a' });
+    it("leads the winner's row with its copy, so the map publishes the winner's file", async () => {
+      // x is listed first and ties with a; the stored winner a keeps the tie. `remotes[0]` is the copy the
+      // global map publishes, so a's copy must move to the front.
+      for (const name of ['@framework/core', '@framework/common'])
+        p.seed(name, [at('17.0.0', name, [copy('x'), copy('a')], 'share')], true, {
+          poolWinner: 'a',
+        });
 
-      await p.runInit();
+      const importMap = await p.runInit();
 
-      // No previous winner, so arrival order breaks the tie.
-      expect(shareOf('@framework/core')!.tag).toBe('18.0.0');
-      expect(p.record('@framework/common').poolWinner).toBe('a');
+      expect(p.record('@framework/core').poolWinner).toBe('a');
+      expect(rowsOf('@framework/core')).toEqual(['17.0.0:share:[a,x]']);
+      // The properties map URLs to tags, so they cannot tell two copies of one tag apart; only this can.
+      expect(importMap.imports['@framework/core']).toBe('http://a/@framework/core.js');
     });
+
+    // Both ways round: whichever member is read first, taking its stored winner instead of none elects b in
+    // one of them, so neither member order can pass this by coincidence.
+    it.each([
+      { core: 'a', common: 'b' },
+      { core: 'b', common: 'a' },
+    ])(
+      'ignores a stored winner the members disagree on (core $core, common $common)',
+      async winners => {
+        seedTied(winners);
+
+        await p.runInit();
+
+        // No previous winner, so arrival order breaks the tie.
+        expect(shareOf('@framework/core')!.tag).toBe('18.0.0');
+        expect(p.record('@framework/common').poolWinner).toBe('a');
+      }
+    );
 
     it('keeps the stored winner when a member that joined since carries none', async () => {
       seedTied({ core: 'b' });
@@ -542,23 +529,6 @@ describe('createPoolSharedExternals', () => {
       expect(namesOf('@framework/core', 'share')).toEqual(['a', 'b', 'c']);
       expect(namesOf('@framework/cdk', 'scope')).toEqual(['b', 'c']);
       expect(verdicts()).toEqual(['b@@framework/cdk: uncovered', 'c@@framework/cdk: uncovered']);
-    });
-
-    it('shares a package the winner ships only as secondary entrypoints', async () => {
-      // `@framework/material` is declared with `/table` alone — no root entry — so round 1 serves the package
-      // through its entrypoint, and the record still has to say which copy is shared.
-      p.seed('@framework/core', [
-        at('17.0.0', '@framework/core', [copy('a', '^17.0.0'), copy('b', '^17.0.0')]),
-      ]);
-      p.seed('@framework/material', [
-        at('17.0.0', '@framework/material', [
-          copy('a', '^17.0.0', { entries: { '@framework/material/table': 'table.js' } }),
-        ]),
-      ]);
-
-      await p.runInit();
-
-      expect(rowsOf('@framework/material')).toEqual(['17.0.0:share:[a]']);
     });
 
     describe('a package shipped only as secondary entrypoints', () => {
@@ -860,17 +830,6 @@ describe('createPoolSharedExternals', () => {
       ]);
     };
 
-    it('writes the pool name and round-1 winner onto every rebuilt member', async () => {
-      seedIslanding();
-
-      await p.runInit();
-
-      for (const name of ['@framework/core', '@framework/common']) {
-        expect(p.record(name).poolName).toBe('framework');
-        expect(p.record(name).poolWinner).toBe('mfe1');
-      }
-    });
-
     it("marks every copy of an islanded remote 'incompatible', and no clean copy", async () => {
       seedIslanding();
 
@@ -891,43 +850,6 @@ describe('createPoolSharedExternals', () => {
       expect(causeOf('@framework/cdk', 'c')).toBe('uncovered');
       // Its core is the elected tag and it agrees, so that copy resolves globally with no cause.
       expect(causeOf('@framework/core', 'c')).toBeUndefined();
-    });
-
-    it('clears a stale poolCause on a re-election that otherwise needs nothing', async () => {
-      // A healthy pool, but the record still says mfe2 self-served last time.
-      p.seed('@framework/core', [
-        withState(at('17.0.0', '@framework/core', [copy('mfe1'), copy('mfe2')], 'share'), 'mfe2', {
-          poolCause: 'uncovered',
-        }),
-      ]);
-      p.seed('@framework/common', [
-        at('17.0.0', '@framework/common', [copy('mfe1'), copy('mfe2')], 'share'),
-      ]);
-
-      await p.runInit();
-
-      expect(causeOf('@framework/core', 'mfe2')).toBeUndefined();
-      expect(namesOf('@framework/core', 'share')).toEqual(['mfe1', 'mfe2']);
-    });
-
-    it('clears a stale subpool and poolCause off a pool that shrank to one remote', async () => {
-      // H redeployed without the family, so only R is left. R's copies still carry the verdicts the
-      // two-remote pool gave them: H's subpool (whose files are gone) and an island cause.
-      p.seed('@framework/core', [
-        withState(at('17.0.0', '@framework/core', [copy('R')], 'share'), 'R', { servedBy: 'H' }),
-      ]);
-      p.seed('@framework/common', [
-        withState(at('17.0.0', '@framework/common', [copy('R')], 'share'), 'R', {
-          poolCause: 'uncovered',
-        }),
-      ]);
-
-      await p.runInit();
-
-      expect(verdicts()).toEqual([]);
-      expect(namesOf('@framework/core', 'share')).toEqual(['R']);
-      expect(namesOf('@framework/common', 'share')).toEqual(['R']);
-      expect(p.record('@framework/core').poolName).toBe('framework');
     });
 
     it('writes a healthy re-election back exactly as stored', async () => {

@@ -50,7 +50,20 @@ const angularOrigins = (loaded: Loaded) =>
   );
 
 test.describe('capture: the captured seven', () => {
-  test('serves the whole Angular family from one major, on two patch tags', async ({ nf }) => {
+  test('islands exactly one remote, on a real range violation', async ({ nf }) => {
+    await run(nf, CAPTURED_SEVEN);
+
+    // The cross-major remote cannot use the shared 22 build, so it serves its own 21.2.18 family.
+    // Nothing else islands: several remotes legitimately draw from two or three builds that agree at
+    // minor granularity, and those are left alone. Nothing is `uncovered` either: every other remote
+    // is witnessed.
+    expect(await nf.islands()).toEqual(['team/mfe1 incompatible']);
+  });
+
+  test('gives every remote a runnable, single-line Angular family', async ({ nf }) => {
+    // The end of the contract: each remote's exposed module statically imports all 6–37 entrypoints its
+    // remoteEntry declares, so this loading at all means every declared external resolved. What it then
+    // holds is one Angular minor line per remote — 22.0 for the six modern remotes, 21.2 for the island.
     await run(nf, CAPTURED_SEVEN);
 
     // Six of the seven remotes run Angular 22; one runs 21.2.18 and is the only one islanded. What
@@ -75,23 +88,6 @@ test.describe('capture: the captured seven', () => {
       '@angular/material': '22.0.6',
     });
     expect(await nf.tears()).toEqual([]);
-  });
-
-  test('islands exactly one remote, on a real range violation', async ({ nf }) => {
-    await run(nf, CAPTURED_SEVEN);
-
-    // The cross-major remote cannot use the shared 22 build, so it serves its own 21.2.18 family.
-    // Nothing else islands: several remotes legitimately draw from two or three builds that agree at
-    // minor granularity, and those are left alone. Nothing is `uncovered` either: every other remote
-    // is witnessed.
-    expect(await nf.islands()).toEqual(['team/mfe1 incompatible']);
-  });
-
-  test('gives every remote a runnable, single-line Angular family', async ({ nf }) => {
-    // The end of the contract: each remote's exposed module statically imports all 6–37 entrypoints its
-    // remoteEntry declares, so this loading at all means every declared external resolved. What it then
-    // holds is one Angular minor line per remote — 22.0 for the six modern remotes, 21.2 for the island.
-    await run(nf, CAPTURED_SEVEN);
 
     const loaded = await nf.loadAll();
     expect(angularLinesPerRemote(loaded)).toEqual({

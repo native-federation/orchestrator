@@ -73,6 +73,32 @@ describe('pooling contains a failure to the pool it happened in', () => {
     );
   });
 
+  it("keeps the host's build global when its pool cannot be judged (init)", async () => {
+    const p = portfolio(
+      { 'team/a': 'http://a/', 'team/b': 'http://b/', 'team/h': 'http://h/' },
+      { hosts: ['team/h'], storage: 'nf-pool-containment-host' }
+    );
+    breakRange(p);
+    for (const name of ['@broken/core', '@broken/common'])
+      p.seed(name, [
+        // team/a arrives first (the record lists the newest tag first): only the host rule keeps team/h.
+        p.version('17.0.0', name, [
+          { remote: 'team/a', req: BROKEN },
+          { remote: 'team/b', req: BROKEN },
+        ]),
+        p.version('16.0.0', name, [{ remote: 'team/h', req: BROKEN, host: true }]),
+      ]);
+
+    await p.runInit();
+
+    // The host cannot be repointed, so its build is the one placement that stays global.
+    expect(rows(p, '@broken/core')).toEqual([
+      ['17.0.0:scope', ['team/a(uncovered)', 'team/b(uncovered)']],
+      ['16.0.0:share', ['team/h']],
+    ]);
+    expect(p.record('@broken/core').versions.find(v => v.action === 'share')!.host).toBe(true);
+  });
+
   it('lets the joiner serve its own family when its pool cannot be judged (dynamic)', async () => {
     const p = portfolio({}, { storage: 'nf-pool-containment-dynamic', realRepositories: true });
     const NAMES = ['@ok/core', '@ok/common', '@broken/core', '@broken/common'];

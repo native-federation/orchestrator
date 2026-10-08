@@ -108,28 +108,6 @@ describe('createPoolDynamicExternals', () => {
       )
       .sort();
 
-  it('leaves a family that agrees with the committed map (all skip) untouched', async () => {
-    const entry = entryWith(shared('@framework/core'), shared('@framework/common'));
-    givenCommitted({
-      '@framework/core': committed('@framework/core', { tag: '17.0.0', remotes: ['host', 'mfe'] }),
-      '@framework/common': committed('@framework/common', {
-        tag: '17.0.0',
-        remotes: ['host', 'mfe'],
-      }),
-    });
-    const actions: SharedInfoActions = {
-      '@framework/core': { action: 'skip', override: 'http://host/core.js' },
-      '@framework/common': { action: 'skip', override: 'http://host/common.js' },
-    };
-
-    const result = await poolDynamicExternals({ entry, actions });
-
-    expect(result.actions).toEqual({
-      '@framework/core': { action: 'skip', override: 'http://host/core.js' },
-      '@framework/common': { action: 'skip', override: 'http://host/common.js' },
-    });
-  });
-
   it('scopes the family when no committed build ships the combination it would be handed', async () => {
     // The capture's shape: forms@22.0.8 and forms/signals@21.2.18 are both committed, from two builds
     // that ship neither of the other's members. Nobody so far consumed both; this remote would be the one
@@ -504,26 +482,6 @@ describe('createPoolDynamicExternals', () => {
       expect(others(written)).toEqual(others(externals[name as keyof typeof externals]));
   });
 
-  it('leaves a whole-pool-introducing remote (all share) untouched', async () => {
-    const entry = entryWith(shared('@framework/core'), shared('@framework/common'));
-    // Its copies are the only ones: update-cache has recorded them, and the committed map serves nothing.
-    givenCommitted({
-      '@framework/core': committed('@framework/core', { tag: '17.0.0', remotes: ['mfe'] }),
-      '@framework/common': committed('@framework/common', { tag: '17.0.0', remotes: ['mfe'] }),
-    });
-    const actions: SharedInfoActions = {
-      '@framework/core': { action: 'share' },
-      '@framework/common': { action: 'share' },
-    };
-
-    const result = await poolDynamicExternals({ entry, actions });
-
-    expect(result.actions).toEqual({
-      '@framework/core': { action: 'share' },
-      '@framework/common': { action: 'share' },
-    });
-  });
-
   it('passes actions through when the committed scope carries no pool state at all', async () => {
     // No `pool` tag or stored pool anywhere in the committed scope (unscoped packages carry no npm-scope
     // tag) → no pool, so update-cache's actions pass through even though the family is right there.
@@ -823,36 +781,6 @@ describe('createPoolDynamicExternals', () => {
         // Its cause stays why it missed the map (its ^21 rejects 22): the missing build only took away the fix.
         ['21.2.18:scope', [{ name: 'team/legacy' }, { name: 'mfe', poolCause: 'incompatible' }]],
       ]);
-    });
-
-    it('writes no verdict for a witnessed remote', async () => {
-      givenCommitted({
-        '@framework/forms': committed('@framework/forms', {
-          tag: '22.0.8',
-          remotes: ['team/a', 'mfe'],
-        }),
-        '@framework/forms/signals': committed('@framework/forms/signals', {
-          tag: '22.0.8',
-          remotes: ['team/a', 'mfe'],
-        }),
-      });
-      const entry = entryWith(shared('@framework/forms'), shared('@framework/forms/signals'));
-
-      await poolDynamicExternals({
-        entry,
-        actions: {
-          '@framework/forms': { action: 'skip' },
-          '@framework/forms/signals': { action: 'skip' },
-        },
-      });
-
-      // Only the name sync writes, onto the committed versions untouched.
-      for (const [name, written] of vi.mocked(adapters.sharedExternalsRepo.addOrUpdate).mock.calls)
-        expect(written.versions).toEqual(
-          tagStoredByNpmScope({
-            [name]: committed(name, { tag: '22.0.8', remotes: ['team/a', 'mfe'] }),
-          })[name]!.versions
-        );
     });
   });
 

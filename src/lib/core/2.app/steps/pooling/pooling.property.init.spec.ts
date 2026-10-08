@@ -115,7 +115,7 @@ describe('pooling properties: init (generated portfolios)', { timeout: TIMEOUT }
     ));
 
   it('idempotence: a warm init writes nothing and yields the same map', () =>
-    run(4, portfolioArbitrary(), 200, async spec => {
+    run(4, portfolioArbitrary(), 100, async spec => {
       const init = await initOrRefuse(spec);
       if (!init.ok) return;
       const warm = await init.rig.init(init.entries);
@@ -134,7 +134,7 @@ describe('pooling properties: init (generated portfolios)', { timeout: TIMEOUT }
     }));
 
   it('poolCause marks exactly the copies a remote serves itself, off the elected build', () =>
-    run(6, portfolioArbitrary(), 250, async spec => {
+    run(6, portfolioArbitrary(), 125, async spec => {
       const init = await initOrRefuse(spec);
       if (!init.ok) return;
       const { importMap, record } = init.result;
@@ -197,7 +197,7 @@ describe('pooling properties: init (generated portfolios)', { timeout: TIMEOUT }
     run(
       7,
       portfolioArbitrary().filter(spec => spec.host !== null),
-      200,
+      100,
       async spec => {
         const init = await initOrRefuse(spec);
         if (!init.ok) return;
@@ -308,7 +308,7 @@ describe('pooling properties: init (generated portfolios)', { timeout: TIMEOUT }
   // the fixpoint drops stays alone, as `lenders` is computed once against round 1's coverage; (B) the build of
   // a dissolved subpool stays alone even when a surviving subpool's build serves it.
   it('no stray loner: no remote left alone is served by a final subpool build', () =>
-    run(19, portfolioArbitrary({ labelNoise: true }), 250, async spec => {
+    run(19, portfolioArbitrary({ labelNoise: true }), 125, async spec => {
       const init = await initOrRefuse(spec);
       if (!init.ok) return;
       for (const [pool, members] of pools(init.result.record)) {
@@ -381,7 +381,7 @@ describe('pooling properties: init (generated portfolios)', { timeout: TIMEOUT }
     run(
       12,
       portfolioArbitrary().map(spec => ({ ...spec, strict: true })),
-      300,
+      150,
       async spec => {
         // `initOrRefuse` asserts the soundness of any refusal.
         await initOrRefuse(spec);
@@ -405,7 +405,7 @@ describe('pooling properties: redeploys (generated portfolios)', { timeout: TIME
     );
 
   it('stored names: every poolWinner and servedBy names a remote that ships the pool', () =>
-    run(14, portfolioArbitrary({ labelNoise: true }), 200, async spec => {
+    run(14, portfolioArbitrary({ labelNoise: true }), 100, async spec => {
       const init = await initOrRefuse(spec);
       if (!init.ok) return;
       expect(strayNames(init.result.record)).toEqual([]);

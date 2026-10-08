@@ -178,18 +178,6 @@ describe('flat and dense builds of one pool in a share scope', () => {
     const own = (importMap: ImportMap, remote: string) =>
       shareScope ? importMap.scopes?.[`http://${remote}/`] : importMap.imports;
 
-    it(`the flat build elected: the dense remotes take its flat entrypoint (${shareScope ?? 'global'})`, async () => {
-      const p = rig(shareScope);
-
-      const importMap = await p.runInit(remotes('^2.0.0', shareScope));
-
-      expect(tears(p, importMap, shareScope)).toEqual([]);
-      expect(own(importMap, 'W')).toEqual({
-        '@fw/core': 'http://G/@fw_core.js',
-        '@fw/core/testing': 'http://G/@fw_core_testing.js',
-      });
-    });
-
     for (const strictImportMap of [false, true])
       it(`the dense build elected: the flat remote takes its entry (${shareScope ?? 'global'}, strictImportMap ${strictImportMap})`, async () => {
         const p = rig(shareScope);

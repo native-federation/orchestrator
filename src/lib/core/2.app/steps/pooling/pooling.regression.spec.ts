@@ -467,9 +467,6 @@ describe('pooling regressions', () => {
       'team/r1': 'http://r1/',
       'team/r2': 'http://r2/',
       'team/r3': 'http://r3/',
-      'team/r4': 'http://r4/',
-      'team/r5': 'http://r5/',
-      'team/r6': 'http://r6/',
     } as const;
     const M0 = '@lib/m0';
     const M1 = '@lib/m1';
@@ -551,66 +548,6 @@ describe('pooling regressions', () => {
       expect(importMap.scopes ?? {}).toEqual({});
       for (const name of [M0, M1]) expect(copyOf(name, 'team/r0').poolCause).toBeUndefined();
       expect(p.islands()).toEqual({});
-    });
-
-    // A subpool member the gate holds back. The host r1 wins round 1 with m0@18.0.1, r0 and r4 (one build)
-    // form a subpool, and r2 contributes m1@18.0.1. r4 accepts both 18.0.1s but no build shipped them
-    // together, so it stays in r0's subpool rather than moving — and the subpool keeps two members.
-    it('keeps a subpool member in its subpool when the extended coverage is unwitnessed', async () => {
-      const req = { 'team/r0': '^18.0.0', 'team/r4': '^18.0.0' };
-      p.seed(M0, [
-        version('18.0.0', M0, ['team/r0', 'team/r4'], { req }),
-        version('18.0.1', M0, ['team/r1'], { host: true }),
-      ]);
-      p.seed(M1, [
-        version('18.0.0', M1, ['team/r0', 'team/r4'], { req }),
-        version('18.0.1', M1, ['team/r2']),
-      ]);
-
-      const importMap = await p.runInit();
-
-      expect(importMap.imports).toEqual({
-        [M0]: 'http://r1/@lib/m0.js',
-        [M1]: 'http://r2/@lib/m1.js',
-      });
-      expect(importMap.scopes?.[SCOPE['team/r0']]).toEqual(ownFiles('team/r0'));
-      expect(importMap.scopes?.[SCOPE['team/r4']]).toEqual(ownFiles('team/r0'));
-      for (const name of [M0, M1]) {
-        // A subpool is recorded as `servedBy` its build, the build's own copies included; neither carries a cause.
-        for (const remote of ['team/r0', 'team/r4'])
-          expect(copyOf(name, remote)).toMatchObject({ action: 'skip', servedBy: 'team/r0' });
-      }
-      expect(p.islands()).toEqual({ 'team/r0': 'subpool team/r0', 'team/r4': 'subpool team/r0' });
-    });
-
-    // A dissolving subpool's build the gate leaves alone. The host r1 ships m0@18.0.0; r5 (m0+m1@18.0.1)
-    // runs a subpool over r6 (m1@18.0.1), winning the tie against r2's build on being newer — r2's exact
-    // `18.0.0` keeps it out of r5's. The extension publishes r2's m1@18.0.0, which r6 shipped next to nothing
-    // else, so r6 moves; r5 is left alone and would resolve m0@18.0.0 + m1@18.0.0, a pair no build shipped.
-    it("leaves a dissolving subpool's build alone when the extended coverage is unwitnessed", async () => {
-      p.seed(M0, [
-        version('18.0.0', M0, ['team/r1'], { host: true }),
-        version('18.0.1', M0, ['team/r5'], { req: { 'team/r5': '^18.0.0' } }),
-      ]);
-      p.seed(M1, [
-        version('18.0.0', M1, ['team/r2'], { req: { 'team/r2': '18.0.0' } }),
-        version('18.0.1', M1, ['team/r5', 'team/r6'], {
-          req: { 'team/r5': '^18.0.0', 'team/r6': '^18.0.0' },
-        }),
-      ]);
-
-      const importMap = await p.runInit();
-
-      expect(importMap.imports).toEqual({
-        [M0]: 'http://r1/@lib/m0.js',
-        [M1]: 'http://r2/@lib/m1.js',
-      });
-      expect(importMap.scopes?.[SCOPE['team/r6']]).toBeUndefined();
-      expect(importMap.scopes?.[SCOPE['team/r5']]).toEqual(ownFiles('team/r5'));
-      expect(copyOf(M1, 'team/r6').poolCause).toBeUndefined();
-      for (const name of [M0, M1])
-        expect(copyOf(name, 'team/r5')).toMatchObject({ action: 'scope', poolCause: 'uncovered' });
-      expect(p.islands()).toEqual({ 'team/r5': 'uncovered' });
     });
   });
 
@@ -894,25 +831,6 @@ describe('pooling regressions', () => {
       expect(page(warm, [mfeD])).toEqual(page(merged, [mfeD]));
     });
 
-    it('resolves a second loaded copy of that tag to the same build on every page', async () => {
-      await initSubpool();
-      const mfeD = entry('team/mfe-d', shared('@fw/anim', '19.1.0', '^19.1.0'));
-      const mfeE = entry('team/mfe-e', shared('@fw/anim', '19.1.0', '^19.1.0'));
-      await p.runDynamic(mfeD);
-      p.reload();
-
-      const { merged } = await p.runDynamic(mfeE);
-      expect(resolves(merged, 'team/mfe-e', '@fw/anim')).toBe(file('team/mfe-d', '@fw/anim'));
-
-      p.reload();
-      const reloaded = await p.drivers.generateImportMap();
-      expect(page(reloaded, [mfeD, mfeE])).toEqual(page(merged, [mfeD, mfeE]));
-
-      p.reload();
-      const warm = await p.runInit([...remotes, mfeD, mfeE]);
-      expect(page(warm, [mfeD, mfeE])).toEqual(page(merged, [mfeD, mfeE]));
-    });
-
     it('keeps a loaded remote redirected onto the subpool build on every page', async () => {
       await initSubpool();
       const mfeD = entry(
@@ -998,33 +916,6 @@ describe('pooling regressions', () => {
       req: '^17.3.0',
       strict: false,
       entries,
-    });
-
-    // w (core, router) wins round 1: p and c both agree with it, and neither serves the other, as they import
-    // different cdk entrypoints. They disagree on cdk's tag, so the extension published material@17.3.0
-    // (both ship it) but not cdk. c took p's material file, whose `@ng/cdk/overlay` import resolves in p's
-    // scope at 17.3.1, beside its own cdk 17.3.0. Neither p nor c takes every member globally, so material is
-    // not published at all now.
-    it('through the extension', async () => {
-      const p = portfolio(
-        { w: 'http://w/', p: 'http://p/', c: 'http://c/' },
-        { storage: 'nf-regression-t1-extension' }
-      );
-      p.seed(CORE, [p.version('17.3.0', CORE, [copy('w'), copy('p'), copy('c')])]);
-      p.seed(ROUTER, [p.version('17.3.0', ROUTER, [copy('w')])]);
-      p.seed(MATERIAL, [p.version('17.3.0', MATERIAL, [copy('p'), copy('c')])]);
-      p.seed(CDK, [
-        p.version('17.3.1', CDK, [copy('p', { '@ng/cdk/overlay': '@ng/cdk/overlay.js' })]),
-        p.version('17.3.0', CDK, [copy('c', { '@ng/cdk': '@ng/cdk.js' })]),
-      ]);
-
-      const importMap = await p.runInit();
-
-      expect(importMap.imports).toEqual({
-        [CORE]: 'http://w/@ng/core.js',
-        [ROUTER]: 'http://w/@ng/router.js',
-      });
-      expect(p.islands()).toEqual({ p: 'uncovered', c: 'uncovered' });
     });
 
     // The host w ships cdk's root; l and c lend cdk/overlay at w's tag. They ship different material

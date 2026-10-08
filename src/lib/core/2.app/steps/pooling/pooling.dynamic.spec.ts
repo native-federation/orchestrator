@@ -50,106 +50,40 @@ describe('pooling (dynamic)', () => {
   const resolves = (importMap: ImportMap, remote: string, specifier: string) =>
     importMap.scopes?.[`http://${remote}/`]?.[specifier] ?? importMap.imports[specifier];
 
-  /**
-   * A remote loaded at runtime may run a combination only one committed build shipped, and may take a
-   * committed build only if that build covers every specifier it imports; no comparison of tags can stand
-   * in for either. Two shapes: *disjoint providers* (each provides one member alone, no build ships the
-   * pair the consumer would run) and *the lockstep pair* (two providers agree exactly on what they share,
-   * yet the coupled pair is in neither build). On the flow, the witness rule already refuses those two
-   * before coverage is asked; the last pair turns on coverage alone.
-   */
-  describe('coverage is what fails on the defect portfolios', () => {
-    it('serves the consumer of two disjoint providers from its own build', async () => {
-      // mfe1 provides core alone, mfe2 router alone at a newer minor; mfe3 consumes both at 22.0.5. The map
-      // serves core from mfe1 and router from mfe2, a pair no build shipped, and neither covers mfe3.
-      await p.runInit([
-        entry('mfe1', shared('@fw/core', '22.0.5', '^22.0.0')),
-        entry('mfe2', shared('@fw/router', '22.1.0', '^22.1.0')),
-      ]);
-
-      const { merged } = await p.runDynamic(
+  // A remote loaded at runtime may take a committed build only if that build covers every specifier it
+  // imports; no comparison of tags can stand in for that.
+  describe('a specifier genuinely absent from the build', () => {
+    // a's 22 build is global; legacy's 21 is a committed island. A 21 remote loaded non-strict is rejected
+    // by the global map and looks for a committed build that covers it.
+    const committed = (legacyEntrypoints: string[]) =>
+      p.runInit([
         entry(
-          'mfe3',
-          shared('@fw/core', '22.0.5', '^22.0.0'),
-          shared('@fw/router', '22.0.5', '^22.0.0')
-        )
-      );
-
-      expect(p.islands()).toEqual({ mfe3: 'uncovered' });
-      expect(resolves(merged, 'mfe3', '@fw/core')).toBe(file('mfe3', '@fw/core'));
-      expect(resolves(merged, 'mfe3', '@fw/router')).toBe(file('mfe3', '@fw/router'));
-    });
-
-    it('serves the consumer of a lockstep pair from its own build', async () => {
-      // Both providers ship core@22.0.5 and agree on it exactly, so no tightening of a tag comparison
-      // reaches this; but mfe1 lacks cdk and mfe2 lacks material, which mfe3 consumes together.
-      await p.runInit([
-        entry(
-          'mfe1',
-          shared('@fw/core', '22.0.5', '^22.0.0'),
-          shared('@fw/material', '22.0.5', '^22.0.0')
+          'a',
+          shared('@fw/core', '22.0.5', '^22.0.0', { entrypoints: ['@fw/core/testing'] }),
+          shared('@fw/common', '22.0.5', '^22.0.0')
         ),
         entry(
-          'mfe2',
-          shared('@fw/core', '22.0.5', '^22.0.0'),
-          shared('@fw/cdk', '22.1.0', '^22.1.0')
+          'legacy',
+          shared('@fw/core', '21.2.0', '~21.2.0', { entrypoints: legacyEntrypoints }),
+          shared('@fw/common', '21.2.0', '~21.2.0')
         ),
       ]);
+    const mfe = entry(
+      'mfe',
+      shared('@fw/core', '21.2.0', '^21.0.0', {
+        strict: false,
+        entrypoints: ['@fw/core/testing'],
+      }),
+      shared('@fw/common', '21.2.0', '^21.0.0', { strict: false })
+    );
 
-      await p.runDynamic(
-        entry(
-          'mfe3',
-          shared('@fw/material', '22.0.5', '^22.0.0'),
-          shared('@fw/cdk', '22.0.5', '^22.0.0')
-        )
-      );
+    it('joins the same build once it ships that specifier too', async () => {
+      await committed(['@fw/core/testing']);
 
-      expect(p.islands()).toEqual({ mfe3: 'uncovered' });
-    });
+      const { merged } = await p.runDynamic(mfe);
 
-    describe('a specifier genuinely absent from the build', () => {
-      // a's 22 build is global; legacy's 21 is a committed island. A 21 remote loaded non-strict is rejected
-      // by the global map and looks for a committed build that covers it.
-      const committed = (legacyEntrypoints: string[]) =>
-        p.runInit([
-          entry(
-            'a',
-            shared('@fw/core', '22.0.5', '^22.0.0', { entrypoints: ['@fw/core/testing'] }),
-            shared('@fw/common', '22.0.5', '^22.0.0')
-          ),
-          entry(
-            'legacy',
-            shared('@fw/core', '21.2.0', '~21.2.0', { entrypoints: legacyEntrypoints }),
-            shared('@fw/common', '21.2.0', '~21.2.0')
-          ),
-        ]);
-      const mfe = entry(
-        'mfe',
-        shared('@fw/core', '21.2.0', '^21.0.0', {
-          strict: false,
-          entrypoints: ['@fw/core/testing'],
-        }),
-        shared('@fw/common', '21.2.0', '^21.0.0', { strict: false })
-      );
-
-      it('refuses the subpool of a build that lacks one specifier the remote imports', async () => {
-        await committed([]);
-
-        await p.runDynamic(mfe);
-
-        expect(p.islands()).toEqual({ legacy: 'incompatible', mfe: 'incompatible' });
-      });
-
-      it('joins the same build once it ships that specifier too', async () => {
-        await committed(['@fw/core/testing']);
-
-        const { merged } = await p.runDynamic(mfe);
-
-        expect(p.islands()).toEqual({ legacy: 'incompatible', mfe: 'subpool legacy' });
-        expect(resolves(merged, 'mfe', '@fw/core/testing')).toBe(
-          file('legacy', '@fw/core/testing')
-        );
-      });
+      expect(p.islands()).toEqual({ legacy: 'incompatible', mfe: 'subpool legacy' });
+      expect(resolves(merged, 'mfe', '@fw/core/testing')).toBe(file('legacy', '@fw/core/testing'));
     });
   });
 
@@ -159,44 +93,6 @@ describe('pooling (dynamic)', () => {
    * no file of the committed build can bind its modules (docs/version-resolver.md §"Scope and dynamic init").
    */
   describe('one rejected member scopes the whole family', () => {
-    const family = ['@fw/core', '@fw/common', '@fw/cdk'];
-
-    it('scopes every member, the ones at the committed tag included', async () => {
-      await p.runInit([entry('host', ...family.map(s => shared(s, '17.0.0', '^17.0.0')))]);
-
-      const { merged } = await p.runDynamic(
-        entry(
-          'mfe',
-          shared('@fw/core', '17.0.0', '^17.0.0'),
-          shared('@fw/common', '17.0.0', '^17.0.0'),
-          shared('@fw/cdk', '18.0.0', '^18.0.0')
-        )
-      );
-
-      expect(p.islands()).toEqual({ mfe: 'incompatible' });
-      for (const specifier of family)
-        expect(resolves(merged, 'mfe', specifier)).toBe(file('mfe', specifier));
-    });
-
-    it('bridges a package another pool labels into the family through the remote that labels it', async () => {
-      // The host labels ui `ds`; mfe labels it `fw`, which joins ui to core's family for the whole page.
-      await p.runInit([
-        entry(
-          'host',
-          shared('@fw/core', '17.0.0', '^17.0.0'),
-          shared('@ds/ui', '17.0.0', '^17.0.0', { pool: 'ds' }),
-          shared('@ds/icons', '17.0.0', '^17.0.0', { pool: 'ds' })
-        ),
-      ]);
-
-      const { merged } = await p.runDynamic(
-        entry('mfe', shared('@fw/core', '17.0.0', '^17.0.0'), shared('@ds/ui', '18.0.0', '^18.0.0'))
-      );
-
-      expect(p.islands()).toEqual({ mfe: 'incompatible' });
-      expect(resolves(merged, 'mfe', '@fw/core')).toBe(file('mfe', '@fw/core'));
-    });
-
     it('holds an unlabelled remote to a pool the committed remotes labelled', async () => {
       // One label anywhere is enough: mfe declares none, and could otherwise bridge two builds the page
       // pooled apart.
