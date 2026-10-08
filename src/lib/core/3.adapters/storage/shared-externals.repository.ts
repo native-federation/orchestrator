@@ -82,7 +82,18 @@ const createSharedExternalsRepository = (config: StorageConfig): ForSharedExtern
             if (external.versions.length === 0) removeExternals.push(name);
           }
         });
-        removeExternals.forEach(name => delete scope[name]);
+
+        const lostPools = new Set<string>();
+        for (const name of removeExternals) {
+          const poolName = scope[name]!.poolName;
+          if (poolName !== undefined) lostPools.add(poolName);
+          delete scope[name];
+        }
+        // A deleted external is not there to spread dirty to its pool's siblings at the next init.
+        if (lostPools.size > 0)
+          for (const external of Object.values(scope))
+            if (external.poolName !== undefined && lostPools.has(external.poolName))
+              external.dirty = true;
       });
     },
     scopeType: function (shareScope?: string) {

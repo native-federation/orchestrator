@@ -121,6 +121,51 @@ describe('pooling re-election', () => {
     expect(causes()).toEqual(['mfe3@@one/common: incompatible', 'mfe3@@one/core: incompatible']);
   });
 
+  // Dirty spreads over the stored pool names and the computed pools together, to a fixpoint. The pools
+  // as computed now: a = {s1, s3}, b = {s2, t1}, c = {t2, t3}; as stored: S = {s1, s2, s3} and
+  // T = {t1, t2, t3}. s2 is dirty: S drags in s1 and s3, b drags in t1, and only the next hop, T, reaches
+  // c, which holds the stale island. Defensive: no generated portfolio reaches a record where one hop
+  // differs from the closure (an init stores every name as computed), but the closure costs nothing and
+  // does not depend on every other path writing merged names right.
+  it('spreads dirty across stored and computed pools transitively', async () => {
+    const plain = (name: string, label: string, poolName: string, dirty: boolean) =>
+      p.seed(
+        name,
+        [p.version('1.0.0', name, [{ remote: 'mfe1', req: '^1.0.0', pool: label }], 'share')],
+        dirty,
+        { poolName, poolWinner: 'mfe1' }
+      );
+    plain('s1', 'a', 'S', false);
+    plain('s3', 'a', 'S', false);
+    plain('s2', 'b', 'S', true);
+    plain('t1', 'b', 'T', false);
+    // c as `seedStaleIsland` stores it: mfe3 runs t2 at 18 against the 17 majority, with no `poolCause`.
+    const c = (remote: string, req: string) => ({ remote, req, pool: 'c' });
+    const stored = { poolName: 'T', poolWinner: 'mfe1' };
+    p.seed(
+      't2',
+      [
+        p.version('17.0.0', 't2', [c('mfe1', '^17.0.0'), c('mfe2', '^17.0.0')], 'share'),
+        p.version('18.0.0', 't2', [c('mfe3', '^18.0.0')], 'scope'),
+      ],
+      false,
+      stored
+    );
+    p.seed(
+      't3',
+      [
+        p.version('17.0.0', 't3', [c('mfe1', '^17.0.0')], 'share'),
+        p.version('17.0.0', 't3', [c('mfe3', '^17.0.0')], 'scope'),
+      ],
+      false,
+      stored
+    );
+
+    await p.runInit();
+
+    expect(causes()).toEqual(['mfe3@t2: incompatible', 'mfe3@t3: incompatible']);
+  });
+
   it('renames a pool nobody changed, without re-electing it', async () => {
     seedStaleIsland('framework', { core: false, common: false }, 'old-name');
     // Something else in the scope changed, so this init does run pooling over the scope.
@@ -227,19 +272,17 @@ describe('pooling re-election', () => {
     });
 
     /**
-     * Redeploys that change a pool without dirtying the part that must be re-elected, so the warm page keeps
-     * a stale election a full re-election of the same state would not make. The oracle is that equivalence:
-     * warm after the redeploy ≡ every pool re-elected on the next page (`settled`). Each is `it.fails` until
-     * the fix lands:
-     * a dirty external spreads dirty to every external with the same STORED `poolName` (read off the raw
-     * record, before mark-pools clears it), and `removeFromAllScopes` marks the same-`poolName` siblings of
-     * an external it deletes dirty. Once a case passes, make it a plain `it`.
+     * Redeploys that change a pool without dirtying the part that must be re-elected, which a warm page used
+     * to keep as a stale election a full re-election of the same state would not make. The oracle is that
+     * equivalence: warm after the redeploy ≡ every pool re-elected on the next page (`settled`). They pass
+     * because a dirty external spreads dirty to every external with the same stored `poolName` (read before
+     * mark-pools clears it) and `removeFromAllScopes` marks the same-`poolName` survivors of an external it
+     * deletes dirty.
      *
-     * `it.fails` passes on any throw, so only the final assertion may throw: a crash, a tear the harness
-     * catches, or a re-election that is not the one described returns early instead, which turns the case
-     * red.
+     * The equivalence alone holds vacuously when nothing stores a `poolName` (`reelect()` then re-elects
+     * nothing), so each case also asserts the warm page directly.
      */
-    describe('known misses: the part of a pool a redeploy changes is not re-elected', () => {
+    describe('the part of a pool a redeploy changes is re-elected', () => {
       const sharedIn = (
         pool: string | null,
         packageName: string,
@@ -281,56 +324,54 @@ describe('pooling re-election', () => {
         };
       };
 
-      // Cold page of `before`, warm page of `after` over it, then a warm page that re-elects every pool of
+      // Cold page of `before` (plus any `loaded` at runtime), warm page of `after` over it, then a warm page that re-elects every pool of
       // that same state. Not a cold page of `after`: a cold page breaks ties by arrival where a warm one
       // keeps the stored winner, a difference that fix does not touch.
-      const warmAndReelected = async (before: RemoteEntry[], after: RemoteEntry[]) => {
+      const warmAndReelected = async (
+        before: RemoteEntry[],
+        after: RemoteEntry[],
+        loaded: RemoteEntry[] = []
+      ) => {
         const q = portfolio({}, { storage: 'nf-pooling-known-miss', realRepositories: true });
         await q.runInit(before);
+        for (const entry of loaded) await q.runDynamic(entry);
         q.reload();
         const warm = settled(q, await q.runInit(after));
         q.reload();
         return { warm, reelected: settled(q, await q.reelect()) };
       };
 
-      const attempt = <T>(scenario: Promise<T>) => scenario.catch(() => undefined);
-
       // N3. W, W2 and W3 ship `@x/core/testing` 2.0.0; R ships `@x/core` 1.0.0 with that entrypoint, which
       // makes them one pool `x`; S ships `@x/core/testing` 1.0.0 under a strict `~1.0.0`. R's build serves S
       // as a subpool. R redeploys shipping nothing: eviction deletes `@x/core`, the last external of the pool
-      // R shipped, and nothing dirty is left, so mark-pools and pooling skip the scope. S keeps `servedBy: R`
-      // from a remote that serves nothing and resolves the global 2.0.0 its strict range rejects; a
-      // re-election scopes S on its own 1.0.0. Today `runs['S|@x/core/testing']` is '2.0.0' warm, '1.0.0'
-      // re-elected.
-      it.fails(
-        're-elects the rest of a pool when eviction empties the scope of its last shipper',
-        async () => {
-          const W = (name: string) =>
-            remote(name, sharedIn('x', '@x/core/testing', '2.0.0', '^2.0.0'));
-          const R = remote(
-            'R',
-            sharedIn('x', '@x/core', '1.0.0', '~1.0.0', { entrypoints: ['@x/core/testing'] })
-          );
-          const S = remote('S', sharedIn('x', '@x/core/testing', '1.0.0', '~1.0.0'));
-          const pages = await attempt(
-            warmAndReelected(
-              [W('W'), W('W2'), W('W3'), R, S],
-              [W('W'), W('W2'), W('W3'), redeployed('R'), S]
-            )
-          );
-          if (pages?.reelected.runs['S|@x/core/testing'] !== '1.0.0') return;
+      // R shipped. Unless eviction marks `@x/core/testing` dirty, nothing dirty is left, mark-pools and
+      // pooling skip the scope, and S keeps `servedBy: R` from a remote that serves nothing, resolving the
+      // global 2.0.0 its strict range rejects; a re-election scopes S on its own 1.0.0.
+      it('re-elects the rest of a pool when eviction empties the scope of its last shipper', async () => {
+        const W = (name: string) =>
+          remote(name, sharedIn('x', '@x/core/testing', '2.0.0', '^2.0.0'));
+        const R = remote(
+          'R',
+          sharedIn('x', '@x/core', '1.0.0', '~1.0.0', { entrypoints: ['@x/core/testing'] })
+        );
+        const S = remote('S', sharedIn('x', '@x/core/testing', '1.0.0', '~1.0.0'));
+        const pages = await warmAndReelected(
+          [W('W'), W('W2'), W('W3'), R, S],
+          [W('W'), W('W2'), W('W3'), redeployed('R'), S]
+        );
 
-          expect(pages.warm).toEqual(pages.reelected);
-        }
-      );
+        expect(pages.reelected.runs['S|@x/core/testing']).toBe('1.0.0');
+        expect(pages.warm.runs['S|@x/core/testing']).toBe('1.0.0');
+        expect(pages.warm).toEqual(pages.reelected);
+      });
 
       // F3. a and b are labelled `x` by everyone; c is labelled `y` by W and Q, but R labels it `x`, which
       // joins all three into one pool, where Q's c 1.0.0 islands Q's whole family `incompatible`. R redeploys
       // labelling c `y`: the pool splits into {a, b} and a lone c, but only c (whose copies changed) is
-      // dirty. The untouched half keeps the merged election: Q's a and b stay in `scope` rows (a second
-      // download of the global 2.0.0, `incompatible`) where a re-election shares them. Trap for the fix:
-      // mark-pools clears `poolName` before pooling reads it.
-      it.fails('re-elects both halves when a label change splits a pool', async () => {
+      // dirty. Unless dirty spreads by stored name, the untouched half keeps the merged election: Q's a and b
+      // stay in `scope` rows (a second download of the global 2.0.0, `incompatible`) where a re-election
+      // shares them. The stored names must be read before mark-pools clears them.
+      it('re-elects both halves when a label change splits a pool', async () => {
         const W = remote(
           'W',
           sharedIn('x', 'a', '2.0.0', '^2.0.0'),
@@ -343,38 +384,81 @@ describe('pooling re-election', () => {
           sharedIn('x', 'b', '2.0.0', '^2.0.0'),
           sharedIn('y', 'c', '1.0.0', '~1.0.0')
         );
-        const pages = await attempt(
-          warmAndReelected(
-            [W, Q, remote('R', sharedIn('x', 'c', '2.0.0', '^2.0.0'))],
-            [W, Q, redeployed('R', sharedIn('y', 'c', '2.0.0', '^2.0.0'))]
-          )
+        const pages = await warmAndReelected(
+          [W, Q, remote('R', sharedIn('x', 'c', '2.0.0', '^2.0.0'))],
+          [W, Q, redeployed('R', sharedIn('y', 'c', '2.0.0', '^2.0.0'))]
         );
-        if (pages === undefined || 'Q' in pages.reelected.islands) return;
 
+        expect(pages.reelected.islands).not.toHaveProperty('Q');
+        expect(pages.warm.islands).not.toHaveProperty('Q');
+        expect(pages.warm.pools).toEqual({ a: 'x won by W', b: 'x won by W' });
         expect(pages.warm).toEqual(pages.reelected);
       });
 
       // P1. Per-remote labels: Y labels a and b `p`, X labels a `q`, and W, V, U label c1 and c2 `q`; X's
       // label joins everything into one pool `q`, won by Y. X redeploys without `a`: the pool splits into
-      // {a, b} (now `p`) and {c1, c2}, which keeps the name `q` and has no dirty member. Warm keeps `q`'s
-      // stale election: `poolWinner` Y, which ships no member of `q`, U's 18 as a subpool for V, and W
-      // `uncovered`. A re-election elects V's 18 for `q` (global) and islands W as `incompatible`.
-      it.fails('re-elects the half of a split pool that keeps its name', async () => {
+      // {a, b} (now `p`) and {c1, c2}, which keeps the name `q` and has no dirty member. Unless dirty spreads
+      // by stored name, warm keeps `q`'s stale election: `poolWinner` Y, which ships no member of `q`, U's
+      // 18 as a subpool for V, and W `uncovered`. A re-election elects V's 18 for `q` (global) and islands W
+      // as `incompatible`.
+      it('re-elects the half of a split pool that keeps its name', async () => {
         const lenient = (pool: string | null, name: string, version: string) =>
           sharedIn(pool, name, version, `^${version}`, { strict: false });
         const Y = remote('Y', lenient('p', 'a', '17.0.0'), lenient('p', 'b', '17.0.0'));
         const W = remote('W', lenient('q', 'c1', '17.0.0'), lenient('q', 'c2', '17.0.0'));
         const V = remote('V', lenient('q', 'c1', '18.0.0'), lenient('q', 'c2', '18.0.0'));
         const U = remote('U', lenient('q', 'c1', '18.0.0'), lenient('q', 'c2', '18.0.0'));
-        const pages = await attempt(
-          warmAndReelected(
-            [Y, remote('X', lenient('q', 'a', '17.0.0')), W, V, U],
-            [Y, redeployed('X', lenient(null, 'zzz', '1.0.0')), W, V, U]
-          )
+        const pages = await warmAndReelected(
+          [Y, remote('X', lenient('q', 'a', '17.0.0')), W, V, U],
+          [Y, redeployed('X', lenient(null, 'zzz', '1.0.0')), W, V, U]
         );
-        if (pages?.reelected.pools['c1'] !== 'q won by V') return;
 
+        expect(pages.reelected.pools['c1']).toBe('q won by V');
+        expect(pages.warm.pools['c1']).toBe('q won by V');
         expect(pages.warm).toEqual(pages.reelected);
+      });
+
+      // A dynamic load merges a new pool into a committed one, and a later redeploy splits them again. R
+      // labels p and q `x`; W and W2 label q `x`. D loads at runtime shipping `p/sub` and `r`, both labelled
+      // `y`: `p/sub` joins p through the entrypoint edge, so `x` and `y` merge (`x` is the most declared),
+      // and no committed build ships `p/sub`, so D serves its own family `uncovered`. R redeploys without
+      // p: eviction deletes p, which cuts {p/sub, r} loose as `y` with no dirty member. Warm keeps D's
+      // `uncovered` and elects no winner for `y`; a re-election elects `y` won by D, no island.
+      it('re-elects a pool a dynamic load merged in once the redeploy splits it off', async () => {
+        const R = remote(
+          'R',
+          sharedIn('x', 'p', '2.0.0', '^2.0.0'),
+          sharedIn('x', 'q', '2.0.0', '^2.0.0')
+        );
+        const W = (name: string) => remote(name, sharedIn('x', 'q', '2.0.0', '^2.0.0'));
+        const D = remote(
+          'D',
+          sharedIn('y', 'p/sub', '1.0.0', '~1.0.0'),
+          sharedIn('y', 'r', '1.0.0', '~1.0.0')
+        );
+        const R2 = redeployed('R', sharedIn('x', 'q', '2.0.0', '^2.0.0'));
+
+        const pages = await warmAndReelected([R, W('W'), W('W2')], [R2, W('W'), W('W2'), D], [D]);
+
+        expect(pages.reelected.pools['r']).toBe('y won by D');
+        expect(pages.warm.pools['r']).toBe('y won by D');
+        expect(pages.warm.islands).toEqual({});
+        expect(pages.warm).toEqual(pages.reelected);
+      });
+
+      // The eviction half on the dynamic path: an `'always'` override of a cached remote evicts its old
+      // copies before the next init. R alone ships p, labelled `x` like W's q; R's new build ships neither,
+      // so p is deleted and q, which lost no copy, is the only trace left of pool `x`.
+      it('marks the survivors of a pool a dynamic override deletes a member of dirty', async () => {
+        const q = portfolio({}, { storage: 'nf-pooling-dynamic-evict', realRepositories: true });
+        const W = (name: string) => remote(name, sharedIn('x', 'q', '2.0.0', '^2.0.0'));
+        await q.runInit([remote('R', sharedIn('x', 'p', '2.0.0', '^2.0.0')), W('W'), W('W2')]);
+        expect(q.record('q').poolName).toBe('x');
+
+        await q.runDynamic(redeployed('R', sharedIn(null, 'z', '1.0.0', '^1.0.0')));
+
+        expect(q.stored()['p']).toBeUndefined();
+        expect(q.record('q').dirty).toBe(true);
       });
     });
   });

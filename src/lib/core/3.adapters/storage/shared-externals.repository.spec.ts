@@ -575,6 +575,52 @@ describe('createSharedExternalsRepository', () => {
         },
       });
     });
+    // A pool's stored name is the only trace of its membership once a member is gone: the next init
+    // spreads dirty from dirty members by that name, and a deleted external is no member any more. Only
+    // its same-named survivors in the same scope are marked; a lost copy alone already dirties its own
+    // external, which spreads from there.
+    it('should mark the same-pool survivors of a deleted external dirty, in that scope only', () => {
+      const only = (name: string, remote: string, poolName?: string): SharedExternal => ({
+        dirty: false,
+        ...(poolName === undefined ? {} : { poolName }),
+        versions: [mockVersion.shared(v2_1_2, name, { remotes: [remote] })],
+      });
+      const shared = (name: string, poolName: string): SharedExternal => ({
+        dirty: false,
+        poolName,
+        versions: [mockVersion.shared(v2_1_2, name, { remotes: ['team/mfe1', 'team/mfe2'] })],
+      });
+
+      const { externalsRepo } = setupWithCache({
+        [GLOBAL_SCOPE]: {
+          gone: only('gone', 'team/mfe1', 'P'),
+          sibling: only('sibling', 'team/mfe2', 'P'),
+          other: only('other', 'team/mfe2', 'Q'),
+          unnamed: only('unnamed', 'team/mfe2'),
+          // Loses a copy but survives: dirty itself, yet its own pool `R` is not dragged in here.
+          trimmed: shared('trimmed', 'R'),
+          'trimmed-sibling': only('trimmed-sibling', 'team/mfe2', 'R'),
+        },
+        team: {
+          'elsewhere-sibling': only('elsewhere-sibling', 'team/mfe2', 'P'),
+        },
+      });
+
+      externalsRepo.removeFromAllScopes(new Set(['team/mfe1']));
+
+      const dirty = (scope: string) =>
+        Object.fromEntries(
+          Object.entries(externalsRepo.getFromScope(scope)).map(([name, e]) => [name, e.dirty])
+        );
+      expect(dirty(GLOBAL_SCOPE)).toEqual({
+        sibling: true,
+        other: false,
+        unnamed: false,
+        trimmed: true,
+        'trimmed-sibling': false,
+      });
+      expect(dirty('team')).toEqual({ 'elsewhere-sibling': false });
+    });
   });
 
   describe('commit', () => {

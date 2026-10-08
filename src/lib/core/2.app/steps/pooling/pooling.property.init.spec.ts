@@ -9,6 +9,7 @@ import {
   type EntryShape,
   type PortfolioSpec,
   type RangeKind,
+  type Redeploy,
 } from 'lib/testing/pooling/generate-portfolio';
 import {
   TIMEOUT,
@@ -21,6 +22,7 @@ import {
   openPortfolio,
   outcome,
   placementOf,
+  poolNameDrift,
   poolTears,
   pools,
   rangeViolations,
@@ -370,11 +372,9 @@ describe('pooling properties: init (generated portfolios)', { timeout: TIMEOUT }
  * fetched again and its old copies evicted), over portfolios with label noise (`Relabel`): the changes that
  * split, join or empty a pool. The oracle is the next warm page re-electing every pool of that same state.
  *
- * The stray-name property fails today on the partial warm re-elections `pooling.reelection.spec.ts`
- * reproduces (N3, F3, P1): it is `it.fails` on a fixed seed whose stream reaches P1's form (offset 45, run 61)
- * until dirt spreads to every external sharing a stored poolName; then it becomes a plain `it` on unfixed
- * seeds. The re-election property passes on the CI stream only: deeper searches reach N3's and F3's forms
- * (offsets 77 and 120 at scale 4), so it too stays on a fixed seed until then.
+ * The partial warm re-elections `pooling.reelection.spec.ts` reproduces (N3, F3, P1) failed these: a label
+ * change that splits a pool (offset 202) and an eviction that deletes a pool member (offsets 45 and 271)
+ * left a part of the pool clean. Those offsets stay pinned to the CI stream that found them.
  */
 describe('pooling properties: redeploys (generated portfolios)', { timeout: TIMEOUT }, () => {
   const redeploys = () =>
@@ -391,34 +391,40 @@ describe('pooling properties: redeploys (generated portfolios)', { timeout: TIME
 
   // Not a cold page of the final portfolio: cold breaks ties by arrival where warm keeps the stored winner
   // instead; that is no partial re-election. `outcome` leaves `poolWinner` out, which a stale election keeps
-  // (P1): on offset 45's stream this fails as the stray-name property below does. Pinned to the CI stream until
-  // dirt spreads to every external sharing a stored poolName.
-  it('redeploy: a warm init runs and places what re-electing every pool of its state does', () =>
-    run(
-      16,
-      redeploys(),
-      100,
-      async ([spec, redeployed]) => {
-        const rig = openPortfolio({ host: hostOf(spec) });
-        await rig.init(toRemoteEntries(spec));
-        const warm = await rig.init(redeployedEntries(spec, redeployed));
-        const reelected = await rig.reelect();
-        const scopeUrls = rig.scopeUrls();
-        const settled = (page: typeof warm) => ({
-          ...outcome(page.importMap, page.record, scopeUrls),
-          winners: Object.fromEntries(
-            Object.entries(page.record).map(([name, external]) => [name, external.poolWinner])
-          ),
-        });
-        expect(settled(warm)).toEqual(settled(reelected));
-      },
-      { fixed: true }
-    ));
+  // (P1), so the winners are compared too.
+  const warmEqualsReelected = async ([spec, redeployed]: [PortfolioSpec, Redeploy[]]) => {
+    const rig = openPortfolio({ host: hostOf(spec) });
+    await rig.init(toRemoteEntries(spec));
+    const warm = await rig.init(redeployedEntries(spec, redeployed));
+    expect(poolNameDrift(warm.record)).toEqual([]);
+    const reelected = await rig.reelect();
+    const scopeUrls = rig.scopeUrls();
+    const settled = (page: typeof warm) => ({
+      ...outcome(page.importMap, page.record, scopeUrls),
+      winners: Object.fromEntries(
+        Object.entries(page.record).map(([name, external]) => [name, external.poolWinner])
+      ),
+    });
+    expect(settled(warm)).toEqual(settled(reelected));
+  };
 
-  // Shrunk at offset 45 (P1's form): r0 wins pool p1, then redeploys without the label that joined it to
-  // p1's other half; the warm record keeps `poolWinner: r0` on members r0 no longer ships. A throw from the
-  // init would satisfy `it.fails` too.
-  it.fails('redeploy: every poolWinner and servedBy still names a remote that ships the pool', () =>
+  it('redeploy: a warm init runs and places what re-electing every pool of its state does', () =>
+    run(16, redeploys(), 100, warmEqualsReelected));
+
+  // Found at offset 202: a redeploy relabels an external out of its pool; the half that keeps its stored
+  // name has no dirty member, so only the spread by stored name re-elects it.
+  it('redeploy: a label change that splits a pool re-elects both halves', () =>
+    run(202, redeploys(), 100, warmEqualsReelected, { fixed: true }));
+
+  // Found at offset 271: eviction deletes a pool member and no survivor of the pool lost a copy, so only
+  // the sibling marking re-elects them.
+  it('redeploy: deleting a pool member re-elects the rest of the pool', () =>
+    run(271, redeploys(), 100, warmEqualsReelected, { fixed: true }));
+
+  // Shrunk at offset 45, an eviction rather than P1's label change: r0 wins pool p1, then redeploys without
+  // a member only it shipped; eviction deletes that member, nothing left in p1 is dirty, and the warm record
+  // keeps `poolWinner: r0` on members r0 no longer ships.
+  it('redeploy: every poolWinner and servedBy still names a remote that ships the pool', () =>
     run(
       45,
       redeploys(),
@@ -427,11 +433,11 @@ describe('pooling properties: redeploys (generated portfolios)', { timeout: TIME
         const rig = openPortfolio({ host: hostOf(spec) });
         await rig.init(toRemoteEntries(spec));
         const warm = await rig.init(redeployedEntries(spec, redeployed));
+        expect(poolNameDrift(warm.record)).toEqual([]);
         expect(strayNames(warm.record)).toEqual([]);
       },
       { fixed: true }
-    )
-  );
+    ));
 });
 
 // Shrunk counterexamples the properties found. Each is `it.fails` until fixed, so vitest reports the fix, then

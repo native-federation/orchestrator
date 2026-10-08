@@ -8,23 +8,16 @@ import type { ModeConfig } from '../../config/mode.contract';
 import type { ExternalName } from 'lib/core/1.domain';
 import { hasPoolResults, withoutPoolResults } from 'lib/core/1.domain/pooling/pool-state';
 import { buildPools } from 'lib/core/1.domain/pooling/membership';
+import { reelectedNames } from 'lib/core/1.domain/pooling/reelection';
 import { poolableScopes } from './pool.util';
 
 export function createMarkPoolsForReelection(
   config: LoggingConfig & ModeConfig,
   ports: Pick<DrivingContract, 'sharedExternalsRepo'>
 ): ForMarkingPoolsForReelection {
-  /**
-   * Runs between process-remote-entries and determine-shared-externals: a pool is one unit of state, so
-   * whenever any member is dirty every member is marked dirty and the pool is elected whole.
-   *
-   * Without this, a member no remote touched this init keeps the previous election's verdict beside the
-   * new one. See docs/version-resolver.md §"How the verdicts land in the record and the map".
-   *
-   * An external in no pool any more loses what pooling stored on it, and is re-elected. It has to happen
-   * here rather than in pooling, which never visits it: a stale `servedBy` keeps the map pointing its copy
-   * at a build nothing chose, and `determine` already exempts such a copy from the coverage policy.
-   */
+  // A pool is one unit of state: any dirty member re-elects it whole. An external in no pool any more loses
+  // its pool results here, since pooling never visits it. See docs/version-resolver.md §"How the verdicts
+  // land in the record and the map".
   return () => {
     const reelected = new Map<string, Set<ExternalName>>();
     for (const [scope, sharedExternals] of poolableScopes(ports.sharedExternalsRepo)) {
@@ -34,22 +27,21 @@ export function createMarkPoolsForReelection(
 
       let spread = 0;
       let unpooled = 0;
+      const { pools } = buildPools(sharedExternals);
       const pooled = new Set<string>();
+      for (const members of pools.values()) for (const member of members) pooled.add(member.name);
 
       // Mutates the stored records in place; nothing is written, so a scope with nothing dirty stays
       // untouched and `commit()` has no reason to fire.
-      for (const [, members] of buildPools(sharedExternals).pools) {
-        for (const member of members) pooled.add(member.name);
-        if (!members.some(m => m.external.dirty)) continue;
-        let names = reelected.get(scope);
-        if (!names) reelected.set(scope, (names = new Set()));
-        for (const member of members) names.add(member.name);
-        for (const member of members)
-          if (!member.external.dirty) {
-            member.external.dirty = true;
-            spread++;
-          }
+      let names: Set<ExternalName> | undefined;
+      for (const name of reelectedNames(sharedExternals, pools)) {
+        if (pooled.has(name)) (names ??= new Set()).add(name);
+        const external = sharedExternals[name]!;
+        if (external.dirty) continue;
+        external.dirty = true;
+        if (pooled.has(name)) spread++;
       }
+      if (names) reelected.set(scope, names);
 
       for (const [name, external] of Object.entries(sharedExternals)) {
         if (pooled.has(name) || !hasPoolResults(external)) continue;

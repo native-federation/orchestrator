@@ -2,6 +2,7 @@ import fc from 'fast-check';
 import { GLOBAL_SCOPE, type ImportMap, type RemoteEntry, type shareScope } from 'lib/core/1.domain';
 import { NFError } from 'lib/core/native-federation.error';
 import { acceptsTag } from 'lib/core/1.domain/externals/compatibility';
+import { buildPools } from 'lib/core/1.domain/pooling/membership';
 import { createVersionCheck } from 'lib/core/3.adapters/checks/version.check';
 import * as _path from 'lib/utils/path';
 import { type GroupTear, tearsByPool } from './no-tear';
@@ -359,6 +360,19 @@ export function strayNames(record: shareScope): string[] {
     }
   }
   return out;
+}
+
+// Every stored `poolName` that differs from the pool the record computes now (undefined in no pool). Warm
+// re-election spreads dirty by stored name, so a name out of sync is a pool nothing would re-elect whole.
+export function poolNameDrift(record: shareScope): string[] {
+  const computed = new Map<string, string>();
+  for (const [pool, members] of buildPools(record).pools)
+    for (const { name } of members) computed.set(name, pool);
+  return Object.entries(record)
+    .filter(([name, external]) => external.poolName !== computed.get(name))
+    .map(
+      ([name, external]) => `${name}: stored ${external.poolName}, computed ${computed.get(name)}`
+    );
 }
 
 // Where pooling placed one remote: the causes on its copies and the builds they run.
