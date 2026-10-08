@@ -23,7 +23,7 @@ import {
   consumedSpecifiers,
   hostRemotes,
 } from 'lib/core/1.domain/pooling/views';
-import { lazy, syncPoolNames } from './pool.util';
+import { lazy, writePoolNames } from './pool.util';
 import { acceptanceTable, acceptsAll, covers, type Acceptance } from './subpool-fit';
 import * as _path from 'lib/utils/path';
 import { acceptsTag } from 'lib/core/1.domain/externals/compatibility';
@@ -136,7 +136,7 @@ export function createPoolDynamicExternals(
         written[name] = recordVerdict(committed[name]!, entry.name, verdict);
         ports.sharedExternalsRepo.addOrUpdate(name, written[name], shareScope);
       }
-      syncPoolNames({ ...committed, ...written }, pools, ports.sharedExternalsRepo, shareScope);
+      writePoolNames({ ...committed, ...written }, pools, ports.sharedExternalsRepo, shareScope);
     }
 
     return Promise.resolve({ entry, actions });

@@ -17,7 +17,7 @@ import { arrivalOrder, hostRemotes } from 'lib/core/1.domain/pooling/views';
 import { electVariants, type Election } from 'lib/core/1.domain/pooling/election';
 import { buildPools, type PoolMember, type PoolName } from 'lib/core/1.domain/pooling/membership';
 import { type Specifier, SpecifierTags } from 'lib/core/1.domain/externals/specifier';
-import { poolableScopes, syncPoolNames } from './pool.util';
+import { poolableScopes, writePoolNames } from './pool.util';
 
 type Route = { kind: 'global' } | { kind: 'subpool'; build: RemoteName } | { kind: 'own' };
 
@@ -54,7 +54,7 @@ export function createPoolSharedExternals(
           }
           rebuilt.add(poolName);
         }
-        syncPoolNames(sharedExternals, pools, ports.sharedExternalsRepo, scope, rebuilt);
+        writePoolNames(sharedExternals, pools, ports.sharedExternalsRepo, scope, rebuilt);
       } catch (error) {
         if (error instanceof NFError) return Promise.reject(error);
         config.log.error(3, `[${scope}] failed to pool shared externals.`, {

@@ -446,6 +446,40 @@ describe('pooling re-election', () => {
         expect(pages.warm).toEqual(pages.reelected);
       });
 
+      // An `'always'` override of a cached remote dissolves a pool at runtime. R alone labels a `x`, every
+      // other remote labels only b `x`, so R's label joins a and b into pool `x`; S and S2 run both at 1.0.0
+      // under a strict ~1.0.0, served by S's build as a subpool. R's new build ships only an unrelated c, so a loses R's
+      // copy (dirty) and no pool is left. If the dynamic step strips the stored pool state off a and b, b
+      // (not dirty) is left as a plain `skip` with no stored name for the next init to re-elect it by, and
+      // only a is re-elected: S and S2 then resolve b's global 2.0.0, which their range rejects. No generated
+      // property reaches this (loads there add remotes, never override one), so this test and the dynamic
+      // step's unit test for an external in no pool are the only guards.
+      it('re-elects both members of a pool a dynamic override dissolves', async () => {
+        const fam = (name: string, tag: string, range: string) =>
+          remote(name, sharedIn(null, 'a', tag, range), sharedIn('x', 'b', tag, range));
+        const others = [
+          fam('W', '2.0.0', '^2.0.0'),
+          fam('W2', '2.0.0', '^2.0.0'),
+          fam('S', '1.0.0', '~1.0.0'),
+          fam('S2', '1.0.0', '~1.0.0'),
+        ];
+        const R2 = redeployed('R', sharedIn(null, 'c', '1.0.0', '^1.0.0'));
+        const q = portfolio({}, { storage: 'nf-pooling-dynamic-dissolve', realRepositories: true });
+        await q.runInit([remote('R', sharedIn('x', 'a', '2.0.0', '^2.0.0')), ...others]);
+        expect(q.record('b').poolName).toBe('x');
+
+        await q.runDynamic(R2);
+        expect(q.record('a').dirty).toBe(true);
+
+        q.reload();
+        const warm = await q.runInit([R2, ...others]);
+        const { runs } = outcome(warm, q.stored(), q.scopeUrls());
+        expect({ S: [runs['S|a'], runs['S|b']], S2: [runs['S2|a'], runs['S2|b']] }).toEqual({
+          S: ['1.0.0', '1.0.0'],
+          S2: ['1.0.0', '1.0.0'],
+        });
+      });
+
       // The eviction half on the dynamic path: an `'always'` override of a cached remote evicts its old
       // copies before the next init. R alone ships p, labelled `x` like W's q; R's new build ships neither,
       // so p is deleted and q, which lost no copy, is the only trace left of pool `x`.

@@ -364,11 +364,13 @@ export function strayNames(record: shareScope): string[] {
 
 // Every stored `poolName` that differs from the pool the record computes now (undefined in no pool). Warm
 // re-election spreads dirty by stored name, so a name out of sync is a pool nothing would re-elect whole.
-export function poolNameDrift(record: shareScope): string[] {
+// `pooledOnly` skips externals in no pool: a dynamic load leaves their stale names for the next init.
+export function poolNameDrift(record: shareScope, { pooledOnly = false } = {}): string[] {
   const computed = new Map<string, string>();
   for (const [pool, members] of buildPools(record).pools)
     for (const { name } of members) computed.set(name, pool);
   return Object.entries(record)
+    .filter(([name]) => !pooledOnly || computed.has(name))
     .filter(([name, external]) => external.poolName !== computed.get(name))
     .map(
       ([name, external]) => `${name}: stored ${external.poolName}, computed ${computed.get(name)}`

@@ -9,7 +9,7 @@ export function hasPoolResults(external: SharedExternal): boolean {
   );
 }
 
-// A fresh record: the dynamic path must leave committed versions untouched.
+// A fresh record; the input is left untouched.
 export function withoutPoolResults(external: SharedExternal): SharedExternal {
   const { poolName: _poolName, poolWinner: _poolWinner, ...rest } = external;
   return {

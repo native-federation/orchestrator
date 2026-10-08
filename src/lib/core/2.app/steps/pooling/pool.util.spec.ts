@@ -6,7 +6,7 @@ import {
 } from 'lib/core/1.domain';
 import type { ForSharedExternalsStorage } from 'lib/core/2.app/driving-ports/for-shared-externals-storage.port';
 import { mockVersionRemote } from 'lib/testing/domain/externals/version.mock';
-import { poolableScopes, syncPoolNames } from './pool.util';
+import { poolableScopes, writePoolNames } from './pool.util';
 
 // W1's real guard: a pool never spans share scopes, so a tag in one scope must not put the others through a
 // pool graph. The flow-level "skips work" test in pool-shared-externals.spec.ts only shows the cost.
@@ -58,20 +58,12 @@ describe('poolableScopes', () => {
   });
 });
 
-describe('syncPoolNames', () => {
-  // An external whose pool dissolved — on the dynamic path, an override reload can drop the copy that carried
-  // the tag. Its surviving copies still name the subpool build they ran, which nothing elects any more.
-  const dissolved = (): SharedExternal => ({
+describe('writePoolNames', () => {
+  const pooled = (poolName?: string): SharedExternal => ({
     dirty: false,
-    poolName: 'framework',
+    ...(poolName === undefined ? {} : { poolName }),
     poolWinner: 'team/a',
     versions: [
-      {
-        tag: '17.0.0',
-        host: false,
-        action: 'share',
-        remotes: [mockVersionRemote('team/a', '@framework/core')],
-      },
       {
         tag: '17.0.0',
         host: false,
@@ -81,35 +73,61 @@ describe('syncPoolNames', () => {
     ],
   });
 
-  it('clears servedBy too off an external in no pool any more, or the map would follow a stale build', () => {
+  it('keeps poolWinner and servedBy on a rename: the pool was not re-elected', () => {
     const addOrUpdate = vi.fn();
-    const record = dissolved();
+    const record = pooled('framework');
 
-    syncPoolNames({ '@framework/core': record }, new Map(), { addOrUpdate }, '__GLOBAL__');
-
-    const [name, written, scope] = addOrUpdate.mock.calls[0]!;
-    expect([name, scope]).toEqual(['@framework/core', '__GLOBAL__']);
-    expect(written.poolName).toBeUndefined();
-    expect(written.poolWinner).toBeUndefined();
-    expect(
-      (written as SharedExternal).versions.flatMap(v => v.remotes).map(r => r.servedBy)
-    ).toEqual([undefined, undefined]);
-    expect(record).toEqual(dissolved());
-  });
-
-  it('keeps poolWinner on a rename: the pool was not re-elected', () => {
-    const addOrUpdate = vi.fn();
-    const record = dissolved();
-
-    syncPoolNames(
+    writePoolNames(
       { '@framework/core': record },
       new Map([['angular', [{ name: '@framework/core', external: record }]]]),
       { addOrUpdate },
       '__GLOBAL__'
     );
 
-    const written = addOrUpdate.mock.calls[0]![1] as SharedExternal;
-    expect(written.poolName).toBe('angular');
-    expect(written.poolWinner).toBe('team/a');
+    expect(addOrUpdate.mock.calls).toEqual([
+      ['@framework/core', { ...pooled('framework'), poolName: 'angular' }, '__GLOBAL__'],
+    ]);
+    expect(record).toEqual(pooled('framework'));
+  });
+
+  // A dynamic load writes the pools it judged; one it merged renames committed members it never rewrote.
+  it('names a member that stored no pool yet, and skips one already named right', () => {
+    const addOrUpdate = vi.fn();
+    const named = pooled('framework');
+    const fresh = pooled();
+
+    writePoolNames(
+      { core: named, common: fresh },
+      new Map([
+        [
+          'framework',
+          [
+            { name: 'core', external: named },
+            { name: 'common', external: fresh },
+          ],
+        ],
+      ]),
+      { addOrUpdate },
+      '__GLOBAL__'
+    );
+
+    expect(addOrUpdate.mock.calls.map(([name, written]) => [name, written.poolName])).toEqual([
+      ['common', 'framework'],
+    ]);
+  });
+
+  it('writes nothing for a pool the caller rebuilds, nor for an external in no pool', () => {
+    const addOrUpdate = vi.fn();
+    const record = pooled('old');
+
+    writePoolNames(
+      { '@framework/core': record, stale: pooled('gone') },
+      new Map([['angular', [{ name: '@framework/core', external: record }]]]),
+      { addOrUpdate },
+      '__GLOBAL__',
+      new Set(['angular'])
+    );
+
+    expect(addOrUpdate).not.toHaveBeenCalled();
   });
 });

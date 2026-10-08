@@ -19,6 +19,7 @@ import {
   openPortfolio,
   outcome,
   placementOf,
+  poolNameDrift,
   pools,
   rangeViolations,
   run,
@@ -91,6 +92,29 @@ describe('pooling properties: dynamic loads (generated portfolios)', { timeout: 
         const added = toRemoteEntry(extra, entries.length);
         const { merged, record } = await rig.load(added);
         const warm = await rig.init([...entries, added]);
+        expect(outcome(warm.importMap, warm.record).runs).toEqual(outcome(merged, record).runs);
+      }
+    ));
+
+  // 102 under label noise, the relabels that split and join pools, with the stored names checked on both
+  // pages: a load writes the name of every pool as it now stands (a merge renames committed members), and
+  // the next init leaves no stale name. Between the two, an external in no pool may keep its old name.
+  it('dynamic reload with label noise: pool names stay in sync and the warm init runs the page', () =>
+    run(
+      106,
+      portfolioArbitrary({ maxRemotes: 12, labelNoise: true }).chain(spec =>
+        fc.tuple(fc.constant(lenient(spec)), extraRemoteArbitrary(spec))
+      ),
+      150,
+      async ([spec, extra]) => {
+        const entries = toRemoteEntries(spec);
+        const rig = openPortfolio({ host: hostOf(spec) });
+        await rig.init(entries);
+        const added = toRemoteEntry(extra, entries.length);
+        const { merged, record } = await rig.load(added);
+        expect(poolNameDrift(record, { pooledOnly: true })).toEqual([]);
+        const warm = await rig.init([...entries, added]);
+        expect(poolNameDrift(warm.record)).toEqual([]);
         expect(outcome(warm.importMap, warm.record).runs).toEqual(outcome(merged, record).runs);
       }
     ));

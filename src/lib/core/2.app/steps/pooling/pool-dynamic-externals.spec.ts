@@ -894,6 +894,32 @@ describe('createPoolDynamicExternals', () => {
       });
     });
 
+    // Committed pools x = {p, q} and y = {r, s}. The loaded remote labels its copy of r `x`, which joins
+    // both into one pool named `x` (three declarations against two). s is no member the load declares and
+    // gets no verdict, yet its stored `y` must become `x`: the next init spreads dirty by stored name.
+    it('renames a committed member of a pool a load merged into another', async () => {
+      const entry = entryWith(shared('r', { pool: 'x' }));
+      const tagged = (name: string, pool: string) =>
+        committed(name, { tag: '17.0.0', remotes: ['host'], pool });
+      givenCommitted({
+        p: { ...tagged('p', 'x'), poolName: 'x' },
+        q: { ...tagged('q', 'x'), poolName: 'x' },
+        r: {
+          ...committed(
+            'r',
+            { tag: '17.0.0', remotes: ['host'], pool: 'y' },
+            { tag: '17.0.0', remotes: ['mfe'], pool: 'x' }
+          ),
+          poolName: 'y',
+        },
+        s: { ...tagged('s', 'y'), poolName: 'y' },
+      });
+
+      await poolDynamicExternals({ entry, actions: { r: { action: 'skip' } } });
+
+      expect(namesWritten()).toEqual({ r: 'x', s: 'x' });
+    });
+
     it('writes nothing for a member already carrying its name', async () => {
       const entry = entryWith(shared('@framework/core'), shared('@framework/common'));
       givenCommitted({
@@ -916,7 +942,7 @@ describe('createPoolDynamicExternals', () => {
       expect(adapters.sharedExternalsRepo.addOrUpdate).not.toHaveBeenCalled();
     });
 
-    it('clears a stale pool name off an external that is in no pool any more', async () => {
+    it('leaves a stale pool name on an external in no pool any more to the next init', async () => {
       // `rxjs` is untagged and alone, yet the record still names a pool for it from an earlier portfolio.
       const entry = entryWith(shared('rxjs'));
       givenCommitted({
@@ -925,8 +951,8 @@ describe('createPoolDynamicExternals', () => {
 
       await poolDynamicExternals({ entry, actions: { rxjs: { action: 'skip' } } });
 
-      expect(adapters.sharedExternalsRepo.addOrUpdate).toHaveBeenCalledOnce();
-      expect(namesWritten()).toEqual({ rxjs: undefined });
+      // mark-pools spreads dirty by the stored name before it strips it, so the name must survive the load.
+      expect(adapters.sharedExternalsRepo.addOrUpdate).not.toHaveBeenCalled();
     });
   });
 });
