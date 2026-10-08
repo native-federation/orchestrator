@@ -797,6 +797,91 @@ describe('createPoolDynamicExternals', () => {
       expect(writtenFor('@framework/cdk')!.versions[2]!.remotes[0]!.servedBy).toBe('team/legacy');
     });
 
+    // Within-tag order is observable (round 1's arrival-order ties, determine's `versions[0]`). The verdict
+    // write orders by tag alone: a `scope` row ahead of the `share` row at its tag stays ahead.
+    it("keeps a tag's rows in the order the record had them", async () => {
+      givenCommitted({
+        '@framework/core': committed(
+          '@framework/core',
+          { tag: '17.0.0', remotes: ['solo'], action: 'scope' },
+          { tag: '17.0.0', remotes: ['host', 'mfe'], action: 'share' }
+        ),
+        '@framework/common': committed(
+          '@framework/common',
+          { tag: '18.0.0', remotes: ['mfe'], action: 'scope' },
+          { tag: '17.0.0', remotes: ['host'], action: 'share' }
+        ),
+      });
+
+      await poolDynamicExternals({
+        entry: entryWith(shared('@framework/core'), shared('@framework/common')),
+        actions: {
+          '@framework/core': { action: 'skip' },
+          '@framework/common': { action: 'scope' },
+        },
+      });
+
+      expect(copies(writtenFor('@framework/core'))).toEqual([
+        ['17.0.0:scope', [{ name: 'solo' }, { name: 'mfe', poolCause: 'incompatible' }]],
+        ['17.0.0:share', [{ name: 'host' }]],
+      ]);
+    });
+
+    // Copy-on-write (rework 02, first step of 08): a subpool verdict rewrites the loaded remote's copy and
+    // nothing else, so every other row reaches the repository as the object it read.
+    describe('a subpool verdict passes untouched rows through', () => {
+      const legacyServes = () => {
+        adapters.remoteInfoRepo.tryGet = vi.fn(name =>
+          name === 'team/legacy'
+            ? Optional.of({ scopeUrl: 'http://legacy/', exposes: [] } as RemoteInfo)
+            : Optional.empty<RemoteInfo>()
+        );
+        const core = committed(
+          '@framework/core',
+          { tag: '22.0.8', remotes: ['team/a'] },
+          { tag: '21.2.18', remotes: ['team/legacy'], action: 'scope' },
+          { tag: '21.2.18', remotes: ['mfe'] }
+        );
+        givenCommitted({
+          '@framework/core': core,
+          '@framework/cdk': committed(
+            '@framework/cdk',
+            { tag: '22.0.6', remotes: ['team/b'] },
+            { tag: '21.2.18', remotes: ['team/legacy'], action: 'scope' },
+            { tag: '21.2.18', remotes: ['mfe'] }
+          ),
+        });
+        return core;
+      };
+      const load = () =>
+        poolDynamicExternals({
+          entry: entryWith(shared('@framework/core'), shared('@framework/cdk')),
+          actions: { '@framework/core': { action: 'skip' }, '@framework/cdk': { action: 'skip' } },
+        });
+
+      it('by reference, rows without its copy', async () => {
+        const core = legacyServes();
+
+        await load();
+
+        const written = writtenFor('@framework/core')!;
+        expect(written.versions[2]!.remotes[0]!.servedBy).toBe('team/legacy');
+        expect(written.versions[0]).toBe(core.versions[0]);
+        expect(written.versions[1]).toBe(core.versions[1]);
+      });
+
+      it('as the record itself when its copy already runs that build', async () => {
+        const core = legacyServes();
+        core.versions[2]!.remotes[0]!.servedBy = 'team/legacy';
+        // Already named, so the pool-name sync writes nothing after the verdict.
+        core.poolName = 'framework';
+
+        await load();
+
+        expect(writtenFor('@framework/core')).toBe(core);
+      });
+    });
+
     // The same portfolio with team/legacy gone from the remote cache. Its files cannot be mapped, so it is
     // no subpool to join: left on update-cache's actions, mfe would run a member from each build.
     it('serves the remote its whole family when the only fitting build is not in the cache', async () => {

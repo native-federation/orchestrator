@@ -45,20 +45,6 @@ export function versionDemands(version: SharedVersion): SharedVersionMeta[] {
   return Array.from(distinct.values());
 }
 
-// Coverage enforcement can leave a `scope` version beside a shareable one at the same tag.
-export function findVersionForTag(
-  versions: SharedVersion[],
-  tag: string
-): SharedVersion | undefined {
-  let scoped: SharedVersion | undefined;
-  for (const version of versions) {
-    if (version.tag !== tag) continue;
-    if (version.action !== 'scope') return version;
-    scoped ??= version;
-  }
-  return scoped;
-}
-
 // Every copy of a version builds the same tag, so a specifier only some of them bundle is not a
 // tear: the version exposes the union of its copies' entrypoints, each served by the first copy
 // that declares it — basis precedence first. See

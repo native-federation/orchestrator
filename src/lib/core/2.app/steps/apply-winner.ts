@@ -1,5 +1,6 @@
 import type { SharedExternal, SharedVersion, SharedVersionMeta } from 'lib/core/1.domain';
 import { uncoveredEntrypoints, versionEntries } from 'lib/core/1.domain/externals/basis';
+import { mergeRows, rowAt } from 'lib/core/1.domain/externals/rows';
 import {
   type AcceptsTag,
   type VersionAcceptance,
@@ -75,22 +76,11 @@ export function createApplyWinner(config: LoggingConfig & ModeConfig) {
         rebuilt.push({ tag: v.tag, host: false, action: 'scope', remotes: [...objecting] });
       }
 
-      // One row per (tag, action). A warm record can already hold a `scope` row at the tag a split
-      // produces — a joiner lands in the deduping row of a split tag and re-splits out of it — and both
-      // `findVersionForTag` and `rebuildMember` read a tag as at most one row per action. Merged after the
-      // loop, not during it: a row's verdict is not final until the winner has been applied to it.
-      // The winner absorbs its tag's other rows, or the `share` below would land on a row merged away.
-      const merged = new Map([[`${winner.tag}|${winner.action}`, winner]]);
-      external.versions = rebuilt.filter(v => {
-        const first = merged.get(`${v.tag}|${v.action}`);
-        if (first === v) return true;
-        if (!first) {
-          merged.set(`${v.tag}|${v.action}`, v);
-          return true;
-        }
-        first.remotes.push(...v.remotes);
-        return false;
-      });
+      // One row per (tag, action), which the record keeps: a warm record can already hold a `scope` row at
+      // the tag a split produces. Merged after the loop, not during it: a row's verdict is not final until
+      // the winner has been applied to it. The winner absorbs its tag's other rows, or the `share` below
+      // would land on a row merged away.
+      external.versions = mergeRows(rebuilt, winner);
     }
 
     winner.action = 'share';
@@ -169,7 +159,7 @@ export function createApplyWinner(config: LoggingConfig & ModeConfig) {
     external.versions = external.versions.filter(v => v.remotes.length > 0);
 
     for (const [tag, remotes] of demotedByTag) {
-      const scoped = external.versions.find(v => v.tag === tag && v.action === 'scope');
+      const scoped = rowAt(external.versions, tag, 'scope');
       if (scoped) scoped.remotes.push(...remotes);
       else external.versions.push({ tag, host: false, action: 'scope', remotes });
     }

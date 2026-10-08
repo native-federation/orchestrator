@@ -29,6 +29,7 @@ import { acceptanceTable, acceptsAll, covers, type Acceptance } from './subpool-
 import * as _path from 'lib/utils/path';
 import { acceptsTag } from 'lib/core/1.domain/externals/compatibility';
 import { addRemoteToVersion } from 'lib/core/1.domain/externals/basis';
+import { byTag, rowAt } from 'lib/core/1.domain/externals/rows';
 import { compareStrings } from 'lib/utils/compare-strings';
 
 // What the gate decided for the loaded remote's copy of one member, as the record must keep it.
@@ -429,16 +430,14 @@ export function createPoolDynamicExternals(
   }
 
   // The share row `update-cache` opened for a copy that now runs the map's files becomes a skip: it
-  // publishes nothing. A tag keeps one non-scope row, so the copy joins one already there.
+  // publishes nothing. A tag keeps one row per action, so the copy joins a skip row already there.
   function recordFromMap(external: SharedExternal, remote: RemoteName): SharedExternal {
     // Only a member whose action was `share` gets this verdict, so its copy sits in a share row.
     const opened = external.versions.find(
       v => v.action === 'share' && v.remotes.some(r => r.name === remote)
     )!;
     const meta = { ...opened.remotes.find(r => r.name === remote)!, cached: false };
-    const joined = external.versions.find(
-      v => v !== opened && v.tag === opened.tag && v.action !== 'scope'
-    );
+    const joined = rowAt(external.versions, opened.tag, 'skip');
 
     if (!joined) {
       return {
@@ -468,15 +467,15 @@ export function createPoolDynamicExternals(
   ): SharedExternal {
     if ('fromMap' in verdict) return recordFromMap(external, remote);
     if ('servedBy' in verdict) {
-      return {
-        ...external,
-        versions: external.versions.map(v => ({
-          ...v,
-          remotes: v.remotes.map(r =>
-            r.name === remote ? { ...r, servedBy: verdict.servedBy } : r
-          ),
-        })),
-      };
+      const { servedBy } = verdict;
+      let changed = false;
+      const versions = external.versions.map(v => {
+        const own = v.remotes.find(r => r.name === remote);
+        if (!own || own.servedBy === servedBy) return v;
+        changed = true;
+        return { ...v, remotes: v.remotes.map(r => (r === own ? { ...r, servedBy } : r)) };
+      });
+      return changed ? { ...external, versions } : external;
     }
 
     const moved: { tag: string; meta: SharedVersionMeta }[] = [];
@@ -495,14 +494,14 @@ export function createPoolDynamicExternals(
       .filter(v => v.remotes.length > 0);
 
     for (const { tag, meta } of moved) {
-      const at = versions.findIndex(v => v.tag === tag && v.action === 'scope');
-      if (at >= 0) versions[at] = { ...versions[at]!, remotes: [...versions[at]!.remotes, meta] };
-      else versions.push({ tag, action: 'scope', host: false, remotes: [meta] });
+      const scoped = rowAt(versions, tag, 'scope');
+      if (!scoped) versions.push({ tag, action: 'scope', host: false, remotes: [meta] });
+      else versions[versions.indexOf(scoped)] = { ...scoped, remotes: [...scoped.remotes, meta] };
     }
 
     return {
       ...external,
-      versions: versions.sort((a, b) => ports.versionCheck.compare(b.tag, a.tag)),
+      versions: versions.sort(byTag(ports.versionCheck.compare)),
     };
   }
 }

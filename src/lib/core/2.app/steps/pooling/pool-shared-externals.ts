@@ -17,6 +17,7 @@ import { electVariants, type Election } from 'lib/core/1.domain/pooling/election
 import type { PoolMember, PoolName } from 'lib/core/1.domain/pooling/membership';
 import { type ElectionPlan, planElection } from 'lib/core/1.domain/pooling/plan';
 import { writePoolNames } from './pool.util';
+import { byTag, mergeRows } from 'lib/core/1.domain/externals/rows';
 import { type Specifier, SpecifierTags } from 'lib/core/1.domain/externals/specifier';
 
 type Route = { kind: 'global' } | { kind: 'subpool'; build: RemoteName } | { kind: 'own' };
@@ -235,16 +236,16 @@ export function createPoolSharedExternals(
           pinned ??= election.tagOf(s);
         }
     const builds = new Set(election.subpools.map(p => p.build));
-    const rows = new Map<string, SharedVersion>();
+    const placed: SharedVersion[] = [];
+    let winnerRow: SharedVersion | undefined;
 
     const place = (tag: VersionName, action: SharedVersion['action'], meta: SharedVersionMeta) => {
-      const key = `${tag}|${action}`;
-      let row = rows.get(key);
-      if (!row) rows.set(key, (row = { tag, host: false, action, remotes: [] }));
+      const row = { tag, host: false, action, remotes: [meta] };
+      placed.push(row);
+      if (meta.name !== election.winner) return;
       // The winner's copy leads its row: `remotes[0]` is the basis the global map publishes.
-      if (meta.name === election.winner) row.remotes.unshift(meta);
-      else row.remotes.push(meta);
-      if (meta.name === election.winner && hosts.has(meta.name)) row.host = true;
+      winnerRow = row;
+      row.host = hosts.has(meta.name);
     };
 
     const runsOf = (name: RemoteName) => {
@@ -289,15 +290,15 @@ export function createPoolSharedExternals(
       }
     }
 
+    const rows = mergeRows(placed, winnerRow);
     // Stable, so the winner still leads; the import map publishes the first copy listing a specifier.
-    for (const row of rows.values())
+    for (const row of rows)
       row.remotes.sort((a, b) => Number(!publishes(a.name)) - Number(!publishes(b.name)));
 
-    // Newest tag first, as `commit()` orders a record; within a tag `share`, `skip`, then `scope`.
+    // Within a tag `share`, `skip`, then `scope`.
     const order = { share: 0, skip: 1, scope: 2 };
-    const versions = [...rows.values()].sort(
-      (a, b) => ports.versionCheck.compare(b.tag, a.tag) || order[a.action] - order[b.action]
-    );
+    const newest = byTag(ports.versionCheck.compare);
+    const versions = rows.sort((a, b) => newest(a, b) || order[a.action] - order[b.action]);
 
     return { dirty: false, poolName, versions };
   }

@@ -471,6 +471,40 @@ describe('createPoolSharedExternals', () => {
       ]);
     });
 
+    // Within-tag order is observable (round 1's arrival-order ties, determine's `versions[0]`), and the rebuild
+    // is the one writer that orders a tag's rows by action. Pinned before rework 02 moves the row helpers.
+    it("orders one tag's rows share, skip, then scope", async () => {
+      // Every core copy is 17.0.0. c's common@16 build serves d (^16 takes 16.1.0); x's ^15 fits no build.
+      p.seed('@framework/core', [
+        at('17.0.0', '@framework/core', [
+          copy('x', '^17.0.0'),
+          copy('d', '^17.0.0'),
+          copy('c', '^17.0.0'),
+          copy('a', '^17.0.0'),
+          copy('b', '^17.0.0'),
+          copy('y', '^17.0.0'),
+        ]),
+      ]);
+      p.seed('@framework/common', [
+        at('17.0.0', '@framework/common', [
+          copy('a', '^17.0.0'),
+          copy('b', '^17.0.0'),
+          copy('y', '^17.0.0'),
+        ]),
+        at('16.1.0', '@framework/common', [copy('c', '~16.1.0')]),
+        at('16.0.5', '@framework/common', [copy('d', '^16.0.0')]),
+        at('15.0.0', '@framework/common', [copy('x', '^15.0.0')]),
+      ]);
+
+      await p.runInit();
+
+      expect(rowsOf('@framework/core')).toEqual([
+        '17.0.0:share:[a,b,y]',
+        '17.0.0:skip:[d,c]',
+        '17.0.0:scope:[x]',
+      ]);
+    });
+
     it('forms no subpool of one: a lone remote serves itself', async () => {
       p.seed('@framework/core', [
         at('22.0.8', '@framework/core', [copy('a', '^22.0.0'), copy('b', '^22.0.0')]),

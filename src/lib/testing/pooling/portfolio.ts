@@ -157,6 +157,18 @@ export const portfolio = (
     drivers.poolDynamicExternals = cache =>
       poolDynamic(cache).then(result => ((actions = result.actions), result));
 
+    // The record shape every step leaves behind, whatever it wrote: at most one row per (tag, action), newest
+    // tag first. Within a tag neither the action order nor "one non-scope row" holds: pooling's
+    // [share T, skip T (servedBy)] and update-cache's share beside a skip row break both by design.
+    for (const key of Object.keys(drivers) as (keyof typeof drivers)[]) {
+      const step = drivers[key] as (...args: unknown[]) => unknown;
+      const checked = (result: unknown) => (assertRecordShape(adapters, key), result);
+      (drivers as Record<string, unknown>)[key] = (...args: unknown[]) => {
+        const result = step(...args);
+        return result instanceof Promise ? result.then(checked) : checked(result);
+      };
+    }
+
     return { config, adapters, drivers };
   };
 
@@ -331,6 +343,21 @@ export const portfolio = (
     islands,
     downloads,
   };
+};
+
+const assertRecordShape = (adapters: DrivingContract, step: string): void => {
+  const misshapen: string[] = [];
+  const { sharedExternalsRepo: repo, versionCheck } = adapters;
+  for (const scope of repo.getScopes())
+    for (const [name, external] of Object.entries(repo.getFromScope(scope))) {
+      const keys = external.versions.map(v => `${v.tag}|${v.action}`);
+      const duplicated = keys.some((key, i) => keys.indexOf(key) !== i);
+      const unordered = external.versions.some(
+        (v, i) => i > 0 && versionCheck.compare(external.versions[i - 1]!.tag, v.tag) < 0
+      );
+      if (duplicated || unordered) misshapen.push(`${step}: ${scope}|${name} [${keys.join(', ')}]`);
+    }
+  expect(misshapen).toEqual([]);
 };
 
 // Import maps are immutable once set: a later map only adds keys the committed one lacks.

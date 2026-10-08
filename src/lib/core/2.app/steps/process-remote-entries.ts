@@ -1,6 +1,7 @@
 import type { ForProcessingRemoteEntries } from '../driver-ports/init/for-processing-remote-entries.port';
 import type { RemoteEntry, RemoteName, DenseSharedInfo } from 'lib/core/1.domain';
-import { addRemoteToVersion, findVersionForTag } from 'lib/core/1.domain/externals/basis';
+import { addRemoteToVersion } from 'lib/core/1.domain/externals/basis';
+import { findVersionForTag } from 'lib/core/1.domain/externals/rows';
 import type { DrivingContract } from '../driving-ports/driving.contract';
 import type { LoggingConfig } from '../config/log.contract';
 import type { ModeConfig } from 'lib/core/2.app/config/mode.contract';
