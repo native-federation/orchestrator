@@ -17,7 +17,6 @@ export type ElectionInput = {
   members: PoolMember[];
   acceptsTag: AcceptsTag;
   hosts: ReadonlySet<RemoteName>;
-  arrival: ReadonlyMap<RemoteName, number>;
   compare: (a: VersionName, b: VersionName) => number;
   // The round-1 winner the stored record carries from the last election, for the tie rule.
   previous?: RemoteName;
@@ -51,7 +50,7 @@ export type Election = {
 };
 
 export function electVariants(input: ElectionInput): Election {
-  const { members, acceptsTag, hosts, arrival, compare } = input;
+  const { members, acceptsTag, hosts, compare } = input;
 
   const shipped = copiesByRemote(members);
   const builds = new Map<RemoteName, Build>();
@@ -117,10 +116,9 @@ export function electVariants(input: ElectionInput): Election {
     return { gap: specifiers[end]!, with: clash.map(i => specifiers[i]!) };
   };
 
-  const byArrival = (a: RemoteName, b: RemoteName) =>
-    (arrival.get(a) ?? Number.MAX_SAFE_INTEGER) - (arrival.get(b) ?? Number.MAX_SAFE_INTEGER) ||
-    compareStrings(a, b);
-  const remotes = [...shipped.keys()].sort(byArrival);
+  // In record order: the order remotes first appear in the pool's versions, which round 1's ties fall back to.
+  const remotes = [...shipped.keys()];
+  const recordOrder = new Map(remotes.map((r, i) => [r, i]));
 
   // Highest first on every key, then the newer build; the sort is stable, so the input order breaks the rest.
   const rank = <C extends { own: Build }>(candidates: C[], keys: ((c: C) => number)[]) => {
@@ -303,7 +301,7 @@ export function electVariants(input: ElectionInput): Election {
   };
   while (settle()) formSubpools();
 
-  election.alone = pending.sort(byArrival);
+  election.alone = pending.sort((a, b) => recordOrder.get(a)! - recordOrder.get(b)!);
   for (const remote of [...election.subpools.map(p => p.build), ...election.alone])
     if (agrees(shipped.get(remote)!, coverage)) {
       election.agreeing.add(remote);

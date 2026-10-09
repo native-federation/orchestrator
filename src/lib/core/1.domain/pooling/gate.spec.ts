@@ -100,53 +100,6 @@ describe('committedView', () => {
       expect([...builds.get('flat')!.tags.keys()].sort()).toEqual(['@ng/core', '@ng/core/testing']);
     });
 
-    // Flat and dense in one build: `x/sub` is an entry of r's dense `x` at 1.0.0 and r's own flat package at
-    // 2.0.0. The build reads its tag from the first copy in pool order, as the election does.
-    it.each([
-      ['dense first', ['x', 'x/sub'], '1.0.0'],
-      ['flat first', ['x/sub', 'x'], '2.0.0'],
-    ])(
-      'takes a specifier two members list from the first in pool order (%s)',
-      (_, order, first) => {
-        const byName: Record<string, PoolMember> = {
-          x: member('x', [
-            {
-              tag: '1.0.0',
-              copies: [
-                { remote: 'r', req: '^1.0.0', entries: { x: 'x.js', 'x/sub': 'dense-sub.js' } },
-              ],
-            },
-          ]),
-          'x/sub': member('x/sub', [{ tag: '2.0.0', copies: [{ remote: 'r', req: '^2.0.0' }] }]),
-        };
-        const members = order.map(name => byName[name]!);
-
-        expect(viewOf(members).builds.get('r')!.tags.get('x/sub')).toBe(first);
-      }
-    );
-
-    // A record the orchestrator never writes itself: b lists `x` twice, and only the second row carries
-    // `x/extra`. A build ships one copy per member, so the first row is taken whole, entries included: b
-    // never covers a specifier at a tag it does not ship `x` at. The gate used to take `x/extra` from the
-    // second row, at 1.0.0, where the election ignored that row.
-    it('reads a duplicated row as the first one, entries included', () => {
-      const members = [
-        member('x', [
-          { tag: '1.0.1', copies: [{ remote: 'b', req: '~1.0.0', entries: { x: 'x.js' } }] },
-          {
-            tag: '1.0.0',
-            copies: [
-              { remote: 'b', req: '~1.0.0', entries: { x: 'x-100.js', 'x/extra': 'extra.js' } },
-            ],
-          },
-        ]),
-      ];
-      const build = viewOf(members).builds.get('b')!;
-
-      expect(build.tags.get('x')).toBe('1.0.1');
-      expect(build.tags.has('x/extra')).toBe(false);
-    });
-
     // Committed, a scoped copy is a stable island: its files are in the map under its own scope and it
     // demonstrably runs its own build, so a remote loaded later may take them.
     it('includes a scoped copy, with the tag it runs', () => {

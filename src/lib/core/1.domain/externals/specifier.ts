@@ -1,7 +1,7 @@
 import type { ExternalName } from './external.contract';
 import type { VersionName } from './version.contract';
 
-// An entrypoint as a consumer imports it; pooling keys by it, not by external name (see `pooling/views.ts`).
+// An entrypoint as a consumer imports it; pooling keys by it, not by external name (see `pooling/builds.ts`).
 export type Specifier = string;
 
 // The package a secondary entrypoint belongs to, or undefined when the name is already a package.

@@ -50,3 +50,12 @@ export function buildOf(owner: RemoteName, copies: readonly Copy[]): Build {
   }
   return { owner, tags, tagByMember };
 }
+
+// Basis precedence puts the host's own copy first on a `host: true` version, so its `remotes[0]` is the host.
+export function hostRemotes(members: PoolMember[]): Set<RemoteName> {
+  const hosts = new Set<RemoteName>();
+  for (const member of members)
+    for (const version of member.external.versions)
+      if (version.host && version.remotes.length > 0) hosts.add(version.remotes[0]!.name);
+  return hosts;
+}

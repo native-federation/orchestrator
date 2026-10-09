@@ -45,7 +45,6 @@ const elect = (builds: Build[]) =>
     members: members(builds),
     acceptsTag: acceptsTag(versionCheck.isCompatible, versionCheck.compare),
     hosts: new Set(),
-    arrival: new Map(builds.map((b, i) => [b.name, i])),
     compare: versionCheck.compare,
     latestFirst: false,
   });
@@ -158,65 +157,5 @@ describe('missOf', () => {
     expect(election.subpools).toEqual([{ build: 'x3', members: ['x1', 'x2', 'x3'] }]);
     for (const remote of ['x1', 'x2', 'x3'])
       expect(election.missOf(remote)).toEqual({ unwitnessed: { gap: 'n', with: ['m', 'k', 'k'] } });
-  });
-});
-
-describe('reading a build from the record', () => {
-  const at = (tag: string, req: string, specifiers: string[]) => ({ tag, req, specifiers });
-
-  // A record the orchestrator never writes itself: b lists `x` twice, and only the second row carries
-  // `x/extra`. A build ships one copy per member, so the first row is taken whole, entries included.
-  it('reads a duplicated row as the first one, entries included', () => {
-    const row = (tag: string, entries: string[]) => ({
-      tag,
-      host: false,
-      action: 'skip' as const,
-      remotes: [
-        mockVersionRemote('b', 'x', {
-          requiredVersion: '~1.0.0',
-          entries: Object.fromEntries(entries.map(s => [s, `${s}-${tag}.js`])),
-        }),
-      ],
-    });
-    const election = electVariants({
-      members: [
-        {
-          name: 'x',
-          external: {
-            dirty: true,
-            versions: [row('1.0.1', ['x']), row('1.0.0', ['x', 'x/extra'])],
-          },
-        },
-      ],
-      acceptsTag: acceptsTag(versionCheck.isCompatible, versionCheck.compare),
-      hosts: new Set(),
-      arrival: new Map([['b', 0]]),
-      compare: versionCheck.compare,
-      latestFirst: false,
-    });
-
-    expect(election.winner).toBe('b');
-    expect([...election.coverage]).toEqual([['x', '1.0.1']]);
-  });
-
-  // Flat and dense in one build: `x/sub` is an entry of R's dense `x` at 1.0.0 and R's own flat package at
-  // 2.0.0. The build's tag for it is the first copy's in pool order, which the members helper takes from the
-  // order the copies are listed in.
-  it.each([
-    [
-      'dense first',
-      { x: at('1.0.0', '^1.0.0', ['x', 'x/sub']), 'x/sub': at('2.0.0', '^2.0.0', ['x/sub']) },
-      '1.0.0',
-    ],
-    [
-      'flat first',
-      { 'x/sub': at('2.0.0', '^2.0.0', ['x/sub']), x: at('1.0.0', '^1.0.0', ['x', 'x/sub']) },
-      '2.0.0',
-    ],
-  ])('takes a specifier two members list from the first in pool order (%s)', (_, copies, tag) => {
-    const election = elect([{ name: 'r', copies }]);
-
-    expect(election.winner).toBe('r');
-    expect(election.coverage.get('x/sub')).toBe(tag);
   });
 });

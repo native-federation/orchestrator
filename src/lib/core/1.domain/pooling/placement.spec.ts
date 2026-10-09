@@ -5,7 +5,7 @@ import { createVersionCheck } from 'lib/core/3.adapters/checks/version.check';
 import { electVariants } from './election';
 import type { PoolMember } from './membership';
 import { electedPlacement, memberRecord, missesOf } from './placement';
-import { hostRemotes } from './views';
+import { hostRemotes } from './builds';
 
 /**
  * The records the init step writes are computed here, before any write, and nothing here may change what it
@@ -57,12 +57,6 @@ describe('placement', () => {
       members,
       acceptsTag: acceptsTag(isCompatible, compare),
       hosts,
-      arrival: new Map([
-        ['team/h', 0],
-        ['team/a', 1],
-        ['team/b', 2],
-        ['team/c', 3],
-      ]),
       compare,
       latestFirst: false,
     });
