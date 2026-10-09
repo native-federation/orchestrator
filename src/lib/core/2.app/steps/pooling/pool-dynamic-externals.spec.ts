@@ -784,6 +784,72 @@ describe('createPoolDynamicExternals', () => {
       ]);
     });
 
+    // The resolver scoped mfe's `@fw/http` (under `scopeUncoveredEntrypoints`, say): the shared version lacks
+    // its testing entrypoint. The map serves that entrypoint from F's flat package, so the gate judges mfe
+    // global, as init would, and the scope becomes a skip. X is a committed island at the same tag.
+    it('turns a resolver scope the map serves into a skip, leaving the scope row to the others', async () => {
+      givenCommitted({
+        '@fw/core': external(
+          row('17.1.1', 'skip', copy('mfe', ['@fw/core'])),
+          row('17.0.0', 'share', copy('F', ['@fw/core'], true))
+        ),
+        '@fw/http/testing': external(row('17.0.0', 'share', copy('F', ['@fw/http/testing'], true))),
+        '@fw/http': external(
+          row(
+            '17.1.1',
+            'scope',
+            copy('X', ['@fw/http/testing'], true),
+            copy('mfe', ['@fw/http/testing'], true)
+          )
+        ),
+      });
+
+      const { actions } = await poolDynamicExternals({
+        ...load(),
+        actions: {
+          '@fw/core': { action: 'skip', covered: ['@fw/core'] },
+          '@fw/http': { action: 'scope' },
+        },
+      });
+
+      expect(actions['@fw/http']).toEqual({ action: 'skip', covered: ['@fw/http/testing'] });
+      expect(copies('@fw/http')).toEqual([
+        ['17.1.1:scope', [{ name: 'X', cached: true }]],
+        ['17.1.1:skip', [{ name: 'mfe', cached: false }]],
+      ]);
+    });
+
+    // A strict ^18 scoped mfe's `@fw/http` 18.0.0: the gate's own range check rejects the map's 17.0.0 too.
+    it("keeps a resolver scope a range rejects self, as 'incompatible'", async () => {
+      givenCommitted({
+        '@fw/core': external(
+          row('17.1.1', 'skip', copy('mfe', ['@fw/core'])),
+          row('17.0.0', 'share', copy('F', ['@fw/core'], true))
+        ),
+        '@fw/http/testing': external(row('17.0.0', 'share', copy('F', ['@fw/http/testing'], true))),
+        '@fw/http': external(
+          row('18.0.0', 'scope', {
+            ...copy('mfe', ['@fw/http/testing'], true),
+            requiredVersion: '^18.0.0',
+            strictVersion: true,
+          })
+        ),
+      });
+
+      const { actions } = await poolDynamicExternals({
+        ...load(),
+        actions: {
+          '@fw/core': { action: 'skip', covered: ['@fw/core'] },
+          '@fw/http': { action: 'scope' },
+        },
+      });
+
+      expect(actions).toEqual({ '@fw/core': { action: 'scope' }, '@fw/http': { action: 'scope' } });
+      expect(copies('@fw/http')).toEqual([
+        ['18.0.0:scope', [{ name: 'mfe', cached: true, poolCause: 'incompatible' }]],
+      ]);
+    });
+
     it('skips a share the map serves in part; the rest self-fills', async () => {
       // mfe ships `@fw/http` 17.0.0 with its root, which nobody serves, so it only reaches a global
       // verdict by agreeing: F serves its testing entrypoint at the same 17.0.0.

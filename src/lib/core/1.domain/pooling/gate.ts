@@ -31,15 +31,20 @@ export type CommittedView = {
 export type GateMiss =
   | { cause: 'incompatible'; specifier: Specifier; tag: VersionName }
   | { cause: 'uncovered'; specifier: Specifier }
-  | { cause: 'uncovered'; scoped: ExternalName }
   | { cause: 'uncovered'; unshipped: true };
 
-// A member whose action the map now serves: `skip` turns its share into a skip.
+// A member whose action the map now serves: `toSkip` turns its share or resolver scope into a skip.
 export type MapCover = {
   name: ExternalName;
-  skip: boolean;
+  toSkip: boolean;
   covered: Specifier[];
   override: Record<Specifier, string>;
+};
+
+type MapPolicy = {
+  shareScope: string;
+  selfFill: boolean;
+  scopeUrlOf: (remote: RemoteName) => string | undefined;
 };
 
 // How the loaded remote's copy of one member moves in the record.
@@ -69,72 +74,52 @@ export function committedView(
   return { builds, global };
 }
 
-// The init rules against a map that can no longer change (§"Scope and dynamic init", step 2). A member the
-// resolver scoped means the map cannot serve it, so no committed build is trusted with this remote.
+// The init rules against a map that can no longer change (§"Scope and dynamic init", step 2). A resolver
+// scope needs no rule of its own: a range that rejects the map's tag is a miss here too.
 export function judgeRemote(
-  own: readonly Copy[],
+  copies: readonly Copy[],
   view: CommittedView,
-  scoped: ReadonlySet<ExternalName>,
   accepts: AcceptsTag
 ): 'global' | GateMiss {
-  const { rejected, missing } = scan(own, view, accepts);
+  const { rejected, missing } = scan(copies, view, accepts);
   if (rejected) return { cause: 'incompatible', ...rejected };
-  const [resolverScoped] = scoped;
-  if (resolverScoped === undefined) {
-    const globalTags = new SpecifierTags([...view.global].map(([s, { tag }]) => [s, tag] as const));
-    // The map's tags must be a combination one build shipped: agreeing is its own witness, otherwise one
-    // committed build must be.
-    if (agrees(own, globalTags)) return 'global';
-    if (missing === undefined && shippedTogether(own, globalTags, view.builds.values()))
-      return 'global';
-  }
+  const globalTags = new SpecifierTags([...view.global].map(([s, { tag }]) => [s, tag] as const));
+  // The map's tags must be a combination one build shipped: agreeing is its own witness, otherwise one
+  // committed build must be.
+  if (agrees(copies, globalTags)) return 'global';
   if (missing !== undefined) return { cause: 'uncovered', specifier: missing };
-  return resolverScoped === undefined
-    ? { cause: 'uncovered', unshipped: true }
-    : { cause: 'uncovered', scoped: resolverScoped };
+  if (shippedTogether(copies, globalTags, view.builds.values())) return 'global';
+  return { cause: 'uncovered', unshipped: true };
 }
 
 // `covered` is per external, but the map serves by specifier: an entrypoint another member ships as a package
 // of its own (flat vs dense) is served all the same. A named scope has no `imports` to inherit, so the remote's
-// own scope names the committed source's file for each specifier, over the resolver's (one row's copy).
+// own scope maps each such specifier to the file the committed map serves it from, replacing the resolver's
+// override.
 export function coverFromMap(
   remote: RemoteName,
   mine: readonly PoolMember[],
   view: CommittedView,
   actions: Readonly<SharedInfoActions>,
-  map: {
-    shareScope: string;
-    selfFill: boolean;
-    scopeUrlOf: (remote: RemoteName) => string | undefined;
-  }
+  policy: MapPolicy
 ): { covers: MapCover[] } | { unmapped: RemoteName } {
   const covers: MapCover[] = [];
 
   for (const member of mine) {
     const action = actions[member.name]!;
-    if (action.action === 'scope') continue;
     // Inherits every mapping already.
     if (action.action === 'skip' && !action.covered) continue;
-    const own = member.external.versions.flatMap(v => v.remotes).find(r => r.name === remote);
-    if (!own) continue;
+    const copy = member.external.versions.flatMap(v => v.remotes).find(r => r.name === remote);
+    if (!copy) continue;
 
-    const covered = new Set(action.covered);
-    const override = { ...action.override };
-    for (const specifier in own.entries) {
-      const source = view.global.get(specifier);
-      if (!source) continue;
-      if (map.shareScope !== GLOBAL_SCOPE) {
-        const scopeUrl = map.scopeUrlOf(source.remote);
-        if (!scopeUrl) return { unmapped: source.remote };
-        override[specifier] = _path.join(scopeUrl, source.file);
-      }
-      covered.add(specifier);
-    }
+    const files = mapFiles(copy, view, policy, action);
+    if ('unmapped' in files) return files;
+    const { covered, override } = files;
 
-    const skip = action.action === 'share';
-    const partial = covered.size < Object.keys(own.entries).length;
-    if (skip && (covered.size === 0 || (partial && !map.selfFill))) continue;
-    covers.push({ name: member.name, skip, covered: [...covered], override });
+    const toSkip = action.action !== 'skip';
+    const partial = covered.size < Object.keys(copy.entries).length;
+    if (toSkip && (covered.size === 0 || (partial && !policy.selfFill))) continue;
+    covers.push({ name: member.name, toSkip, covered: [...covered], override });
   }
 
   return { covers };
@@ -153,14 +138,14 @@ export function recordMove(
   const moved: { tag: string; meta: SharedVersionMeta }[] = [];
   const versions = external.versions
     .map(v => {
-      const own = v.remotes.find(r => r.name === remote);
-      if (!own) return v;
-      const { servedBy: _servedBy, ...rest } = own;
+      const copy = v.remotes.find(r => r.name === remote);
+      if (!copy) return v;
+      const { servedBy: _servedBy, ...rest } = copy;
       const meta = { ...rest, cached: true, poolCause: move.cause };
       if (v.action === 'scope')
-        return { ...v, remotes: v.remotes.map(r => (r === own ? meta : r)) };
+        return { ...v, remotes: v.remotes.map(r => (r === copy ? meta : r)) };
       moved.push({ tag: v.tag, meta });
-      return { ...v, remotes: v.remotes.filter(r => r !== own) };
+      return { ...v, remotes: v.remotes.filter(r => r !== copy) };
     })
     // A version only the loaded remote held — a `share` it introduced — leaves with it.
     .filter(v => v.remotes.length > 0);
@@ -174,12 +159,35 @@ export function recordMove(
   return { ...external, versions: versions.sort(byTag(compare)) };
 }
 
+// The copy's specifiers the map serves, beside what the resolver covered, or a serving build a named scope
+// cannot map.
+function mapFiles(
+  copy: SharedVersionMeta,
+  view: CommittedView,
+  policy: MapPolicy,
+  action: SharedInfoActions[string]
+): { covered: Set<Specifier>; override: Record<Specifier, string> } | { unmapped: RemoteName } {
+  const covered = new Set(action.covered);
+  const override = { ...action.override };
+  for (const specifier in copy.entries) {
+    const source = view.global.get(specifier);
+    if (!source) continue;
+    if (policy.shareScope !== GLOBAL_SCOPE) {
+      const scopeUrl = policy.scopeUrlOf(source.remote);
+      if (!scopeUrl) return { unmapped: source.remote };
+      override[specifier] = _path.join(scopeUrl, source.file);
+    }
+    covered.add(specifier);
+  }
+  return { covered, override };
+}
+
 // The remote's copies against the committed global map: the first tag a range rejects and the first
 // entrypoint the map does not serve.
-function scan(own: readonly Copy[], view: CommittedView, accepts: AcceptsTag) {
+function scan(copies: readonly Copy[], view: CommittedView, accepts: AcceptsTag) {
   let rejected: { specifier: Specifier; tag: VersionName } | undefined;
   let missing: Specifier | undefined;
-  for (const copy of own)
+  for (const copy of copies)
     for (const s of copy.specifiers) {
       const global = view.global.get(s);
       if (global === undefined) missing ??= s;
@@ -192,30 +200,25 @@ function scan(own: readonly Copy[], view: CommittedView, accepts: AcceptsTag) {
 // The share row `update-cache` opened for a copy that now runs the map's files becomes a skip: it
 // publishes nothing. A tag keeps one row per action, so the copy joins a skip row already there.
 function recordFromMap(external: SharedExternal, remote: RemoteName): SharedExternal {
-  // Only a member whose action was `share` gets this move, so its copy sits in a share row.
+  // Only a member whose action was `share` or `scope` gets this move: its copy sits alone in the share row
+  // it opened, or among other islands in a scope row.
   const opened = external.versions.find(
-    v => v.action === 'share' && v.remotes.some(r => r.name === remote)
+    v => v.action !== 'skip' && v.remotes.some(r => r.name === remote)
   )!;
   const meta = { ...opened.remotes.find(r => r.name === remote)!, cached: false };
   const joined = rowAt(external.versions, opened.tag, 'skip');
-
-  if (!joined) {
-    return {
-      ...external,
-      versions: external.versions.map(v =>
-        v === opened
-          ? { ...v, action: 'skip', remotes: v.remotes.map(r => (r.name === remote ? meta : r)) }
-          : v
-      ),
-    };
-  }
-
-  const into = { ...joined, remotes: [...joined.remotes] };
+  const into = joined
+    ? { ...joined, remotes: [...joined.remotes] }
+    : { ...opened, action: 'skip' as const, remotes: [] };
   addRemoteToVersion(into, meta);
-  return {
-    ...external,
-    versions: external.versions.filter(v => v !== opened).map(v => (v === joined ? into : v)),
-  };
+
+  const versions = external.versions.flatMap(v => {
+    if (v === joined) return [into];
+    if (v !== opened) return [v];
+    const left = { ...v, remotes: v.remotes.filter(r => r.name !== remote) };
+    return [...(left.remotes.length > 0 ? [left] : []), ...(joined ? [] : [into])];
+  });
+  return { ...external, versions };
 }
 
 // The order `generate-import-map` fills `imports` in: every `share` version, then every `skip` copy; the
@@ -227,7 +230,7 @@ function forEachGlobalClaim(
   without: RemoteName | undefined,
   visit: (specifier: Specifier, tag: VersionName, meta: SharedVersionMeta) => void
 ): void {
-  // generate-import-map's `imports` and `claimsOf` walks claim in the record's order.
+  // The record's order: generate-import-map claims `imports` and named scopes (`claimsOf`) in it.
   const rank = new Map(recordOrder.map((name, i) => [name, i]));
   const walk = [...members].sort((a, b) => rank.get(a.name)! - rank.get(b.name)!);
 

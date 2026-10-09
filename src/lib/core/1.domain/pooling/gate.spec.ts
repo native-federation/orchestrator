@@ -1,7 +1,7 @@
 import type { SharedExternal, SharedVersion, SharedVersionAction } from 'lib/core/1.domain';
 import { mockVersionRemote } from 'lib/testing/domain/externals/version.mock';
 import { copiesByRemote } from './builds';
-import { committedView } from './gate';
+import { committedView, coverFromMap } from './gate';
 import type { PoolMember } from './membership';
 
 /**
@@ -256,5 +256,32 @@ describe('committedView', () => {
         remote: 'flat',
       });
     });
+  });
+});
+
+describe('coverFromMap', () => {
+  const policy = { shareScope: '__GLOBAL__', selfFill: false, scopeUrlOf: () => undefined };
+
+  // Defensive: unreachable under a coherent committed map, where a remote that agrees with the map never has
+  // a resolver-scoped member (jsdev-b-5's probe). A scope the map serves only in part, or not at all, stays a
+  // scope: half its entrypoints on the map's files and half on its own build would tear it.
+  it('leaves a resolver scope the map serves only in part, or not at all, out of the covers', () => {
+    const scoped = (entries: Record<string, string>) => [
+      member('@ng/core', [
+        { tag: '22.0.0', action: 'share', copies: [{ remote: 'F' }] },
+        { tag: '22.1.0', action: 'scope', copies: [{ remote: 'mfe', entries }] },
+      ]),
+    ];
+
+    for (const entries of [
+      { '@ng/core': 'core.js', '@ng/core/testing': 'testing.js' },
+      { '@ng/core/testing': 'testing.js' },
+    ]) {
+      const members = scoped(entries);
+      const view = viewOf(members, 'mfe');
+      expect(
+        coverFromMap('mfe', members, view, { '@ng/core': { action: 'scope' } }, policy)
+      ).toEqual({ covers: [] });
+    }
   });
 });

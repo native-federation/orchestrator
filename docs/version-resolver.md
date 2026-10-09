@@ -929,15 +929,15 @@ every pool the portfolio has — including one formed by another remote's `pool`
 declares itself can have their verdict rewritten. The committed view excludes the loaded remote's own copies,
 which `update-cache` has already stored but the committed map holds none of. In order:
 
-1. **Already scoped.** If the resolver scoped any member for this remote, it serves its whole family itself;
-   no committed build is trusted with it. The cause is `incompatible` when a range rejects a tag the map serves,
-   else `uncovered` (`scopeUncoveredEntrypoints` scoped a copy whose entrypoint the map lacks).
-2. **The global map.** It resolves through the committed `imports` when no range rejects a tag the map serves
+1. **The global map.** It resolves through the committed `imports` when no range rejects a tag the map serves
    and either it **agrees** with the map on everything both ship — then the packages it adds are its own to
    publish — or the map serves every specifier it imports and some committed build shipped that exact
    combination. The second check matters for records written before variant election, whose global map can
-   mix builds per member. A range rejecting a global tag moves it on with cause `incompatible`.
-3. **Otherwise it serves its own family.** Every self-serving remote is warned, in the same sentences as init.
+   mix builds per member. A range rejecting a global tag moves it on with cause `incompatible`. A member the
+   resolver scoped is judged the same way: a strict range that rejects the map's tag islands the family as
+   `incompatible`, while a copy `scopeUncoveredEntrypoints` scoped for an entrypoint the shared version lacks
+   becomes a skip when the map serves every entrypoint it ships, as at init.
+2. **Otherwise it serves its own family.** Every self-serving remote is warned, in the same sentences as init.
 
 This gate is not redundant even though init enforced its own. Init guarantees no _remote_ runs a combination
 nothing shipped, but a remote loaded later is exactly the consumer that could bridge two builds the committed

@@ -14,21 +14,10 @@ const twinArbitrary = (o: Parameters<typeof portfolioArbitrary>[0]) =>
     .filter(spec => spec.remotes.length > 0)
     .chain(spec => fc.tuple(fc.constant(lenient(spec)), fc.nat(spec.remotes.length - 1)));
 
-type TwinRed = Awaited<ReturnType<typeof twinGate>>['reds'][number];
-
-// A twin the resolver scopes for an entrypoint the shared version lacks serves its family itself even where
-// its source resolves through the map; C5 of rework 05 judges it instead (`fx-sf-global` below).
-const islandedUncovered = (red: TwinRed) => {
-  const twin = (red.detail as { T?: { action: string; cause?: string } } | undefined)?.T;
-  return red.check === 'same-file' && twin?.action === 'scope' && twin.cause === 'uncovered';
+const twinGates = async ([spec, source]: [PortfolioSpec, number]) => {
+  const { R, T, reds } = await twinGate(spec, source);
+  expect({ R, T, reds }).toEqual({ R, T, reds: [] });
 };
-
-const twinGates =
-  (known?: (red: TwinRed) => boolean) =>
-  async ([spec, source]: [PortfolioSpec, number]) => {
-    const { R, T, reds } = await twinGate(spec, source);
-    expect({ R, T, reds: reds.filter(r => !known?.(r)) }).toEqual({ R, T, reds: [] });
-  };
 
 describe('pooling properties: twin loads (generated portfolios)', { timeout: TIMEOUT }, () => {
   it('twin: a renamed clone of a committed remote resolves through the map or serves itself', () =>
@@ -41,7 +30,7 @@ describe('pooling properties: twin loads (generated portfolios)', { timeout: TIM
         scopeUncoveredEntrypoints: true,
       }),
       150,
-      twinGates()
+      twinGates
     ));
 
   for (const [offset, shareScope] of [
@@ -58,7 +47,7 @@ describe('pooling properties: twin loads (generated portfolios)', { timeout: TIM
           ...(shareScope && { shareScope }),
         }),
         150,
-        twinGates()
+        twinGates
       ));
 
   // Flat builds ship each entrypoint as a package of its own, which the map can still serve where the shared
@@ -78,7 +67,7 @@ describe('pooling properties: twin loads (generated portfolios)', { timeout: TIM
           ...(shareScope && { shareScope }),
         }),
         150,
-        twinGates(islandedUncovered)
+        twinGates
       ));
 });
 
@@ -118,7 +107,7 @@ describe('pooling properties: twin counterexamples', () => {
   // fx-sf-global (tester-9). r0 is a flat 18.0.0 build (@p0/m1 and @p0/m1/sub each a package of its own);
   // r1 a dense 18.2.0 build shipping only @p0/m1/sub under ^18. At init r1 skips onto the map, which serves
   // @p0/m1/sub from r0. Under scopeUncoveredEntrypoints the resolver scopes a clone of r1 (the shared
-  // @p0/m1 18.2.0 lacks /sub), and the twin runs its own /sub where r1 runs r0's. Both flip at C5 of rework 05.
+  // @p0/m1 18.2.0 lacks /sub); the gate judges it all the same, and the map serves it as it serves r1.
   const m1 = (flat: boolean, minor: number, members: (string | null)[]) =>
     remote(flat, { major: 1, minor, patch: 0, members, range: 'major' }, 'caret');
   const sfGlobal = {
@@ -129,25 +118,11 @@ describe('pooling properties: twin counterexamples', () => {
     remotes: [m1(true, 0, [null, 'root+sub', null]), m1(false, 2, [null, 'sub', null])],
   } as unknown as PortfolioSpec;
 
-  it.fails(
-    'a runtime remote the resolver scopes for an entrypoint the map serves resolves through the map',
-    async () => {
-      const { T, reds, record } = await twinGate(sfGlobal, 1);
-      expect(reds).toEqual([]);
-      const twin = record!['@p0/m1']!.versions.find(v => v.remotes.some(r => r.name === T))!;
-      expect(twin.action).not.toBe('scope');
-      expect(twin.remotes.find(r => r.name === T)!.poolCause).toBeUndefined();
-    }
-  );
-
-  // The gate's forced self for a resolver-scoped member (G6 in tester-9's 05 mutants): today the twin r2
-  // records the resolver's 'uncovered' without being judged; judged, it records no cause. Kills G6 until C5.
-  it.fails(
-    'a runtime remote the resolver scopes for an entrypoint is judged, not islanded unjudged',
-    async () => {
-      const { T, record } = await twinGate(sfGlobal, 1);
-      const twin = record!['@p0/m1']!.versions.flatMap(v => v.remotes).find(r => r.name === T);
-      expect(twin?.poolCause).toBeUndefined();
-    }
-  );
+  it('a runtime remote the resolver scopes for an entrypoint the map serves resolves through the map', async () => {
+    const { T, reds, record } = await twinGate(sfGlobal, 1);
+    expect(reds).toEqual([]);
+    const twin = record!['@p0/m1']!.versions.find(v => v.remotes.some(r => r.name === T))!;
+    expect(twin.action).not.toBe('scope');
+    expect(twin.remotes.find(r => r.name === T)!.poolCause).toBeUndefined();
+  });
 });

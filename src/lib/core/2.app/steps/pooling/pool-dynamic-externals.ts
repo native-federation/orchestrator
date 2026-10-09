@@ -71,7 +71,7 @@ export function createPoolDynamicExternals(
     recordOrder: ExternalName[],
     shareScope: string
   ): Map<ExternalName, CopyMove> {
-    const map = { shareScope, selfFill: maySelfFill(shareScope), scopeUrlOf };
+    const policy = { shareScope, selfFill: maySelfFill(shareScope), scopeUrlOf };
     const moves = new Map<ExternalName, CopyMove>();
     const selfServe = (members: PoolMember[], cause: PoolCause) => {
       for (const { name } of members) {
@@ -91,26 +91,23 @@ export function createPoolDynamicExternals(
       try {
         const shipped = copiesByRemote(pool);
         const view = committedView(pool, shipped, recordOrder, remote);
-        const scoped = new Set(
-          mine.filter(m => actions[m.name]!.action === 'scope').map(m => m.name)
-        );
-        const verdict = judgeRemote(shipped.get(remote) ?? [], view, scoped, accepts);
+        const verdict = judgeRemote(shipped.get(remote) ?? [], view, accepts);
         if (verdict !== 'global') {
           config.log.warn(8, `[${shareScope}] ${selfServeWarning(remote, verdict, mine.length)}`);
           selfServe(mine, verdict.cause);
           continue;
         }
 
-        const cover = coverFromMap(remote, mine, view, actions, map);
+        const cover = coverFromMap(remote, mine, view, actions, policy);
         if ('unmapped' in cover) {
           // Half its family on the map's files and half on its own build would tear it.
           warnUnmapped(shareScope, remote, cover.unmapped);
           selfServe(mine, 'uncovered');
           continue;
         }
-        for (const { name, skip, covered, override } of cover.covers) {
+        for (const { name, toSkip, covered, override } of cover.covers) {
           const action = actions[name]!;
-          if (skip) {
+          if (toSkip) {
             action.action = 'skip';
             moves.set(name, { fromMap: true });
           }
@@ -189,11 +186,6 @@ function selfServeWarning(remote: RemoteName, miss: GateMiss, members: number): 
   const where = `All ${members} members it imports are scoped for it.`;
   if (miss.cause === 'incompatible')
     return `'${remote}' is islanded: its range rejects '${miss.specifier}@${miss.tag}' of the committed map. ${where}`;
-  return `'${remote}' serves its own family: no committed build offers every entrypoint it imports at a version it accepts — '${gapOf(miss)}' is the gap. ${where}`;
-}
-
-function gapOf(miss: GateMiss): string {
-  if ('specifier' in miss) return miss.specifier;
-  if ('scoped' in miss) return miss.scoped;
-  return 'a combination no committed build shipped';
+  const gap = 'specifier' in miss ? miss.specifier : 'a combination no committed build shipped';
+  return `'${remote}' serves its own family: no committed build offers every entrypoint it imports at a version it accepts — '${gap}' is the gap. ${where}`;
 }
