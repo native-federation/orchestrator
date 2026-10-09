@@ -10,6 +10,8 @@ export type Copy = {
   tag: VersionName;
   requiredVersion: string;
   strict: boolean;
+  // Basis precedence puts the host's own copy first on a `host: true` version.
+  host: boolean;
   specifiers: Specifier[];
 };
 
@@ -17,6 +19,7 @@ export type Build = {
   owner: RemoteName;
   tags: SpecifierTags;
   tagByMember: Map<ExternalName, VersionName>;
+  host: boolean;
 };
 
 export function copiesByRemote(members: PoolMember[]): Map<RemoteName, Copy[]> {
@@ -34,6 +37,7 @@ export function copiesByRemote(members: PoolMember[]): Map<RemoteName, Copy[]> {
             tag: version.tag,
             requiredVersion: meta.requiredVersion,
             strict: meta.strictVersion,
+            host: version.host && meta === version.remotes[0],
             specifiers: Object.keys(meta.entries),
           });
       }
@@ -48,14 +52,5 @@ export function buildOf(owner: RemoteName, copies: readonly Copy[]): Build {
       if (!tags.has(specifier)) tags.set(specifier, copy.tag);
     tagByMember.set(copy.member, copy.tag);
   }
-  return { owner, tags, tagByMember };
-}
-
-// Basis precedence puts the host's own copy first on a `host: true` version, so its `remotes[0]` is the host.
-export function hostRemotes(members: PoolMember[]): Set<RemoteName> {
-  const hosts = new Set<RemoteName>();
-  for (const member of members)
-    for (const version of member.external.versions)
-      if (version.host && version.remotes.length > 0) hosts.add(version.remotes[0]!.name);
-  return hosts;
+  return { owner, tags, tagByMember, host: copies.some(c => c.host) };
 }

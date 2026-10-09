@@ -1,6 +1,6 @@
 import type { SharedExternal, SharedVersion, SharedVersionAction } from 'lib/core/1.domain';
 import { mockVersionRemote } from 'lib/testing/domain/externals/version.mock';
-import { buildOf, copiesByRemote, hostRemotes } from './builds';
+import { buildOf, copiesByRemote } from './builds';
 import type { PoolMember } from './membership';
 
 /**
@@ -87,16 +87,15 @@ describe('a build read from the record', () => {
       ).tags.get('x/sub')
     ).toBe(first);
   });
-});
 
-describe('hostRemotes', () => {
-  it('is nobody when no version came from a host', () => {
+  it('is no host when no version came from a host', () => {
     const members = [
       member('@angular/core', [
         { tag: '22.0.5', action: 'share', copies: [{ remote: 'mfe-b', req: '~22.0.5' }] },
         { tag: '22.1.0', copies: [{ remote: 'mfe-a' }] },
       ]),
     ];
-    expect(hostRemotes(members)).toEqual(new Set());
+    expect(buildFor('mfe-a', members).host).toBe(false);
+    expect(buildFor('mfe-b', members).host).toBe(false);
   });
 });

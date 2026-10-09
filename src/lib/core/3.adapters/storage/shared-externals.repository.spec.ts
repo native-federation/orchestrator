@@ -434,7 +434,7 @@ describe('createSharedExternalsRepository', () => {
     });
 
     // `determine` grants a version with `host: true` precedence over every other version of the external,
-    // and `hostRemotes` reads it to decide who pooling may never repoint. Both then take `remotes[0]` for
+    // and pooling's `copiesByRemote` reads it to decide who pooling may never repoint. Both then take `remotes[0]` for
     // the host — so leaving the flag on a version the host just left hands both to whoever moved up, and a
     // host that moved to another tag loses to the tag it abandoned.
     it('should clear the host flag when the leading copy is evicted', () => {

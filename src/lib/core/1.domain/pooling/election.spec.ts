@@ -44,7 +44,6 @@ const elect = (builds: Build[]) =>
   electVariants({
     members: members(builds),
     acceptsTag: acceptsTag(versionCheck.isCompatible, versionCheck.compare),
-    hosts: new Set(),
     compare: versionCheck.compare,
     latestFirst: false,
   });

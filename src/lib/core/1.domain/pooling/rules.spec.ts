@@ -7,6 +7,7 @@ const copy = (member: string, tag: string, specifiers: string[]): Copy => ({
   tag,
   requiredVersion: `^${tag}`,
   strict: false,
+  host: false,
   specifiers,
 });
 

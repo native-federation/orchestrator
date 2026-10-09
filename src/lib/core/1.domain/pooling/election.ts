@@ -16,7 +16,6 @@ import { compareStrings } from 'lib/utils/compare-strings';
 type ElectionInput = {
   members: PoolMember[];
   acceptsTag: AcceptsTag;
-  hosts: ReadonlySet<RemoteName>;
   compare: (a: VersionName, b: VersionName) => number;
   // The round-1 winner the stored record carries from the last election, for the tie rule.
   previous?: RemoteName;
@@ -35,6 +34,7 @@ export type Placement =
 
 export type Election = {
   winner: RemoteName;
+  winnerIsHost: boolean;
   // The winner's specifiers, same-tag loans from agreeing builds, and packages they all add at one tag.
   coverage: SpecifierTags;
   // Remotes outside round 1 that agree with the winner on everything both ship (rule 5).
@@ -49,7 +49,7 @@ export type Election = {
 };
 
 export function electVariants(input: ElectionInput): Election {
-  const { members, acceptsTag, hosts, compare } = input;
+  const { members, acceptsTag, compare } = input;
 
   const shipped = copiesByRemote(members);
   const builds = new Map<RemoteName, Build>();
@@ -154,7 +154,7 @@ export function electVariants(input: ElectionInput): Election {
   };
 
   // Round 1. The host cannot be repointed, so its build is the global one whenever it ships any member.
-  const host = remotes.find(r => hosts.has(r));
+  const host = remotes.find(r => buildFor(r).host);
   type Candidate = {
     own: Build;
     // The build's tags plus its loans.
@@ -295,6 +295,7 @@ export function electVariants(input: ElectionInput): Election {
   const alone = pending.sort((a, b) => recordOrder.get(a)! - recordOrder.get(b)!);
   const election: Election = {
     winner,
+    winnerIsHost: host !== undefined,
     coverage,
     agreeing: new Set(),
     publishers: new Set(),

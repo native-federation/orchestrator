@@ -16,7 +16,6 @@ import type { PoolMember, PoolName } from './membership';
 // Everything `memberRecord` reads of one pool.
 export type PlacedPool = Election & {
   poolName: PoolName;
-  hosts: ReadonlySet<RemoteName>;
   compare: (a: VersionName, b: VersionName) => number;
 };
 
@@ -75,7 +74,7 @@ export function memberRecord(member: PoolMember, pool: PlacedPool): SharedExtern
     if (meta.name !== pool.winner) return;
     // The winner's copy leads its row: `remotes[0]` is the basis the global map publishes.
     winnerRow = row;
-    row.host = pool.hosts.has(meta.name);
+    row.host = pool.winnerIsHost;
   };
 
   for (const version of member.external.versions)

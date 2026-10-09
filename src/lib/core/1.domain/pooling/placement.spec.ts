@@ -5,7 +5,6 @@ import { createVersionCheck } from 'lib/core/3.adapters/checks/version.check';
 import { electVariants } from './election';
 import type { PoolMember } from './membership';
 import { memberRecord, type PlacedPool } from './placement';
-import { hostRemotes } from './builds';
 
 /**
  * The records the init step writes are computed here, before any write, and nothing here may change what it
@@ -52,15 +51,13 @@ describe('placement', () => {
   it('memberRecord reads an elected pool without changing it', () => {
     const members = pool();
     const before = structuredClone(members);
-    const hosts = hostRemotes(members);
     const election = electVariants({
       members,
       acceptsTag: acceptsTag(isCompatible, compare),
-      hosts,
       compare,
       latestFirst: false,
     });
-    const placed: PlacedPool = { ...election, poolName: 'x', hosts, compare };
+    const placed: PlacedPool = { ...election, poolName: 'x', compare };
 
     const records = members.map(m => memberRecord(m, placed));
 

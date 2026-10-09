@@ -5,7 +5,7 @@ import type { DrivingContract } from '../../driving-ports/driving.contract';
 import type { LoggingConfig } from '../../config/log.contract';
 import type { ModeConfig } from '../../config/mode.contract';
 import { acceptsTag } from 'lib/core/1.domain/externals/compatibility';
-import { type Copy, copiesByRemote, hostRemotes } from 'lib/core/1.domain/pooling/builds';
+import { type Copy, copiesByRemote } from 'lib/core/1.domain/pooling/builds';
 import { electVariants, type PoolMiss } from 'lib/core/1.domain/pooling/election';
 import type { PoolMember, PoolName } from 'lib/core/1.domain/pooling/membership';
 import { type ElectionPlan, planElection, renamedRecords } from 'lib/core/1.domain/pooling/plan';
@@ -69,16 +69,14 @@ export function createPoolSharedExternals(
     members: PoolMember[],
     scope: string
   ): [ExternalName, SharedExternal][] {
-    const hosts = hostRemotes(members);
     const election = electVariants({
       members,
       acceptsTag: acceptsTag(ports.versionCheck.isCompatible, compare),
-      hosts,
       compare,
       previous: previousWinner(members),
       latestFirst: config.profile.latestSharedExternal,
     });
-    const placed: PlacedPool = { ...election, poolName, hosts, compare };
+    const placed: PlacedPool = { ...election, poolName, compare };
     report(poolName, members, placed, scope);
     return members.map(m => [m.name, { ...memberRecord(m, placed), poolWinner: placed.winner }]);
   }
