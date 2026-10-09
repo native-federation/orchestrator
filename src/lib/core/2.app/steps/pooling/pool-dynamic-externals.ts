@@ -42,7 +42,7 @@ export function createPoolDynamicExternals(
   // another remote's. See docs/version-resolver.md §"Scope and dynamic init".
   return ({ entry, actions }) => {
     for (const [shareScope, names] of poolableNames(entry, actions)) {
-      // A tag anywhere in the committed scope forms pools this entry is subject to — its own tag is not
+      // A label anywhere in the committed scope forms pools this entry is subject to — its own label is not
       // required, and the pool covers the whole external, this entry's copies included.
       const committed = ports.sharedExternalsRepo.getFromScope(shareScope);
       if (!scopeHasPoolState(committed)) continue;

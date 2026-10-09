@@ -10,7 +10,7 @@ vi.mock('./membership', async importOriginal => {
   return { ...actual, buildPools: vi.fn(actual.buildPools) };
 });
 
-// The plan reads names, `pool` tags, `dirty` and pool results; one version per record suffices.
+// The plan reads names, `pool` labels, `dirty` and pool results; one version per record suffices.
 const record = (
   o: { dirty?: boolean; pool?: string; poolName?: string; servedBy?: string } = {}
 ): SharedExternal => ({
@@ -35,10 +35,10 @@ const shape = (plan: ElectionPlan) => ({
   dirtyPools: [...plan.dirtyPools].map(([name, members]) => [name, members.map(m => m.name)]),
   dissolved: [...plan.dissolved.keys()],
   renames: plan.renames,
-  taggedAlone: plan.taggedAlone,
+  labelledAlone: plan.labelledAlone,
 });
 
-const EMPTY = { dirtyPools: [], dissolved: [], renames: [], taggedAlone: [] };
+const EMPTY = { dirtyPools: [], dissolved: [], renames: [], labelledAlone: [] };
 
 describe('planElection', () => {
   beforeEach(() => {
@@ -46,7 +46,7 @@ describe('planElection', () => {
   });
 
   it('is empty, and builds no graph, when nothing in the scope is dirty', () => {
-    // Stale pool results and a lonely tag are both left alone: a clean scope is what storage holds.
+    // Stale pool results and a lone label are both left alone: a clean scope is what storage holds.
     const scope: shareScope = {
       a: record({ pool: 'g', poolName: 'g' }),
       b: record({ pool: 'g', poolName: 'g' }),
@@ -135,10 +135,10 @@ describe('planElection', () => {
     expect(shape(planElection(scope, true)).renames).toEqual([['c', 'h']]);
   });
 
-  it('lists a tagged external that pooled with nothing', () => {
+  it('lists a labelled external that pooled with nothing', () => {
     const scope: shareScope = { a: record({ dirty: true, pool: 'typo' }) };
 
-    expect(shape(planElection(scope, true))).toEqual({ ...EMPTY, taggedAlone: ['a'] });
+    expect(shape(planElection(scope, true))).toEqual({ ...EMPTY, labelledAlone: ['a'] });
   });
 
   it('never writes to the scope it reads', () => {

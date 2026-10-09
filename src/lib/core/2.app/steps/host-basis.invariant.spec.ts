@@ -1,6 +1,6 @@
 import type { RemoteEntry } from 'lib/core/1.domain';
 import { portfolio } from 'lib/testing/pooling/portfolio';
-import { tagSharedInfoByNpmScope } from 'lib/testing/pooling/tag-by-npm-scope';
+import { labelSharedInfoByNpmScope } from 'lib/testing/pooling/label-by-npm-scope';
 
 /**
  * On a version flagged `host`, `remotes[0]` is the host's copy — what the import map publishes and what
@@ -31,17 +31,17 @@ const entry = (name: string, deps: Dep[], o: { v2?: boolean } = {}): RemoteEntry
   }) as unknown as RemoteEntry;
 
 // The init flow, start to commit, on real repositories; a second page opens over what the first committed.
-// With pooling, entries arrive tagged by npm scope — the build's default for scoped packages.
+// With pooling, entries arrive labelled by npm scope — the build's default for scoped packages.
 function setup(pooling: boolean) {
   const p = portfolio({}, { hosts: ['host'], storage: 'nf-host-basis', realRepositories: true });
-  const tagged = (entries: RemoteEntry[]) =>
-    pooling ? entries.map(e => ({ ...e, shared: tagSharedInfoByNpmScope(e.shared) })) : entries;
+  const labelled = (entries: RemoteEntry[]) =>
+    pooling ? entries.map(e => ({ ...e, shared: labelSharedInfoByNpmScope(e.shared) })) : entries;
   return {
     p,
-    init: (entries: RemoteEntry[]) => p.runInit(tagged(entries)),
+    init: (entries: RemoteEntry[]) => p.runInit(labelled(entries)),
     nextPage: (entries: RemoteEntry[]) => {
       p.reload();
-      return p.runInit(tagged(entries));
+      return p.runInit(labelled(entries));
     },
   };
 }

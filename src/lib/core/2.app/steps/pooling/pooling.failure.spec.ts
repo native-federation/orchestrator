@@ -1,7 +1,7 @@
 import type { RemoteEntry } from 'lib/core/1.domain';
 import { mockSharedInfo } from 'lib/testing/domain/remote-entry/shared-info.mock';
 import { portfolio } from 'lib/testing/pooling/portfolio';
-import { tagSharedInfoByNpmScope } from 'lib/testing/pooling/tag-by-npm-scope';
+import { labelSharedInfoByNpmScope } from 'lib/testing/pooling/label-by-npm-scope';
 
 /**
  * An unexpected error inside pooling fails the init or the runtime load, as one in determine does (D-4); no
@@ -59,7 +59,7 @@ describe('a pooling error', () => {
       name,
       url: `http://${name.split('/')[1]}/remoteEntry.json`,
       exposes: [],
-      shared: tagSharedInfoByNpmScope(
+      shared: labelSharedInfoByNpmScope(
         NAMES.map(pkg =>
           mockSharedInfo(pkg, { requiredVersion: range(pkg), version: '17.0.0', singleton: true })
         )

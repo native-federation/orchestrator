@@ -51,7 +51,7 @@ export type DepOptions = {
   strict?: boolean;
   /** `singleton`, default true — false means the external is scoped per remote, never shared. */
   singleton?: boolean;
-  /** Explicit `pool` tag; joins this external to a family without the harness scope tags. */
+  /** Explicit `pool` label; joins this external to a family without the harness scope labels. */
   pool?: string;
   shareScope?: string;
   /** Extra entrypoints of the same package, e.g. `['/http']` for `@angular/common/http`. */
@@ -239,7 +239,7 @@ export const fixture = (name: FixtureName): RemoteEntry =>
 const POOLED = [pooled1, pooled2, pooled3] as const;
 
 /**
- * A recorded-style entry from `e2e/fixtures/pooling`: flat externals, flat chunking, `pool` tags — the
+ * A recorded-style entry from `e2e/fixtures/pooling`: flat externals, flat chunking, `pool` labels — the
  * combination none of the eleven captured entries has. See that folder's README.
  */
 export const poolFixture = (n: 1 | 2 | 3): RemoteEntry =>

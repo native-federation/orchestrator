@@ -99,7 +99,7 @@ test.describe('lifecycle: the warm start', () => {
   });
 
   test('drops a stale subpool when the pool that formed it dissolves', async ({ nf }) => {
-    // Only mfe1 tags the family, so its tag alone forms the pool (explicit tags only, no scope tags).
+    // Only mfe1 labels the family, so its label alone forms the pool (explicit labels only, no scope labels).
     // mfe2 and mfe4 pin core to ~22.0.9, so mfe1's 22.0.6 build cannot serve them; the 22.0.9 build cannot
     // serve mfe1 or mfe3 (no router). Two each, so the newer build wins round 1, and a later round places
     // mfe3 in mfe1's subpool, recording `servedBy: team/mfe1` on its copies.
@@ -124,7 +124,7 @@ test.describe('lifecycle: the warm start', () => {
     await nf.init([mfe1(SCOPE.mfe1, 'ng'), ...others()], { pooling: false });
     expect(await subpoolsOf('@angular/core')).toContain('team/mfe3>team/mfe1');
 
-    // mfe1 redeploys at a new URL without its tag. Only mfe1 is refetched; mfe3 stays cached, and the
+    // mfe1 redeploys at a new URL without its label. Only mfe1 is refetched; mfe3 stays cached, and the
     // pool is gone. Its subpool used to survive, pointing mfe3's core at mfe1's *new* build beside mfe3's
     // own router — a pair neither pooling nor plain resolution would hand it.
     await nf.init([mfe1(SCOPE.mfe5), ...others()], { pooling: false });
@@ -138,7 +138,7 @@ test.describe('lifecycle: the warm start', () => {
   test('drops a stale subpool when every other remote leaves a pool that survives', async ({
     nf,
   }) => {
-    // As above, but mfe3 tags the family too, so the pool outlives mfe1's departure with mfe3 as its
+    // As above, but mfe3 labels the family too, so the pool outlives mfe1's departure with mfe3 as its
     // only remote. A one-remote pool used to return before rebuilding its members, so mfe3 stayed in the
     // subpool of a build that no longer ships the family.
     const subpoolsOf = async (name: string) =>
@@ -165,7 +165,7 @@ test.describe('lifecycle: the warm start', () => {
     );
     expect(await subpoolsOf('@angular/core')).toContain('team/mfe3>team/mfe1');
 
-    // mfe1 and mfe2 redeploy at new URLs without the family; only mfe3's copies remain, still tagged.
+    // mfe1 and mfe2 redeploy at new URLs without the family; only mfe3's copies remain, still labelled.
     await nf.init(
       [
         remote('team/mfe1', SCOPE.mfe5, [dep('rxjs', '7.8.1')]),

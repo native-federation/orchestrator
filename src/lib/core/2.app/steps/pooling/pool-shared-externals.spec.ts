@@ -9,7 +9,7 @@ import { storedRecord } from 'lib/testing/pooling/portfolio-fixtures';
  * resolves. Islands and subpools are read off the stored record, never off the warnings.
  *
  * Seeded records start dirty, as a fresh registration leaves them, unless a case says otherwise. Scoped
- * packages carry their npm-scope pool tag, as the build adds by default.
+ * packages carry their npm-scope pool label, as the build adds by default.
  */
 describe('createPoolSharedExternals', () => {
   const SCOPE = Object.fromEntries(
@@ -122,8 +122,8 @@ describe('createPoolSharedExternals', () => {
   };
 
   describe('when inert', () => {
-    it('stores no pool state when no pool tag is present', async () => {
-      // Unscoped packages carry no npm-scope tag, so nothing pools them.
+    it('stores no pool state when no pool label is present', async () => {
+      // Unscoped packages carry no npm-scope label, so nothing pools them.
       p.seed('foo', [at('17.0.0', 'foo', [copy('mfe1')], 'share')]);
       p.seed('bar', [at('17.0.0', 'bar', [copy('mfe1')], 'share')]);
 
@@ -170,16 +170,16 @@ describe('createPoolSharedExternals', () => {
   // pools, so a scope without pool state must cost exactly what it costs on a page with no pool anywhere. Which
   // scopes are pooled at all is pinned by plan.spec.ts.
   describe('skips work', () => {
-    // team-b holds foo and bar, tagged into one pool or not; `pooledElsewhere` adds a pool to the global
+    // team-b holds foo and bar, labelled into one pool or not; `pooledElsewhere` adds a pool to the global
     // scope. Counts team-b's storage writes over one init, and those that carry a pool result.
-    const trafficOf = async (o: { tagged: boolean; pooledElsewhere: boolean }) => {
+    const trafficOf = async (o: { labelled: boolean; pooledElsewhere: boolean }) => {
       page({ scope: 'team-b' });
-      const tag = o.tagged ? { pool: 'grp' } : {};
+      const label = o.labelled ? { pool: 'grp' } : {};
       p.seed('foo', [
-        at('17.0.0', 'foo', [copy('mfe1', '17', tag)]),
-        at('18.0.0', 'foo', [copy('mfe2', '18', tag)]),
+        at('17.0.0', 'foo', [copy('mfe1', '17', label)]),
+        at('18.0.0', 'foo', [copy('mfe2', '18', label)]),
       ]);
-      p.seed('bar', [at('17.0.0', 'bar', [copy('mfe1', '17', tag)])]);
+      p.seed('bar', [at('17.0.0', 'bar', [copy('mfe1', '17', label)])]);
       if (o.pooledElsewhere)
         for (const name of ['@framework/core', '@framework/common'])
           p.adapters.sharedExternalsRepo.addOrUpdate(
@@ -204,9 +204,9 @@ describe('createPoolSharedExternals', () => {
     };
 
     it('writes a scope without pool state as if no scope had any (W1)', async () => {
-      const alone = await trafficOf({ tagged: false, pooledElsewhere: false });
-      const besidePool = await trafficOf({ tagged: false, pooledElsewhere: true });
-      const pooled = await trafficOf({ tagged: true, pooledElsewhere: false });
+      const alone = await trafficOf({ labelled: false, pooledElsewhere: false });
+      const besidePool = await trafficOf({ labelled: false, pooledElsewhere: true });
+      const pooled = await trafficOf({ labelled: true, pooledElsewhere: false });
 
       expect(besidePool.pooledElsewhere).toBe('framework');
       expect(besidePool.writes).toBe(alone.writes);
@@ -218,7 +218,7 @@ describe('createPoolSharedExternals', () => {
   });
 
   describe('membership', () => {
-    it('pools via an explicit remote pool tag', async () => {
+    it('pools via an explicit remote pool label', async () => {
       for (const name of ['foo', 'bar'])
         p.seed(name, [
           at(

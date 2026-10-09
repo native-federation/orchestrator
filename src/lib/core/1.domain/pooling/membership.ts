@@ -2,7 +2,7 @@ import type { ExternalName, SharedExternal, shareScope } from 'lib/core/1.domain
 import { owningPackage } from 'lib/core/1.domain/externals/specifier';
 import { compareStrings } from 'lib/utils/compare-strings';
 
-// Unique per share scope: the most-declared of the names merged into the pool.
+// Unique per share scope: the most-declared of the labels merged into the pool.
 export type PoolName = string;
 
 export type PoolMember = {
@@ -12,8 +12,8 @@ export type PoolMember = {
 
 export type Pools<T> = {
   pools: Map<PoolName, T[]>;
-  // Tagged externals that pooled with nothing, in graph order: likely a typo or a missing sibling.
-  lonelyTags: ExternalName[];
+  // Labelled externals that pooled with nothing, in graph order: likely a typo or a missing sibling.
+  labelledAlone: ExternalName[];
 };
 
 // Union by size with iterative path halving (no stack growth in the browser); keys interned to array indices.
@@ -58,34 +58,34 @@ function createDSU() {
   };
 }
 
-// A name is one node across every remote: the name is the pool's identity.
-// NUL-separated so a name can never alias an external.
+// A label is one node across every remote: the label is the pool's identity.
+// NUL-separated so a label can never alias an external.
 const extNode = (name: ExternalName): string => `ext\x00${name}`;
-const nameNode = (tag: string): string => `name\x00${tag}`;
+const labelNode = (label: string): string => `label\x00${label}`;
 
-// `tags` holds one entry per declaring copy, which `mostDeclaredTag` counts.
+// `labels` holds one entry per declaring copy, which `mostDeclaredLabel` counts.
 export type PoolCandidate<T> = {
   name: ExternalName;
-  tags: readonly string[];
+  labels: readonly string[];
   value: T;
 };
 
-// A pool is a connected component of `external -> name` edges (one per declared tag, whichever remote
+// A pool is a connected component of `external -> label` edges (one per declared label, whichever remote
 // declared it) and `entrypoint -> package` edges; only pools of >=2 members are returned. See
 // docs/version-resolver.md.
 export function groupByMembership<T>(candidates: readonly PoolCandidate<T>[]): Pools<T> {
   const dsu = createDSU();
-  const tagged = new Set<ExternalName>();
+  const labelled = new Set<ExternalName>();
 
   for (const candidate of candidates) {
-    for (const tag of candidate.tags) {
-      dsu.union(extNode(candidate.name), nameNode(tag));
-      tagged.add(candidate.name);
+    for (const label of candidate.labels) {
+      dsu.union(extNode(candidate.name), labelNode(label));
+      labelled.add(candidate.name);
     }
   }
 
-  // An entrypoint follows its package into whatever pool the package joins, tagged or not: a flat build
-  // that tags only the package would otherwise leave its entrypoints out — measured as a torn package.
+  // An entrypoint follows its package into whatever pool the package joins, labelled or not: a flat build
+  // that labels only the package would otherwise leave its entrypoints out — measured as a torn package.
   const declared = new Set(candidates.map(c => c.name));
   for (const candidate of candidates) {
     const owner = owningPackage(candidate.name);
@@ -101,16 +101,16 @@ export function groupByMembership<T>(candidates: readonly PoolCandidate<T>[]): P
   }
 
   const pools: PoolCandidate<T>[][] = [];
-  const lonelyTags: ExternalName[] = [];
+  const labelledAlone: ExternalName[] = [];
   for (const members of byComponent.values()) {
-    // A property of the component, not of one member: an entrypoint carries no tag of its own yet pools
+    // A property of the component, not of one member: an entrypoint carries no label of its own yet pools
     // with the package that does.
-    if (!members.some(m => tagged.has(m.name))) continue;
+    if (!members.some(m => labelled.has(m.name))) continue;
 
     members.sort((a, b) => compareStrings(a.name, b.name));
     if (members.length < 2) {
       const only = members[0]!;
-      if (tagged.has(only.name)) lonelyTags.push(only.name);
+      if (labelled.has(only.name)) labelledAlone.push(only.name);
       continue;
     }
     pools.push(members);
@@ -119,25 +119,25 @@ export function groupByMembership<T>(candidates: readonly PoolCandidate<T>[]): P
   // Pools come back in order of their smallest member; the election's determinism relies on it.
   pools.sort((a, b) => compareStrings(a[0]!.name, b[0]!.name));
 
-  // Unique without suffixing: a name belongs to exactly one component, so two pools never pick the same one.
+  // Unique without suffixing: a label belongs to exactly one component, so two pools never pick the same one.
   const named = new Map<PoolName, T[]>();
   for (const members of pools)
     named.set(
-      mostDeclaredTag(members) ?? members[0]!.name,
+      mostDeclaredLabel(members) ?? members[0]!.name,
       members.map(m => m.value)
     );
-  return { pools: named, lonelyTags };
+  return { pools: named, labelledAlone };
 }
 
-function mostDeclaredTag(members: readonly PoolCandidate<unknown>[]): string | undefined {
+function mostDeclaredLabel(members: readonly PoolCandidate<unknown>[]): string | undefined {
   const counts = new Map<string, number>();
   for (const member of members)
-    for (const tag of member.tags) counts.set(tag, (counts.get(tag) ?? 0) + 1);
+    for (const label of member.labels) counts.set(label, (counts.get(label) ?? 0) + 1);
 
   let best: string | undefined;
-  for (const [tag, count] of counts) {
+  for (const [label, count] of counts) {
     const top = best === undefined ? 0 : counts.get(best)!;
-    if (count > top || (count === top && compareStrings(tag, best!) < 0)) best = tag;
+    if (count > top || (count === top && compareStrings(label, best!) < 0)) best = label;
   }
   return best;
 }
@@ -146,10 +146,10 @@ export function buildPools(sharedExternals: shareScope): Pools<PoolMember> {
   const candidates = Object.entries(sharedExternals).map<PoolCandidate<PoolMember>>(
     ([name, external]) => ({
       name,
-      tags: external.versions.flatMap(v =>
+      labels: external.versions.flatMap(v =>
         v.remotes.flatMap(r => {
-          const tag = r.pool?.trim();
-          return tag ? [tag] : [];
+          const label = r.pool?.trim();
+          return label ? [label] : [];
         })
       ),
       value: { name, external },

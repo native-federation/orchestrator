@@ -156,21 +156,21 @@ test.describe('symmetric: an island takes the whole family', () => {
     // resolver granted mfe2 that dedup — but taking it would load the shared ui built against framework
     // 18 inside a remote running framework 17. The whole family is scoped for mfe2 instead.
     //
-    // Membership here is by declared `pool` tag, with scope tagging off: a design system opting into being
-    // coupled to the framework it is built against. The tag mechanism is `membership.e2e.spec.ts`; that
+    // Membership here is by declared `pool` label, with scope labelling off: a design system opting into being
+    // coupled to the framework it is built against. The label mechanism is `membership.e2e.spec.ts`; that
     // the flag does not change this verdict is `flag.e2e.spec.ts`.
-    const tagged = (pkg: string, version: string, req: string) =>
+    const labelled = (pkg: string, version: string, req: string) =>
       dep(pkg, version, { req, pool: 'framework' });
 
     await nf.init(
       [
         remote('team/mfe1', SCOPE.mfe1, [
-          tagged('@framework/core', '18.0.0', '^18.0.0'),
-          tagged('@design-system/ui', '1.0.0', '^1.0.0'),
+          labelled('@framework/core', '18.0.0', '^18.0.0'),
+          labelled('@design-system/ui', '1.0.0', '^1.0.0'),
         ]),
         remote('team/mfe2', SCOPE.mfe2, [
-          tagged('@framework/core', '17.0.0', '^17.0.0'),
-          tagged('@design-system/ui', '1.0.0', '^1.0.0'),
+          labelled('@framework/core', '17.0.0', '^17.0.0'),
+          labelled('@design-system/ui', '1.0.0', '^1.0.0'),
         ]),
       ],
       { pooling: false }

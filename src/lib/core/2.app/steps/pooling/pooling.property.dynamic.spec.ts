@@ -70,7 +70,7 @@ describe('pooling properties: dynamic loads (generated portfolios)', { timeout: 
             });
 
           // Both sides judged under the pools as they stand after the load: a remote can join a pool that did
-          // not exist at init (a lone tagged external gains its sibling), and the committed map it then
+          // not exist at init (a lone labelled external gains its sibling), and the committed map it then
           // exposes is immutable, so a tear already in it is not the delta's.
           const before = torn(committed, record, scopeUrlsOf(loaded), host);
           loaded.push(added);

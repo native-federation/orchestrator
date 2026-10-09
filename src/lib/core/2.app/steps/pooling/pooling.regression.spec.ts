@@ -459,7 +459,7 @@ describe('pooling regressions', () => {
    * the combination it would resolve; otherwise it serves itself, `uncovered`.
    *
    * Shrunk from the property suite (POOLING_PROPERTY_SEED=1..3, SCALE=5); every range is the caret of its own
-   * tag unless a case says otherwise, and `@lib/*` shares one npm-scope tag.
+   * tag unless a case says otherwise, and `@lib/*` shares one npm-scope label.
    */
   describe('extension witness: a remote moves onto the extended coverage only when one build shipped it', () => {
     const SCOPE = {
@@ -598,7 +598,7 @@ describe('pooling regressions', () => {
       expect(warmMap).toEqual(coldMap);
     });
 
-    it('keeps the winner when a newly tagged member joins the tied pool', async () => {
+    it('keeps the winner when a newly labelled member joins the tied pool', async () => {
       seedTiedPool();
       const coldMap = await p.runInit();
       const coldM4 = structuredClone(p.record('@fam/m4'));

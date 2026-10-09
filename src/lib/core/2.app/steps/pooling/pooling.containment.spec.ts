@@ -1,7 +1,7 @@
 import type { RemoteEntry } from 'lib/core/1.domain';
 import { mockSharedInfo } from 'lib/testing/domain/remote-entry/shared-info.mock';
 import { portfolio } from 'lib/testing/pooling/portfolio';
-import { tagSharedInfoByNpmScope } from 'lib/testing/pooling/tag-by-npm-scope';
+import { labelSharedInfoByNpmScope } from 'lib/testing/pooling/label-by-npm-scope';
 
 /**
  * A bug inside one pool's election must not fail the whole init, nor leave that pool half-placed. The init

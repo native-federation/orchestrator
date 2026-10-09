@@ -2,7 +2,10 @@ import type { RemoteEntry, RemoteInfo } from 'lib/core/1.domain';
 import { Optional } from 'lib/utils/optional';
 import { mockSharedInfo } from 'lib/testing/domain/remote-entry/shared-info.mock';
 import { portfolio } from 'lib/testing/pooling/portfolio';
-import { tagSharedInfoByNpmScope, tagStoredByNpmScope } from 'lib/testing/pooling/tag-by-npm-scope';
+import {
+  labelSharedInfoByNpmScope,
+  labelStoredByNpmScope,
+} from 'lib/testing/pooling/label-by-npm-scope';
 
 /**
  * The ONE place pooling's warn wording is pinned, word for word: every init sentence (`missWarning` with
@@ -49,7 +52,7 @@ describe('island warnings (contract)', () => {
       name,
       url: `${SCOPE[name]}remoteEntry.json`,
       exposes: [],
-      shared: tagSharedInfoByNpmScope(
+      shared: labelSharedInfoByNpmScope(
         shared.map(([pkg, version, requiredVersion]) =>
           mockSharedInfo(pkg, { version, requiredVersion, singleton: true, strictVersion: strict })
         )
@@ -263,8 +266,8 @@ describe('island warnings (contract)', () => {
       ]);
     });
 
-    it('names the pool a vendor lockstep pair was tagged into', async () => {
-      // e2e provenance: material and cdk pool with core under `angular`, the npm scope tag.
+    it('names the pool a vendor lockstep pair was labelled into', async () => {
+      // e2e provenance: material and cdk pool with core under `angular`, the npm scope label.
       p.seed('@angular/core', [
         p.version('22.0.5', '@angular/core', [
           { remote: 'team/mfe-a', req: '^22.0.0' },
@@ -317,7 +320,7 @@ describe('island warnings (contract)', () => {
       const seedIn = (name: string, versions: ReturnType<typeof p.version>[]) =>
         p.adapters.sharedExternalsRepo.addOrUpdate(
           name,
-          tagStoredByNpmScope({ [name]: { dirty: true, versions } })[name]!,
+          labelStoredByNpmScope({ [name]: { dirty: true, versions } })[name]!,
           'widgets'
         );
       for (const name of ['@angular/core', '@angular/router'])
@@ -337,9 +340,9 @@ describe('island warnings (contract)', () => {
     });
   });
 
-  it('warns about a pool tag nothing else joined', async () => {
-    // e2e membership: "warns about a tag that pooled with nothing". An unscoped name, so the explicit
-    // (misspelt) tag is the only one.
+  it('warns about a pool label nothing else joined', async () => {
+    // e2e membership: "warns about a label that pooled with nothing". An unscoped name, so the explicit
+    // (misspelt) label is the only one.
     p.seed('core-pkg', [
       p.version('18.0.0', 'core-pkg', [
         { remote: 'team/mfe-a', req: '^18.0.0', pool: 'framwork' },

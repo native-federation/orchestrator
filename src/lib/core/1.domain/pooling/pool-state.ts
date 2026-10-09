@@ -1,7 +1,7 @@
 import type { SharedExternal, shareScope } from '../externals/external.contract';
 
 // What pooling writes onto a record: `poolName`, `poolWinner`, and `servedBy`/`poolCause` per copy. Outside a
-// pool all of it is stale. The declared `pool` tag is pooling's input, not a result, and always stays.
+// pool all of it is stale. The declared `pool` label is pooling's input, not a result, and always stays.
 export function hasPoolResults(external: SharedExternal): boolean {
   if (external.poolName !== undefined || external.poolWinner !== undefined) return true;
   return external.versions.some(v =>
@@ -21,7 +21,7 @@ export function withoutPoolResults(external: SharedExternal): SharedExternal {
   };
 }
 
-// Stored results outlive the last tag that left, so they count; read from the record, not this init.
+// Stored results outlive the last label that left, so they count; read from the record, not this init.
 export function scopeHasPoolState(scope: shareScope): boolean {
   for (const name in scope) {
     const external = scope[name]!;

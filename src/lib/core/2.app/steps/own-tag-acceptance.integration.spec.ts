@@ -1,7 +1,7 @@
 import type { RemoteEntry, SharedVersion } from 'lib/core/1.domain';
 import { mockSharedInfo } from 'lib/testing/domain/remote-entry/shared-info.mock';
 import { type CopySpec, portfolio } from 'lib/testing/pooling/portfolio';
-import { tagSharedInfoByNpmScope } from 'lib/testing/pooling/tag-by-npm-scope';
+import { labelSharedInfoByNpmScope } from 'lib/testing/pooling/label-by-npm-scope';
 
 /**
  * A copy always runs the build it ships, so a range that excludes its own version — package.json drifted
@@ -118,7 +118,7 @@ describe('a copy accepts its own version (integration)', () => {
         name: 'team/mfe-b',
         url: 'http://mfe-b/remoteEntry.json',
         exposes: [],
-        shared: tagSharedInfoByNpmScope(
+        shared: labelSharedInfoByNpmScope(
           names.map(name =>
             mockSharedInfo(name, {
               requiredVersion: '~19.1.0',

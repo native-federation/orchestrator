@@ -111,9 +111,9 @@ test.describe('incremental: a pool is re-elected as a unit', () => {
   });
 });
 
-test.describe('incremental: a tag-formed pool on a warm cache', () => {
-  // Auto-pooling off, so only the explicit `pool` tag groups these — and the tagged remotes are cached
-  // by the second init, which is why `hasPoolTag()` has to read storage rather than this init's entries.
+test.describe('incremental: a label-formed pool on a warm cache', () => {
+  // Auto-pooling off, so only the explicit `pool` label groups these — and the labelled remotes are cached
+  // by the second init, which is why `scopeHasPoolState()` has to read storage rather than this init's entries.
   const base = remote('team/mfe1', SCOPE.mfe1, [
     dep('core-pkg', '22.1.0', { req: '^22.0.0', pool: 'fw' }),
     dep('router-pkg', '22.1.0', { req: '^22.0.0', pool: 'fw' }),
@@ -121,14 +121,16 @@ test.describe('incremental: a tag-formed pool on a warm cache', () => {
   const pinned = remote('team/mfe2', SCOPE.mfe2, [
     dep('core-pkg', '22.0.5', { req: '~22.0.5', pool: 'fw' }),
   ]);
-  // Declares no tag of its own and touches only one member of the pool.
-  const untagged = remote('team/mfe3', SCOPE.mfe3, [dep('core-pkg', '22.1.0', { req: '^22.0.0' })]);
+  // Declares no label of its own and touches only one member of the pool.
+  const unlabelled = remote('team/mfe3', SCOPE.mfe3, [
+    dep('core-pkg', '22.1.0', { req: '^22.0.0' }),
+  ]);
 
-  test('still coordinates the pool when no fetched entry declares the tag', async ({ nf }) => {
+  test('still coordinates the pool when no fetched entry declares the label', async ({ nf }) => {
     await nf.init([base, pinned], { pooling: false });
-    await nf.init([base, pinned, untagged], { pooling: false });
+    await nf.init([base, pinned, unlabelled], { pooling: false });
 
-    expect(nf.fetches()).toEqual([untagged.url]);
+    expect(nf.fetches()).toEqual([unlabelled.url]);
 
     const store = await nf.store();
     expect(storedActions(store, 'router-pkg')).toEqual(['22.1.0:share']);

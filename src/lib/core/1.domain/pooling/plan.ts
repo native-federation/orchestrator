@@ -9,7 +9,7 @@ export type ElectionPlan = {
   dissolved: Map<ExternalName, SharedExternal>;
   // Members of a pool nobody re-elects whose stored `poolName` is not the computed one.
   renames: [ExternalName, PoolName][];
-  taggedAlone: ExternalName[];
+  labelledAlone: ExternalName[];
 };
 
 // Reads the scope, never writes it. A pool is one unit of state: any dirty member re-elects it whole. See
@@ -19,15 +19,15 @@ export function planElection(scope: shareScope, poolable: boolean): ElectionPlan
     dirtyPools: new Map(),
     dissolved: new Map(),
     renames: [],
-    taggedAlone: [],
+    labelledAlone: [],
   };
   // Nothing dirty ⇒ nothing to re-elect, so skip before building the graph. Measured, this was the whole
   // pooling cost of a warm init.
   if (!poolable || !Object.values(scope).some(external => external.dirty)) return plan;
   if (!scopeHasPoolState(scope)) return plan;
 
-  const { pools, lonelyTags } = buildPools(scope);
-  plan.taggedAlone = lonelyTags;
+  const { pools, labelledAlone } = buildPools(scope);
+  plan.labelledAlone = labelledAlone;
   const reelected = reelectedNames(scope, pools);
   const pooled = new Set<ExternalName>();
   const clean = new Map<PoolName, PoolMember[]>();

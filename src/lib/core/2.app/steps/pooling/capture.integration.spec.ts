@@ -3,7 +3,7 @@ import { resolve } from 'node:path';
 import type { ImportMap, RemoteEntry, SharedExternal } from 'lib/core/1.domain';
 import { initFederation } from 'lib/core/init-federation';
 import { globalThisStorageEntry } from 'lib/core/4.config/storage/global-this.storage';
-import { tagSharedInfoByNpmScope } from 'lib/testing/pooling/tag-by-npm-scope';
+import { labelSharedInfoByNpmScope } from 'lib/testing/pooling/label-by-npm-scope';
 import { emittedUrls, findIncoherentRemotes, findSplitRemotes } from 'lib/testing/pooling/no-tear';
 
 /**
@@ -20,13 +20,13 @@ const FIXTURES = resolve(__dirname, '../../../../../../e2e/fixtures');
 const SEVEN = ['mfe1', 'mfe2', 'mfe3', 'mfe4', 'mfe5', 'mfe6', 'mfe7'];
 const ELEVEN = [...SEVEN, 'mfe8', 'mfe9', 'mfe10', 'mfe11'];
 
-// The e2e harness tags by npm scope whenever pooling is on, standing in for the build-time default.
+// The e2e harness labels by npm scope whenever pooling is on, standing in for the build-time default.
 const entry = (name: string): RemoteEntry => {
   const raw = JSON.parse(readFileSync(resolve(FIXTURES, `${name}.remoteEntry.json`), 'utf8'));
   return {
     ...raw,
     url: `http://${name}/remoteEntry.json`,
-    shared: tagSharedInfoByNpmScope(raw.shared ?? []),
+    shared: labelSharedInfoByNpmScope(raw.shared ?? []),
   };
 };
 

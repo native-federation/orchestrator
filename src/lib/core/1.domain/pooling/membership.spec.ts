@@ -2,7 +2,7 @@ import type { SharedExternal, shareScope } from 'lib/core/1.domain';
 import { mockVersionRemote } from 'lib/testing/domain/externals/version.mock';
 import { buildPools, type PoolMember, type PoolName } from './membership';
 
-// buildPools reads only the external name and each remote's name + pool tag — one skip version suffices.
+// buildPools reads only the external name and each remote's name + pool label — one skip version suffices.
 const ext = (remotes: { remote: string; pool?: string }[]): SharedExternal => ({
   dirty: false,
   versions: [
@@ -22,9 +22,9 @@ const shape = (pools: Map<PoolName, PoolMember[]>): [PoolName, string[]][] =>
   [...pools.entries()].map(([name, members]) => [name, members.map(m => m.name)]);
 
 describe('buildPools', () => {
-  // The build writes the npm scope as an explicit tag by default, so these portfolios carry `pool: 'ng'` on
+  // The build writes the npm scope as an explicit label by default, so these portfolios carry `pool: 'ng'` on
   // every copy. A name is a pool's identity across remotes, not a per-remote label.
-  describe('scope-derived tags (what the build emits by default)', () => {
+  describe('scope-derived labels (what the build emits by default)', () => {
     it('pools one name across remotes even when they share no member', () => {
       // a and b share no member: the name alone says core and common belong together, whoever declared it.
       const { pools } = buildPools(
@@ -36,7 +36,7 @@ describe('buildPools', () => {
       expect(shape(pools)).toEqual([['ng', ['@ng/common', '@ng/core']]]);
     });
 
-    it('is inert without tags', () => {
+    it('is inert without labels', () => {
       const { pools } = buildPools(
         scope({ '@ng/core': [{ remote: 'a' }], '@ng/common': [{ remote: 'a' }] })
       );
@@ -44,9 +44,9 @@ describe('buildPools', () => {
     });
   });
 
-  describe('explicit tags (one pool per name, names merge through a shared member)', () => {
-    it('merges tag groups with different labels through a shared member', () => {
-      // mfe1 tags {core, ui}="ng"; mfe2 tags {ui, forms}="ds". ui bridges them despite the labels differing.
+  describe('explicit labels (one pool per label, labels merge through a shared member)', () => {
+    it('merges groups with different labels through a shared member', () => {
+      // mfe1 labels {core, ui}="ng"; mfe2 labels {ui, forms}="ds". ui bridges them despite the labels differing.
       const { pools } = buildPools(
         scope({
           '@x/core': [{ remote: 'mfe1', pool: 'ng' }],
@@ -61,7 +61,7 @@ describe('buildPools', () => {
       expect(shape(pools)).toEqual([['ds', ['@x/core', '@x/forms', '@x/ui']]]);
     });
 
-    it('bridges a co-tagged cross-scope member into the family', () => {
+    it('bridges a co-labelled cross-scope member into the family', () => {
       const { pools } = buildPools(
         scope({
           '@ng/core': [
@@ -76,8 +76,8 @@ describe('buildPools', () => {
     });
   });
 
-  // The pool tag is trimmed before it is compared: a padded tag is the same pool as its trimmed twin.
-  it('pools a padded tag with the same tag unpadded', () => {
+  // The pool label is trimmed before it is compared: a padded label is the same pool as its trimmed twin.
+  it('pools a padded label with the same label unpadded', () => {
     const { pools } = buildPools(
       scope({
         a: [{ remote: 'mfe1', pool: ' x' }],
@@ -88,7 +88,7 @@ describe('buildPools', () => {
   });
 
   describe('naming', () => {
-    it('names a pool after the tag most copies declare', () => {
+    it('names a pool after the label most copies declare', () => {
       // "ng" is declared three times, "ds" once; the alphabetical order would have picked "ds".
       const { pools } = buildPools(
         scope({
@@ -122,9 +122,9 @@ describe('buildPools', () => {
   });
 
   describe('secondary entrypoints follow their package', () => {
-    // A flat build that tags only the package would otherwise leave its entrypoints out of pooling —
+    // A flat build that labels only the package would otherwise leave its entrypoints out of pooling —
     // measured as a torn @ng/core.
-    it('pulls an untagged entrypoint into its tagged package’s pool', () => {
+    it('pulls an unlabelled entrypoint into its labelled package’s pool', () => {
       const { pools } = buildPools(
         scope({
           '@ng/core': [{ remote: 'mfe1', pool: 'ng' }],
@@ -145,7 +145,7 @@ describe('buildPools', () => {
     });
 
     // An entrypoint edge is not itself a reason to pool.
-    it('forms no pool from a package and its entrypoint when nothing is tagged', () => {
+    it('forms no pool from a package and its entrypoint when nothing is labelled', () => {
       const { pools } = buildPools(
         scope({ utils: [{ remote: 'a' }], 'utils/deep': [{ remote: 'a' }] })
       );

@@ -68,7 +68,7 @@ describe('pooling re-election', () => {
     );
   };
 
-  // An unscoped external, so no npm-scope tag pools it, carrying what an earlier pool stored on it: an
+  // An unscoped external, so no npm-scope label pools it, carrying what an earlier pool stored on it: an
   // island cause on mfe1's copy and a subpool on mfe2's.
   const seedLeftEveryPool = (dirty: boolean) => {
     const version = (

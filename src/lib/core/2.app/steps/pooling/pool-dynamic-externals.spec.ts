@@ -11,7 +11,7 @@ import type {
 } from 'lib/core/1.domain';
 import { mockSharedInfo } from 'lib/testing/domain/remote-entry/shared-info.mock';
 import { mockVersionRemote } from 'lib/testing/domain/externals/version.mock';
-import { tagStoredByNpmScope } from 'lib/testing/pooling/tag-by-npm-scope';
+import { labelStoredByNpmScope } from 'lib/testing/pooling/label-by-npm-scope';
 import { mockAdapters } from 'lib/testing/adapters.mock';
 import { Optional } from 'lib/utils/optional';
 import type { RemoteInfo } from 'lib/core/1.domain';
@@ -31,7 +31,7 @@ const committed = (
     remotes: string[];
     action?: SharedVersion['action'];
     // `store-remote-entry` persists a declared `pool` onto the copy, so the committed record is where
-    // membership is read from — a tag on somebody else's copy groups this family for the whole portfolio.
+    // membership is read from — a label on somebody else's copy groups this family for the whole portfolio.
     pool?: string;
   }[]
 ): SharedExternal => ({
@@ -70,10 +70,10 @@ describe('createPoolDynamicExternals', () => {
   let config: ConfigContract;
   let adapters: DrivingContract;
 
-  // Scoped packages are tagged by their npm scope, as the build tags them by default; explicit tags win.
+  // Scoped packages are labelled by their npm scope, as the build labels them by default; explicit labels win.
   const givenCommitted = (externals: Record<string, SharedExternal>) => {
-    // Tagged up front, so a spec snapshotting `externals` sees the record as the step reads it.
-    tagStoredByNpmScope(externals);
+    // Labelled up front, so a spec snapshotting `externals` sees the record as the step reads it.
+    labelStoredByNpmScope(externals);
     adapters.sharedExternalsRepo.getFromScope = vi.fn(() => externals);
   };
 
@@ -385,8 +385,8 @@ describe('createPoolDynamicExternals', () => {
   });
 
   it('passes actions through when the committed scope carries no pool state at all', async () => {
-    // No `pool` tag or stored pool anywhere in the committed scope (unscoped packages carry no npm-scope
-    // tag) → no pool, so update-cache's actions pass through even though the family is right there.
+    // No `pool` label or stored pool anywhere in the committed scope (unscoped packages carry no npm-scope
+    // label) → no pool, so update-cache's actions pass through even though the family is right there.
     const entry = entryWith(shared('foo'), shared('bar'));
     givenCommitted({
       foo: committed('foo', { tag: '17.0.0', remotes: ['host', 'mfe'] }),
@@ -435,7 +435,7 @@ describe('createPoolDynamicExternals', () => {
 
   it('coordinates each shareScope independently (no cross-scope pooling)', async () => {
     // Same pool name but different scopes (core in team-a, common in global): they must not coordinate.
-    // In global, common is 18 against the committed 17 and scopes; core, alone in team-a, is a lone tag
+    // In global, common is 18 against the committed 17 and scopes; core, alone in team-a, is a lone label
     // and passes through, where one cross-scope family would scope it too.
     const entry = entryWith(
       shared('@framework/core', { shareScope: 'team-a' }),
@@ -452,8 +452,8 @@ describe('createPoolDynamicExternals', () => {
     const teamA = {
       '@framework/core': committed('@framework/core', { tag: '17.0.0', remotes: ['mfe'] }),
     };
-    tagStoredByNpmScope(global);
-    tagStoredByNpmScope(teamA);
+    labelStoredByNpmScope(global);
+    labelStoredByNpmScope(teamA);
     adapters.sharedExternalsRepo.getFromScope = vi.fn(scope =>
       scope === 'team-a' ? teamA : global
     );
@@ -1016,11 +1016,11 @@ describe('createPoolDynamicExternals', () => {
     // gets no verdict, yet its stored `y` must become `x`: the next init spreads dirty by stored name.
     it('renames a committed member of a pool a load merged into another', async () => {
       const entry = entryWith(shared('r', { pool: 'x' }));
-      const tagged = (name: string, pool: string) =>
+      const labelled = (name: string, pool: string) =>
         committed(name, { tag: '17.0.0', remotes: ['host'], pool });
       givenCommitted({
-        p: { ...tagged('p', 'x'), poolName: 'x' },
-        q: { ...tagged('q', 'x'), poolName: 'x' },
+        p: { ...labelled('p', 'x'), poolName: 'x' },
+        q: { ...labelled('q', 'x'), poolName: 'x' },
         r: {
           ...committed(
             'r',
@@ -1029,7 +1029,7 @@ describe('createPoolDynamicExternals', () => {
           ),
           poolName: 'y',
         },
-        s: { ...tagged('s', 'y'), poolName: 'y' },
+        s: { ...labelled('s', 'y'), poolName: 'y' },
       });
 
       await poolDynamicExternals({ entry, actions: { r: { action: 'skip' } } });
@@ -1060,7 +1060,7 @@ describe('createPoolDynamicExternals', () => {
     });
 
     it('leaves a stale pool name on an external in no pool any more to the next init', async () => {
-      // `rxjs` is untagged and alone, yet the record still names a pool for it from an earlier portfolio.
+      // `rxjs` is unlabelled and alone, yet the record still names a pool for it from an earlier portfolio.
       const entry = entryWith(shared('rxjs'));
       givenCommitted({
         rxjs: { ...committed('rxjs', { tag: '7.0.0', remotes: ['host', 'mfe'] }), poolName: 'old' },

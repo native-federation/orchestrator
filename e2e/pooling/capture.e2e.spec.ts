@@ -12,7 +12,7 @@ import {
  * synthetic siblings — driven through the real init flow in a real browser.
  *
  * Everything else in this folder is a two- or three-remote fixture built to isolate one rule. This file
- * is the opposite: real entries, 6–37 shared externals each, multi-entrypoint packages, `pool` tags on
+ * is the opposite: real entries, 6–37 shared externals each, multi-entrypoint packages, `pool` labels on
  * some remotes and not others, a non-global share scope, chunk bundles, and one remote still on the
  * older sparse remoteEntry format. It is the check that the rules compose on input nobody designed for
  * them — and, because every remote's exposed module is really loaded, that the resulting map is one a
@@ -23,7 +23,7 @@ import {
  *
  * - `mfe1` — the cross-major outlier (Angular 21.2.18, flat/sparse externals, flat chunks, 37 of them),
  *   and the sole provider of `animations`, `compiler`, `platform-browser-dynamic`, `forms/signals`
- * - `mfe2` — Angular 22.0.8 with `@angular/cdk/*` exact-pinned at 22.0.6, no `pool` tags
+ * - `mfe2` — Angular 22.0.8 with `@angular/cdk/*` exact-pinned at 22.0.6, no `pool` labels
  * - `mfe8` — a second previous-major remote, one patch off `mfe1` (21.2.15)
  * - `mfe11` — the widest Angular set of any remote, entirely from one older-but-consistent 22.0.6 build
  */
@@ -202,7 +202,7 @@ test.describe('capture: the synthetic siblings', () => {
   test('shares a cross-scope design system and an unscoped lockstep pair', async ({ nf }) => {
     // `mfe10` is the awkward one: its `@acme/design-system*` packages carry `pool: ng-core`,
     // which joins a different npm scope to the Angular family at a completely different version line
-    // (4.2.0 beside 22.0.x); it pairs `react` + `react-dom` under `pool: react`, a family scope tagging
+    // (4.2.0 beside 22.0.x); it pairs `react` + `react-dom` under `pool: react`, a family scope labelling
     // can never group because the names are unscoped; and one of its entrypoints lives in a non-global
     // share scope. Nothing here conflicts, so nothing new islands — pools of unrelated version lines
     // are not a coherence problem by themselves.

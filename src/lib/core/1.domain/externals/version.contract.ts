@@ -28,7 +28,7 @@ export type SharedVersionMeta = {
   cached: boolean;
   name: RemoteName;
   bundle?: string;
-  // The `pool` tag this remote declared, as it declared it. Pooling's input, never rewritten.
+  // The `pool` label this remote declared, as it declared it. Pooling's input, never rewritten.
   pool?: string;
   entries: Record<string, string>;
   // The build of the subpool this copy runs in, when pooling placed it in one rather than on the version's

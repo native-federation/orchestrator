@@ -73,7 +73,7 @@ export function createPoolSharedExternals(
         3,
         `[${scope}] ${plan.dissolved.size} external(s) left every pool; cleared their pool state for re-election.`
       );
-    for (const name of plan.taggedAlone)
+    for (const name of plan.labelledAlone)
       config.log.warn(
         3,
         `[${name}] declares a 'pool' tag but no other external joined its pool; likely a typo or a missing sibling.`

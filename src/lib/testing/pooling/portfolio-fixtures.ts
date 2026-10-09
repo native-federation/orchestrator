@@ -5,7 +5,7 @@ import type {
   SharedVersionMeta,
 } from 'lib/core/1.domain';
 import { mockVersionRemote, newestFirst } from 'lib/testing/domain/externals/version.mock';
-import { tagStoredByNpmScope } from './tag-by-npm-scope';
+import { labelStoredByNpmScope } from './label-by-npm-scope';
 
 /** Record builders for fixtures that seed stored externals directly rather than register remote entries. */
 
@@ -43,7 +43,7 @@ export const version = (
 /**
  * A record as storage would hold it: newest first, as `commit()` sorts it, so a fixture reads in whatever
  * order is clearest without seeding an order production could never hand to determine. A scoped package
- * gets its npm-scope pool tag, as the build adds by default; an explicit `pool` wins.
+ * gets its npm-scope pool label, as the build adds by default; an explicit `pool` wins.
  */
 export const storedRecord = (
   name: string,
@@ -51,4 +51,4 @@ export const storedRecord = (
   compare: (a: string, b: string) => number,
   dirty = true
 ): SharedExternal =>
-  tagStoredByNpmScope({ [name]: { dirty, versions: newestFirst(versions, compare) } })[name]!;
+  labelStoredByNpmScope({ [name]: { dirty, versions: newestFirst(versions, compare) } })[name]!;

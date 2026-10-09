@@ -49,10 +49,10 @@ describe('pool results', () => {
     expect(hasPoolResults(onlyCause)).toBe(true);
   });
 
-  it('does not count the declared pool tag: it is input', () => {
-    const tagged = withoutPoolResults(pooledRecord());
-    expect(tagged.versions.every(v => v.remotes.every(r => r.pool === 'framework'))).toBe(true);
-    expect(hasPoolResults(tagged)).toBe(false);
+  it('does not count the declared pool label: it is input', () => {
+    const labelled = withoutPoolResults(pooledRecord());
+    expect(labelled.versions.every(v => v.remotes.every(r => r.pool === 'framework'))).toBe(true);
+    expect(hasPoolResults(labelled)).toBe(false);
   });
 
   it('strips poolName, poolWinner, servedBy and poolCause without touching the record it was given', () => {
@@ -73,9 +73,9 @@ describe('pool results', () => {
 
 /**
  * Whether a share scope gives either pooling step anything to do. It reads the stored record, not a flag set
- * while this init's entries were merged: a warm init whose tagged remotes are all cached merges nothing, and
+ * while this init's entries were merged: a warm init whose labelled remotes are all cached merges nothing, and
  * pooling still has to coordinate their pool — see docs/version-resolver.md §"How pooling resolves". It takes
- * one scope because a pool never spans share scopes: a tag elsewhere is no reason to pool here.
+ * one scope because a pool never spans share scopes: a label elsewhere is no reason to pool here.
  */
 describe('scopeHasPoolState', () => {
   const external = (pool?: string): SharedExternal => ({
@@ -94,20 +94,20 @@ describe('scopeHasPoolState', () => {
     expect(scopeHasPoolState({})).toBe(false);
   });
 
-  it('reports none when no stored remote carries a tag', () => {
+  it('reports none when no stored remote carries a label', () => {
     expect(scopeHasPoolState({ 'dep-a': external(), 'dep-b': external() })).toBe(false);
   });
 
-  it('reports a declared tag on any external', () => {
+  it('reports a declared label on any external', () => {
     expect(scopeHasPoolState({ 'dep-a': external(), 'dep-b': external('grp') })).toBe(true);
   });
 
-  it('ignores a blank tag', () => {
+  it('ignores a blank label', () => {
     expect(scopeHasPoolState({ 'dep-a': external('  ') })).toBe(false);
   });
 
-  // The tags are gone but the record still carries what pooling wrote: the scope must be visited to clear it.
-  it('reports any stored pool result with no tag left', () => {
+  // The labels are gone but the record still carries what pooling wrote: the scope must be visited to clear it.
+  it('reports any stored pool result with no label left', () => {
     expect(scopeHasPoolState({ 'dep-a': { ...external(), poolName: 'grp' } })).toBe(true);
     expect(scopeHasPoolState({ 'dep-a': { ...external(), poolWinner: 'team/mfe1' } })).toBe(true);
 

@@ -223,7 +223,7 @@ test.describe('shapes: flat externals and `convertFlatSharedInfo`', () => {
 
     await nf.loadAll();
     expect(await originsServing(nf, M)).toEqual(['mfe1', 'mfe3']);
-    // And no gate reacts: the entrypoints are separate members of one scope-tagged pool, agreeing on one tag.
+    // And no gate reacts: the entrypoints are separate members of one scope-labelled pool, agreeing on one tag.
     expect(await nf.islands()).toEqual([]);
   });
 
@@ -397,7 +397,7 @@ test.describe('shapes: flat chunking maps a chunk per declaring remote', () => {
   });
 
   test('never lets a chunk pseudo-external join a pool', async ({ nf }) => {
-    // `@nf-internal` looks exactly like an npm scope, so scope tagging would group a build's chunks into a
+    // `@nf-internal` looks exactly like an npm scope, so scope labelling would group a build's chunks into a
     // family of their own if they ever reached the shared-externals repo. They cannot: a non-singleton
     // external is scoped per remote and never shareable, so `buildPools` never sees one.
     await nf.init(
@@ -435,18 +435,18 @@ test.describe('shapes: flat chunking maps a chunk per declaring remote', () => {
 
 /**
  * The same shape as a recorded file rather than a generated one: `fixtures/pooling/` holds three entries
- * with flat externals, flat chunking and `pool` tags — the combination none of the eleven captured entries
- * has (the one flat/flat capture carries no tags).
+ * with flat externals, flat chunking and `pool` labels — the combination none of the eleven captured entries
+ * has (the one flat/flat capture carries no labels).
  *
- * Auto-pooling is off throughout, so the declared tag is the only thing forming the family.
+ * Auto-pooling is off throughout, so the declared label is the only thing forming the family.
  */
-test.describe('shapes: a recorded flat entry with `pool` tags', () => {
+test.describe('shapes: a recorded flat entry with `pool` labels', () => {
   const portfolio = () => [poolFixture(1), poolFixture(2), poolFixture(3)];
 
-  test('islands the incompatible remote across the tagged family', async ({ nf }) => {
+  test('islands the incompatible remote across the labelled family', async ({ nf }) => {
     await nf.init(portfolio(), { pooling: false });
 
-    // mfe3's `~4.2.0` cannot accept the 4.3.2 the other two ship, so the tag scopes its whole family —
+    // mfe3's `~4.2.0` cannot accept the 4.3.2 the other two ship, so the label scopes its whole family —
     // including `@acme/widgets`, which only mfe1 and mfe3 ship and which mfe3 would otherwise dedup.
     expect(await nf.islands()).toEqual(['team/mfe3 incompatible']);
 
@@ -464,10 +464,10 @@ test.describe('shapes: a recorded flat entry with `pool` tags', () => {
     });
   });
 
-  test('leaves the untagged unscoped member deduped, island or not', async ({ nf }) => {
+  test('leaves the unlabelled unscoped member deduped, island or not', async ({ nf }) => {
     await nf.init(portfolio(), { pooling: false });
 
-    // `rxjs` carries no tag and has no npm scope, so it is in no pool: the islanded remote still dedups it
+    // `rxjs` carries no label and has no npm scope, so it is in no pool: the islanded remote still dedups it
     // from the majority. An island is scoped to the family it was islanded from, never to the remote.
     const loaded = await nf.loadAll();
     expect(loaded['team/mfe3']!.seen['rxjs']).toBe('mfe1|rxjs@7.8.2');
