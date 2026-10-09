@@ -170,3 +170,35 @@ describe('missOf', () => {
       });
   });
 });
+
+describe('subpool rounds', () => {
+  const ship = (name: string, tag: string, req: string): Build => ({
+    name,
+    copies: {
+      m: { tag, req, specifiers: ['m'] },
+      n: { tag, req, specifiers: ['n'] },
+    },
+  });
+
+  /**
+   * Every remote below rejects round 1's 3.0.0. x's build serves x, a and b (3); y's serves y and a (2); b's
+   * serves b and a; a's only itself. x forms the first subpool and takes a and b with it, which leaves y
+   * serving only itself: y runs its own build, not a subpool claiming a again. Shrunk by hand from the
+   * property counterexample of a formSubpools cache that was not narrowed to the remotes still waiting
+   * (C4, e2979f7); that mutant put a in both subpools, and the later one won.
+   */
+  it('takes a remote into one subpool only: a build it no longer waits for serves only itself', () => {
+    const election = electFrom([
+      ...[0, 1, 2, 3, 4].map(i => ship(`w${i}`, '3.0.0', '^3.0.0')),
+      ship('a', '1.0.0', '^1.0.0'),
+      ship('b', '1.0.9', '~1.0.9 || ~1.1.0'),
+      ship('x', '1.1.0', '~1.1.0'),
+      ship('y', '1.5.0', '~1.5.0'),
+    ]);
+
+    expect(inGlobal(election)).toEqual(['w0', 'w1', 'w2', 'w3', 'w4']);
+    expect(inSubpool(election, 'x')).toEqual(['a', 'b', 'x']);
+    expect(inSubpool(election, 'y')).toEqual([]);
+    expect(election.placements.get('y')).toEqual({ kind: 'self', cause: 'incompatible' });
+  });
+});

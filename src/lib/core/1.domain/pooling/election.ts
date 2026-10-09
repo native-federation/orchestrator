@@ -203,16 +203,22 @@ export function elect(input: ElectionInput): Election {
   const admits = (owner: RemoteName, remote: RemoteName) =>
     remote === owner || !lenders.has(remote) || agrees(shipped.get(owner)!, globalTags);
   const formSubpools = () => {
+    // The global tags hold still within a call and pending only shrinks, so who each build serves is found once.
+    const servable = new Map(
+      pending.map(owner => {
+        const build = buildFor(owner);
+        const served = pending.filter(r => serves(shipped.get(r)!, build.tags) && admits(owner, r));
+        return [owner, { build, served }];
+      })
+    );
     for (;;) {
+      const waiting = new Set(pending);
       // A tie goes by name, never record order; see docs/version-resolver.md §"How pooling resolves", step 3.
       const candidates = [...pending]
         .sort(compareStrings)
         .map(owner => {
-          const build = buildFor(owner);
-          const served = pending.filter(
-            r => serves(shipped.get(r)!, build.tags) && admits(owner, r)
-          );
-          return { build, served };
+          const { build, served } = servable.get(owner)!;
+          return { build, served: served.filter(r => waiting.has(r)) };
         })
         .filter(c => c.served.includes(c.build.owner) && c.served.length >= 2);
       const best = rank(candidates, [c => c.served.length]);
