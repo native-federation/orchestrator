@@ -57,6 +57,8 @@ export function findIncoherentRemotes({
   const tagOfUrl = new Map<string, VersionName>();
 
   for (const external of Object.values(members)) {
+    // D28: a build ships one copy per member, so a second row of one remote is read as its first.
+    const read = new Set<RemoteName>();
     for (const version of external.versions) {
       for (const meta of version.remotes) {
         const scopeUrl = scopeUrls[meta.name];
@@ -64,9 +66,11 @@ export function findIncoherentRemotes({
 
         let own = builds.get(meta.name);
         if (!own) builds.set(meta.name, (own = new Map()));
+        const first = !read.has(meta.name);
+        read.add(meta.name);
 
         for (const [specifier, file] of Object.entries(meta.entries)) {
-          own.set(specifier, version.tag);
+          if (first) own.set(specifier, version.tag);
           tagOfUrl.set(_path.join(scopeUrl, file), version.tag);
         }
       }

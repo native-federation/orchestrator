@@ -32,6 +32,7 @@ import {
   unmapped,
 } from 'lib/testing/pooling/property-harness';
 import * as _path from 'lib/utils/path';
+import { copiesByRemote } from 'lib/core/1.domain/pooling/builds';
 import { committedView } from 'lib/core/1.domain/pooling/views';
 
 /**
@@ -251,8 +252,10 @@ describe('pooling properties: init (generated portfolios)', { timeout: TIMEOUT }
       if (!init.ok) return;
       const { importMap, record } = init.result;
       for (const [pool, members] of pools(record)) {
+        const poolMembers = Object.entries(members).map(([name, external]) => ({ name, external }));
         const { global } = committedView(
-          Object.entries(members).map(([name, external]) => ({ name, external })),
+          poolMembers,
+          copiesByRemote(poolMembers),
           Object.keys(record)
         );
         const view: Record<string, string> = {};

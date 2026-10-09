@@ -108,6 +108,31 @@ describe('createPoolDynamicExternals', () => {
       )
       .sort();
 
+  // D28: a record the orchestrator never writes itself, mfe listing core twice. A remote ships one copy per
+  // member, so the gate reads mfe's first row, as the election does: core 17.0.0, which the map serves. The
+  // second row's ^16 would reject the committed 17.0.0 and island mfe for a copy it does not run.
+  it('reads a duplicated row of the loaded remote as the first one', async () => {
+    givenCommitted({
+      '@framework/core': committed(
+        '@framework/core',
+        { tag: '17.0.0', remotes: ['host', 'mfe'] },
+        { tag: '16.0.0', remotes: ['mfe'] }
+      ),
+      '@framework/common': committed('@framework/common', {
+        tag: '17.0.0',
+        remotes: ['host', 'mfe'],
+      }),
+    });
+
+    const result = await poolDynamicExternals({
+      entry: entryWith(shared('@framework/core'), shared('@framework/common')),
+      actions: { '@framework/core': { action: 'skip' }, '@framework/common': { action: 'skip' } },
+    });
+
+    expect(result.actions['@framework/core']).toEqual({ action: 'skip' });
+    expect(verdictsWritten()).toEqual([]);
+  });
+
   it('scopes the family when no committed build ships the combination it would be handed', async () => {
     // The capture's shape: forms@22.0.8 and forms/signals@21.2.18 are both committed, from two builds
     // that ship neither of the other's members. Nobody so far consumed both; this remote would be the one

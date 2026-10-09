@@ -1,5 +1,6 @@
 import type { SharedExternal, SharedVersion, SharedVersionAction } from 'lib/core/1.domain';
 import { mockVersionRemote } from 'lib/testing/domain/externals/version.mock';
+import { copiesByRemote } from './builds';
 import { committedView, hostRemotes } from './views';
 import type { PoolMember } from './membership';
 
@@ -62,11 +63,13 @@ const soleProviderIsland = (): PoolMember[] => [
   ]),
 ];
 
-// The fixtures list members in the order they are stored.
-const viewOf = (members: PoolMember[]) =>
+// The fixtures list members in the order they are stored; `without` is the remote being loaded.
+const viewOf = (members: PoolMember[], without?: string) =>
   committedView(
     members,
-    members.map(m => m.name)
+    copiesByRemote(members),
+    members.map(m => m.name),
+    without
   );
 
 describe('committedView', () => {
@@ -165,6 +168,27 @@ describe('committedView', () => {
       expect(global.get('@angular/router')).toMatchObject({ tag: '22.1.0', remote: 'mfe-a' });
     });
 
+    // update-cache stored the loaded remote's copies, which the committed map does not hold: a share row it
+    // opened at a newer tag must not hide the committed one, and its build is no committed build.
+    it('leaves out the remote being loaded', () => {
+      const members = [
+        member('@ng/core', [
+          { tag: '22.1.0', action: 'share', copies: [{ remote: 'loaded' }] },
+          { tag: '22.0.8', action: 'share', copies: [{ remote: 'mfe5' }] },
+          {
+            tag: '22.0.8',
+            copies: [{ remote: 'loaded', entries: { '@ng/core/testing': 't.js' } }],
+          },
+        ]),
+      ];
+      const { global, builds } = viewOf(members, 'loaded');
+
+      expect([...global]).toEqual([
+        ['@ng/core', { tag: '22.0.8', remote: 'mfe5', file: '@ng/core.js' }],
+      ]);
+      expect([...builds.keys()]).toEqual(['mfe5']);
+    });
+
     // A package's secondary entrypoints are routinely published from a `skip` copy of the shared tag.
     it('includes a specifier only a skipping copy publishes', () => {
       const members = [
@@ -222,7 +246,12 @@ describe('committedView', () => {
       ];
 
       expect(
-        committedView(members, ['@ng/core/testing', '@ng/core']).global.get('@ng/core/testing')
+        committedView(
+          members,
+          copiesByRemote(members),
+          ['@ng/core/testing', '@ng/core'],
+          'loaded'
+        ).global.get('@ng/core/testing')
       ).toMatchObject({
         remote: 'flat',
       });

@@ -833,6 +833,45 @@ describe('pooling regressions', () => {
   });
 
   /**
+   * D28. A record the orchestrator never writes itself: a remote lists `@fw/core` twice, at 1.0.1 and at
+   * 1.0.0 with another file. A build ships one copy per member, so the election, the dynamic gate and the
+   * no-tear oracle all read its first row, whole: the build is core 1.0.1 beside common 1.0.0. The gate's own
+   * first-row read is pinned in pool-dynamic-externals.spec.ts.
+   */
+  describe('D28: a duplicated row is read as the first one', () => {
+    let p: ReturnType<typeof portfolio>;
+    beforeEach(() => {
+      p = portfolio({}, { storage: 'nf-regression-d28', realRepositories: true });
+    });
+
+    // mfe-d disagrees with the map's core 1.0.1, so it takes the map's files only because a build shipped
+    // core 1.0.1 beside common 1.0.0: mfe-s's first row. Its second row shipped no such pair.
+    it("witnesses a load by a committed build's first row", async () => {
+      await p.runInit([
+        entry(
+          'team/mfe-s',
+          shared('@fw/core', '1.0.1', '~1.0.0'),
+          { ...shared('@fw/core', '1.0.0', '~1.0.0'), entries: { '@fw/core': 'core-100.js' } },
+          shared('@fw/common', '1.0.0', '~1.0.0')
+        ),
+      ]);
+      expect(rows(p, '@fw/core')).toEqual(['1.0.1:share:[team/mfe-s]', '1.0.0:skip:[team/mfe-s]']);
+
+      p.reload();
+      const { merged } = await p.runDynamic(
+        entry(
+          'team/mfe-d',
+          shared('@fw/core', '1.0.0', '~1.0.0', false),
+          shared('@fw/common', '1.0.0', '~1.0.0', false)
+        )
+      );
+      expect(p.islands()).toEqual({});
+      expect(resolves(merged, 'team/mfe-d', '@fw/core')).toBe(file('team/mfe-s', '@fw/core'));
+      expect(resolves(merged, 'team/mfe-d', '@fw/common')).toBe(file('team/mfe-s', '@fw/common'));
+    });
+  });
+
+  /**
    * A remote that serves some members itself could still publish a global file: rule 5 gave an
    * agreeing build every file at a tag round 1 publishes, and both the extension and round 1's same-tag loans
    * took files from such builds. Import-map scopes are keyed by URL, so that file's own imports resolve in its

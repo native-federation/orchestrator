@@ -7,7 +7,7 @@ import type {
 } from 'lib/core/1.domain';
 import { forEachVersionEntry } from 'lib/core/1.domain/externals/basis';
 import type { Specifier } from 'lib/core/1.domain/externals/specifier';
-import { type Build, buildOf, copiesByRemote } from './builds';
+import { type Build, buildOf, type Copy } from './builds';
 import type { PoolMember } from './membership';
 
 // Read-only projections of one pool's stored record, keyed by specifier rather than external name so flat and
@@ -20,17 +20,25 @@ export type CommittedView = {
 };
 
 // A `scope` copy counts as served by its build: its files are already in the map under its own scope.
-export function committedView(members: PoolMember[], stored: ExternalName[]): CommittedView {
+// `without` is left out: `update-cache` has already stored a loaded remote's copies, but the committed map holds
+// none of them.
+export function committedView(
+  members: PoolMember[],
+  shipped: ReadonlyMap<RemoteName, readonly Copy[]>,
+  recordOrder: ExternalName[],
+  without?: RemoteName
+): CommittedView {
   const global: CommittedView['global'] = new Map();
 
   // Mirrors what `generate-import-map` emitted, so `global` is what the committed map really serves.
-  forEachGlobalClaim(members, stored, (specifier, tag, meta) => {
+  forEachGlobalClaim(members, recordOrder, without, (specifier, tag, meta) => {
     if (!global.has(specifier))
       global.set(specifier, { tag, remote: meta.name, file: meta.entries[specifier]! });
   });
 
   const builds = new Map<RemoteName, Build>();
-  for (const [owner, copies] of copiesByRemote(members)) builds.set(owner, buildOf(owner, copies));
+  for (const [owner, copies] of shipped)
+    if (owner !== without) builds.set(owner, buildOf(owner, copies));
 
   return { builds, global };
 }
@@ -68,20 +76,26 @@ export function arrivalOrder(members: PoolMember[]): Map<RemoteName, number> {
 // served by another build never publishes.
 function forEachGlobalClaim(
   members: PoolMember[],
-  stored: ExternalName[],
+  recordOrder: ExternalName[],
+  without: RemoteName | undefined,
   visit: (specifier: Specifier, tag: VersionName, meta: SharedVersionMeta) => void
 ): void {
-  // `stored` is the record's order, which generate-import-map's `imports` and `claimsOf` walks claim in.
-  const rank = new Map(stored.map((name, i) => [name, i]));
+  // generate-import-map's `imports` and `claimsOf` walks claim in the record's order.
+  const rank = new Map(recordOrder.map((name, i) => [name, i]));
   const walk = [...members].sort((a, b) => rank.get(a.name)! - rank.get(b.name)!);
 
   const claim = (version: SharedVersion) =>
-    forEachVersionEntry(version, undefined, (specifier, meta) =>
-      visit(specifier, version.tag, meta)
+    forEachVersionEntry(
+      version,
+      meta => meta.name !== without,
+      (specifier, meta) => visit(specifier, version.tag, meta)
     );
 
   for (const member of walk) {
-    const winner = member.external.versions.find(v => v.action === 'share');
+    // A share row only `without` holds publishes nothing yet.
+    const winner = member.external.versions.find(
+      v => v.action === 'share' && v.remotes.some(r => r.name !== without)
+    );
     if (winner) claim(winner);
   }
   for (const member of walk)

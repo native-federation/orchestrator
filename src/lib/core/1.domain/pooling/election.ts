@@ -7,6 +7,7 @@ import {
 } from 'lib/core/1.domain/externals/specifier';
 import { type Build, buildOf, type Copy, copiesByRemote } from './builds';
 import type { PoolMember } from './membership';
+import { agrees, serves as servesAt, shippedTogether } from './rules';
 import { compareStrings } from 'lib/utils/compare-strings';
 
 // Who serves each remote of one pool, keyed by specifier; pure, `pool-shared-externals.ts` turns it into
@@ -54,11 +55,8 @@ export function electVariants(input: ElectionInput): Election {
 
   const shipped = copiesByRemote(members);
   const builds = new Map<RemoteName, Build>();
-  const buildFor = (owner: RemoteName) => {
-    let own = builds.get(owner);
-    if (!own) builds.set(owner, (own = buildOf(owner, shipped.get(owner)!)));
-    return own;
-  };
+  for (const [owner, copies] of shipped) builds.set(owner, buildOf(owner, copies));
+  const buildFor = (owner: RemoteName) => builds.get(owner)!;
 
   // Which build is newer: the first member both ship, in pool order, whose tags differ decides, so two
   // unrelated version lines are never compared.
@@ -71,17 +69,6 @@ export function electVariants(input: ElectionInput): Election {
       if (d !== 0) return d;
     }
     return 0;
-  };
-
-  // A specifier the build does not ship is still pinned by its package's tag: a flat `core/testing` at
-  // 22.0.6 next to a build's `core` at 22.0.8 is two cores, whoever lists the entrypoint.
-  const agrees = (copies: readonly Copy[], tags: SpecifierTags): boolean => {
-    for (const copy of copies)
-      for (const s of copy.specifiers) {
-        const tag = tags.tagOf(s);
-        if (tag !== undefined && tag !== copy.tag) return false;
-      }
-    return true;
   };
 
   // Same tag, same artefact: round 1 also serves entrypoints other copies of its tags ship — but only from
@@ -101,23 +88,10 @@ export function electVariants(input: ElectionInput): Election {
     return { tags, loans };
   };
 
-  const serves = (copies: readonly Copy[], tags: SpecifierTags): boolean => {
-    for (const copy of copies)
-      for (const s of copy.specifiers) {
-        const tag = tags.get(s);
-        if (tag === undefined || !acceptsTag(tag, copy.tag, copy.requiredVersion)) return false;
-      }
-    return true;
-  };
-
-  // One build must have shipped the combination a remote resolves; a build witnesses its packages' other
-  // entrypoints at its tag. See docs/version-resolver.md §"How pooling resolves".
-  const shippedTogether = (specifiers: Specifier[]): boolean =>
-    [...shipped.keys()].some(owner =>
-      specifiers.every(s => buildFor(owner).tags.tagOf(s) === coverage.get(s))
-    );
+  const serves = (copies: readonly Copy[], tags: SpecifierTags) =>
+    servesAt(copies, tags, acceptsTag);
   const witnessed = (remote: RemoteName) =>
-    shippedTogether(shipped.get(remote)!.flatMap(c => c.specifiers));
+    shippedTogether(shipped.get(remote)!, coverage, builds.values());
   // The first specifier no build ships next to the ones before it, and a smallest set of those it clashes with.
   const unwitnessed = (remote: RemoteName) => {
     const specifiers = shipped.get(remote)!.flatMap(c => c.specifiers);
