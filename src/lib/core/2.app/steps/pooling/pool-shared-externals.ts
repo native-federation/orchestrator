@@ -17,16 +17,8 @@ import {
   type PlacedPool,
   type PoolMiss,
   previousWinner,
-  safePlacement,
 } from 'lib/core/1.domain/pooling/placement';
 import type { Specifier } from 'lib/core/1.domain/externals/specifier';
-
-type Decision = {
-  election: Election;
-  misses: Map<RemoteName, PoolMiss | undefined>;
-  placed: PlacedPool;
-  records: [ExternalName, SharedExternal][];
-};
 
 export function createPoolSharedExternals(
   config: LoggingConfig & ModeConfig,
@@ -80,24 +72,11 @@ export function createPoolSharedExternals(
       );
   }
 
-  // Containment (D3) wraps only the decision, so a failure leaves nothing of the pool written.
   function poolRecords(
     poolName: PoolName,
     members: PoolMember[],
     scope: string
   ): [ExternalName, SharedExternal][] {
-    let decision: Decision;
-    try {
-      decision = decide(poolName, members);
-    } catch (error) {
-      if (error instanceof NFError) throw error;
-      return contain(poolName, members, scope, error);
-    }
-    report(poolName, members, decision, scope);
-    return decision.records;
-  }
-
-  function decide(poolName: PoolName, members: PoolMember[]): Decision {
     const hosts = hostRemotes(members);
     const election = electVariants({
       members,
@@ -110,35 +89,19 @@ export function createPoolSharedExternals(
     });
     const misses = missesOf(election);
     const placed = electedPlacement(poolName, election, misses, hosts, compare);
-    const records = members.map((m): [ExternalName, SharedExternal] => [
-      m.name,
-      { ...memberRecord(m, placed), poolWinner: election.winner },
-    ]);
-    return { election, misses, placed, records };
+    report(poolName, members, election, misses, placed, scope);
+    return members.map(m => [m.name, { ...memberRecord(m, placed), poolWinner: election.winner }]);
   }
 
-  // The round-1 summary, then the strict refusal, then why each remote missed round 1.
+  // The strict refusal, then why each remote missed round 1.
   function report(
     poolName: PoolName,
     members: PoolMember[],
-    { election, misses, placed }: Decision,
+    election: Election,
+    misses: Map<RemoteName, PoolMiss | undefined>,
+    placed: PlacedPool,
     scope: string
   ): void {
-    config.log.debug(
-      3,
-      `[${scope}][pool:${poolName}] round 1: '${election.winner}' serves ${election.global.size}` +
-        election.subpools.map(p => `; subpool '${p.build}' serves ${p.members.length}`).join('') +
-        (election.alone.length ? `; alone: {${election.alone.join(', ')}}` : '')
-    );
-
-    const subpoolSizes = new Map(election.subpools.map(p => [p.build, p.members.length]));
-    for (const [remote, miss] of misses)
-      if (miss === undefined)
-        config.log.warn(
-          3,
-          `[${scope}][pool:${poolName}] '${remote}' keeps subpool '${remote}': the elected build would serve it, but ${subpoolSizes.get(remote)! - 1} other remote(s) in it need its build.`
-        );
-
     // A range rejecting the elected build is what this flag refuses; a coverage miss never is.
     const rejecting = [...misses]
       .filter(([, miss]) => miss?.cause === 'incompatible' && miss.strict)
@@ -151,9 +114,16 @@ export function createPoolSharedExternals(
       throw new NFError(`Could not pool '${poolName}' in scope ${scope}.`);
     }
 
+    const subpoolSizes = new Map(election.subpools.map(p => [p.build, p.members.length]));
     let shipped: Map<RemoteName, Copy[]> | undefined;
     for (const [remote, miss] of misses) {
-      if (miss === undefined) continue;
+      if (miss === undefined) {
+        config.log.warn(
+          3,
+          `[${scope}][pool:${poolName}] '${remote}' keeps subpool '${remote}': the elected build would serve it, but ${subpoolSizes.get(remote)! - 1} other remote(s) in it need its build.`
+        );
+        continue;
+      }
       shipped ??= copiesByRemote(members);
       const counts = {
         imports: shipped.get(remote)!.length,
@@ -164,23 +134,6 @@ export function createPoolSharedExternals(
         `[${scope}][pool:${poolName}] ${missWarning(remote, miss, placed, counts)}`
       );
     }
-  }
-
-  // An unexpected failure stays in its pool (D3). It stores no `poolWinner`: it was not an election, so it
-  // must not break the next one's tie.
-  function contain(
-    poolName: PoolName,
-    members: PoolMember[],
-    scope: string,
-    error: unknown
-  ): [ExternalName, SharedExternal][] {
-    const placed = safePlacement(poolName, members, compare);
-    config.log.error(
-      3,
-      `[${scope}][pool:${poolName}] could not elect the pool; only '${placed.winner}' resolves globally, every other remote serves its own family.`,
-      error
-    );
-    return members.map(m => [m.name, memberRecord(m, placed)]);
   }
 }
 

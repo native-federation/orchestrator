@@ -8,11 +8,9 @@ import type {
   VersionName,
 } from 'lib/core/1.domain';
 import { byTag, mergeRows } from 'lib/core/1.domain/externals/rows';
-import { type Specifier, SpecifierTags } from 'lib/core/1.domain/externals/specifier';
-import { buildOf, copiesByRemote } from './builds';
+import type { Specifier, SpecifierTags } from 'lib/core/1.domain/externals/specifier';
 import type { Election } from './election';
 import type { PoolMember, PoolName } from './membership';
-import { hostRemotes } from './views';
 
 // Where each remote of one pool runs and the records that follows from it; pure, the step logs and writes.
 // See docs/version-resolver.md §"How the verdicts land in the record and the map".
@@ -81,34 +79,6 @@ export function electedPlacement(
     coverage: election.coverage,
     agreeing: election.agreeing,
     publishers: election.publishers,
-    placements,
-    compare,
-  };
-}
-
-// The placement that cannot tear, for a pool that could not be elected: the host's build, else the first
-// arrival's, stays global and every other remote serves its whole family itself.
-export function safePlacement(
-  poolName: PoolName,
-  members: PoolMember[],
-  compare: PlacedPool['compare']
-): PlacedPool {
-  const hosts = hostRemotes(members);
-  // In arrival order, as `arrivalOrder` reads it.
-  const shipped = copiesByRemote(members);
-  const remotes = [...shipped.keys()];
-  const winner = remotes.find(r => hosts.has(r)) ?? remotes[0];
-  const placements = new Map<RemoteName, Placement>(
-    remotes.map(r => [r, r === winner ? { kind: 'global' } : { kind: 'self', cause: 'uncovered' }])
-  );
-  return {
-    poolName,
-    winner,
-    hosts,
-    coverage:
-      winner === undefined ? new SpecifierTags() : buildOf(winner, shipped.get(winner)!).tags,
-    agreeing: new Set(),
-    publishers: new Set(),
     placements,
     compare,
   };

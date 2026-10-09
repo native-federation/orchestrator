@@ -169,7 +169,7 @@ describe('createProcessRemoteEntries', () => {
       expect(stored.versions[0].remotes[0].pool).toBe('grp');
     });
 
-    it('leaves the meta without a tag when none is declared', async () => {
+    it('leaves the meta without a label when none is declared', async () => {
       const remoteEntries = [
         mockRemoteEntry_MFE1({
           shared: [mockSharedInfo('dep-a', { singleton: true })],

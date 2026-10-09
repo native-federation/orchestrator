@@ -877,7 +877,6 @@ copies come from:
 | `warn` | `'<remote>' serves its own family: no committed build offers every entrypoint it imports at a version it accepts — '<gap>' is the gap. All N members it imports are scoped for it.` | Dynamic init only — the coverage finding read off the committed record. |
 | `warn` | `'<build>' keeps subpool '<build>': the elected build would serve it, but K other remote(s) in it need its build.` | A subpool's build the global map would serve, kept for the members that need it. Nothing to fix on that remote; aligning the other members moves the whole subpool onto the global map. |
 | `error` | `version-incompatible remotes cannot be pooled: {…}.` | Logged before the `strictExternalCompatibility` throw, naming every remote whose `strictVersion` range rejects the elected build. |
-| `debug` | `round 1: '<winner>' serves N; subpool '<build>' serves M; …; alone: {…}` | The election, for confirming who serves whom. |
 
 #### What pooling stores
 
@@ -888,7 +887,7 @@ have to re-derive them. Every field is omitted when it does not apply.
 | where | field | meaning |
 | --- | --- | --- |
 | `SharedExternal` | `poolName` | the pool this external resolves in: the most-declared name of the merged pool |
-| `SharedExternal` | `poolWinner` | the round-1 winner of the pool's last election; a rename keeps it, the failure fallback stores none |
+| `SharedExternal` | `poolWinner` | the round-1 winner of the pool's last election; a rename keeps it |
 | `SharedVersionMeta` | `pool` | the `pool` tag this remote declared — pooling's input, never rewritten |
 | `SharedVersionMeta` | `servedBy` | the build of the subpool this copy runs in — the remote itself on its own build's copies |
 | `SharedVersionMeta` | `poolCause` | why pooling made this copy serve itself: `incompatible` (a range rejects a tag of the elected build) or `uncovered` (the elected build does not serve every specifier it imports) |

@@ -21,8 +21,7 @@ describe('a pooling error', () => {
     };
   };
 
-  // Fails until rework 20 D-4 drops the init step's containment, which places the pool instead.
-  it.fails('fails the init, naming the share scope', async () => {
+  it('fails the init, naming the share scope', async () => {
     const p = portfolio(
       { 'team/a': 'http://a/', 'team/b': 'http://b/', 'team/c': 'http://c/' },
       { storage: 'nf-pool-failure-init' }
