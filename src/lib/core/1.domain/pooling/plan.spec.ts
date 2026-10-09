@@ -1,7 +1,7 @@
 import type { SharedExternal, shareScope } from 'lib/core/1.domain';
 import { mockVersionRemote } from 'lib/testing/domain/externals/version.mock';
 import { buildPools } from './membership';
-import { planElection, renamesOf, type ElectionPlan } from './plan';
+import { planElection, renamedRecords, renamesOf, type ElectionPlan } from './plan';
 import { hasPoolResults } from './pool-state';
 
 // Wraps the real `buildPools` so a test can tell whether the plan built the pool graph at all.
@@ -205,5 +205,30 @@ describe('renamesOf', () => {
     const scope: shareScope = { a: record({ poolName: 'p' }) };
 
     expect(renamesOf(scope, new Map([['p', [{ name: 'a', external: before }]]]))).toEqual([]);
+  });
+});
+
+describe('renamedRecords', () => {
+  const pooled = (poolName?: string): SharedExternal => ({
+    dirty: false,
+    ...(poolName === undefined ? {} : { poolName }),
+    poolWinner: 'team/a',
+    versions: [
+      {
+        tag: '17.0.0',
+        host: false,
+        action: 'skip',
+        remotes: [mockVersionRemote('team/b', '@framework/core', { servedBy: 'team/c' })],
+      },
+    ],
+  });
+
+  it('keeps poolWinner and servedBy on a rename: the pool was not re-elected', () => {
+    const record = pooled('framework');
+
+    expect(renamedRecords({ '@framework/core': record }, [['@framework/core', 'angular']])).toEqual(
+      [['@framework/core', { ...pooled('framework'), poolName: 'angular' }]]
+    );
+    expect(record).toEqual(pooled('framework'));
   });
 });

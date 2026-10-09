@@ -33,7 +33,7 @@ import {
 } from 'lib/testing/pooling/property-harness';
 import * as _path from 'lib/utils/path';
 import { copiesByRemote } from 'lib/core/1.domain/pooling/builds';
-import { committedView } from 'lib/core/1.domain/pooling/views';
+import { committedView } from 'lib/core/1.domain/pooling/gate';
 
 /**
  * Pooling invariants over generated portfolios (`generate-portfolio.ts`), through the real init steps with

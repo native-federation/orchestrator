@@ -9,7 +9,7 @@ import { arrivalOrder, hostRemotes } from 'lib/core/1.domain/pooling/views';
 import { type Copy, copiesByRemote } from 'lib/core/1.domain/pooling/builds';
 import { electVariants, type Election } from 'lib/core/1.domain/pooling/election';
 import type { PoolMember, PoolName } from 'lib/core/1.domain/pooling/membership';
-import { type ElectionPlan, planElection } from 'lib/core/1.domain/pooling/plan';
+import { type ElectionPlan, planElection, renamedRecords } from 'lib/core/1.domain/pooling/plan';
 import {
   electedPlacement,
   memberRecord,
@@ -19,7 +19,6 @@ import {
   previousWinner,
   safePlacement,
 } from 'lib/core/1.domain/pooling/placement';
-import { writePoolNames } from './pool.util';
 import type { Specifier } from 'lib/core/1.domain/externals/specifier';
 
 type Decision = {
@@ -47,7 +46,8 @@ export function createPoolSharedExternals(
           for (const [name, record] of poolRecords(poolName, members, scope))
             repo.addOrUpdate(name, record, scope);
         for (const [name, external] of plan.dissolved) repo.addOrUpdate(name, external, scope);
-        writePoolNames(sharedExternals, plan.renames, repo, scope);
+        for (const [name, record] of renamedRecords(sharedExternals, plan.renames))
+          repo.addOrUpdate(name, record, scope);
       } catch (error) {
         if (error instanceof NFError) return Promise.reject(error);
         config.log.error(3, `[${scope}] failed to pool shared externals.`, {

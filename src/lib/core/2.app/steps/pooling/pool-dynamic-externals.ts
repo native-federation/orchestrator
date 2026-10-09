@@ -6,30 +6,26 @@ import {
   type ExternalName,
   GLOBAL_SCOPE,
   type PoolCause,
+  type RemoteEntry,
   type RemoteName,
   STRICT_SCOPE,
   type SharedExternal,
   type SharedInfoActions,
-  type SharedVersionMeta,
+  type shareScope,
 } from 'lib/core/1.domain';
-import { copiesByRemote, type Copy } from 'lib/core/1.domain/pooling/builds';
-import { buildPools, type PoolMember } from 'lib/core/1.domain/pooling/membership';
-import { agrees, shippedTogether } from 'lib/core/1.domain/pooling/rules';
-import { renamesOf } from 'lib/core/1.domain/pooling/plan';
+import { copiesByRemote } from 'lib/core/1.domain/pooling/builds';
+import { buildPools, type PoolMember, type PoolName } from 'lib/core/1.domain/pooling/membership';
+import { renamedRecords, renamesOf } from 'lib/core/1.domain/pooling/plan';
 import { scopeHasPoolState } from 'lib/core/1.domain/pooling/pool-state';
-import { type Specifier, SpecifierTags } from 'lib/core/1.domain/externals/specifier';
-import { type CommittedView, committedView } from 'lib/core/1.domain/pooling/views';
-import { writePoolNames } from './pool.util';
-import * as _path from 'lib/utils/path';
+import {
+  committedView,
+  type CopyMove,
+  coverFromMap,
+  type GateMiss,
+  judgeRemote,
+  recordMove,
+} from 'lib/core/1.domain/pooling/gate';
 import { acceptsTag } from 'lib/core/1.domain/externals/compatibility';
-import { addRemoteToVersion } from 'lib/core/1.domain/externals/basis';
-import { byTag, rowAt } from 'lib/core/1.domain/externals/rows';
-
-// What the gate decided for the loaded remote's copy of one member, as the record must keep it.
-type Verdict = { cause: PoolCause } | { fromMap: true };
-
-// Why the loaded remote cannot resolve through the committed map, worded for the log.
-type Miss = { cause: PoolCause; gap: string };
 
 export function createPoolDynamicExternals(
   config: LoggingConfig & ModeConfig,
@@ -40,198 +36,117 @@ export function createPoolDynamicExternals(
     (tag, range) => ports.versionCheck.isCompatible(tag, range),
     (a, b) => ports.versionCheck.compare(a, b)
   );
+  const scopeUrlOf = (remote: RemoteName) => ports.remoteInfoRepo.tryGet(remote).get()?.scopeUrl;
 
   // The committed map is immutable, so this only rewrites the loaded remote's own actions and copies, never
   // another remote's. See docs/version-resolver.md §"Scope and dynamic init".
   return ({ entry, actions }) => {
-    // The poolable singletons whose actions may be rewritten; membership comes from the record.
-    const declared = new Map<string, Set<ExternalName>>();
-    for (const external of entry.shared ?? []) {
-      const name = external.packageName;
-      if (!external.singleton || !actions[name]) continue;
-      if (external.shareScope === STRICT_SCOPE) continue;
-
-      const shareScope = external.shareScope ?? GLOBAL_SCOPE;
-      let names = declared.get(shareScope);
-      if (!names) declared.set(shareScope, (names = new Set()));
-      names.add(name);
-    }
-    if (declared.size === 0) return Promise.resolve({ entry, actions });
-
-    // Per share scope, the loaded remote's verdicts to write back, so a reload rebuilds the map this
-    // delta publishes rather than the one `update-cache` recorded.
-    let verdicts = new Map<ExternalName, Verdict>();
-
-    const scope = (name: string, cause: PoolCause) => {
-      actions[name]!.action = 'scope';
-      delete actions[name]!.override;
-      delete actions[name]!.covered;
-      verdicts.set(name, { cause });
-    };
-
-    for (const [shareScope, names] of declared) {
+    for (const [shareScope, names] of poolableNames(entry, actions)) {
       // A tag anywhere in the committed scope forms pools this entry is subject to — its own tag is not
       // required, and the pool covers the whole external, this entry's copies included.
       const committed = ports.sharedExternalsRepo.getFromScope(shareScope);
       if (!scopeHasPoolState(committed)) continue;
 
       const { pools } = buildPools(committed);
-      const recordOrder = Object.keys(committed);
-      verdicts = new Map();
-
-      for (const pool of pools.values()) {
-        // Only the members this entry declares have an action to rewrite; the rest of the pool is context:
-        // its committed tags are what the gate reads.
-        const mine = pool.filter(member => names.has(member.name));
-        if (mine.length === 0) continue;
-
-        try {
-          const shipped = copiesByRemote(pool);
-          const own = shipped.get(entry.name) ?? [];
-          const view = committedView(pool, shipped, recordOrder, entry.name);
-          // The resolver scoping a member means the committed map cannot serve it — a range rejects its tag,
-          // or under `scopeUncoveredEntrypoints` it lacks an entrypoint — so no committed build is trusted
-          // with this remote: it serves its whole family itself, no dedup.
-          const resolverScoped = mine.find(m => actions[m.name]!.action === 'scope');
-          const verdict = resolverScoped
-            ? missOf(own, view, resolverScoped.name)
-            : judge(own, view);
-          if (verdict === 'global') {
-            const served = serveFromMap(entry.name, mine, view, actions, shareScope);
-            if ('unmapped' in served) {
-              // Half its family on the map's files and half on its own build would tear it.
-              warnUnmapped(shareScope, entry.name, served.unmapped);
-              mine.forEach(member => scope(member.name, 'uncovered'));
-              continue;
-            }
-            for (const name of served.skipped) verdicts.set(name, { fromMap: true });
-            continue;
-          }
-
-          config.log.warn(
-            8,
-            `[${shareScope}] ${selfServeWarning(entry.name, verdict, mine.length)}`
-          );
-          mine.forEach(member => scope(member.name, verdict.cause));
-        } catch (error) {
-          // Its own build is the one family this remote can always resolve coherently.
-          config.log.error(
-            8,
-            `[${shareScope}][${entry.name}] could not judge its pool; it serves its own family.`,
-            error
-          );
-          mine.forEach(member => scope(member.name, 'uncovered'));
-        }
-      }
-
-      const written: Record<string, SharedExternal> = {};
-      for (const [name, verdict] of verdicts) {
-        written[name] = recordVerdict(committed[name]!, entry.name, verdict);
-        ports.sharedExternalsRepo.addOrUpdate(name, written[name], shareScope);
-      }
-      const merged = { ...committed, ...written };
-      writePoolNames(merged, renamesOf(merged, pools), ports.sharedExternalsRepo, shareScope);
+      const moves = judgeScope(
+        entry.name,
+        names,
+        actions,
+        pools,
+        Object.keys(committed),
+        shareScope
+      );
+      writeMoves(entry.name, moves, committed, pools, shareScope);
     }
 
     return Promise.resolve({ entry, actions });
   };
 
-  // The init rules against a map that can no longer change (§"Scope and dynamic init", step 2).
-  function judge(own: readonly Copy[], view: CommittedView): 'global' | Miss {
-    const { rejected, missing } = scan(own, view);
-    if (rejected) return { cause: 'incompatible', gap: rejected };
-    const globalTags = new SpecifierTags([...view.global].map(([s, { tag }]) => [s, tag] as const));
-    // The map's tags must be a combination one build shipped: agreeing is its own witness, otherwise one
-    // committed build must be.
-    if (agrees(own, globalTags)) return 'global';
-    if (missing === undefined && shippedTogether(own, globalTags, view.builds.values()))
-      return 'global';
-    return { cause: 'uncovered', gap: missing ?? 'a combination no committed build shipped' };
-  }
-
-  // Why the resolver scoped one of the remote's members, in the terms `judge` reports a miss in.
-  function missOf(own: readonly Copy[], view: CommittedView, scoped: ExternalName): Miss {
-    const { rejected, missing } = scan(own, view);
-    return rejected
-      ? { cause: 'incompatible', gap: rejected }
-      : { cause: 'uncovered', gap: missing ?? scoped };
-  }
-
-  // The remote's copies against the committed global map: the first tag a range rejects and the first
-  // entrypoint the map does not serve.
-  function scan(own: readonly Copy[], view: CommittedView) {
-    let rejected: string | undefined;
-    let missing: string | undefined;
-    for (const copy of own)
-      for (const s of copy.specifiers) {
-        const global = view.global.get(s);
-        if (global === undefined) missing ??= s;
-        else if (!accepts(global.tag, copy.tag, copy.requiredVersion))
-          rejected ??= `${s}@${global.tag}`;
-      }
-    return { rejected, missing };
-  }
-
-  // `covered` is per external, but the map serves by specifier: an entrypoint another member ships as a
-  // package of its own (flat vs dense) is served all the same. Names the members whose share now skips, or a
-  // serving build a named scope cannot map.
-  function serveFromMap(
+  // Rewrites the loaded remote's actions pool by pool and returns how its copies move in the record.
+  function judgeScope(
     remote: RemoteName,
-    mine: PoolMember[],
-    view: CommittedView,
+    names: ReadonlySet<ExternalName>,
     actions: SharedInfoActions,
+    pools: ReadonlyMap<PoolName, PoolMember[]>,
+    recordOrder: ExternalName[],
     shareScope: string
-  ): { skipped: ExternalName[] } | { unmapped: RemoteName } {
-    const skipped: ExternalName[] = [];
-
-    for (const member of mine) {
-      const action = actions[member.name]!;
-      if (action.action === 'scope') continue;
-      // Inherits every mapping already.
-      if (action.action === 'skip' && !action.covered) continue;
-      const own = ownCopy(member.external, remote);
-      if (!own) continue;
-
-      const served = servedByMap(own, view, shareScope, action);
-      if ('unmapped' in served) return served;
-      const { covered, override } = served;
-
-      if (action.action === 'share') {
-        const partial = covered.length < Object.keys(own.entries).length;
-        if (covered.length === 0 || (partial && !maySelfFill(shareScope))) continue;
-        action.action = 'skip';
-        skipped.push(member.name);
+  ): Map<ExternalName, CopyMove> {
+    const map = { shareScope, selfFill: maySelfFill(shareScope), scopeUrlOf };
+    const moves = new Map<ExternalName, CopyMove>();
+    const selfServe = (members: PoolMember[], cause: PoolCause) => {
+      for (const { name } of members) {
+        actions[name]!.action = 'scope';
+        delete actions[name]!.override;
+        delete actions[name]!.covered;
+        moves.set(name, { cause });
       }
-      action.covered = covered;
-      if (Object.keys(override).length > 0) action.override = override;
+    };
+
+    for (const pool of pools.values()) {
+      // Only the members this entry declares have an action to rewrite; the rest of the pool is context:
+      // its committed tags are what the gate reads.
+      const mine = pool.filter(member => names.has(member.name));
+      if (mine.length === 0) continue;
+
+      try {
+        const shipped = copiesByRemote(pool);
+        const view = committedView(pool, shipped, recordOrder, remote);
+        const scoped = new Set(
+          mine.filter(m => actions[m.name]!.action === 'scope').map(m => m.name)
+        );
+        const verdict = judgeRemote(shipped.get(remote) ?? [], view, scoped, accepts);
+        if (verdict !== 'global') {
+          config.log.warn(8, `[${shareScope}] ${selfServeWarning(remote, verdict, mine.length)}`);
+          selfServe(mine, verdict.cause);
+          continue;
+        }
+
+        const cover = coverFromMap(remote, mine, view, actions, map);
+        if ('unmapped' in cover) {
+          // Half its family on the map's files and half on its own build would tear it.
+          warnUnmapped(shareScope, remote, cover.unmapped);
+          selfServe(mine, 'uncovered');
+          continue;
+        }
+        for (const { name, skip, covered, override } of cover.covers) {
+          const action = actions[name]!;
+          if (skip) {
+            action.action = 'skip';
+            moves.set(name, { fromMap: true });
+          }
+          action.covered = covered;
+          if (Object.keys(override).length > 0) action.override = override;
+        }
+      } catch (error) {
+        // Its own build is the one family this remote can always resolve coherently.
+        config.log.error(
+          8,
+          `[${shareScope}][${remote}] could not judge its pool; it serves its own family.`,
+          error
+        );
+        selfServe(mine, 'uncovered');
+      }
     }
 
-    return { skipped };
+    return moves;
   }
 
-  // The copy's specifiers the map serves, beside what the resolver covered. A named scope has no `imports`
-  // to inherit, so the remote's own scope names the map's file for each, over the resolver's (one row's copy).
-  function servedByMap(
-    own: SharedVersionMeta,
-    view: CommittedView,
-    shareScope: string,
-    action: SharedInfoActions[string]
-  ): { covered: Specifier[]; override: Record<Specifier, string> } | { unmapped: RemoteName } {
-    const covered = new Set(action.covered);
-    const override = { ...action.override };
-
-    for (const specifier in own.entries) {
-      const source = view.global.get(specifier);
-      if (!source) continue;
-      if (shareScope !== GLOBAL_SCOPE) {
-        const scopeUrl = scopeUrlOf(source.remote);
-        if (!scopeUrl) return { unmapped: source.remote };
-        override[specifier] = _path.join(scopeUrl, source.file);
-      }
-      covered.add(specifier);
+  // Writes the moves back so a reload rebuilds the map this delta publishes, not the one `update-cache` recorded.
+  function writeMoves(
+    remote: RemoteName,
+    moves: ReadonlyMap<ExternalName, CopyMove>,
+    committed: shareScope,
+    pools: ReadonlyMap<PoolName, PoolMember[]>,
+    shareScope: string
+  ): void {
+    const written: Record<string, SharedExternal> = {};
+    for (const [name, move] of moves) {
+      written[name] = recordMove(committed[name]!, remote, move, ports.versionCheck.compare);
+      ports.sharedExternalsRepo.addOrUpdate(name, written[name], shareScope);
     }
-
-    return { covered: [...covered], override };
+    const merged = { ...committed, ...written };
+    for (const [name, record] of renamedRecords(merged, renamesOf(merged, pools)))
+      ports.sharedExternalsRepo.addOrUpdate(name, record, shareScope);
   }
 
   // Whether an entrypoint a skip leaves uncovered may come from the remote's own build: the coverage policies
@@ -242,91 +157,43 @@ export function createPoolDynamicExternals(
     return shareScope === GLOBAL_SCOPE || !config.strict.strictImportMap;
   }
 
-  function ownCopy(external: SharedExternal, remote: RemoteName): SharedVersionMeta | undefined {
-    return external.versions.flatMap(v => v.remotes).find(r => r.name === remote);
-  }
-
-  function scopeUrlOf(remote: RemoteName): string | undefined {
-    return ports.remoteInfoRepo.tryGet(remote).get()?.scopeUrl;
-  }
-
   function warnUnmapped(shareScope: string, remote: RemoteName, build: RemoteName): void {
     config.log.warn(
       8,
       `[${shareScope}][${remote}] '${build}' is not in the cache, so its files cannot be mapped.`
     );
   }
+}
 
-  // The share row `update-cache` opened for a copy that now runs the map's files becomes a skip: it
-  // publishes nothing. A tag keeps one row per action, so the copy joins a skip row already there.
-  function recordFromMap(external: SharedExternal, remote: RemoteName): SharedExternal {
-    // Only a member whose action was `share` gets this verdict, so its copy sits in a share row.
-    const opened = external.versions.find(
-      v => v.action === 'share' && v.remotes.some(r => r.name === remote)
-    )!;
-    const meta = { ...opened.remotes.find(r => r.name === remote)!, cached: false };
-    const joined = rowAt(external.versions, opened.tag, 'skip');
+// The poolable singletons whose actions may be rewritten, per share scope; membership comes from the record.
+function poolableNames(
+  entry: RemoteEntry,
+  actions: SharedInfoActions
+): Map<string, Set<ExternalName>> {
+  const declared = new Map<string, Set<ExternalName>>();
+  for (const external of entry.shared ?? []) {
+    const name = external.packageName;
+    if (!external.singleton || !actions[name]) continue;
+    if (external.shareScope === STRICT_SCOPE) continue;
 
-    if (!joined) {
-      return {
-        ...external,
-        versions: external.versions.map(v =>
-          v === opened
-            ? { ...v, action: 'skip', remotes: v.remotes.map(r => (r.name === remote ? meta : r)) }
-            : v
-        ),
-      };
-    }
-
-    const into = { ...joined, remotes: [...joined.remotes] };
-    addRemoteToVersion(into, meta);
-    return {
-      ...external,
-      versions: external.versions.filter(v => v !== opened).map(v => (v === joined ? into : v)),
-    };
+    const shareScope = external.shareScope ?? GLOBAL_SCOPE;
+    let names = declared.get(shareScope);
+    if (!names) declared.set(shareScope, (names = new Set()));
+    names.add(name);
   }
-
-  // A fresh record with only the loaded remote's copy moved: into a `scope` row at its tag, or into a skip row
-  // that runs the map's files.
-  function recordVerdict(
-    external: SharedExternal,
-    remote: RemoteName,
-    verdict: Verdict
-  ): SharedExternal {
-    if ('fromMap' in verdict) return recordFromMap(external, remote);
-
-    const moved: { tag: string; meta: SharedVersionMeta }[] = [];
-    const versions = external.versions
-      .map(v => {
-        const own = v.remotes.find(r => r.name === remote);
-        if (!own) return v;
-        const { servedBy: _subpool, ...rest } = own;
-        const meta = { ...rest, cached: true, poolCause: verdict.cause };
-        if (v.action === 'scope')
-          return { ...v, remotes: v.remotes.map(r => (r === own ? meta : r)) };
-        moved.push({ tag: v.tag, meta });
-        return { ...v, remotes: v.remotes.filter(r => r !== own) };
-      })
-      // A version only the loaded remote held — a `share` it introduced — leaves with it.
-      .filter(v => v.remotes.length > 0);
-
-    for (const { tag, meta } of moved) {
-      const scoped = rowAt(versions, tag, 'scope');
-      if (!scoped) versions.push({ tag, action: 'scope', host: false, remotes: [meta] });
-      else versions[versions.indexOf(scoped)] = { ...scoped, remotes: [...scoped.remotes, meta] };
-    }
-
-    return {
-      ...external,
-      versions: versions.sort(byTag(ports.versionCheck.compare)),
-    };
-  }
+  return declared;
 }
 
 // Wording is pinned in `island-warnings.contract.spec.ts` alone; tools read islands from the record.
-function selfServeWarning(remote: RemoteName, miss: Miss, members: number): string {
+function selfServeWarning(remote: RemoteName, miss: GateMiss, members: number): string {
   const where = `All ${members} members it imports are scoped for it.`;
-  return miss.cause === 'incompatible'
-    ? `'${remote}' is islanded: its range rejects '${miss.gap}' of the committed map. ${where}`
-    : `'${remote}' serves its own family: no committed build offers every entrypoint it imports at a version it accepts — '${miss.gap}' is the gap. ${where}`;
+  if (miss.cause === 'incompatible')
+    return `'${remote}' is islanded: its range rejects '${miss.specifier}@${miss.tag}' of the committed map. ${where}`;
+  return `'${remote}' serves its own family: no committed build offers every entrypoint it imports at a version it accepts — '${gapOf(miss)}' is the gap. ${where}`;
+}
+
+function gapOf(miss: GateMiss): string {
+  if ('specifier' in miss) return miss.specifier;
+  if ('scoped' in miss) return miss.scoped;
+  return 'a combination no committed build shipped';
 }

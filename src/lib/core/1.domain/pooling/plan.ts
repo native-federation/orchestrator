@@ -57,3 +57,11 @@ export function renamesOf(
       if (scope[name]!.poolName !== poolName) renames.push([name, poolName]);
   return renames;
 }
+
+// The record of each renamed member under its new pool name, pool results kept: its pool was not re-elected.
+export function renamedRecords(
+  scope: shareScope,
+  renames: readonly [ExternalName, PoolName][]
+): [ExternalName, SharedExternal][] {
+  return renames.map(([name, poolName]) => [name, { ...scope[name]!, poolName }]);
+}
