@@ -4,8 +4,8 @@ import { portfolio } from 'lib/testing/pooling/portfolio';
 import { tagSharedInfoByNpmScope } from 'lib/testing/pooling/tag-by-npm-scope';
 
 /**
- * A bug inside one pool's election must not fail the whole init, nor leave that pool half-placed. Both
- * pooling steps fall back to the placement that cannot tear. The failure is injected through the version
+ * A bug inside one pool's election must not fail the whole init, nor leave that pool half-placed. The init
+ * pooling step falls back to the placement that cannot tear. The failure is injected through the version
  * check port: asking it about the `@broken/*` copies' range throws, so judging that pool fails while the
  * `@ok/*` pool runs for real.
  */
@@ -176,48 +176,5 @@ describe('pooling contains a failure to the pool it happened in', () => {
       ['17.0.0:share', ['team/h']],
       ['16.0.0:skip', ['team/h']],
     ]);
-  });
-
-  it('lets the joiner serve its own family when its pool cannot be judged (dynamic)', async () => {
-    const p = portfolio({}, { storage: 'nf-pool-containment-dynamic', realRepositories: true });
-    const NAMES = ['@ok/core', '@ok/common', '@broken/core', '@broken/common'];
-    const entry = (name: string, range: (pkg: string) => string): RemoteEntry => ({
-      name,
-      url: `http://${name.split('/')[1]}/remoteEntry.json`,
-      exposes: [],
-      shared: tagSharedInfoByNpmScope(
-        NAMES.map(pkg =>
-          mockSharedInfo(pkg, { requiredVersion: range(pkg), version: '17.0.0', singleton: true })
-        )
-      ),
-    });
-    await p.runInit([entry('team/a', () => '^17.0.0')]);
-
-    // `update-cache` checks the loaded copy's range against the shared tag before the gate runs, outside
-    // pooling and by design, so the failure is armed only while the dynamic pooling step judges.
-    let judging = false;
-    const gate = p.drivers.poolDynamicExternals;
-    p.drivers.poolDynamicExternals = cache => {
-      judging = true;
-      return gate(cache).finally(() => (judging = false));
-    };
-    breakRange(p, () => judging);
-
-    const { actions } = await p.runDynamic(
-      entry('team/b', pkg => (pkg.startsWith('@broken/') ? BROKEN : '^17.0.0'))
-    );
-
-    expect(actions['@ok/core']!.action).toBe('skip');
-    expect(actions['@broken/core']!.action).toBe('scope');
-    expect(actions['@broken/common']!.action).toBe('scope');
-    expect(rows(p, '@broken/core')).toEqual([
-      ['17.0.0:share', ['team/a']],
-      ['17.0.0:scope', ['team/b(uncovered)']],
-    ]);
-    expect(p.config.log.error).toHaveBeenCalledWith(
-      8,
-      expect.any(String),
-      expect.objectContaining({ message: 'range bug' })
-    );
   });
 });

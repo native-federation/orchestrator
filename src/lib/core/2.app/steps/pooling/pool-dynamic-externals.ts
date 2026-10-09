@@ -88,40 +88,30 @@ export function createPoolDynamicExternals(
       const mine = pool.filter(member => names.has(member.name));
       if (mine.length === 0) continue;
 
-      try {
-        const shipped = copiesByRemote(pool);
-        const view = committedView(pool, shipped, recordOrder, remote);
-        const verdict = judgeRemote(shipped.get(remote) ?? [], view, accepts);
-        if (verdict !== 'global') {
-          config.log.warn(8, `[${shareScope}] ${selfServeWarning(remote, verdict, mine.length)}`);
-          selfServe(mine, verdict.cause);
-          continue;
-        }
+      const shipped = copiesByRemote(pool);
+      const view = committedView(pool, shipped, recordOrder, remote);
+      const verdict = judgeRemote(shipped.get(remote) ?? [], view, accepts);
+      if (verdict !== 'global') {
+        config.log.warn(8, `[${shareScope}] ${selfServeWarning(remote, verdict, mine.length)}`);
+        selfServe(mine, verdict.cause);
+        continue;
+      }
 
-        const cover = coverFromMap(remote, mine, view, actions, policy);
-        if ('unmapped' in cover) {
-          // Half its family on the map's files and half on its own build would tear it.
-          warnUnmapped(shareScope, remote, cover.unmapped);
-          selfServe(mine, 'uncovered');
-          continue;
-        }
-        for (const { name, toSkip, covered, override } of cover.covers) {
-          const action = actions[name]!;
-          if (toSkip) {
-            action.action = 'skip';
-            moves.set(name, { fromMap: true });
-          }
-          action.covered = covered;
-          if (Object.keys(override).length > 0) action.override = override;
-        }
-      } catch (error) {
-        // Its own build is the one family this remote can always resolve coherently.
-        config.log.error(
-          8,
-          `[${shareScope}][${remote}] could not judge its pool; it serves its own family.`,
-          error
-        );
+      const cover = coverFromMap(remote, mine, view, actions, policy);
+      if ('unmapped' in cover) {
+        // Half its family on the map's files and half on its own build would tear it.
+        warnUnmapped(shareScope, remote, cover.unmapped);
         selfServe(mine, 'uncovered');
+        continue;
+      }
+      for (const { name, toSkip, covered, override } of cover.covers) {
+        const action = actions[name]!;
+        if (toSkip) {
+          action.action = 'skip';
+          moves.set(name, { fromMap: true });
+        }
+        action.covered = covered;
+        if (Object.keys(override).length > 0) action.override = override;
       }
     }
 
