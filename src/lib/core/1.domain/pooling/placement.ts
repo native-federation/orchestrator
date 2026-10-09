@@ -22,7 +22,7 @@ export type PlacedPool = Election & {
 // One member's record, one row per `(tag, action)`; see docs/version-resolver.md §"How the verdicts land in
 // the record and the map".
 export function memberRecord(member: PoolMember, pool: PlacedPool): SharedExternal {
-  const { coverage, placements } = pool;
+  const { globalTags, placements } = pool;
   // A package can ship only secondary entrypoints (`material/table` without `material`), so its shared tag
   // is whatever round 1 serves any of its entrypoints at.
   // An entrypoint round 1 does not serve itself still has its package's tag, which is what rule 5 compares.
@@ -31,13 +31,13 @@ export function memberRecord(member: PoolMember, pool: PlacedPool): SharedExtern
   for (const version of member.external.versions)
     for (const meta of version.remotes)
       for (const s in meta.entries) {
-        sharedTag ??= coverage.get(s);
-        pinned ||= coverage.tagOf(s) !== undefined;
+        sharedTag ??= globalTags.get(s);
+        pinned ||= globalTags.tagOf(s) !== undefined;
       }
 
   const runsOn = (name: RemoteName) => {
     const placement = placements.get(name)!;
-    return placement.kind === 'runs' ? placement.build : name;
+    return placement.kind === 'subpool' ? placement.build : name;
   };
   const claimsGlobally = (name: RemoteName) =>
     placements.get(name)!.kind === 'global' || pool.publishers.has(runsOn(name));
@@ -61,7 +61,7 @@ export function memberRecord(member: PoolMember, pool: PlacedPool): SharedExtern
       pinned &&
       (pool.publishers.has(runs) ||
         Object.keys(meta.entries).every(
-          s => coverage.get(s) === tag && claimableAt.get(tag)?.has(s) === true
+          s => globalTags.get(s) === tag && claimableAt.get(tag)?.has(s) === true
         ))
     );
   };
@@ -83,7 +83,7 @@ export function memberRecord(member: PoolMember, pool: PlacedPool): SharedExtern
       const placement = placements.get(meta.name)!;
       if (placement.kind === 'global' || takesGlobalFiles(meta, version.tag))
         place(version.tag, version.tag === sharedTag ? 'share' : 'skip', meta);
-      else if (placement.kind === 'runs')
+      else if (placement.kind === 'subpool')
         place(version.tag, 'skip', { ...meta, servedBy: placement.build });
       else place(version.tag, 'scope', { ...meta, poolCause: placement.cause });
     }

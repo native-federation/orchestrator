@@ -6,7 +6,7 @@ import type { LoggingConfig } from '../../config/log.contract';
 import type { ModeConfig } from '../../config/mode.contract';
 import { acceptsTag } from 'lib/core/1.domain/externals/compatibility';
 import { type Copy, copiesByRemote } from 'lib/core/1.domain/pooling/builds';
-import { electVariants, type PoolMiss } from 'lib/core/1.domain/pooling/election';
+import { elect, type PoolMiss } from 'lib/core/1.domain/pooling/election';
 import type { PoolMember, PoolName } from 'lib/core/1.domain/pooling/membership';
 import { type ElectionPlan, planElection, renamedRecords } from 'lib/core/1.domain/pooling/plan';
 import { memberRecord, type PlacedPool, previousWinner } from 'lib/core/1.domain/pooling/placement';
@@ -69,7 +69,7 @@ export function createPoolSharedExternals(
     members: PoolMember[],
     scope: string
   ): [ExternalName, SharedExternal][] {
-    const election = electVariants({
+    const election = elect({
       members,
       acceptsTag: acceptsTag(ports.versionCheck.isCompatible, compare),
       compare,
@@ -103,7 +103,7 @@ export function createPoolSharedExternals(
 
     const subpoolSizes = new Map<RemoteName, number>();
     for (const placement of placed.placements.values())
-      if (placement.kind === 'runs')
+      if (placement.kind === 'subpool')
         subpoolSizes.set(placement.build, (subpoolSizes.get(placement.build) ?? 0) + 1);
     let shipped: Map<RemoteName, Copy[]> | undefined;
     for (const [remote, miss] of misses) {
@@ -137,7 +137,7 @@ function missWarning(
   const { imports, subpoolSize } = counts;
   const placement = placed.placements.get(remote)!;
   const where =
-    placement.kind === 'runs' && placement.build !== remote
+    placement.kind === 'subpool' && placement.build !== remote
       ? `It runs in subpool '${placement.build}': all ${imports} members it imports come from that build.`
       : subpoolSize > 1
         ? `Its build runs subpool '${remote}' for its ${imports} members and ${subpoolSize - 1} other remote(s).`
@@ -145,7 +145,7 @@ function missWarning(
           ? `It takes the elected files where its versions match and serves the rest of its ${imports} members itself.`
           : `All ${imports} members it imports are scoped for it.`;
 
-  const at = (s: Specifier) => `'${s}@${placed.coverage.tagOf(s)!}'`;
+  const at = (s: Specifier) => `'${s}@${placed.globalTags.tagOf(s)!}'`;
   if (miss.cause === 'incompatible')
     return `'${remote}' is islanded: its range rejects '${miss.member}@${miss.tag}' of the elected build '${placed.winner}'. ${where}`;
   if (miss.with)

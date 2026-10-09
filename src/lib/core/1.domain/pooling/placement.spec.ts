@@ -2,7 +2,7 @@ import type { SharedVersion } from 'lib/core/1.domain';
 import { mockVersionRemote } from 'lib/testing/domain/externals/version.mock';
 import { acceptsTag } from 'lib/core/1.domain/externals/compatibility';
 import { createVersionCheck } from 'lib/core/3.adapters/checks/version.check';
-import { electVariants } from './election';
+import { elect } from './election';
 import type { PoolMember } from './membership';
 import { memberRecord, type PlacedPool } from './placement';
 
@@ -51,7 +51,7 @@ describe('placement', () => {
   it('memberRecord reads an elected pool without changing it', () => {
     const members = pool();
     const before = structuredClone(members);
-    const election = electVariants({
+    const election = elect({
       members,
       acceptsTag: acceptsTag(isCompatible, compare),
       compare,

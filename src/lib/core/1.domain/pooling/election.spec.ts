@@ -2,7 +2,7 @@ import type { SharedExternal, SharedVersion } from 'lib/core/1.domain';
 import { mockVersionRemote } from 'lib/testing/domain/externals/version.mock';
 import { acceptsTag } from 'lib/core/1.domain/externals/compatibility';
 import { createVersionCheck } from 'lib/core/3.adapters/checks/version.check';
-import { type Election, electVariants } from './election';
+import { type Election, elect } from './election';
 import type { PoolMember } from './membership';
 
 const versionCheck = createVersionCheck();
@@ -40,8 +40,8 @@ const members = (builds: Build[]): PoolMember[] => {
   }));
 };
 
-const elect = (builds: Build[]) =>
-  electVariants({
+const electFrom = (builds: Build[]) =>
+  elect({
     members: members(builds),
     acceptsTag: acceptsTag(versionCheck.isCompatible, versionCheck.compare),
     compare: versionCheck.compare,
@@ -49,11 +49,11 @@ const elect = (builds: Build[]) =>
   });
 
 // Who the election placed where, read back from its placements.
-const global = (election: Election) =>
+const inGlobal = (election: Election) =>
   [...election.placements].filter(([, p]) => p.kind === 'global').map(([r]) => r);
-const subpool = (election: Election, build: string) =>
+const inSubpool = (election: Election, build: string) =>
   [...election.placements]
-    .filter(([, p]) => p.kind === 'runs' && p.build === build)
+    .filter(([, p]) => p.kind === 'subpool' && p.build === build)
     .map(([r]) => r);
 
 describe('missOf', () => {
@@ -98,10 +98,10 @@ describe('missOf', () => {
       ),
       drifted('y', '1.1.9', { a: full.slice(30), k: ['k'], n: ['n'], m: ['m'] }),
     ];
-    const election = elect(builds);
+    const election = electFrom(builds);
 
-    expect(global(election).sort()).toEqual(['akn', 'amk', 'amn', 'w0', 'w1', 'w2', 'w3', 'w4']);
-    expect(subpool(election, 'x3')).toEqual(['x1', 'x2', 'x3', 'y']);
+    expect(inGlobal(election).sort()).toEqual(['akn', 'amk', 'amn', 'w0', 'w1', 'w2', 'w3', 'w4']);
+    expect(inSubpool(election, 'x3')).toEqual(['x1', 'x2', 'x3', 'y']);
     expect(election.misses.size).toBe(4);
     // Every prefix up to k is shipped together (amk, with a's entrypoints witnessed at a's tag); n is the gap.
     // amn and akn each ship n next to one of m and k, so the smallest clash is both, and none of a's.
@@ -133,9 +133,9 @@ describe('missOf', () => {
         },
       },
     ];
-    const election = elect(builds);
+    const election = electFrom(builds);
 
-    expect(global(election).sort()).toEqual(['w0', 'w1']);
+    expect(inGlobal(election).sort()).toEqual(['w0', 'w1']);
     expect(election.misses.get('r')).toEqual({
       cause: 'incompatible',
       member: 'm',
@@ -158,9 +158,9 @@ describe('missOf', () => {
         drifted(`x${i}`, `1.1.${i}`, { a: full, m: ['m'], k: ['k'], kk: ['k'], n: ['n'] })
       ),
     ];
-    const election = elect(builds);
+    const election = electFrom(builds);
 
-    expect(subpool(election, 'x3')).toEqual(['x1', 'x2', 'x3']);
+    expect(inSubpool(election, 'x3')).toEqual(['x1', 'x2', 'x3']);
     expect(election.misses.size).toBe(3);
     for (const remote of ['x1', 'x2', 'x3'])
       expect(election.misses.get(remote)).toEqual({
