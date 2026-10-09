@@ -1,7 +1,6 @@
 import type { SharedExternal, SharedVersion, SharedVersionAction } from 'lib/core/1.domain';
 import { mockVersionRemote } from 'lib/testing/domain/externals/version.mock';
-import { filesOf } from './builds';
-import { committedView, consumedMembers, hostRemotes } from './views';
+import { committedView, hostRemotes } from './views';
 import type { PoolMember } from './membership';
 
 /**
@@ -96,14 +95,13 @@ describe('committedView', () => {
         '@ng/core/testing',
       ]);
       expect([...builds.get('flat')!.tags.keys()].sort()).toEqual(['@ng/core', '@ng/core/testing']);
-      expect(filesOf(members, 'dense').get('@ng/core/testing')).toBe('t.js');
     });
 
     // Flat and dense in one build: `x/sub` is an entry of r's dense `x` at 1.0.0 and r's own flat package at
-    // 2.0.0. The build reads it, tag and file, from the first copy in pool order, as the election does.
+    // 2.0.0. The build reads its tag from the first copy in pool order, as the election does.
     it.each([
-      ['dense first', ['x', 'x/sub'], { tag: '1.0.0', file: 'dense-sub.js' }],
-      ['flat first', ['x/sub', 'x'], { tag: '2.0.0', file: 'x/sub.js' }],
+      ['dense first', ['x', 'x/sub'], '1.0.0'],
+      ['flat first', ['x/sub', 'x'], '2.0.0'],
     ])(
       'takes a specifier two members list from the first in pool order (%s)',
       (_, order, first) => {
@@ -120,8 +118,7 @@ describe('committedView', () => {
         };
         const members = order.map(name => byName[name]!);
 
-        expect(viewOf(members).builds.get('r')!.tags.get('x/sub')).toBe(first.tag);
-        expect(filesOf(members, 'r').get('x/sub')).toBe(first.file);
+        expect(viewOf(members).builds.get('r')!.tags.get('x/sub')).toBe(first);
       }
     );
 
@@ -145,7 +142,6 @@ describe('committedView', () => {
 
       expect(build.tags.get('x')).toBe('1.0.1');
       expect(build.tags.has('x/extra')).toBe(false);
-      expect([...filesOf(members, 'b')]).toEqual([['x', 'x.js']]);
     });
 
     // Committed, a scoped copy is a stable island: its files are in the map under its own scope and it
@@ -231,22 +227,6 @@ describe('committedView', () => {
         remote: 'flat',
       });
     });
-  });
-});
-
-describe('consumedMembers', () => {
-  it('lists what a remote must be served', () => {
-    expect(Object.fromEntries(consumedMembers(splitPair()))).toEqual({
-      'mfe-a': ['@angular/core', '@angular/router'],
-      'mfe-b': ['@angular/core'],
-    });
-  });
-
-  it('includes members whose copy was scoped', () => {
-    expect(consumedMembers(soleProviderIsland()).get('form-overview')).toEqual([
-      '@angular/core',
-      '@angular/animations',
-    ]);
   });
 });
 

@@ -937,15 +937,7 @@ which `update-cache` has already stored but the committed map holds none of. In 
    publish — or the map serves every specifier it imports and some committed build shipped that exact
    combination. The second check matters for records written before variant election, whose global map can
    mix builds per member. A range rejecting a global tag moves it on with cause `incompatible`.
-3. **A committed subpool.** Otherwise it may join the subpool of one committed build that covers every
-   entrypoint it imports at versions it accepts and **already runs its own whole family**: every copy it
-   holds is a member's global basis, `scope`, or `servedBy` itself. Anything in between resolved part of its
-   family through the global winner — its modules are already bound there, and a consumer running it
-   inherits that tear one hop in.
-   Candidates are tried cheapest first: a build the committed `imports` already serves this pool from, then
-   the host, then by name so the choice is reload-stable. All of the remote's actions become `skip` with a
-   per-consumer override naming that build's files.
-4. **Otherwise it serves its own family.** Every self-serving remote is warned, in the same sentences as init.
+3. **Otherwise it serves its own family.** Every self-serving remote is warned, in the same sentences as init.
 
 This gate is not redundant even though init enforced its own. Init guarantees no _remote_ runs a combination
 nothing shipped, but a remote loaded later is exactly the consumer that could bridge two builds the committed

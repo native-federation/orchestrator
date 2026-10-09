@@ -35,62 +35,6 @@ export function committedView(members: PoolMember[], stored: ExternalName[]): Co
   return { builds, global };
 }
 
-// Per remote, what it must be served. Wider than its build: a copy marked `scope` is excluded there
-// but still consumed.
-export function consumedMembers(members: PoolMember[]): Map<RemoteName, ExternalName[]> {
-  const consumed = new Map<RemoteName, ExternalName[]>();
-
-  for (const member of members) {
-    const versions = member.external.versions;
-    for (let v = 0; v < versions.length; v++) {
-      const remotes = versions[v]!.remotes;
-      for (let r = 0; r < remotes.length; r++) {
-        const name = remotes[r]!.name;
-        const list = consumed.get(name);
-        if (!list) consumed.set(name, [member.name]);
-        // Members are the outer loop, so a repeat can only be the entry just pushed.
-        else if (list[list.length - 1] !== member.name) list.push(member.name);
-      }
-    }
-  }
-
-  return consumed;
-}
-
-// `consumedMembers` in specifier space.
-export function consumedSpecifiers(members: PoolMember[]): Map<RemoteName, Set<Specifier>> {
-  const consumed = new Map<RemoteName, Set<Specifier>>();
-
-  for (const member of members) {
-    const versions = member.external.versions;
-    for (let v = 0; v < versions.length; v++) {
-      const remotes = versions[v]!.remotes;
-      for (let r = 0; r < remotes.length; r++) {
-        const meta = remotes[r]!;
-        let own = consumed.get(meta.name);
-        if (!own) consumed.set(meta.name, (own = new Set()));
-        for (const specifier in meta.entries) own.add(specifier);
-      }
-    }
-  }
-
-  return consumed;
-}
-
-// The first own-build copy of each member's `share` version, in `commit()`'s basis order: the one whose file
-// the global mapping publishes. A member with no entry is not published globally.
-export function basisPerMember(members: PoolMember[]): Map<ExternalName, RemoteName> {
-  const basis = new Map<ExternalName, RemoteName>();
-
-  for (const member of members) {
-    const winner = member.external.versions.find(v => v.action === 'share');
-    const own = winner?.remotes.find(r => r.servedBy === undefined);
-    if (own) basis.set(member.name, own.name);
-  }
-
-  return basis;
-}
-
 // Basis precedence puts the host's own copy first on a `host: true` version, so its `remotes[0]` is the host.
 export function hostRemotes(members: PoolMember[]): Set<RemoteName> {
   const hosts = new Set<RemoteName>();

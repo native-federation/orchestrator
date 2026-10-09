@@ -50,17 +50,3 @@ export function buildOf(owner: RemoteName, copies: readonly Copy[]): Build {
   }
   return { owner, tags, tagByMember };
 }
-
-// The file `owner`'s build serves each specifier from, read as `copiesByRemote` reads its copies.
-export function filesOf(members: PoolMember[], owner: RemoteName): Map<Specifier, string> {
-  const files = new Map<Specifier, string>();
-  for (const member of members)
-    for (const version of member.external.versions) {
-      const meta = version.remotes.find(r => r.name === owner);
-      if (!meta) continue;
-      for (const specifier in meta.entries)
-        if (!files.has(specifier)) files.set(specifier, meta.entries[specifier]!);
-      break;
-    }
-  return files;
-}

@@ -16,8 +16,6 @@ import { mockAdapters } from 'lib/testing/adapters.mock';
 import { Optional } from 'lib/utils/optional';
 import type { RemoteInfo } from 'lib/core/1.domain';
 import type { DrivingContract } from '../../driving-ports/driving.contract';
-import { createConvertToImportMap } from '../convert-to-import-map';
-import { mockChunkRepository } from 'lib/testing/adapters/chunk.repository.mock';
 import { createVersionCheck } from 'lib/core/3.adapters/checks/version.check';
 
 // A committed external: the first version is the `share` one, i.e. `remotes[0]` of it is the build
@@ -96,8 +94,8 @@ describe('createPoolDynamicExternals', () => {
       .filter(c => c[0] === name)
       .at(-1)?.[1];
 
-  // Every verdict the record ends up holding: a scoped copy's `poolCause` and a redirected copy's
-  // `servedBy`. Islands are read from here, not from the warnings.
+  // Every verdict the record ends up holding: a scoped copy's `poolCause` and any `servedBy`. Islands are
+  // read from here, not from the warnings.
   const verdictsWritten = (): string[] =>
     [...new Set(writes().map(c => c[0]))]
       .flatMap(name =>
@@ -172,54 +170,6 @@ describe('createPoolDynamicExternals', () => {
       '@framework/forms': { action: 'skip' },
       '@framework/forms/signals': { action: 'skip' },
     });
-  });
-
-  it("joins a committed island's subpool and maps its files per consumer", async () => {
-    // What lifting the override guard onto the global path buys. team/legacy is a committed island: every
-    // copy it holds is scoped, so it demonstrably runs its own build and its files sit in the map under
-    // its own scope. mfe ships the same previous-major family, which the committed 22 winner cannot serve,
-    // so instead of downloading its own it takes legacy's — through a per-consumer override, because the
-    // global `imports` names the 22 build.
-    adapters.remoteInfoRepo.tryGet = vi.fn(name =>
-      name === 'team/legacy'
-        ? Optional.of({ scopeUrl: 'http://legacy/', exposes: [] } as RemoteInfo)
-        : Optional.empty<RemoteInfo>()
-    );
-    // The committed map serves core from team/a and cdk from team/b, so nothing witnesses the pair mfe
-    // would be handed — the only build carrying both is the island.
-    givenCommitted({
-      '@framework/core': committed(
-        '@framework/core',
-        { tag: '22.0.8', remotes: ['team/a'] },
-        { tag: '21.2.18', remotes: ['team/legacy'], action: 'scope' },
-        { tag: '21.2.18', remotes: ['mfe'] }
-      ),
-      '@framework/cdk': committed(
-        '@framework/cdk',
-        { tag: '22.0.6', remotes: ['team/b'] },
-        { tag: '21.2.18', remotes: ['team/legacy'], action: 'scope' },
-        { tag: '21.2.18', remotes: ['mfe'] }
-      ),
-    });
-    const entry = entryWith(shared('@framework/core'), shared('@framework/cdk'));
-    const actions: SharedInfoActions = {
-      '@framework/core': { action: 'skip' },
-      '@framework/cdk': { action: 'skip' },
-    };
-
-    const result = await poolDynamicExternals({ entry, actions });
-
-    expect(result.actions['@framework/core']).toEqual({
-      action: 'skip',
-      covered: ['@framework/core'],
-      override: { '@framework/core': 'http://legacy/@framework/core.js' },
-    });
-    expect(result.actions['@framework/cdk']).toEqual({
-      action: 'skip',
-      covered: ['@framework/cdk'],
-      override: { '@framework/cdk': 'http://legacy/@framework/cdk.js' },
-    });
-    expect(config.log.warn).not.toHaveBeenCalled();
   });
 
   it('lets a remote that agrees with the committed map add the package it introduces', async () => {
@@ -344,134 +294,10 @@ describe('createPoolDynamicExternals', () => {
     expect(verdictsWritten()).toEqual([]);
   });
 
-  it("joins a committed subpool: its build's copies name itself and run its own family", async () => {
-    // The committed map is 22; team/legacy-a runs a 21 subpool (its copies name it) with legacy-b in it.
-    // mfe is 21 too, so it joins the subpool rather than downloading a third 21 build.
-    adapters.remoteInfoRepo.tryGet = vi.fn(name =>
-      name === 'team/legacy-a'
-        ? Optional.of({ scopeUrl: 'http://legacy-a/', exposes: [] } as RemoteInfo)
-        : Optional.empty<RemoteInfo>()
-    );
-    const record = {
-      '@framework/core': committed(
-        '@framework/core',
-        { tag: '22.0.8', remotes: ['team/a'] },
-        { tag: '21.2.18', remotes: ['team/legacy-a', 'mfe'] },
-        { tag: '21.2.15', remotes: ['team/legacy-b'] }
-      ),
-      '@framework/router': committed(
-        '@framework/router',
-        { tag: '22.0.8', remotes: ['team/a'] },
-        { tag: '21.2.18', remotes: ['team/legacy-a', 'mfe'] }
-      ),
-    };
-    for (const external of Object.values(record))
-      for (const version of external.versions)
-        for (const meta of version.remotes)
-          if (meta.name.startsWith('team/legacy')) meta.servedBy = 'team/legacy-a';
-    givenCommitted(record);
-    const entry = entryWith(shared('@framework/core'), shared('@framework/router'));
-    const actions: SharedInfoActions = {
-      '@framework/core': { action: 'skip' },
-      '@framework/router': { action: 'skip' },
-    };
-
-    const result = await poolDynamicExternals({ entry, actions });
-
-    expect(result.actions['@framework/core']).toMatchObject({
-      action: 'skip',
-      override: { '@framework/core': 'http://legacy-a/@framework/core.js' },
-    });
-    expect(result.actions['@framework/router']).toMatchObject({
-      action: 'skip',
-      override: { '@framework/router': 'http://legacy-a/@framework/router.js' },
-    });
-  });
-
-  it('rewrites only the members it declares in this scope when it joins a subpool', async () => {
-    // `actions` is keyed by package name alone, so a pool member mfe declares in *another* share scope has
-    // an action here too — the one that scope's resolver gave it. Joining legacy's global subpool via core
-    // must not touch mfe's team-x cdk: turned into a skip with no override, the import map has nothing to
-    // point it at, and under `strictImportMap` the whole dynamic load is refused.
-    adapters.remoteInfoRepo.tryGet = vi.fn(name =>
-      name === 'team/legacy'
-        ? Optional.of({ scopeUrl: 'http://legacy/', exposes: [] } as RemoteInfo)
-        : Optional.empty<RemoteInfo>()
-    );
-    // Global pool {core, cdk}: mfe's global copy is core only; its cdk was committed to team-x instead.
-    const global = {
-      '@framework/core': committed(
-        '@framework/core',
-        { tag: '22.0.8', remotes: ['team/a'] },
-        { tag: '21.2.18', remotes: ['team/legacy'], action: 'scope' },
-        { tag: '21.2.18', remotes: ['mfe'] }
-      ),
-      '@framework/cdk': committed(
-        '@framework/cdk',
-        { tag: '22.0.6', remotes: ['team/b'] },
-        { tag: '21.2.18', remotes: ['team/legacy'], action: 'scope' }
-      ),
-    };
-    tagStoredByNpmScope(global);
-    adapters.sharedExternalsRepo.getFromScope = vi.fn(scope => (scope === 'team-x' ? {} : global));
-    const entry = entryWith(
-      shared('@framework/core'),
-      shared('@framework/cdk', { shareScope: 'team-x' })
-    );
-    const actions: SharedInfoActions = {
-      '@framework/core': { action: 'skip' },
-      '@framework/cdk': { action: 'share' },
-    };
-
-    const result = await poolDynamicExternals({ entry, actions });
-
-    expect(result.actions['@framework/core']).toMatchObject({
-      action: 'skip',
-      override: { '@framework/core': 'http://legacy/@framework/core.js' },
-    });
-    expect(result.actions['@framework/cdk']).toEqual({ action: 'share' });
-    // The symptom the user sees: the map for this load builds under `strictImportMap`, without errors.
-    config.strict.strictImportMap = true;
-    const convert = createConvertToImportMap(config, { sharedChunksRepo: mockChunkRepository() });
-    await expect(convert(result)).resolves.toBeDefined();
-    expect(config.log.error).not.toHaveBeenCalled();
-  });
-
-  it("refuses to join a build's subpool when that build is itself deduping", async () => {
-    // Constraint 9. team/b covers mfe and its versions fit, but it does not win `@framework/core`: its own
-    // family resolves through the committed 22.0.8 winner, so its modules are already bound to that copy.
-    // A consumer deduping onto it would inherit the tear one hop in, and no additive map can repair it —
-    // so mfe serves its own family instead. Both builds are mappable, so that rule alone refuses team/b.
-    adapters.remoteInfoRepo.tryGet = vi.fn(name =>
-      Optional.of({ scopeUrl: `http://${name.slice('team/'.length)}/`, exposes: [] } as RemoteInfo)
-    );
-    givenCommitted({
-      '@framework/core': committed(
-        '@framework/core',
-        { tag: '22.0.8', remotes: ['team/a'] },
-        { tag: '22.0.6', remotes: ['team/b', 'mfe'] }
-      ),
-      '@framework/cdk': committed('@framework/cdk', {
-        tag: '22.0.6',
-        remotes: ['team/b', 'mfe'],
-      }),
-    });
-    const entry = entryWith(shared('@framework/core'), shared('@framework/cdk'));
-    const actions: SharedInfoActions = {
-      '@framework/core': { action: 'skip' },
-      '@framework/cdk': { action: 'skip' },
-    };
-
-    const result = await poolDynamicExternals({ entry, actions });
-
-    expect(result.actions['@framework/core']).toEqual({ action: 'scope' });
-    expect(result.actions['@framework/cdk']).toEqual({ action: 'scope' });
-  });
-
   it('scopes patch drift across two committed builds that no build shipped together', async () => {
     // The committed map serves core@22.0.8 from team/a and cdk@22.0.6 from team/b; mfe imports both. The
     // two sit on one minor line, but no build shipped that pair, so mfe serves its own family and pays the
-    // download. team/b runs no subpool either: it does not win core (constraint 9).
+    // download.
     givenCommitted({
       '@framework/core': committed(
         '@framework/core',
@@ -672,6 +498,36 @@ describe('createPoolDynamicExternals', () => {
       }
     });
 
+    it('drops a servedBy the islanded copy still carries from an earlier verdict', async () => {
+      // Defensive: unreachable through the flows, 'always' evicts first. mfe's stored core copy still names the
+      // build it ran before; scoped now, it runs its own files, so a kept servedBy would point a reload at
+      // another build's.
+      const entry = entryWith(shared('@framework/core'), shared('@framework/common'));
+      const core = committed('@framework/core', { tag: '17.0.0', remotes: ['host', 'mfe'] });
+      core.versions[0]!.remotes[1]!.servedBy = 'host';
+      givenCommitted({
+        '@framework/core': core,
+        '@framework/common': committed(
+          '@framework/common',
+          { tag: '18.0.0', remotes: ['mfe'], action: 'scope' },
+          { tag: '17.0.0', remotes: ['host'], action: 'share' }
+        ),
+      });
+
+      await poolDynamicExternals({
+        entry,
+        actions: {
+          '@framework/core': { action: 'skip' },
+          '@framework/common': { action: 'scope' },
+        },
+      });
+
+      expect(copies(writtenFor('@framework/core'))).toEqual([
+        ['17.0.0:share', [{ name: 'host' }]],
+        ['17.0.0:scope', [{ name: 'mfe', poolCause: 'incompatible' }]],
+      ]);
+    });
+
     it("records a resolver scope for a missing entrypoint as 'uncovered', not a range rejection", async () => {
       // Under `scopeUncoveredEntrypoints` the resolver scopes mfe's common@17.0.1: its `/http` entrypoint is
       // not in the committed 17.0.0, though its range takes 17.0.0. The family self-serves for coverage.
@@ -762,41 +618,6 @@ describe('createPoolDynamicExternals', () => {
       ]);
     });
 
-    it('records the subpool build a redirected copy dedups onto', async () => {
-      adapters.remoteInfoRepo.tryGet = vi.fn(name =>
-        name === 'team/legacy'
-          ? Optional.of({ scopeUrl: 'http://legacy/', exposes: [] } as RemoteInfo)
-          : Optional.empty<RemoteInfo>()
-      );
-      givenCommitted({
-        '@framework/core': committed(
-          '@framework/core',
-          { tag: '22.0.8', remotes: ['team/a'] },
-          { tag: '21.2.18', remotes: ['team/legacy'], action: 'scope' },
-          { tag: '21.2.18', remotes: ['mfe'] }
-        ),
-        '@framework/cdk': committed(
-          '@framework/cdk',
-          { tag: '22.0.6', remotes: ['team/b'] },
-          { tag: '21.2.18', remotes: ['team/legacy'], action: 'scope' },
-          { tag: '21.2.18', remotes: ['mfe'] }
-        ),
-      });
-      const entry = entryWith(shared('@framework/core'), shared('@framework/cdk'));
-
-      await poolDynamicExternals({
-        entry,
-        actions: { '@framework/core': { action: 'skip' }, '@framework/cdk': { action: 'skip' } },
-      });
-
-      expect(copies(writtenFor('@framework/core'))).toEqual([
-        ['22.0.8:share', [{ name: 'team/a' }]],
-        ['21.2.18:scope', [{ name: 'team/legacy' }]],
-        ['21.2.18:skip', [{ name: 'mfe', servedBy: 'team/legacy' }]],
-      ]);
-      expect(writtenFor('@framework/cdk')!.versions[2]!.remotes[0]!.servedBy).toBe('team/legacy');
-    });
-
     // Within-tag order is observable (round 1's arrival-order ties, determine's `versions[0]`). The verdict
     // write orders by tag alone: a `scope` row ahead of the `share` row at its tag stays ahead.
     it("keeps a tag's rows in the order the record had them", async () => {
@@ -824,98 +645,6 @@ describe('createPoolDynamicExternals', () => {
       expect(copies(writtenFor('@framework/core'))).toEqual([
         ['17.0.0:scope', [{ name: 'solo' }, { name: 'mfe', poolCause: 'incompatible' }]],
         ['17.0.0:share', [{ name: 'host' }]],
-      ]);
-    });
-
-    // Copy-on-write (rework 02, first step of 08): a subpool verdict rewrites the loaded remote's copy and
-    // nothing else, so every other row reaches the repository as the object it read.
-    describe('a subpool verdict passes untouched rows through', () => {
-      const legacyServes = () => {
-        adapters.remoteInfoRepo.tryGet = vi.fn(name =>
-          name === 'team/legacy'
-            ? Optional.of({ scopeUrl: 'http://legacy/', exposes: [] } as RemoteInfo)
-            : Optional.empty<RemoteInfo>()
-        );
-        const core = committed(
-          '@framework/core',
-          { tag: '22.0.8', remotes: ['team/a'] },
-          { tag: '21.2.18', remotes: ['team/legacy'], action: 'scope' },
-          { tag: '21.2.18', remotes: ['mfe'] }
-        );
-        givenCommitted({
-          '@framework/core': core,
-          '@framework/cdk': committed(
-            '@framework/cdk',
-            { tag: '22.0.6', remotes: ['team/b'] },
-            { tag: '21.2.18', remotes: ['team/legacy'], action: 'scope' },
-            { tag: '21.2.18', remotes: ['mfe'] }
-          ),
-        });
-        return core;
-      };
-      const load = () =>
-        poolDynamicExternals({
-          entry: entryWith(shared('@framework/core'), shared('@framework/cdk')),
-          actions: { '@framework/core': { action: 'skip' }, '@framework/cdk': { action: 'skip' } },
-        });
-
-      it('by reference, rows without its copy', async () => {
-        const core = legacyServes();
-
-        await load();
-
-        const written = writtenFor('@framework/core')!;
-        expect(written.versions[2]!.remotes[0]!.servedBy).toBe('team/legacy');
-        expect(written.versions[0]).toBe(core.versions[0]);
-        expect(written.versions[1]).toBe(core.versions[1]);
-      });
-
-      it('as the record itself when its copy already runs that build', async () => {
-        const core = legacyServes();
-        core.versions[2]!.remotes[0]!.servedBy = 'team/legacy';
-        // Already named, so the pool-name sync writes nothing after the verdict.
-        core.poolName = 'framework';
-
-        await load();
-
-        expect(writtenFor('@framework/core')).toBe(core);
-      });
-    });
-
-    // The same portfolio with team/legacy gone from the remote cache. Its files cannot be mapped, so it is
-    // no subpool to join: left on update-cache's actions, mfe would run a member from each build.
-    it('serves the remote its whole family when the only fitting build is not in the cache', async () => {
-      adapters.remoteInfoRepo.tryGet = vi.fn(() => Optional.empty<RemoteInfo>());
-      givenCommitted({
-        '@framework/core': committed(
-          '@framework/core',
-          { tag: '22.0.8', remotes: ['team/a'] },
-          { tag: '21.2.18', remotes: ['team/legacy'], action: 'scope' },
-          { tag: '21.2.18', remotes: ['mfe'] }
-        ),
-        '@framework/cdk': committed(
-          '@framework/cdk',
-          { tag: '22.0.6', remotes: ['team/b'] },
-          { tag: '21.2.18', remotes: ['team/legacy'], action: 'scope' },
-          { tag: '21.2.18', remotes: ['mfe'] }
-        ),
-      });
-      const actions: SharedInfoActions = {
-        '@framework/core': { action: 'skip' },
-        '@framework/cdk': { action: 'skip' },
-      };
-
-      await poolDynamicExternals({
-        entry: entryWith(shared('@framework/core'), shared('@framework/cdk')),
-        actions,
-      });
-
-      expect(actions['@framework/core']!.action).toBe('scope');
-      expect(actions['@framework/cdk']!.action).toBe('scope');
-      expect(copies(writtenFor('@framework/core'))).toEqual([
-        ['22.0.8:share', [{ name: 'team/a' }]],
-        // Its cause stays why it missed the map (its ^21 rejects 22): the missing build only took away the fix.
-        ['21.2.18:scope', [{ name: 'team/legacy' }, { name: 'mfe', poolCause: 'incompatible' }]],
       ]);
     });
   });
@@ -1146,7 +875,8 @@ describe('createPoolDynamicExternals', () => {
         expect(verdictsWritten()).toEqual(['mfe@@fw/core: uncovered']);
         expect(config.log.warn).toHaveBeenCalledWith(
           8,
-          "[team][mfe] 'G' is not in the cache, so its files cannot be mapped."
+          // Wording is pinned in island-warnings.contract.spec.ts alone.
+          expect.stringContaining("'G'")
         );
       });
     });

@@ -226,7 +226,7 @@ describe('pooling properties: dynamic loads (generated portfolios)', { timeout: 
         const rig = openPortfolio({ host: hostOf(spec) });
         const { importMap: committed } = await rig.init(entries);
         const added = toRemoteEntry(extra, entries.length);
-        const { merged, record } = await rig.load(added);
+        const { record } = await rig.load(added);
 
         for (const [pool, members] of pools(record)) {
           const copies = copiesOf(members);
@@ -242,38 +242,15 @@ describe('pooling properties: dynamic loads (generated portfolios)', { timeout: 
           const { causes, servedBy } = placementOf(added.name, copies);
           const at = { pool, causes, servedBy };
           const global = !rejects && (agrees || (!missing && witnessed));
-          if (global) expect(at).toEqual({ ...at, causes: [], servedBy: [] });
-          else if (causes[0] === 'incompatible')
-            expect({ ...at, rejects }).toEqual({ ...at, rejects: true });
-          else if (causes[0] === 'uncovered')
-            expect({ ...at, rejects }).toEqual({ ...at, rejects: false });
-          else {
-            // Joined a committed subpool: one build serves all of it, at tags its ranges accept.
-            const build = servedBy[0];
-            const misfits = copies
-              .filter(c => c.remote === added.name)
-              .flatMap(c => {
-                const served = copies.find(b => b.remote === build && b.member === c.member);
-                return c.specifiers
-                  .filter(
-                    s => !served?.specifiers.includes(s) || !accepts(served.tag, c.tag, c.range)
-                  )
-                  .map(s => `${s}: ${served?.tag ?? 'not shipped'}, range ${c.range}`);
-              });
-            expect({ ...at, misfits }).toEqual({
-              ...at,
-              causes: [],
-              servedBy: [build],
-              misfits: [],
-            });
-            expect(rangeViolations(merged, record, added.name)).toEqual([]);
-          }
+          // Off the map, it serves its whole family itself: never a committed build.
+          const cause = rejects ? 'incompatible' : 'uncovered';
+          expect(at).toEqual({ ...at, causes: global ? [] : [cause], servedBy: [] });
         }
       }
     ));
 
-  // A load lands globally, in its own scope or in a committed subpool; in every case each specifier it ships
-  // must run a tag its own range accepts. The second load can join a subpool the first one created.
+  // A load lands globally or in its own scope; either way each specifier it ships must run a tag its own range
+  // accepts.
   it('dynamic range soundness: every loaded copy runs a tag its own range accepts', () =>
     run(
       105,

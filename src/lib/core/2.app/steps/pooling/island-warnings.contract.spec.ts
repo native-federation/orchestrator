@@ -399,43 +399,32 @@ describe('island warnings (contract)', () => {
         "[__GLOBAL__] 'team/mfe-b' serves its own family: no committed build offers every entrypoint it imports at a version it accepts — '@framework/forms' is the gap. All 2 members it imports are scoped for it.",
       ]);
     });
-    it('a fitting build is not in the cache', async () => {
-      p.seed('@framework/core', [
-        p.version('22.0.8', '@framework/core', [{ remote: 'team/mfe-a', req: '^22.0.0' }]),
-        p.version('21.2.18', '@framework/core', [{ remote: 'team/legacy-a', req: '~21.2.0' }]),
+
+    it('unmapped: the build serving a named scope is not in the cache', async () => {
+      p = portfolio(SCOPE, {
+        hosts: ['team/host'],
+        storage: 'nf-island-warnings-team',
+        scope: 'team',
+      });
+      await commit();
+      const mfeB = entry('team/mfe-b', [
+        ['@framework/core', '22.1.0', '^22.0.0'],
+        ['@framework/router', '22.1.0', '^22.0.0'],
       ]);
-      p.seed('@framework/cdk', [
-        p.version('22.0.6', '@framework/cdk', [{ remote: 'team/mfe-b', req: '^22.0.0' }]),
-        p.version('21.2.18', '@framework/cdk', [{ remote: 'team/legacy-a', req: '~21.2.0' }]),
-      ]);
-      await p.runInit();
-      vi.mocked(p.config.log.warn).mockClear();
-      // legacy-a's build would fit, but its remote info is gone, so its files cannot be mapped.
+      mfeB.shared.forEach(s => (s.shareScope = 'team'));
+      const updated = await p.drivers.updateCache(mfeB);
+      // mfe-a's remote info goes after update-cache, which names its files for the resolver's override:
+      // a named scope has no `imports` to inherit, so pooling cannot name them either.
       const tryGet = p.adapters.remoteInfoRepo.tryGet;
       p.adapters.remoteInfoRepo.tryGet = vi.fn((name: string) =>
-        name === 'team/legacy-a' ? Optional.empty<RemoteInfo>() : tryGet(name)
+        name === 'team/mfe-a' ? Optional.empty<RemoteInfo>() : tryGet(name)
       );
 
-      // Driven step by step: `runDynamic` first regenerates the committed map, which needs legacy-a's scope.
-      const updated = await p.drivers.updateCache(
-        entry(
-          'team/legacy-b',
-          [
-            ['@framework/core', '21.2.18', '~21.2.0'],
-            ['@framework/cdk', '21.2.18', '~21.2.0'],
-          ],
-          false
-        )
-      );
       await p.drivers.poolDynamicExternals(updated);
 
-      expect(p.islands()).toEqual({
-        'team/legacy-a': 'incompatible',
-        'team/legacy-b': 'incompatible',
-      });
+      expect(p.islands()).toEqual({ 'team/mfe-b': 'uncovered' });
       expect(warnings()).toEqual([
-        "[__GLOBAL__][team/legacy-b] 'team/legacy-a' is not in the cache, so its files cannot be mapped.",
-        "[__GLOBAL__] 'team/legacy-b' is islanded: its range rejects '@framework/cdk@22.0.6' of the committed map. All 2 members it imports are scoped for it.",
+        "[team][team/mfe-b] 'team/mfe-a' is not in the cache, so its files cannot be mapped.",
       ]);
     });
   });
