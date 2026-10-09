@@ -61,7 +61,7 @@ describe('placement', () => {
 
     const records = members.map(m => memberRecord(m, placed));
 
-    expect(members).toEqual(before);
+    expect(members).toStrictEqual(before);
     // b and c run one build at 16.0.0: a subpool, so the record is new and not a copy of the stored one.
     expect(records[0]!.versions.map(v => `${v.tag}:${v.action}`)).toEqual([
       '17.0.0:share',

@@ -22,7 +22,7 @@ export type Build = {
   host: boolean;
 };
 
-export function copiesByRemote(members: PoolMember[]): Map<RemoteName, Copy[]> {
+export function copiesByRemote(members: readonly PoolMember[]): Map<RemoteName, Copy[]> {
   const shipped = new Map<RemoteName, Copy[]>();
   for (const member of members)
     for (const version of member.external.versions)

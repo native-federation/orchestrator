@@ -1,3 +1,4 @@
+import type { DeepReadonly } from 'lib/utils/deep-readonly';
 import {
   type ExternalName,
   GLOBAL_SCOPE,
@@ -234,7 +235,7 @@ function forEachGlobalClaim(
   const rank = new Map(recordOrder.map((name, i) => [name, i]));
   const walk = [...members].sort((a, b) => rank.get(a.name)! - rank.get(b.name)!);
 
-  const claim = (version: SharedVersion) =>
+  const claim = (version: DeepReadonly<SharedVersion>) =>
     forEachVersionEntry(
       version,
       meta => meta.name !== without,

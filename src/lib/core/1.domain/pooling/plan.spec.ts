@@ -153,7 +153,7 @@ describe('planElection', () => {
 
     planElection(scope, true);
 
-    expect(scope).toEqual(before);
+    expect(scope).toStrictEqual(before);
   });
 
   it('does not depend on the order of the scope keys', () => {

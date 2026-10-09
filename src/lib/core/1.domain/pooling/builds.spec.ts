@@ -98,4 +98,16 @@ describe('a build read from the record', () => {
     expect(buildFor('mfe-a', members).host).toBe(false);
     expect(buildFor('mfe-b', members).host).toBe(false);
   });
+
+  // Pins intent, not a record the orchestrator writes: any copy from a host row marks the build, even when
+  // another of its copies sits on a non-host row.
+  it('is the host when any of its copies came from a host row', () => {
+    const members = [
+      member('@angular/core', [
+        { tag: '22.0.5', action: 'share', copies: [{ remote: 'shell', host: true }] },
+      ]),
+      member('@angular/common', [{ tag: '22.0.5', copies: [{ remote: 'shell' }] }]),
+    ];
+    expect(buildFor('shell', members).host).toBe(true);
+  });
 });

@@ -2,6 +2,7 @@ import type { ExternalName, SharedExternal, shareScope } from '../externals/exte
 import { buildPools, type PoolMember, type PoolName } from './membership';
 import { hasPoolResults, scopeHasPoolState, withoutPoolResults } from './pool-state';
 import { reelectedNames } from './reelection';
+import type { DeepReadonly } from 'lib/utils/deep-readonly';
 
 export type ElectionPlan = {
   dirtyPools: Map<PoolName, PoolMember[]>;
@@ -14,7 +15,7 @@ export type ElectionPlan = {
 
 // Reads the scope, never writes it. A pool is one unit of state: any dirty member re-elects it whole. See
 // docs/version-resolver.md §"How the verdicts land in the record and the map".
-export function planElection(scope: shareScope, poolable: boolean): ElectionPlan {
+export function planElection(scope: DeepReadonly<shareScope>, poolable: boolean): ElectionPlan {
   const plan: ElectionPlan = {
     dirtyPools: new Map(),
     dissolved: new Map(),
@@ -48,7 +49,7 @@ export function planElection(scope: shareScope, poolable: boolean): ElectionPlan
 // another. Each member must be a key of `scope`. An external in no pool keeps its stored name, which the next
 // init's plan spreads dirty by before it strips it.
 export function renamesOf(
-  scope: shareScope,
+  scope: DeepReadonly<shareScope>,
   pools: ReadonlyMap<PoolName, readonly PoolMember[]>
 ): [ExternalName, PoolName][] {
   const renames: [ExternalName, PoolName][] = [];

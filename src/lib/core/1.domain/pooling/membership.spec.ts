@@ -188,4 +188,28 @@ describe('buildPools', () => {
       expect(shape(shuffled)).toEqual(shape(forward));
     });
   });
+
+  // Typed DeepReadonly, so this pins the runtime side: the members it hands out are the scope's own records.
+  it('never writes to the scope it reads', () => {
+    const input = scope({
+      '@ng/forms': [{ remote: 'b', pool: ' ng' }],
+      '@ng/core': [
+        { remote: 'a', pool: 'ng' },
+        { remote: 'b', pool: 'ui' },
+      ],
+      '@ng/core/testing': [{ remote: 'a' }],
+      lonely: [{ remote: 'a', pool: 'typo' }],
+      plain: [{ remote: 'a' }],
+    });
+    // A second version, so a reordering write shows.
+    input['plain']!.versions.push({ ...input['plain']!.versions[0]!, tag: '0.9.0' });
+    const before = structuredClone(input);
+
+    const { pools, labelledAlone } = buildPools(input);
+
+    expect(input).toStrictEqual(before);
+    expect(Object.keys(input)).toEqual(Object.keys(before));
+    expect(shape(pools)).toEqual([['ng', ['@ng/core', '@ng/core/testing', '@ng/forms']]]);
+    expect(labelledAlone).toEqual(['lonely']);
+  });
 });

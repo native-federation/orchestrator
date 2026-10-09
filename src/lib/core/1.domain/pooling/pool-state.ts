@@ -1,8 +1,9 @@
+import type { DeepReadonly } from 'lib/utils/deep-readonly';
 import type { SharedExternal, shareScope } from '../externals/external.contract';
 
 // What pooling writes onto a record: `poolName`, `poolWinner`, and `servedBy`/`poolCause` per copy. Outside a
 // pool all of it is stale. The declared `pool` label is pooling's input, not a result, and always stays.
-export function hasPoolResults(external: SharedExternal): boolean {
+export function hasPoolResults(external: DeepReadonly<SharedExternal>): boolean {
   if (external.poolName !== undefined || external.poolWinner !== undefined) return true;
   return external.versions.some(v =>
     v.remotes.some(r => r.servedBy !== undefined || r.poolCause !== undefined)
@@ -10,7 +11,7 @@ export function hasPoolResults(external: SharedExternal): boolean {
 }
 
 // A fresh record; the input is left untouched.
-export function withoutPoolResults(external: SharedExternal): SharedExternal {
+export function withoutPoolResults(external: DeepReadonly<SharedExternal>): SharedExternal {
   const { poolName: _poolName, poolWinner: _poolWinner, ...rest } = external;
   return {
     ...rest,
@@ -22,7 +23,7 @@ export function withoutPoolResults(external: SharedExternal): SharedExternal {
 }
 
 // Stored results outlive the last label that left, so they count; read from the record, not this init.
-export function scopeHasPoolState(scope: shareScope): boolean {
+export function scopeHasPoolState(scope: DeepReadonly<shareScope>): boolean {
   for (const name in scope) {
     const external = scope[name]!;
     if (hasPoolResults(external)) return true;

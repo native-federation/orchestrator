@@ -1,3 +1,4 @@
+import type { DeepReadonly } from 'lib/utils/deep-readonly';
 import type { SharedVersion, SharedVersionMeta } from './version.contract';
 
 const coverage = (remote: SharedVersionMeta): number => Object.keys(remote.entries).length;
@@ -79,7 +80,7 @@ export function committedEntries(version: SharedVersion): Map<string, SharedVers
  * letting the next copy claim it.
  */
 export function forEachVersionEntry(
-  version: SharedVersion,
+  version: DeepReadonly<SharedVersion>,
   accepts: ((remote: SharedVersionMeta) => boolean) | undefined,
   visit: (entrypoint: string, remote: SharedVersionMeta) => void
 ): void {

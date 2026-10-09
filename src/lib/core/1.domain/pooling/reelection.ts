@@ -1,3 +1,4 @@
+import type { DeepReadonly } from 'lib/utils/deep-readonly';
 import type { ExternalName, shareScope } from 'lib/core/1.domain';
 import type { PoolMember, PoolName } from './membership';
 
@@ -5,7 +6,7 @@ import type { PoolMember, PoolName } from './membership';
 // `poolName`s together, transitively, so a pool that split or merged since it was stored is re-elected on
 // every side; the stored names must be read before anything clears them.
 export function reelectedNames(
-  scope: shareScope,
+  scope: DeepReadonly<shareScope>,
   pools: ReadonlyMap<PoolName, readonly PoolMember[]>
 ): Set<ExternalName> {
   const byStored = new Map<PoolName, ExternalName[]>();

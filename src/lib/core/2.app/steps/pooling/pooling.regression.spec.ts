@@ -622,7 +622,7 @@ describe('pooling regressions', () => {
    * The host ships the family at 18.0.0, which neither `^17` remote accepts. team/b and team/a ship one 17.0.0
    * build, so each one's build serves both; team/b arrives first and still runs team/a's build.
    */
-  describe('equal subpool builds are told apart by name, not arrival', () => {
+  describe('equal subpool builds are told apart by name, whatever the registration order', () => {
     const SCOPE = { 'team/host': 'http://host/', 'team/a': 'http://a/', 'team/b': 'http://b/' };
     const MEMBERS = ['@fam/m0', '@fam/m1'];
 

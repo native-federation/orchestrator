@@ -14,7 +14,7 @@ import { compareStrings } from 'lib/utils/compare-strings';
 // verdicts. See docs/version-resolver.md §"How pooling resolves".
 
 type ElectionInput = {
-  members: PoolMember[];
+  members: readonly PoolMember[];
   acceptsTag: AcceptsTag;
   compare: (a: VersionName, b: VersionName) => number;
   // The round-1 winner the stored record carries from the last election, for the tie rule.
@@ -41,11 +41,11 @@ export type Election = {
   agreeing: Set<RemoteName>;
   // Those of `agreeing` that take every member they ship from the global map, so may publish its files.
   publishers: Set<RemoteName>;
-  placements: Map<RemoteName, Placement>;
+  placements: ReadonlyMap<RemoteName, Placement>;
   // Every remote off the global map, in the warning order (subpools in election order, then self): a
   // rejected tag (a strict range's first, as `strictExternalCompatibility` refuses that), else a gap, else
   // specifiers no one build shipped together. Undefined only for a subpool's build the global map would serve.
-  misses: Map<RemoteName, PoolMiss | undefined>;
+  misses: ReadonlyMap<RemoteName, PoolMiss | undefined>;
 };
 
 type Subpool = { build: RemoteName; remotes: RemoteName[] };

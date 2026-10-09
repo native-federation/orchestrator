@@ -1,5 +1,6 @@
 import type { ExternalName, SharedExternal, shareScope } from 'lib/core/1.domain';
 import { owningPackage } from 'lib/core/1.domain/externals/specifier';
+import type { DeepReadonly } from 'lib/utils/deep-readonly';
 import { compareStrings } from 'lib/utils/compare-strings';
 
 // Unique per share scope: the most-declared of the labels merged into the pool.
@@ -7,7 +8,7 @@ export type PoolName = string;
 
 export type PoolMember = {
   name: ExternalName;
-  external: SharedExternal;
+  external: DeepReadonly<SharedExternal>;
 };
 
 export type Pools = {
@@ -44,7 +45,7 @@ const labelNode = (label: string): string => `label\x00${label}`;
 // A pool is a connected component of `external -> label` edges (one per declared label, whichever remote
 // declared it) and `entrypoint -> package` edges; only pools of >=2 members are returned. See
 // docs/version-resolver.md.
-export function buildPools(sharedExternals: shareScope): Pools {
+export function buildPools(sharedExternals: DeepReadonly<shareScope>): Pools {
   const { find, union } = unionFind();
   // One entry per declaring copy, which `mostDeclaredLabel` counts.
   const labelsOf = new Map<ExternalName, string[]>();
