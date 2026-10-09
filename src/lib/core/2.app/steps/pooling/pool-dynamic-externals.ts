@@ -93,6 +93,7 @@ export function createPoolDynamicExternals(
       if (!scopeHasPoolState(committed)) continue;
 
       const { pools } = buildPools(committed);
+      const stored = Object.keys(committed);
       verdicts = new Map();
 
       for (const pool of pools.values()) {
@@ -102,7 +103,7 @@ export function createPoolDynamicExternals(
         if (mine.length === 0) continue;
 
         try {
-          const asked = gateViews(entry.name, pool);
+          const asked = gateViews(entry.name, pool, stored);
           // The resolver scoping a member means the committed map cannot serve it — a range rejects its tag,
           // or under `scopeUncoveredEntrypoints` it lacks an entrypoint — so no committed build is trusted
           // with this remote: it serves its whole family itself, no dedup.
@@ -158,10 +159,10 @@ export function createPoolDynamicExternals(
   };
 
   // Everything the decision reads about one pool, built once; only the version table is worth deferring.
-  function gateViews(remote: RemoteName, pool: PoolMember[]): GateViews {
+  function gateViews(remote: RemoteName, pool: PoolMember[], stored: ExternalName[]): GateViews {
     return {
       pool,
-      view: committedView(withoutRemote(pool, remote)),
+      view: committedView(withoutRemote(pool, remote), stored),
       wants: consumedMembers(pool).get(remote) ?? [],
       specifiers: consumedSpecifiers(pool).get(remote) ?? new Set<Specifier>(),
       acceptance: lazy(() => acceptanceTable(pool, accepts)),
@@ -383,7 +384,7 @@ export function createPoolDynamicExternals(
   }
 
   // The copy's specifiers the map serves, beside what the resolver covered. A named scope has no `imports`
-  // to inherit, so the remote's own scope must name each file.
+  // to inherit, so the remote's own scope names the map's file for each, over the resolver's (one row's copy).
   function servedByMap(
     own: SharedVersionMeta,
     view: CommittedView,
@@ -395,7 +396,7 @@ export function createPoolDynamicExternals(
 
     for (const specifier in own.entries) {
       const source = view.global.get(specifier);
-      if (!source || covered.has(specifier)) continue;
+      if (!source) continue;
       if (shareScope !== GLOBAL_SCOPE) {
         const scopeUrl = scopeUrlOf(source.remote);
         if (!scopeUrl) return { unmapped: source.remote };

@@ -20,11 +20,11 @@ export type CommittedView = {
 };
 
 // A `scope` copy counts as served by its build: its files are already in the map under its own scope.
-export function committedView(members: PoolMember[]): CommittedView {
+export function committedView(members: PoolMember[], stored: ExternalName[]): CommittedView {
   const global: CommittedView['global'] = new Map();
 
   // Mirrors what `generate-import-map` emitted, so `global` is what the committed map really serves.
-  forEachGlobalClaim(members, (specifier, tag, meta) => {
+  forEachGlobalClaim(members, stored, (specifier, tag, meta) => {
     if (!global.has(specifier))
       global.set(specifier, { tag, remote: meta.name, file: meta.entries[specifier]! });
   });
@@ -124,17 +124,22 @@ export function arrivalOrder(members: PoolMember[]): Map<RemoteName, number> {
 // served by another build never publishes.
 function forEachGlobalClaim(
   members: PoolMember[],
+  stored: ExternalName[],
   visit: (specifier: Specifier, tag: VersionName, meta: SharedVersionMeta) => void
 ): void {
+  // `stored` is the record's order, which generate-import-map's `imports` and `claimsOf` walks claim in.
+  const rank = new Map(stored.map((name, i) => [name, i]));
+  const walk = [...members].sort((a, b) => rank.get(a.name)! - rank.get(b.name)!);
+
   const claim = (version: SharedVersion) =>
     forEachVersionEntry(version, undefined, (specifier, meta) =>
       visit(specifier, version.tag, meta)
     );
 
-  for (const member of members) {
+  for (const member of walk) {
     const winner = member.external.versions.find(v => v.action === 'share');
     if (winner) claim(winner);
   }
-  for (const member of members)
+  for (const member of walk)
     for (const version of member.external.versions) if (version.action === 'skip') claim(version);
 }

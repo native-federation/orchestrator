@@ -370,4 +370,65 @@ describe('a load into a pool of flat and dense builds, and the page after it', (
     expect(outcome(warm, p.stored()).runs).toEqual(page);
     expect(page['D|@fw/http/testing']).toBe('17.0.0');
   });
+
+  // F ships `@fw/core/testing` as a package of its own, D as an entry of its `@fw/core`, both at 2.0.0. The
+  // page maps D's file for testing in every scope. L, a copy of F, skips F's flat package at its own tag, so
+  // `update-cache` points that skip at F's file: the same tag, but a second module instance of the singleton.
+  it("a load runs the committed scopes' file, not a copy at its tag (team)", async () => {
+    const shareScope = 'team';
+    const p = portfolio({}, { realRepositories: true, assertNoTear: false, scope: shareScope });
+    const flat = (name: string) =>
+      entry(
+        name,
+        shared('@fw/core', '2.0.0', ['@fw/core'], shareScope),
+        shared('@fw/core/testing', '2.0.0', ['@fw/core/testing'], shareScope)
+      );
+    const committed = [
+      flat('F'),
+      entry('D', shared('@fw/core', '2.0.0', ['@fw/core', '@fw/core/testing'], shareScope)),
+    ];
+    const init = await p.runInit(committed);
+    p.reload();
+
+    const { merged } = await p.runDynamic(flat('L'));
+
+    const files = (importMap: ImportMap, remote: string) => importMap.scopes?.[`http://${remote}/`];
+    expect(files(init, 'F')).toEqual(files(init, 'D'));
+    expect(files(init, 'D')).toEqual({
+      '@fw/core': 'http://D/@fw_core.js',
+      '@fw/core/testing': 'http://D/@fw_core_testing.js',
+    });
+    expect(files(merged, 'L')).toEqual(files(init, 'D'));
+  });
+
+  // As above with the shapes swapped and F's flat `@fw/core/testing` stored ahead of D's dense `@fw/core`: the
+  // page maps F's file for testing in every scope, the first stored package claiming it. L, a copy of D, skips
+  // `@fw/core`, whose shared version names D's testing. Pool members come in name order, `@fw/core` first, so
+  // a committed view walking them would name D's too.
+  it("a load runs the first stored package's file, not its own (team)", async () => {
+    const shareScope = 'team';
+    const p = portfolio({}, { realRepositories: true, assertNoTear: false, scope: shareScope });
+    const dense = (name: string) =>
+      entry(name, shared('@fw/core', '2.0.0', ['@fw/core', '@fw/core/testing'], shareScope));
+    const committed = [
+      entry(
+        'F',
+        shared('@fw/core/testing', '2.0.0', ['@fw/core/testing'], shareScope),
+        shared('@fw/core', '2.0.0', ['@fw/core'], shareScope)
+      ),
+      dense('D'),
+    ];
+    const init = await p.runInit(committed);
+    p.reload();
+
+    const { merged } = await p.runDynamic(dense('L'));
+
+    const files = (importMap: ImportMap, remote: string) => importMap.scopes?.[`http://${remote}/`];
+    expect(Object.keys(p.stored())).toEqual(['@fw/core/testing', '@fw/core']);
+    expect(files(init, 'D')).toEqual({
+      '@fw/core': 'http://D/@fw_core.js',
+      '@fw/core/testing': 'http://F/@fw_core_testing.js',
+    });
+    expect(files(merged, 'L')).toEqual(files(init, 'D'));
+  });
 });

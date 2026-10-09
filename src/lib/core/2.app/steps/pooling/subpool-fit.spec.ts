@@ -55,6 +55,12 @@ const accepts = acceptsTag(
   createVersionCheck().compare
 );
 
+const buildsOf = (members: PoolMember[]) =>
+  committedView(
+    members,
+    members.map(m => m.name)
+  ).builds;
+
 describe('acceptance', () => {
   it('records every tag a remote’s own range accepts, per member', () => {
     const table = acceptanceTable(disjointProviders(), accepts);
@@ -67,7 +73,7 @@ describe('acceptance', () => {
   it('refuses a build that offers a member at a tag the consumer’s range rejects', () => {
     const members = disjointProviders();
     const table = acceptanceTable(members, accepts);
-    const builds = committedView(members).builds;
+    const builds = buildsOf(members);
     const consumed = consumedMembers(members);
 
     // mfe3 accepts router@22.1.0 under ^22.0.0, so mfe2's tag is fine on acceptance alone — coverage is
@@ -83,7 +89,7 @@ describe('acceptance', () => {
     const table = acceptanceTable(members, accepts);
 
     expect(
-      acceptsAll(table, committedView(members).builds.get('mfe1')!.tagByMember, 'mfe3', [
+      acceptsAll(table, buildsOf(members).get('mfe1')!.tagByMember, 'mfe3', [
         '@ng/core',
         '@ng/router',
       ])
@@ -96,9 +102,7 @@ describe('acceptance', () => {
     const table = acceptanceTable(members, accepts);
 
     expect(
-      acceptsAll(table, committedView(members).builds.get('mfe1')!.tagByMember, 'stranger', [
-        '@ng/core',
-      ])
+      acceptsAll(table, buildsOf(members).get('mfe1')!.tagByMember, 'stranger', ['@ng/core'])
     ).toBe(false);
   });
 });

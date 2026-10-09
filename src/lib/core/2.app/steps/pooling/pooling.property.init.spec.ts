@@ -252,7 +252,8 @@ describe('pooling properties: init (generated portfolios)', { timeout: TIMEOUT }
       const { importMap, record } = init.result;
       for (const [pool, members] of pools(record)) {
         const { global } = committedView(
-          Object.entries(members).map(([name, external]) => ({ name, external }))
+          Object.entries(members).map(([name, external]) => ({ name, external })),
+          Object.keys(record)
         );
         const view: Record<string, string> = {};
         for (const [specifier, { remote, file }] of global)

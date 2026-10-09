@@ -63,6 +63,13 @@ const soleProviderIsland = (): PoolMember[] => [
   ]),
 ];
 
+// The fixtures list members in the order they are stored.
+const viewOf = (members: PoolMember[]) =>
+  committedView(
+    members,
+    members.map(m => m.name)
+  );
+
 describe('committedView', () => {
   describe('builds, keyed by specifier', () => {
     // A flat remote declares `@ng/core/testing` as its own external; a dense one carries the same specifier
@@ -82,7 +89,7 @@ describe('committedView', () => {
         ]),
         member('@ng/core/testing', [{ tag: '22.0.5', copies: [{ remote: 'flat' }] }]),
       ];
-      const { builds } = committedView(members);
+      const { builds } = viewOf(members);
 
       expect([...builds.get('dense')!.tags.keys()].sort()).toEqual([
         '@ng/core',
@@ -113,7 +120,7 @@ describe('committedView', () => {
         };
         const members = order.map(name => byName[name]!);
 
-        expect(committedView(members).builds.get('r')!.tags.get('x/sub')).toBe(first.tag);
+        expect(viewOf(members).builds.get('r')!.tags.get('x/sub')).toBe(first.tag);
         expect(filesOf(members, 'r').get('x/sub')).toBe(first.file);
       }
     );
@@ -134,7 +141,7 @@ describe('committedView', () => {
           },
         ]),
       ];
-      const build = committedView(members).builds.get('b')!;
+      const build = viewOf(members).builds.get('b')!;
 
       expect(build.tags.get('x')).toBe('1.0.1');
       expect(build.tags.has('x/extra')).toBe(false);
@@ -144,7 +151,7 @@ describe('committedView', () => {
     // Committed, a scoped copy is a stable island: its files are in the map under its own scope and it
     // demonstrably runs its own build, so a remote loaded later may take them.
     it('includes a scoped copy, with the tag it runs', () => {
-      const { builds } = committedView(soleProviderIsland());
+      const { builds } = viewOf(soleProviderIsland());
 
       expect(Object.fromEntries(builds.get('form-overview')!.tagByMember)).toEqual({
         '@angular/core': '21.2.18',
@@ -156,7 +163,7 @@ describe('committedView', () => {
 
   describe('the global map', () => {
     it('names the build behind each shared specifier', () => {
-      const { global } = committedView(splitPair());
+      const { global } = viewOf(splitPair());
 
       expect(global.get('@angular/core')).toMatchObject({ tag: '22.0.5', remote: 'mfe-b' });
       expect(global.get('@angular/router')).toMatchObject({ tag: '22.1.0', remote: 'mfe-a' });
@@ -171,7 +178,7 @@ describe('committedView', () => {
         ]),
       ];
 
-      expect(committedView(members).global.get('@ng/core/testing')).toMatchObject({
+      expect(viewOf(members).global.get('@ng/core/testing')).toMatchObject({
         tag: '22.0.8',
         remote: 'mfe2',
       });
@@ -197,7 +204,32 @@ describe('committedView', () => {
         ]),
       ];
 
-      expect([...committedView(members).global.keys()]).toEqual(['@ng/core']);
+      expect([...viewOf(members).global.keys()]).toEqual(['@ng/core']);
+    });
+
+    // A flat build ships `@ng/core/testing` as a package of its own, a dense one as an entry of `@ng/core`, and
+    // both share it. `generate-import-map` hands it to the package stored first, whatever the pool's name order.
+    it('names the package stored first for a specifier two shared packages claim', () => {
+      const members = [
+        member('@ng/core', [
+          {
+            tag: '22.0.8',
+            action: 'share',
+            copies: [
+              { remote: 'dense', entries: { '@ng/core': 'c.js', '@ng/core/testing': 't.js' } },
+            ],
+          },
+        ]),
+        member('@ng/core/testing', [
+          { tag: '22.0.8', action: 'share', copies: [{ remote: 'flat' }] },
+        ]),
+      ];
+
+      expect(
+        committedView(members, ['@ng/core/testing', '@ng/core']).global.get('@ng/core/testing')
+      ).toMatchObject({
+        remote: 'flat',
+      });
     });
   });
 });
