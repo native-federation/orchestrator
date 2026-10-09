@@ -10,7 +10,7 @@ const versionCheck = createVersionCheck();
 // One remote's build: per member, the tag it ships, its range and the specifiers it carries.
 type Build = {
   name: string;
-  copies: Record<string, { tag: string; req: string; specifiers: string[] }>;
+  copies: Record<string, { tag: string; req: string; specifiers: string[]; strict?: boolean }>;
 };
 
 const members = (builds: Build[]): PoolMember[] => {
@@ -31,6 +31,7 @@ const members = (builds: Build[]): PoolMember[] => {
         remotes: owners.map(owner =>
           mockVersionRemote(owner.name, name, {
             requiredVersion: owner.copies[name]!.req,
+            strictVersion: owner.copies[name]!.strict,
             entries: Object.fromEntries(owner.copies[name]!.specifiers.map(s => [s, `${s}.js`])),
           })
         ),
@@ -108,6 +109,34 @@ describe('missOf', () => {
     // amn and akn each ship n next to one of m and k, so the smallest clash is both, and none of a's.
     for (const remote of ['x1', 'x2', 'x3', 'y'])
       expect(election.missOf(remote)).toEqual({ unwitnessed: { gap: 'n', with: ['m', 'k'] } });
+  });
+
+  // r rejects both members' elected tag, neither strictly: the miss names the first member r ships, so
+  // the warning reads the same whichever rejection a scan meets last.
+  it('names the first of two non-strict rejections', () => {
+    const at1 = (strict: boolean) => ({ tag: '1.0.0', req: '~1.0.0', specifiers: [], strict });
+    const builds: Build[] = [
+      ...['w0', 'w1'].map(name => ({
+        name,
+        copies: {
+          m: { ...at1(true), specifiers: ['m'] },
+          n: { ...at1(true), specifiers: ['n'] },
+        },
+      })),
+      {
+        name: 'r',
+        copies: {
+          m: { tag: '2.0.0', req: '^2.0.0', specifiers: ['m'], strict: false },
+          n: { tag: '2.0.0', req: '^2.0.0', specifiers: ['n'], strict: false },
+        },
+      },
+    ];
+    const election = elect(builds);
+
+    expect([...election.global].sort()).toEqual(['w0', 'w1']);
+    expect(election.missOf('r')).toEqual({
+      rejected: { member: 'm', tag: '1.0.0', strict: false },
+    });
   });
 
   // A dense build may list one specifier under two members: here `k` under both k and kk. The clash search

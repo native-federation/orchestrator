@@ -377,6 +377,30 @@ describe('createPoolSharedExternals', () => {
       expect(p.record('@framework/core').poolWinner).toBe('a');
     });
 
+    // x and a ship one build, tag for tag, so they tie on every key and neither is newer; with no stored
+    // winner, the copy listed first in the record wins. Both ways round, so neither name order nor the
+    // reverse of the record can pass this.
+    it.each([
+      { order: ['x', 'a'], winner: 'x' },
+      { order: ['a', 'x'], winner: 'a' },
+    ])('breaks a round-1 tie by record order ($order)', async ({ order, winner }) => {
+      for (const name of ['@framework/core', '@framework/common'])
+        p.seed(name, [
+          at(
+            '17.0.0',
+            name,
+            order.map(remote => copy(remote)),
+            'share'
+          ),
+        ]);
+
+      const importMap = await p.runInit();
+
+      expect(p.record('@framework/core').poolWinner).toBe(winner);
+      expect(rowsOf('@framework/core')).toEqual([`17.0.0:share:[${order}]`]);
+      expect(importMap.imports['@framework/core']).toBe(`http://${winner}/@framework/core.js`);
+    });
+
     it('takes the newest build first under latestSharedExternal', async () => {
       p.config.profile.latestSharedExternal = true;
       // a's 17.9.0 build serves both remotes, b's 17.10.0 only b; the flag puts the newest first anyway.

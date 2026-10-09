@@ -174,25 +174,28 @@ describe('flat and dense builds of one pool in a share scope', () => {
       scopeUrls: p.scopeUrls(),
     });
 
-  for (const shareScope of [undefined, 'team']) {
+  // Two corners of the (scope, strictImportMap) square: the other two rows killed no mutant these miss.
+  for (const [shareScope, strictImportMap] of [
+    [undefined, false],
+    ['team', true],
+  ] as const) {
     const own = (importMap: ImportMap, remote: string) =>
       shareScope ? importMap.scopes?.[`http://${remote}/`] : importMap.imports;
 
-    for (const strictImportMap of [false, true])
-      it(`the dense build elected: the flat remote takes its entry (${shareScope ?? 'global'}, strictImportMap ${strictImportMap})`, async () => {
-        const p = rig(shareScope);
-        // Elects W's dense 2.0.0 over G's newer 2.0.1 (W and W2 pin 2.0.0 exactly); latest-first would elect G.
-        p.config.profile.latestSharedExternal = false;
-        p.config.strict.strictImportMap = strictImportMap;
+    it(`the dense build elected: the flat remote takes its entry (${shareScope ?? 'global'}, strictImportMap ${strictImportMap})`, async () => {
+      const p = rig(shareScope);
+      // Elects W's dense 2.0.0 over G's newer 2.0.1 (W and W2 pin 2.0.0 exactly); latest-first would elect G.
+      p.config.profile.latestSharedExternal = false;
+      p.config.strict.strictImportMap = strictImportMap;
 
-        const importMap = await p.runInit(remotes('2.0.0', shareScope));
+      const importMap = await p.runInit(remotes('2.0.0', shareScope));
 
-        expect(tears(p, importMap, shareScope)).toEqual([]);
-        expect(own(importMap, 'G')).toEqual({
-          '@fw/core': 'http://W/@fw_core.js',
-          '@fw/core/testing': 'http://W/@fw_core_testing.js',
-        });
+      expect(tears(p, importMap, shareScope)).toEqual([]);
+      expect(own(importMap, 'G')).toEqual({
+        '@fw/core': 'http://W/@fw_core.js',
+        '@fw/core/testing': 'http://W/@fw_core_testing.js',
       });
+    });
   }
 });
 

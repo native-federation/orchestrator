@@ -1,4 +1,5 @@
 import fc from 'fast-check';
+import type { ImportMap, shareScope } from 'lib/core/1.domain';
 import {
   hostOf,
   portfolioArbitrary,
@@ -50,6 +51,29 @@ import { committedView } from 'lib/core/1.domain/pooling/gate';
  *
  * A deeper local search: POOLING_PROPERTY_SEED=<n> POOLING_PROPERTY_SCALE=<factor> (CI uses the defaults).
  */
+
+// A page's pools: the records that carry a pool name, and the map's files for the specifiers they ship.
+const pooledPart = ({ importMap, record }: { importMap: ImportMap; record: shareScope }) => {
+  const pooled = Object.fromEntries(
+    Object.entries(record).filter(([, external]) => external.poolName !== undefined)
+  );
+  const specifiers = new Set(
+    Object.values(pooled).flatMap(e =>
+      e.versions.flatMap(v => v.remotes.flatMap(r => Object.keys(r.entries)))
+    )
+  );
+  const only = (map: Record<string, string> = {}) =>
+    Object.fromEntries(Object.entries(map).filter(([s]) => specifiers.has(s)));
+  return {
+    record: pooled,
+    imports: only(importMap.imports),
+    scopes: Object.fromEntries(
+      Object.entries(importMap.scopes ?? {})
+        .map(([url, map]) => [url, only(map)] as const)
+        .filter(([, map]) => Object.keys(map).length > 0)
+    ),
+  };
+};
 
 describe('pooling properties: init (generated portfolios)', { timeout: TIMEOUT }, () => {
   // The two oracles run as separate properties, so a failure names which of them broke.
@@ -155,6 +179,29 @@ describe('pooling properties: init (generated portfolios)', { timeout: TIMEOUT }
       expect(again.importMap).toEqual(init.result.importMap);
       expect(again.record).toEqual(init.result.record);
     }));
+
+  // Whatever changes in a share scope, the warm init after it re-elects from the state the init left: one
+  // external marked dirty must reproduce every pool's record and the files the map gives their specifiers.
+  // Half the draws pick an external in no pool when there is one, which re-elects no pool unless a dirty
+  // scope re-elects all of them (D-5). Only the pools are compared: determine does not re-resolve every
+  // unpooled external the same way once its copies are cached, and under strictExternalCompatibility it may
+  // refuse one a cold init took (for-later), hence lenient portfolios.
+  it('idempotence: a warm init with any one external dirty reproduces every pool', () =>
+    run(
+      24,
+      fc.tuple(portfolioArbitrary({ latestSharedExternal: true }), fc.boolean(), fc.nat()),
+      200,
+      async ([spec, unpooled, pick]) => {
+        const init = await initOrRefuse(lenient(spec));
+        if (!init.ok) return;
+        const all = Object.keys(init.result.record).sort();
+        const loose = all.filter(name => init.result.record[name]!.poolName === undefined);
+        const names = unpooled && loose.length > 0 ? loose : all;
+        if (names.length === 0) return;
+        const again = await init.rig.touch(names[pick % names.length]!);
+        expect(pooledPart(again)).toEqual(pooledPart(init.result));
+      }
+    ));
 
   it('poolCause marks exactly the copies a remote serves itself, off the elected build', () =>
     run(6, portfolioArbitrary(), 125, async spec => {

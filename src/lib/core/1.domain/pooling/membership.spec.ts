@@ -76,6 +76,17 @@ describe('buildPools', () => {
     });
   });
 
+  // The pool tag is trimmed before it is compared: a padded tag is the same pool as its trimmed twin.
+  it('pools a padded tag with the same tag unpadded', () => {
+    const { pools } = buildPools(
+      scope({
+        a: [{ remote: 'mfe1', pool: ' x' }],
+        b: [{ remote: 'mfe2', pool: 'x' }],
+      })
+    );
+    expect(shape(pools)).toEqual([['x', ['a', 'b']]]);
+  });
+
   describe('naming', () => {
     it('names a pool after the tag most copies declare', () => {
       // "ng" is declared three times, "ds" once; the alphabetical order would have picked "ds".

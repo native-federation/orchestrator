@@ -121,6 +121,34 @@ describe('pooling re-election', () => {
     expect(causes()).toEqual(['mfe3@@one/common: incompatible', 'mfe3@@one/core: incompatible']);
   });
 
+  // Fails until rework 20 D-5: anything dirty in a share scope re-elects every pool of that scope.
+  it.fails('re-elects every pool of the scope when one pool changed', async () => {
+    seedStaleIsland('one', { core: true, common: false });
+    seedStaleIsland('two', { core: false, common: false });
+
+    await p.runInit();
+
+    expect(causes()).toEqual([
+      'mfe3@@one/common: incompatible',
+      'mfe3@@one/core: incompatible',
+      'mfe3@@two/common: incompatible',
+      'mfe3@@two/core: incompatible',
+    ]);
+  });
+
+  // Fails until rework 20 D-5, as above: here the change is an external in no pool.
+  it.fails('re-elects every pool of the scope when an external in no pool changed', async () => {
+    seedStaleIsland('framework', { core: false, common: false });
+    p.seed('rxjs', [p.version('7.0.0', 'rxjs', [copy('mfe1', '^7.0.0')])]);
+
+    await p.runInit();
+
+    expect(causes()).toEqual([
+      'mfe3@@framework/common: incompatible',
+      'mfe3@@framework/core: incompatible',
+    ]);
+  });
+
   // Dirty spreads over the stored pool names and the computed pools together, to a fixpoint. The pools
   // as computed now: a = {s1, s3}, b = {s2, t1}, c = {t2, t3}; as stored: S = {s1, s2, s3} and
   // T = {t1, t2, t3}. s2 is dirty: S drags in s1 and s3, b drags in t1, and only the next hop, T, reaches

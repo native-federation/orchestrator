@@ -179,6 +179,11 @@ export function openPortfolio(
       next();
       return result(await p.reelect());
     },
+    // A warm page after `name` changed.
+    async touch(name: string) {
+      next();
+      return result(await p.touch(name));
+    },
     async load(entry: RemoteEntry) {
       next();
       const { importMap: delta, merged } = await p.runDynamic(structuredClone(entry));

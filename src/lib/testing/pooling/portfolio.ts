@@ -271,6 +271,12 @@ export const portfolio = (
     return runInit();
   };
 
+  // A warm init after one stored external changed, pooled or not: it is marked dirty first.
+  const touch = (name: string): Promise<ImportMap> => {
+    adapters.sharedExternalsRepo.addOrUpdate(name, { ...record(name), dirty: true }, scope);
+    return runInit();
+  };
+
   // The dynamic flow for one remote entry, fetched by URL. The committed map is generated from the record as
   // it stood before the load.
   const runDynamic = async (entry: RemoteEntry): Promise<DynamicLoad> => {
@@ -347,6 +353,7 @@ export const portfolio = (
     scopeUrls: knownScopeUrls,
     runInit,
     reelect,
+    touch,
     runDynamic,
     islands,
     downloads,

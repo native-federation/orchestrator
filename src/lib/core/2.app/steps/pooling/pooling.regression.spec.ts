@@ -1138,5 +1138,51 @@ describe('pooling regressions', () => {
           [FORMS]: 'http://x/@ng/forms.js',
         });
       });
+
+    // A drop that leaves a second remote without a publisher. The host w ships core and router; l agrees and
+    // lends core/testing and router/upgrade at 17.3.0, but is not served, as nothing covers Z (q ships it at
+    // another tag, both exact). r ships upgrade at 17.3.1, so it disagrees and lends nothing, yet its range
+    // takes the borrowed upgrade; x's range takes the borrowed testing: both go global. Only l, off the map,
+    // ships upgrade at 17.3.0, so the fixpoint drops it and takes r off the map. r was the only global remote
+    // shipping testing at 17.3.0, so a second pass drops that too and takes x off the map. l's build then
+    // serves all three as a subpool.
+    it('drops what a remote it took off the global map published, and whoever needed that', async () => {
+      const TESTING = '@ng/core/testing';
+      const UPGRADE = '@ng/router/upgrade';
+      const Z = '@ng/z';
+      const p = portfolio(
+        { w: 'http://w/', l: 'http://l/', r: 'http://r/', x: 'http://x/', q: 'http://q/' },
+        { storage: 'nf-regression-t1-cascade', hosts: ['w'] }
+      );
+      const testing = (remote: string) => copy(remote, { [TESTING]: `${remote}-testing.js` });
+      const upgrade = (remote: string) => copy(remote, { [UPGRADE]: `${remote}-upgrade.js` });
+      p.seed(CORE, [
+        p.version('17.3.2', CORE, [testing('x')]),
+        { ...p.version('17.3.0', CORE, [copy('w'), testing('l'), testing('r')]), host: true },
+      ]);
+      p.seed(ROUTER, [
+        p.version('17.3.1', ROUTER, [upgrade('r')]),
+        { ...p.version('17.3.0', ROUTER, [copy('w'), upgrade('l')]), host: true },
+      ]);
+      p.seed(Z, [
+        p.version('17.3.5', Z, [{ ...copy('l'), req: '17.3.5' }]),
+        p.version('17.3.4', Z, [{ ...copy('q'), req: '17.3.4' }]),
+      ]);
+
+      const importMap = await p.runInit();
+
+      expect(importMap.imports).toEqual({
+        [CORE]: 'http://w/@ng/core.js',
+        [ROUTER]: 'http://w/@ng/router.js',
+      });
+      // With one pass, x stayed global and the map took core/testing from x's own 17.3.2 file.
+      expect(p.islands()).toEqual({
+        l: 'subpool l',
+        r: 'subpool l',
+        x: 'subpool l',
+        q: 'uncovered',
+      });
+      expect(importMap.scopes?.['http://x/']).toEqual({ [TESTING]: 'http://l/l-testing.js' });
+    });
   });
 });

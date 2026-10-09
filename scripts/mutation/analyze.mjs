@@ -21,7 +21,7 @@ function statuses(path) {
   const report = JSON.parse(readFileSync(path, 'utf8'));
   const result = new Map();
   for (const file of report.testResults) {
-    const rel = file.name.startsWith(root) ? file.name.slice(root.length + 1) : file.name;
+    const rel = file.name.startsWith(root + '/') ? file.name.slice(root.length + 1) : file.name;
     if (file.assertionResults.length === 0 || (file.status === 'failed' && file.message))
       result.set(`${rel} > (file)`, file.status === 'failed' ? 'failed' : 'passed');
     for (const a of file.assertionResults) {
