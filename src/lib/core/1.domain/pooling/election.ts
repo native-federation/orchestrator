@@ -1,4 +1,4 @@
-import type { ExternalName, RemoteName, VersionName } from 'lib/core/1.domain';
+import type { ExternalName, PoolCause, RemoteName, VersionName } from 'lib/core/1.domain';
 import type { AcceptsTag } from 'lib/core/1.domain/externals/compatibility';
 import {
   owningPackage,
@@ -13,7 +13,7 @@ import { compareStrings } from 'lib/utils/compare-strings';
 // Who serves each remote of one pool, keyed by specifier; pure, `pool-shared-externals.ts` turns it into
 // verdicts. See docs/version-resolver.md §"How pooling resolves".
 
-export type ElectionInput = {
+type ElectionInput = {
   members: PoolMember[];
   acceptsTag: AcceptsTag;
   hosts: ReadonlySet<RemoteName>;
@@ -23,30 +23,29 @@ export type ElectionInput = {
   latestFirst: boolean;
 };
 
+// Why a remote missed round 1. `with`: the specifiers no build shipped together with `gap`, for a remote the
+// map serves but no build witnesses.
+export type PoolMiss =
+  | { cause: 'incompatible'; member: ExternalName; tag: VersionName; strict: boolean }
+  | { cause: 'uncovered'; gap: Specifier; with?: Specifier[] };
+
+// A subpool's build runs its own build too.
+export type Placement =
+  { kind: 'global' } | { kind: 'runs'; build: RemoteName } | { kind: 'self'; cause: PoolCause };
+
 export type Election = {
-  // Round 1's build; undefined only for a pool with no copies.
-  winner?: RemoteName;
+  winner: RemoteName;
   // The winner's specifiers, same-tag loans from agreeing builds, and packages they all add at one tag.
   coverage: SpecifierTags;
-  // Everyone the global map serves, the winner included.
-  global: Set<RemoteName>;
-  // Later rounds, in election order; `build` is one of `members`.
-  subpools: { build: RemoteName; members: RemoteName[] }[];
-  alone: RemoteName[];
   // Remotes outside round 1 that agree with the winner on everything both ship (rule 5).
   agreeing: Set<RemoteName>;
   // Those of `agreeing` that take every member they ship from the global map, so may publish its files.
   publishers: Set<RemoteName>;
-  // A rejected tag (a strict range's first, as `strictExternalCompatibility` refuses that), else a gap,
-  // else specifiers no one build shipped together. Undefined only for a subpool's build the global map
-  // would serve.
-  missOf: (
-    remote: RemoteName
-  ) =>
-    | { rejected: { member: ExternalName; tag: VersionName; strict: boolean } }
-    | { gap: Specifier }
-    | { unwitnessed: { gap: Specifier; with: Specifier[] } }
-    | undefined;
+  placements: Map<RemoteName, Placement>;
+  // Every remote off the global map, subpools in election order and then those serving themselves: a
+  // rejected tag (a strict range's first, as `strictExternalCompatibility` refuses that), else a gap, else
+  // specifiers no one build shipped together. Undefined only for a subpool's build the global map would serve.
+  misses: Map<RemoteName, PoolMiss | undefined>;
 };
 
 export function electVariants(input: ElectionInput): Election {
@@ -134,33 +133,25 @@ export function electVariants(input: ElectionInput): Election {
   };
 
   const coverage = new SpecifierTags();
-  const election: Election = {
-    coverage,
-    global: new Set(),
-    subpools: [],
-    alone: [],
-    agreeing: new Set(),
-    publishers: new Set(),
-    missOf: remote => {
-      let rejected: { member: ExternalName; tag: VersionName; strict: boolean } | undefined;
-      for (const copy of shipped.get(remote) ?? [])
-        for (const s of copy.specifiers) {
-          const tag = coverage.get(s);
-          if (tag === undefined || acceptsTag(tag, copy.tag, copy.requiredVersion)) continue;
-          if (copy.strict) return { rejected: { member: copy.member, tag, strict: true } };
-          rejected ??= { member: copy.member, tag, strict: false };
-        }
-      if (rejected) return { rejected };
-      for (const copy of shipped.get(remote) ?? [])
-        for (const s of copy.specifiers) if (!coverage.has(s)) return { gap: s };
-      const torn = unwitnessed(remote);
-      if (torn) return { unwitnessed: torn };
-      // Everyone else the extended coverage serves is global, so only a subpool's build can lack a reason.
-      if (election.subpools.some(p => p.build === remote)) return undefined;
-      throw new Error(`'${remote}' missed the global map with nothing it rejects or lacks.`);
-    },
+  let subpools: { build: RemoteName; members: RemoteName[] }[] = [];
+  const missOf = (remote: RemoteName): PoolMiss | undefined => {
+    let rejected: PoolMiss | undefined;
+    for (const copy of shipped.get(remote)!)
+      for (const s of copy.specifiers) {
+        const tag = coverage.get(s);
+        if (tag === undefined || acceptsTag(tag, copy.tag, copy.requiredVersion)) continue;
+        if (copy.strict) return { cause: 'incompatible', member: copy.member, tag, strict: true };
+        rejected ??= { cause: 'incompatible', member: copy.member, tag, strict: false };
+      }
+    if (rejected) return rejected;
+    for (const copy of shipped.get(remote)!)
+      for (const s of copy.specifiers) if (!coverage.has(s)) return { cause: 'uncovered', gap: s };
+    const torn = unwitnessed(remote);
+    if (torn) return { cause: 'uncovered', ...torn };
+    // Everyone else the extended coverage serves is global, so only a subpool's build can lack a reason.
+    if (subpools.some(p => p.build === remote)) return undefined;
+    throw new Error(`'${remote}' missed the global map with nothing it rejects or lacks.`);
   };
-  if (remotes.length === 0) return election;
 
   // Round 1. The host cannot be repointed, so its build is the global one whenever it ships any member.
   const host = remotes.find(r => hosts.has(r));
@@ -190,9 +181,9 @@ export function electVariants(input: ElectionInput): Election {
     c => (c.own.owner === input.previous ? 1 : 0),
   ])!;
 
-  election.winner = first.own.owner;
+  const winner = first.own.owner;
   for (const [s, tag] of first.tags) coverage.set(s, tag);
-  election.global = new Set([election.winner, ...first.served]);
+  const global = new Set([winner, ...first.served]);
 
   // A borrowed file is published only from a build that takes every member it ships globally (the fixpoint
   // below drops it otherwise). Where no round-1 remote ships it, its lenders must stay out of any subpool
@@ -201,11 +192,11 @@ export function electVariants(input: ElectionInput): Election {
     shipped.get(remote)!.some(c => c.tag === tag && c.specifiers.includes(specifier));
   const lenders = new Set<RemoteName>();
   for (const [specifier, from] of first.loans)
-    if (![...election.global].some(r => shipsAt(r, specifier, coverage.get(specifier)!)))
+    if (![...global].some(r => shipsAt(r, specifier, coverage.get(specifier)!)))
       for (const remote of from) lenders.add(remote);
 
   // Later rounds: subpools of own builds among the remotes still waiting, while one serves at least two.
-  let pending = remotes.filter(r => !election.global.has(r));
+  let pending = remotes.filter(r => !global.has(r));
   const admits = (owner: RemoteName, remote: RemoteName) =>
     remote === owner || !lenders.has(remote) || agrees(shipped.get(owner)!, coverage);
   const formSubpools = () => {
@@ -221,7 +212,7 @@ export function electVariants(input: ElectionInput): Election {
         .filter(c => c.served.includes(c.own.owner) && c.served.length >= 2);
       const best = rank(candidates, [c => c.served.length]);
       if (!best) break;
-      election.subpools.push({ build: best.own.owner, members: best.served });
+      subpools.push({ build: best.own.owner, members: best.served });
       pending = pending.filter(r => !best.served.includes(r));
     }
   };
@@ -231,10 +222,10 @@ export function electVariants(input: ElectionInput): Election {
   // of them ships it at one tag, as one tag cannot split it. Last, so it only moves remotes no later round
   // could place in a subpool. A subpool copy resolves globally only when its subpool's build agrees.
   const runnerOf = (remote: RemoteName) =>
-    election.subpools.find(p => p.members.includes(remote))?.build ?? remote;
+    subpools.find(p => p.members.includes(remote))?.build ?? remote;
   const contributors = remotes.filter(
     r =>
-      !election.global.has(r) &&
+      !global.has(r) &&
       agrees(shipped.get(r)!, coverage) &&
       agrees(shipped.get(runnerOf(r))!, coverage)
   );
@@ -257,16 +248,16 @@ export function electVariants(input: ElectionInput): Election {
   // serves itself.
   const takesExtended = (remote: RemoteName) =>
     serves(shipped.get(remote)!, coverage) && witnessed(remote);
-  for (const remote of pending) if (takesExtended(remote)) election.global.add(remote);
-  pending = pending.filter(r => !election.global.has(r));
-  for (const subpool of election.subpools) {
+  for (const remote of pending) if (takesExtended(remote)) global.add(remote);
+  pending = pending.filter(r => !global.has(r));
+  for (const subpool of subpools) {
     const moved = subpool.members.filter(r => r !== subpool.build && takesExtended(r));
-    for (const remote of moved) election.global.add(remote);
+    for (const remote of moved) global.add(remote);
     subpool.members = subpool.members.filter(r => !moved.includes(r));
   }
-  election.subpools = election.subpools.filter(subpool => {
+  subpools = subpools.filter(subpool => {
     if (subpool.members.length >= 2) return true;
-    if (takesExtended(subpool.build)) election.global.add(subpool.build);
+    if (takesExtended(subpool.build)) global.add(subpool.build);
     else pending.push(subpool.build);
     return false;
   });
@@ -280,17 +271,17 @@ export function electVariants(input: ElectionInput): Election {
   const settle = (): boolean => {
     let demoted = false;
     for (;;) {
-      const publishers = remotes.filter(r => election.global.has(r) || runsAll(runnerOf(r)));
+      const publishers = remotes.filter(r => global.has(r) || runsAll(runnerOf(r)));
       const kept = [...coverage].filter(([s, tag]) =>
         publishers.some(r => buildFor(r).tags.get(s) === tag)
       );
       if (kept.length === coverage.size) return demoted;
       coverage.clear();
       for (const [s, tag] of kept) coverage.set(s, tag);
-      for (const remote of election.global)
-        if (remote !== election.winner && !serves(shipped.get(remote)!, coverage)) {
-          election.global.delete(remote);
-          const subpool = election.subpools.find(
+      for (const remote of global)
+        if (remote !== winner && !serves(shipped.get(remote)!, coverage)) {
+          global.delete(remote);
+          const subpool = subpools.find(
             p => serves(shipped.get(remote)!, buildFor(p.build).tags) && admits(p.build, remote)
           );
           if (subpool) subpool.members.push(remote);
@@ -301,12 +292,27 @@ export function electVariants(input: ElectionInput): Election {
   };
   while (settle()) formSubpools();
 
-  election.alone = pending.sort((a, b) => recordOrder.get(a)! - recordOrder.get(b)!);
-  for (const remote of [...election.subpools.map(p => p.build), ...election.alone])
+  const alone = pending.sort((a, b) => recordOrder.get(a)! - recordOrder.get(b)!);
+  const election: Election = {
+    winner,
+    coverage,
+    agreeing: new Set(),
+    publishers: new Set(),
+    placements: new Map(),
+    misses: new Map(),
+  };
+  for (const remote of [...subpools.map(p => p.build), ...alone])
     if (agrees(shipped.get(remote)!, coverage)) {
       election.agreeing.add(remote);
       if (runsAll(remote)) election.publishers.add(remote);
     }
 
+  for (const remote of [...subpools.flatMap(p => p.members), ...alone])
+    election.misses.set(remote, missOf(remote));
+  for (const remote of global) election.placements.set(remote, { kind: 'global' });
+  for (const { build, members: runners } of subpools)
+    for (const remote of runners) election.placements.set(remote, { kind: 'runs', build });
+  for (const remote of alone)
+    election.placements.set(remote, { kind: 'self', cause: election.misses.get(remote)!.cause });
   return election;
 }

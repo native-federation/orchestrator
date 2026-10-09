@@ -2,7 +2,7 @@ import type { SharedExternal, SharedVersion } from 'lib/core/1.domain';
 import { mockVersionRemote } from 'lib/testing/domain/externals/version.mock';
 import { acceptsTag } from 'lib/core/1.domain/externals/compatibility';
 import { createVersionCheck } from 'lib/core/3.adapters/checks/version.check';
-import { electVariants } from './election';
+import { type Election, electVariants } from './election';
 import type { PoolMember } from './membership';
 
 const versionCheck = createVersionCheck();
@@ -49,6 +49,14 @@ const elect = (builds: Build[]) =>
     latestFirst: false,
   });
 
+// Who the election placed where, read back from its placements.
+const global = (election: Election) =>
+  [...election.placements].filter(([, p]) => p.kind === 'global').map(([r]) => r);
+const subpool = (election: Election, build: string) =>
+  [...election.placements]
+    .filter(([, p]) => p.kind === 'runs' && p.build === build)
+    .map(([r]) => r);
+
 describe('missOf', () => {
   const entrypoints = (pkg: string, count: number) => [
     pkg,
@@ -93,21 +101,17 @@ describe('missOf', () => {
     ];
     const election = elect(builds);
 
-    expect([...election.global].sort()).toEqual([
-      'akn',
-      'amk',
-      'amn',
-      'w0',
-      'w1',
-      'w2',
-      'w3',
-      'w4',
-    ]);
-    expect(election.subpools).toEqual([{ build: 'x3', members: ['x1', 'x2', 'x3', 'y'] }]);
+    expect(global(election).sort()).toEqual(['akn', 'amk', 'amn', 'w0', 'w1', 'w2', 'w3', 'w4']);
+    expect(subpool(election, 'x3')).toEqual(['x1', 'x2', 'x3', 'y']);
+    expect(election.misses.size).toBe(4);
     // Every prefix up to k is shipped together (amk, with a's entrypoints witnessed at a's tag); n is the gap.
     // amn and akn each ship n next to one of m and k, so the smallest clash is both, and none of a's.
     for (const remote of ['x1', 'x2', 'x3', 'y'])
-      expect(election.missOf(remote)).toEqual({ unwitnessed: { gap: 'n', with: ['m', 'k'] } });
+      expect(election.misses.get(remote)).toEqual({
+        cause: 'uncovered',
+        gap: 'n',
+        with: ['m', 'k'],
+      });
   });
 
   // r rejects both members' elected tag, neither strictly: the miss names the first member r ships, so
@@ -132,9 +136,12 @@ describe('missOf', () => {
     ];
     const election = elect(builds);
 
-    expect([...election.global].sort()).toEqual(['w0', 'w1']);
-    expect(election.missOf('r')).toEqual({
-      rejected: { member: 'm', tag: '1.0.0', strict: false },
+    expect(global(election).sort()).toEqual(['w0', 'w1']);
+    expect(election.misses.get('r')).toEqual({
+      cause: 'incompatible',
+      member: 'm',
+      tag: '1.0.0',
+      strict: false,
     });
   });
 
@@ -154,8 +161,13 @@ describe('missOf', () => {
     ];
     const election = elect(builds);
 
-    expect(election.subpools).toEqual([{ build: 'x3', members: ['x1', 'x2', 'x3'] }]);
+    expect(subpool(election, 'x3')).toEqual(['x1', 'x2', 'x3']);
+    expect(election.misses.size).toBe(3);
     for (const remote of ['x1', 'x2', 'x3'])
-      expect(election.missOf(remote)).toEqual({ unwitnessed: { gap: 'n', with: ['m', 'k', 'k'] } });
+      expect(election.misses.get(remote)).toEqual({
+        cause: 'uncovered',
+        gap: 'n',
+        with: ['m', 'k', 'k'],
+      });
   });
 });

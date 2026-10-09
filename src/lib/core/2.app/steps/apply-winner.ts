@@ -1,11 +1,7 @@
 import type { SharedExternal, SharedVersion, SharedVersionMeta } from 'lib/core/1.domain';
 import { uncoveredEntrypoints, versionEntries } from 'lib/core/1.domain/externals/basis';
 import { mergeRows, rowAt } from 'lib/core/1.domain/externals/rows';
-import {
-  type AcceptsTag,
-  type VersionAcceptance,
-  versionAcceptance,
-} from 'lib/core/1.domain/externals/compatibility';
+import type { AcceptsTag, VersionAcceptance } from 'lib/core/1.domain/externals/compatibility';
 import { NFError } from 'lib/core/native-federation.error';
 import type { LoggingConfig } from '../config/log.contract';
 import type { ModeConfig } from '../config/mode.contract';
@@ -28,7 +24,7 @@ export function createApplyWinner(config: LoggingConfig & ModeConfig) {
   ): SharedExternal {
     // Every copy accepts its own tag, so a lone version, like the winner, is never redirected or split.
     if (external.versions.length > 1) {
-      const { accepts, objector } = acceptance ?? versionAcceptance(external, acceptsTag);
+      const { accepts, objector } = acceptance!;
 
       const rebuilt: SharedVersion[] = [];
 

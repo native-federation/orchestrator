@@ -6,17 +6,10 @@ import type { LoggingConfig } from '../../config/log.contract';
 import type { ModeConfig } from '../../config/mode.contract';
 import { acceptsTag } from 'lib/core/1.domain/externals/compatibility';
 import { type Copy, copiesByRemote, hostRemotes } from 'lib/core/1.domain/pooling/builds';
-import { electVariants, type Election } from 'lib/core/1.domain/pooling/election';
+import { electVariants, type PoolMiss } from 'lib/core/1.domain/pooling/election';
 import type { PoolMember, PoolName } from 'lib/core/1.domain/pooling/membership';
 import { type ElectionPlan, planElection, renamedRecords } from 'lib/core/1.domain/pooling/plan';
-import {
-  electedPlacement,
-  memberRecord,
-  missesOf,
-  type PlacedPool,
-  type PoolMiss,
-  previousWinner,
-} from 'lib/core/1.domain/pooling/placement';
+import { memberRecord, type PlacedPool, previousWinner } from 'lib/core/1.domain/pooling/placement';
 import type { Specifier } from 'lib/core/1.domain/externals/specifier';
 
 export function createPoolSharedExternals(
@@ -85,21 +78,19 @@ export function createPoolSharedExternals(
       previous: previousWinner(members),
       latestFirst: config.profile.latestSharedExternal,
     });
-    const misses = missesOf(election);
-    const placed = electedPlacement(poolName, election, misses, hosts, compare);
-    report(poolName, members, election, misses, placed, scope);
-    return members.map(m => [m.name, { ...memberRecord(m, placed), poolWinner: election.winner }]);
+    const placed: PlacedPool = { ...election, poolName, hosts, compare };
+    report(poolName, members, placed, scope);
+    return members.map(m => [m.name, { ...memberRecord(m, placed), poolWinner: placed.winner }]);
   }
 
   // The strict refusal, then why each remote missed round 1.
   function report(
     poolName: PoolName,
     members: PoolMember[],
-    election: Election,
-    misses: Map<RemoteName, PoolMiss | undefined>,
     placed: PlacedPool,
     scope: string
   ): void {
+    const { misses } = placed;
     // A range rejecting the elected build is what this flag refuses; a coverage miss never is.
     const rejecting = [...misses]
       .filter(([, miss]) => miss?.cause === 'incompatible' && miss.strict)
@@ -112,7 +103,10 @@ export function createPoolSharedExternals(
       throw new NFError(`Could not pool '${poolName}' in scope ${scope}.`);
     }
 
-    const subpoolSizes = new Map(election.subpools.map(p => [p.build, p.members.length]));
+    const subpoolSizes = new Map<RemoteName, number>();
+    for (const placement of placed.placements.values())
+      if (placement.kind === 'runs')
+        subpoolSizes.set(placement.build, (subpoolSizes.get(placement.build) ?? 0) + 1);
     let shipped: Map<RemoteName, Copy[]> | undefined;
     for (const [remote, miss] of misses) {
       if (miss === undefined) {

@@ -4,7 +4,7 @@ import { acceptsTag } from 'lib/core/1.domain/externals/compatibility';
 import { createVersionCheck } from 'lib/core/3.adapters/checks/version.check';
 import { electVariants } from './election';
 import type { PoolMember } from './membership';
-import { electedPlacement, memberRecord, missesOf } from './placement';
+import { memberRecord, type PlacedPool } from './placement';
 import { hostRemotes } from './builds';
 
 /**
@@ -60,7 +60,7 @@ describe('placement', () => {
       compare,
       latestFirst: false,
     });
-    const placed = electedPlacement('x', election, missesOf(election), hosts, compare);
+    const placed: PlacedPool = { ...election, poolName: 'x', hosts, compare };
 
     const records = members.map(m => memberRecord(m, placed));
 

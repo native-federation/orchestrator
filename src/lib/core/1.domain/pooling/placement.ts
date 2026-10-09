@@ -1,6 +1,4 @@
 import type {
-  ExternalName,
-  PoolCause,
   RemoteName,
   SharedExternal,
   SharedVersion,
@@ -8,81 +6,19 @@ import type {
   VersionName,
 } from 'lib/core/1.domain';
 import { byTag, mergeRows } from 'lib/core/1.domain/externals/rows';
-import type { Specifier, SpecifierTags } from 'lib/core/1.domain/externals/specifier';
+import type { Specifier } from 'lib/core/1.domain/externals/specifier';
 import type { Election } from './election';
 import type { PoolMember, PoolName } from './membership';
 
-// Where each remote of one pool runs and the records that follows from it; pure, the step logs and writes.
+// The records that follow from where each remote of one pool runs; pure, the step writes them.
 // See docs/version-resolver.md §"How the verdicts land in the record and the map".
 
-// Why a remote missed round 1. `with`: the specifiers no build shipped together with `gap`, for a remote the
-// map serves but no build witnesses.
-export type PoolMiss =
-  | { cause: 'incompatible'; member: ExternalName; tag: VersionName; strict: boolean }
-  | { cause: 'uncovered'; gap: Specifier; with?: Specifier[] };
-
-// A subpool's build runs its own build too.
-export type Placement =
-  { kind: 'global' } | { kind: 'runs'; build: RemoteName } | { kind: 'self'; cause: PoolCause };
-
-// Everything `memberRecord` reads of one pool, built once per pool.
-export type PlacedPool = {
+// Everything `memberRecord` reads of one pool.
+export type PlacedPool = Election & {
   poolName: PoolName;
-  // Round 1's build; undefined only for a pool with no copies.
-  winner?: RemoteName;
   hosts: ReadonlySet<RemoteName>;
-  coverage: SpecifierTags;
-  agreeing: ReadonlySet<RemoteName>;
-  publishers: ReadonlySet<RemoteName>;
-  placements: ReadonlyMap<RemoteName, Placement>;
   compare: (a: VersionName, b: VersionName) => number;
 };
-
-// Every remote off the global map, in placement order; undefined for a subpool's build the global map would
-// serve.
-export function missesOf(election: Election): Map<RemoteName, PoolMiss | undefined> {
-  const misses = new Map<RemoteName, PoolMiss | undefined>();
-  const remotes = [...election.subpools.flatMap(p => p.members), ...election.alone];
-  for (const remote of remotes) {
-    const miss = election.missOf(remote);
-    misses.set(
-      remote,
-      miss === undefined
-        ? undefined
-        : 'rejected' in miss
-          ? { cause: 'incompatible', ...miss.rejected }
-          : 'unwitnessed' in miss
-            ? { cause: 'uncovered', ...miss.unwitnessed }
-            : { cause: 'uncovered', gap: miss.gap }
-    );
-  }
-  return misses;
-}
-
-export function electedPlacement(
-  poolName: PoolName,
-  election: Election,
-  misses: ReadonlyMap<RemoteName, PoolMiss | undefined>,
-  hosts: ReadonlySet<RemoteName>,
-  compare: PlacedPool['compare']
-): PlacedPool {
-  const placements = new Map<RemoteName, Placement>();
-  for (const remote of election.global) placements.set(remote, { kind: 'global' });
-  for (const { build, members } of election.subpools)
-    for (const remote of members) placements.set(remote, { kind: 'runs', build });
-  for (const remote of election.alone)
-    placements.set(remote, { kind: 'self', cause: misses.get(remote)!.cause });
-  return {
-    poolName,
-    winner: election.winner,
-    hosts,
-    coverage: election.coverage,
-    agreeing: election.agreeing,
-    publishers: election.publishers,
-    placements,
-    compare,
-  };
-}
 
 // One member's record, one row per `(tag, action)`; see docs/version-resolver.md §"How the verdicts land in
 // the record and the map".
