@@ -154,7 +154,23 @@ describe('buildPools', () => {
   });
 
   describe('determinism', () => {
-    it('names and orders pools the same whatever the input order', () => {
+    // Nothing reads the order of pools but the logs; it follows the record, not the members' names.
+    it('keeps pools in the record order of their first member', () => {
+      const pools = buildPools(
+        scope({
+          'z/core': [{ remote: 'a', pool: 'z' }],
+          'a/core': [{ remote: 'a', pool: 'a' }],
+          'z/common': [{ remote: 'a', pool: 'z' }],
+          'a/common': [{ remote: 'a', pool: 'a' }],
+        })
+      ).pools;
+      expect(shape(pools)).toEqual([
+        ['z', ['z/common', 'z/core']],
+        ['a', ['a/common', 'a/core']],
+      ]);
+    });
+
+    it('names a pool and orders its members the same whatever the input order', () => {
       const members = {
         '@ng/core': [{ remote: 'a', pool: 'ng' }],
         '@ng/common': [{ remote: 'a', pool: 'ng' }],
