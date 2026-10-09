@@ -138,12 +138,12 @@ export function createApplyWinner(config: LoggingConfig & ModeConfig) {
 
   function scopeTornRemotes(externalName: string, external: SharedExternal, tears: Tear[]): void {
     const torn = new Set(tears.map(t => t.remote));
-    const demotedByTag = new Map<string, SharedVersionMeta[]>();
+    const demotedBySource = new Map<SharedVersion, SharedVersionMeta[]>();
 
     for (const { version, remote, uncovered } of tears) {
-      const group = demotedByTag.get(version.tag);
+      const group = demotedBySource.get(version);
       if (group) group.push(remote);
-      else demotedByTag.set(version.tag, [remote]);
+      else demotedBySource.set(version, [remote]);
 
       config.log.debug(
         3,
@@ -156,13 +156,18 @@ export function createApplyWinner(config: LoggingConfig & ModeConfig) {
         version.remotes = version.remotes.filter(r => !torn.has(r));
       }
     }
-    external.versions = external.versions.filter(v => v.remotes.length > 0);
 
-    for (const [tag, remotes] of demotedByTag) {
+    // Inserted before the emptied rows go, so a scope row can take its source's place, as the split's does.
+    for (const [source, remotes] of demotedBySource) {
+      const { tag } = source;
       const scoped = rowAt(external.versions, tag, 'scope');
       if (scoped) scoped.remotes.push(...remotes);
-      else external.versions.push({ tag, host: false, action: 'scope', remotes });
+      else {
+        const at = external.versions.indexOf(source) + 1;
+        external.versions.splice(at, 0, { tag, host: false, action: 'scope', remotes });
+      }
     }
+    external.versions = external.versions.filter(v => v.remotes.length > 0);
   }
 }
 

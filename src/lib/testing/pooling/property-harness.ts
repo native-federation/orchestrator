@@ -135,7 +135,13 @@ const REFUSALS = [
 // One page sequence on `portfolio()`: every `init` after the first opens a warm page that skips what it has
 // cached, as get-remote-entries does; `load` adds a remote at runtime on a new page.
 export function openPortfolio(
-  o: { host?: string; strict?: boolean; scope?: string; latestSharedExternal?: boolean } = {}
+  o: {
+    host?: string;
+    strict?: boolean;
+    scope?: string;
+    latestSharedExternal?: boolean;
+    scopeUncoveredEntrypoints?: boolean;
+  } = {}
 ) {
   const p = portfolio(
     {},
@@ -143,6 +149,7 @@ export function openPortfolio(
       hosts: o.host === undefined ? [] : [o.host],
       strict: o.strict,
       latestSharedExternal: o.latestSharedExternal,
+      scopeUncoveredEntrypoints: o.scopeUncoveredEntrypoints,
       ...(o.scope === undefined ? {} : { scope: o.scope }),
       storage: `nf-pooling-property-${namespaces++}`,
       realRepositories: true,
@@ -191,6 +198,7 @@ export async function initOrRefuse(spec: PortfolioSpec) {
     host,
     scope: spec.shareScope,
     latestSharedExternal: spec.latestSharedExternal,
+    scopeUncoveredEntrypoints: spec.scopeUncoveredEntrypoints,
   });
   try {
     const result = await rig.init(entries);
@@ -244,6 +252,10 @@ export function outcome(
       }
   return { runs, verdicts };
 }
+
+// Every `remote|specifier` a remote ships that the map leaves unresolved.
+export const unmapped = (runs: Record<string, string | null>): string[] =>
+  Object.keys(runs).filter(key => runs[key] === null);
 
 export const lenient = (spec: PortfolioSpec): PortfolioSpec => ({ ...spec, strict: false });
 

@@ -25,6 +25,7 @@ import {
   run,
   scopeUrlsOf,
   torn,
+  unmapped,
 } from 'lib/testing/pooling/property-harness';
 
 /**
@@ -39,14 +40,19 @@ describe('pooling properties: dynamic loads (generated portfolios)', { timeout: 
   it('dynamic additivity: the delta never re-declares a committed key and adds no tear', () =>
     run(
       101,
-      portfolioArbitrary({ maxRemotes: 12, labelNoise: true }).chain(spec =>
-        fc.tuple(fc.constant(lenient(spec)), extraRemotesArbitrary(spec))
-      ),
+      portfolioArbitrary({
+        maxRemotes: 12,
+        labelNoise: true,
+        scopeUncoveredEntrypoints: true,
+      }).chain(spec => fc.tuple(fc.constant(lenient(spec)), extraRemotesArbitrary(spec))),
       150,
       async ([spec, extras]) => {
         const entries = toRemoteEntries(spec);
         const host = hostOf(spec);
-        const rig = openPortfolio({ host });
+        const rig = openPortfolio({
+          host,
+          scopeUncoveredEntrypoints: spec.scopeUncoveredEntrypoints,
+        });
         let committed = (await rig.init(entries)).importMap;
         const loaded = [...entries];
 
@@ -70,6 +76,12 @@ describe('pooling properties: dynamic loads (generated portfolios)', { timeout: 
           loaded.push(added);
           const after = torn(merged, record, scopeUrlsOf(loaded), host);
           expect(after.filter(t => !before.includes(t))).toEqual([]);
+          if (spec.scopeUncoveredEntrypoints)
+            expect(
+              unmapped(outcome(merged, record, scopeUrlsOf(loaded)).runs).filter(k =>
+                k.startsWith(`${added.name}|`)
+              )
+            ).toEqual([]);
           committed = merged;
         }
       }

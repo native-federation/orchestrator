@@ -57,6 +57,8 @@ export type PortfolioSpec = {
   shareScope?: string;
   // `profile.latestSharedExternal`: round 1 takes the newest build first.
   latestSharedExternal?: boolean;
+  // `profile.scopeUncoveredEntrypoints`: a copy the shared version tears is scoped, never self-filled.
+  scopeUncoveredEntrypoints?: boolean;
 };
 
 /** What one build ships of a pool: everything a `RemotePoolSpec` says except the range its remote declares. */
@@ -133,6 +135,7 @@ export const portfolioArbitrary = (
     flat?: boolean;
     shareScope?: string;
     latestSharedExternal?: boolean;
+    scopeUncoveredEntrypoints?: boolean;
   } = {}
 ): fc.Arbitrary<PortfolioSpec> =>
   fc
@@ -195,13 +198,15 @@ export const portfolioArbitrary = (
             )
           ),
           ...(o.latestSharedExternal ? { latest: fc.boolean() } : {}),
+          ...(o.scopeUncoveredEntrypoints ? { scopeUncovered: fc.boolean() } : {}),
         })
-        .map(({ templates, remotes, host, mixedMajors, latest }) => ({
+        .map(({ templates, remotes, host, mixedMajors, latest, scopeUncovered }) => ({
           poolSizes,
           strict,
           host,
           ...(o.shareScope === undefined ? {} : { shareScope: o.shareScope }),
           ...(latest === undefined ? {} : { latestSharedExternal: latest }),
+          ...(scopeUncovered === undefined ? {} : { scopeUncoveredEntrypoints: scopeUncovered }),
           remotes: remotes.map(remote => ({
             ...remote,
             pools: remote.pools.map((pick, p) => {

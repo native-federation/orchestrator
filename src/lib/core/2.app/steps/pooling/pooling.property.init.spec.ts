@@ -29,6 +29,7 @@ import {
   run,
   scopeUrlsOf,
   strayNames,
+  unmapped,
 } from 'lib/testing/pooling/property-harness';
 import * as _path from 'lib/utils/path';
 import { committedView } from 'lib/core/1.domain/pooling/views';
@@ -52,21 +53,35 @@ import { committedView } from 'lib/core/1.domain/pooling/views';
 describe('pooling properties: init (generated portfolios)', { timeout: TIMEOUT }, () => {
   // The two oracles run as separate properties, so a failure names which of them broke.
   it('no-tear (resolution): no remote resolves a combination no build shipped', () =>
-    run(1, portfolioArbitrary({ latestSharedExternal: true }), 150, async spec => {
-      const init = await initOrRefuse(spec);
-      if (!init.ok) return;
-      const { importMap, record } = init.result;
-      for (const tear of poolTears(importMap, record, scopeUrlsOf(init.entries), init.host))
-        expect({ pool: tear.pool, incoherent: tear.incoherent }).toEqual({
-          pool: tear.pool,
-          incoherent: [],
-        });
-    }));
+    run(
+      1,
+      portfolioArbitrary({ latestSharedExternal: true, scopeUncoveredEntrypoints: true }),
+      150,
+      async spec => {
+        const init = await initOrRefuse(spec);
+        if (!init.ok) return;
+        const { importMap, record } = init.result;
+        for (const tear of poolTears(importMap, record, scopeUrlsOf(init.entries), init.host))
+          expect({ pool: tear.pool, incoherent: tear.incoherent }).toEqual({
+            pool: tear.pool,
+            incoherent: [],
+          });
+        // The oracle skips a specifier the map does not resolve. Under scopeUncoveredEntrypoints the builders
+        // drop an uncovered entrypoint instead of self-filling it, so a torn skip copy would leave it unmapped:
+        // nothing may be left so.
+        if (spec.scopeUncoveredEntrypoints)
+          expect(unmapped(outcome(importMap, record, scopeUrlsOf(init.entries)).runs)).toEqual([]);
+      }
+    ));
 
   it('no-tear (binding): no file a remote reaches binds a second tag of any specifier', () =>
     run(
       2,
-      portfolioArbitrary({ labelNoise: true, latestSharedExternal: true }),
+      portfolioArbitrary({
+        labelNoise: true,
+        latestSharedExternal: true,
+        scopeUncoveredEntrypoints: true,
+      }),
       300,
       async spec => {
         const init = await initOrRefuse(spec);

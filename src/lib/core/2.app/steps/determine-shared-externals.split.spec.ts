@@ -209,6 +209,30 @@ describe('determine: splitting a version on election', () => {
     expect(rows()).toEqual([majorityRow('2.2.0', 4), '2.1.0:scope:[team/mfe-c,team/mfe-a]']);
   });
 
+  it("puts a torn newer copy's scope row above an older winner", async () => {
+    // The newer copy is not strict, so it dedups to the older winner; coverage then tears it and empties
+    // its row. Its scope row has to take the emptied row's place, not land after the winner's.
+    config.profile.scopeUncoveredEntrypoints = true;
+    seed([
+      version('2.2.0', [
+        {
+          remote: 'team/mfe-n',
+          req: '^2.2.0',
+          strict: false,
+          entries: { 'dep-a': 'a.js', 'dep-a/extra': 'x.js' },
+        },
+      ]),
+      version(
+        '2.1.0',
+        Array.from({ length: 4 }, (_, i) => ({ remote: `team/maj${i + 1}`, req: '~2.1.0' }))
+      ),
+    ]);
+
+    await createDetermineSharedExternals(config, adapters)();
+
+    expect(rows()).toEqual(['2.2.0:scope:[team/mfe-n]', majorityRow('2.1.0', 4)]);
+  });
+
   it('still refuses the portfolio under strictExternalCompatibility', async () => {
     config.strict.strictExternalCompatibility = true;
     seed([
