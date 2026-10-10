@@ -1,6 +1,11 @@
-import type { SharedExternal } from '../externals/external.contract';
+import type { SharedExternal, shareScope } from '../externals/external.contract';
 import { mockVersionRemote } from 'lib/testing/domain/externals/version.mock';
-import { hasPoolResults, scopeHasPoolState, withoutPoolResults } from './pool-state';
+import {
+  hasPoolResults,
+  renamedRecords,
+  scopeHasPoolState,
+  withoutPoolResults,
+} from './pool-state';
 
 const pooledRecord = (): SharedExternal => ({
   dirty: false,
@@ -118,5 +123,58 @@ describe('scopeHasPoolState', () => {
     const islanded = external();
     islanded.versions[0]!.remotes[0]!.poolCause = 'uncovered';
     expect(scopeHasPoolState({ 'dep-a': islanded })).toBe(true);
+  });
+});
+
+describe('renamedRecords', () => {
+  const pooled = (poolName?: string): SharedExternal => ({
+    dirty: false,
+    ...(poolName === undefined ? {} : { poolName }),
+    poolWinner: 'team/a',
+    versions: [
+      {
+        tag: '17.0.0',
+        host: false,
+        action: 'skip',
+        remotes: [mockVersionRemote('team/b', '@framework/core', { servedBy: 'team/c' })],
+      },
+    ],
+  });
+  const pool = (scope: shareScope, ...names: string[]) =>
+    names.map(name => ({ name, external: scope[name]! }));
+
+  // A dynamic load writes the pools it judged; one it merged renames committed members it never rewrote.
+  it('names a member that stored no pool yet, and skips one already named right', () => {
+    const scope: shareScope = { core: pooled('framework'), common: pooled() };
+
+    expect(renamedRecords(scope, new Map([['framework', pool(scope, 'core', 'common')]]))).toEqual([
+      ['common', { ...pooled(), poolName: 'framework' }],
+    ]);
+  });
+
+  it('renames a member stored under another name, and nothing in no pool', () => {
+    const scope: shareScope = { '@framework/core': pooled('old'), stale: pooled('gone') };
+
+    expect(renamedRecords(scope, new Map([['angular', pool(scope, '@framework/core')]]))).toEqual([
+      ['@framework/core', { ...pooled('old'), poolName: 'angular' }],
+    ]);
+  });
+
+  it('reads the stored name from the scope, not from the member it was handed', () => {
+    // The dynamic path passes the committed records merged with what it just wrote.
+    const before = pooled('old');
+    const scope: shareScope = { a: pooled('p') };
+
+    expect(renamedRecords(scope, new Map([['p', [{ name: 'a', external: before }]]]))).toEqual([]);
+  });
+
+  it('keeps poolWinner and servedBy on a rename: the pool was not re-elected', () => {
+    const record = pooled('framework');
+    const scope: shareScope = { '@framework/core': record };
+
+    expect(renamedRecords(scope, new Map([['angular', pool(scope, '@framework/core')]]))).toEqual([
+      ['@framework/core', { ...pooled('framework'), poolName: 'angular' }],
+    ]);
+    expect(record).toEqual(pooled('framework'));
   });
 });

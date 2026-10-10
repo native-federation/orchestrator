@@ -51,7 +51,8 @@ export function memberRecord(member: PoolMember, pool: PlacedPool): SharedExtern
         for (const s in entries) specifiers.add(s);
       }
 
-  // Rule 5: a build agreeing with round 1 takes its files where a global copy at its tag lists every file it takes.
+  // Rule 5: a build agreeing with round 1 takes its files where a global copy at its tag lists every
+  // file it takes.
   const takesGlobalFiles = (meta: SharedVersionMeta, tag: VersionName) => {
     const runs = runsOn(meta.name);
     return (

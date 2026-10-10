@@ -13,7 +13,7 @@ export type PoolMember = {
 
 export type Pools = {
   pools: Map<PoolName, PoolMember[]>;
-  // Labelled externals that pooled with nothing, in graph order: likely a typo or a missing sibling.
+  // Labelled externals that pooled with nothing, in scope order: likely a typo or a missing sibling.
   labelledAlone: ExternalName[];
 };
 

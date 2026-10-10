@@ -353,7 +353,7 @@ describe('createPoolSharedExternals', () => {
 
         await p.runInit();
 
-        // No previous winner, so arrival order breaks the tie.
+        // No previous winner, so record order breaks the tie.
         expect(shareOf('@framework/core')!.tag).toBe('18.0.0');
         expect(p.record('@framework/common').poolWinner).toBe('a');
       }
@@ -495,7 +495,7 @@ describe('createPoolSharedExternals', () => {
       ]);
     });
 
-    // Within-tag order is observable (round 1's arrival-order ties, determine's `versions[0]`), and the rebuild
+    // Within-tag order is observable (round 1's record-order ties, determine's `versions[0]`), and the rebuild
     // is the one writer that orders a tag's rows by action. Pinned before rework 02 moves the row helpers.
     it("orders one tag's rows share, skip, then scope", async () => {
       // Every core copy is 17.0.0. c's common@16 build serves d (^16 takes 16.1.0); x's ^15 fits no build.

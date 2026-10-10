@@ -222,7 +222,7 @@ export async function initOrRefuse(spec: PortfolioSpec) {
 }
 
 // The map and record up to interchangeable providers: which tag each remote runs per specifier it ships, and
-// each copy's verdict. Which of two copies of one tag publishes a file is basis precedence, i.e. arrival.
+// each copy's verdict. Which of two copies of one tag publishes a file is basis precedence, i.e. record order.
 // `scopeUrls` is needed only once a remote was redeployed to another URL.
 export function outcome(
   importMap: ImportMap,

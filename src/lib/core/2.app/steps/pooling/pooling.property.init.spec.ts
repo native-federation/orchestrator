@@ -485,7 +485,7 @@ describe('pooling properties: redeploys (generated portfolios)', { timeout: TIME
       expect(strayNames(init.result.record)).toEqual([]);
     }));
 
-  // Not a cold page of the final portfolio: cold breaks ties by arrival where warm keeps the stored winner
+  // Not a cold page of the final portfolio: cold breaks ties by record order where warm keeps the stored winner
   // instead; that is no partial re-election. `outcome` leaves `poolWinner` out, which a stale election keeps
   // (P1), so the winners are compared too.
   const warmEqualsReelected = async ([spec, redeployed]: [PortfolioSpec, Redeploy[]]) => {
@@ -556,7 +556,7 @@ describe('pooling properties: shrunk counterexamples', () => {
 
   // order independence, found at POOLING_PROPERTY_SEED=1 POOLING_PROPERTY_SCALE=5. The host r0 holds
   // m0@17, so r1 and r2 (two 18.1.1 builds, each with one member the other lacks) both miss round 1, and either
-  // can run the subpool that serves r3. They tie on every key, and arrival used to pick whichever registered
+  // can run the subpool that serves r3. They tie on every key, and record order used to pick whichever registered
   // first: the same tags ran either way, but the stored verdicts (which one is `incompatible`) followed it.
   it('order independence: two equal subpool builds are not told apart by registration order', async () => {
     const spec: PortfolioSpec = {
@@ -578,7 +578,7 @@ describe('pooling properties: shrunk counterexamples', () => {
 
   // re-election idempotence, found at the CI seed once the generator redeployed builds. r2 and r3 are one
   // 17.1.0 build; round 1 (the host r0) serves neither, and each one's build serves both, so they tie for the
-  // subpool. Arrival used to pick: the first election read it from update-cache (r2 first), and r2's subpool
+  // subpool. Record order used to pick: the first election read it from update-cache (r2 first), and r2's subpool
   // dissolved once the extension moved r3 global. The re-election read it from the record pooling rewrote,
   // whose `skip` row (r3) precedes the `scope` row (r2): r3 kept a subpool for r2 and left the global map, so a
   // warm page re-electing on equal terms ran r3 on 17.1.0 instead of 17.1.1.

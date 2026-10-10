@@ -115,7 +115,8 @@ describe('pooling re-election', () => {
   });
 
   // Stored under an old name, so this also pins that a re-election renames the pool: the members are
-  // written under the computed name, mfe1 wins, and the island gains its cause.
+  // written under the computed name and the island gains its cause. mfe1 also wins cold, so the winner
+  // check alone does not prove a re-election ran.
   it('re-elects every pool of the scope when an external in no pool changed', async () => {
     seedStaleIsland('framework', { core: false, common: false }, 'old-name');
     p.seed('rxjs', [p.version('7.0.0', 'rxjs', [copy('mfe1', '^7.0.0')])]);
@@ -194,7 +195,7 @@ describe('pooling re-election', () => {
       );
 
       const cold = await p.runInit([a, b, c]);
-      // a and b ship the same family, so arrival order makes a the winner.
+      // a and b ship the same family, so record order makes a the winner.
       expect(cold.imports['@fw/core']).toBe('http://a/fw_core.js');
       expect(p.record('@fw/core').poolWinner).toBe('team/a');
 
@@ -275,7 +276,7 @@ describe('pooling re-election', () => {
       };
 
       // Cold page of `before` (plus any `loaded` at runtime), warm page of `after` over it, then a warm page that re-elects every pool of
-      // that same state. Not a cold page of `after`: a cold page breaks ties by arrival where a warm one
+      // that same state. Not a cold page of `after`: a cold page breaks ties by record order where a warm one
       // keeps the stored winner, a difference that fix does not touch.
       const warmAndReelected = async (
         before: RemoteEntry[],

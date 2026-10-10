@@ -1,7 +1,7 @@
 import type { SharedExternal, shareScope } from 'lib/core/1.domain';
 import { mockVersionRemote } from 'lib/testing/domain/externals/version.mock';
 import { buildPools } from './membership';
-import { planElection, renamedRecords, renamesOf, type ElectionPlan } from './plan';
+import { planElection, type ElectionPlan } from './plan';
 import { hasPoolResults } from './pool-state';
 
 // Wraps the real `buildPools` so a test can tell whether the plan built the pool graph at all.
@@ -152,63 +152,5 @@ describe('planElection', () => {
     expect(sorted(planElection(Object.fromEntries([...entries].reverse()), true))).toEqual(
       sorted(planElection(Object.fromEntries(entries), true))
     );
-  });
-});
-
-describe('renamesOf', () => {
-  const pool = (scope: shareScope, ...names: string[]) =>
-    names.map(name => ({ name, external: scope[name]! }));
-
-  // A dynamic load writes the pools it judged; one it merged renames committed members it never rewrote.
-  it('names a member that stored no pool yet, and skips one already named right', () => {
-    const scope: shareScope = { core: record({ poolName: 'framework' }), common: record() };
-
-    expect(renamesOf(scope, new Map([['framework', pool(scope, 'core', 'common')]]))).toEqual([
-      ['common', 'framework'],
-    ]);
-  });
-
-  it('renames a member stored under another name, and nothing in no pool', () => {
-    const scope: shareScope = {
-      '@framework/core': record({ poolName: 'old' }),
-      stale: record({ poolName: 'gone' }),
-    };
-
-    expect(renamesOf(scope, new Map([['angular', pool(scope, '@framework/core')]]))).toEqual([
-      ['@framework/core', 'angular'],
-    ]);
-  });
-
-  it('reads the stored name from the scope, not from the member it was handed', () => {
-    // The dynamic path passes the committed records merged with what it just wrote.
-    const before = record({ poolName: 'old' });
-    const scope: shareScope = { a: record({ poolName: 'p' }) };
-
-    expect(renamesOf(scope, new Map([['p', [{ name: 'a', external: before }]]]))).toEqual([]);
-  });
-});
-
-describe('renamedRecords', () => {
-  const pooled = (poolName?: string): SharedExternal => ({
-    dirty: false,
-    ...(poolName === undefined ? {} : { poolName }),
-    poolWinner: 'team/a',
-    versions: [
-      {
-        tag: '17.0.0',
-        host: false,
-        action: 'skip',
-        remotes: [mockVersionRemote('team/b', '@framework/core', { servedBy: 'team/c' })],
-      },
-    ],
-  });
-
-  it('keeps poolWinner and servedBy on a rename: the pool was not re-elected', () => {
-    const record = pooled('framework');
-
-    expect(renamedRecords({ '@framework/core': record }, [['@framework/core', 'angular']])).toEqual(
-      [['@framework/core', { ...pooled('framework'), poolName: 'angular' }]]
-    );
-    expect(record).toEqual(pooled('framework'));
   });
 });

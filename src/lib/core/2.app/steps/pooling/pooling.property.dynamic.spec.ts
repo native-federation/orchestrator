@@ -139,7 +139,7 @@ describe('pooling properties: dynamic loads (generated portfolios)', { timeout: 
 
   // The record a load leaves is what the next page rebuilds its map from, so it must rebuild the page the
   // load handed the browser. Compared as the tag each remote runs per specifier, since which of two copies of
-  // one tag publishes a file is arrival order.
+  // one tag publishes a file is record order.
   it('dynamic reload: a warm init after a load runs the tags the page ran', () =>
     run(
       102,

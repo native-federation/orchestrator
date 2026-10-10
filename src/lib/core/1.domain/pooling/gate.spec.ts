@@ -226,10 +226,11 @@ describe('coverFromMap', () => {
       ]),
     ];
 
-    for (const entries of [
+    const cases: Record<string, string>[] = [
       { '@ng/core': 'core.js', '@ng/core/testing': 'testing.js' },
       { '@ng/core/testing': 'testing.js' },
-    ]) {
+    ];
+    for (const entries of cases) {
       const members = scoped(entries);
       const view = viewOf(members, 'mfe');
       expect(

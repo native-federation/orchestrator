@@ -28,7 +28,7 @@ export type PoolMiss =
   | { cause: 'incompatible'; member: ExternalName; tag: VersionName; strict: boolean }
   | { cause: 'uncovered'; gap: Specifier; with?: Specifier[] };
 
-// A subpool's build runs its own build too.
+// A subpool's build is placed in its own subpool.
 export type Placement =
   { kind: 'global' } | { kind: 'subpool'; build: RemoteName } | { kind: 'self'; cause: PoolCause };
 
@@ -196,7 +196,8 @@ export function elect(input: ElectionInput): Election {
     if (![...globalRemotes].some(r => shipsAt(r, specifier, globalTags.get(specifier)!)))
       for (const remote of from) lenders.add(remote);
 
-  // Later rounds: subpools of own builds among the remotes still waiting, while one serves at least two.
+  // Later rounds: subpools among the remotes still waiting, each led by a build that serves itself and at
+  // least one more.
   let pending = remotes.filter(r => !globalRemotes.has(r));
   const admits = (owner: RemoteName, remote: RemoteName) =>
     remote === owner || !lenders.has(remote) || agrees(shipped.get(owner)!, globalTags);

@@ -3,9 +3,9 @@ import { createPoolDynamicExternals } from './pool-dynamic-externals';
 import type { ConfigContract } from 'lib/core/2.app/config';
 import { mockConfig } from 'lib/testing/config.mock';
 import type {
+  DenseSharedInfo,
   RemoteEntry,
   SharedExternal,
-  SharedInfo,
   SharedInfoActions,
   SharedVersion,
 } from 'lib/core/1.domain';
@@ -49,7 +49,7 @@ const committed = (
   })),
 });
 
-const shared = (name: string, opt: { pool?: string; shareScope?: string } = {}): SharedInfo =>
+const shared = (name: string, opt: { pool?: string; shareScope?: string } = {}): DenseSharedInfo =>
   mockSharedInfo(name, {
     requiredVersion: '^17.0.0',
     singleton: true,
@@ -57,13 +57,12 @@ const shared = (name: string, opt: { pool?: string; shareScope?: string } = {}):
     shareScope: opt.shareScope,
   });
 
-const entryWith = (...externals: SharedInfo[]): RemoteEntry =>
-  ({
-    name: 'mfe',
-    url: 'http://mfe/remoteEntry.json',
-    exposes: [],
-    shared: externals,
-  }) as RemoteEntry;
+const entryWith = (...externals: DenseSharedInfo[]): RemoteEntry => ({
+  name: 'mfe',
+  url: 'http://mfe/remoteEntry.json',
+  exposes: [],
+  shared: externals,
+});
 
 describe('createPoolDynamicExternals', () => {
   let poolDynamicExternals: ForPoolingDynamicExternals;
@@ -393,14 +392,14 @@ describe('createPoolDynamicExternals', () => {
       bar: committed('bar', { tag: '17.0.0', remotes: ['host', 'mfe'] }),
     });
     const actions: SharedInfoActions = {
-      foo: { action: 'skip', override: 'http://host/foo.js' },
+      foo: { action: 'skip', override: { foo: 'http://host/foo.js' } },
       bar: { action: 'scope' },
     };
 
     const result = await poolDynamicExternals({ entry, actions });
 
     expect(result.actions).toEqual({
-      foo: { action: 'skip', override: 'http://host/foo.js' },
+      foo: { action: 'skip', override: { foo: 'http://host/foo.js' } },
       bar: { action: 'scope' },
     });
     expect(adapters.sharedExternalsRepo.addOrUpdate).not.toHaveBeenCalled();
@@ -643,7 +642,7 @@ describe('createPoolDynamicExternals', () => {
       ]);
     });
 
-    // Within-tag order is observable (round 1's arrival-order ties, determine's `versions[0]`). The verdict
+    // Within-tag order is observable (round 1's record-order ties, determine's `versions[0]`). The verdict
     // write orders by tag alone: a `scope` row ahead of the `share` row at its tag stays ahead.
     it("keeps a tag's rows in the order the record had them", async () => {
       givenCommitted({
@@ -875,14 +874,24 @@ describe('createPoolDynamicExternals', () => {
       [
         'strictEntryPointCoverage',
         undefined,
-        (c: ConfigContract) => (c.strict.strictEntryPointCoverage = true),
+        (c: ConfigContract): void => {
+          c.strict.strictEntryPointCoverage = true;
+        },
       ],
       [
         'scopeUncoveredEntrypoints',
         undefined,
-        (c: ConfigContract) => (c.profile.scopeUncoveredEntrypoints = true),
+        (c: ConfigContract): void => {
+          c.profile.scopeUncoveredEntrypoints = true;
+        },
       ],
-      ['strictImportMap', 'team', (c: ConfigContract) => (c.strict.strictImportMap = true)],
+      [
+        'strictImportMap',
+        'team',
+        (c: ConfigContract): void => {
+          c.strict.strictImportMap = true;
+        },
+      ],
     ] as const)('keeps a partly served share under %s (%s)', async (_policy, shareScope, set) => {
       set(config);
       scopeUrls('F');
@@ -994,8 +1003,14 @@ describe('createPoolDynamicExternals', () => {
         }),
       });
       const actions: SharedInfoActions = {
-        '@framework/core': { action: 'skip', override: 'http://host/core.js' },
-        '@framework/common': { action: 'skip', override: 'http://host/common.js' },
+        '@framework/core': {
+          action: 'skip',
+          override: { '@framework/core': 'http://host/core.js' },
+        },
+        '@framework/common': {
+          action: 'skip',
+          override: { '@framework/common': 'http://host/common.js' },
+        },
       };
 
       const result = await poolDynamicExternals({ entry, actions });
@@ -1007,7 +1022,7 @@ describe('createPoolDynamicExternals', () => {
       // Names only: the loaded remote's verdicts are untouched by the write.
       expect(result.actions['@framework/core']).toEqual({
         action: 'skip',
-        override: 'http://host/core.js',
+        override: { '@framework/core': 'http://host/core.js' },
       });
     });
 

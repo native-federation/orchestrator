@@ -1,5 +1,6 @@
 import type { DeepReadonly } from 'lib/utils/deep-readonly';
-import type { SharedExternal, shareScope } from '../externals/external.contract';
+import type { ExternalName, SharedExternal, shareScope } from '../externals/external.contract';
+import type { PoolMember, PoolName } from './membership';
 
 // What pooling writes onto a record: `poolName`, `poolWinner`, and `servedBy`/`poolCause` per copy. Outside a
 // pool all of it is stale. The declared `pool` label is pooling's input, not a result, and always stays.
@@ -31,4 +32,19 @@ export function scopeHasPoolState(scope: DeepReadonly<shareScope>): boolean {
       for (const remote of version.remotes) if (remote.pool?.trim()) return true;
   }
   return false;
+}
+
+// The record of every member whose stored `poolName` is not its pool's, under the new name, pool results
+// kept: a pool nobody re-elected can still be renamed by another. Each member must be a key of `scope`,
+// which holds the stored name. An external in no pool keeps its stored name until the next dirty init
+// strips it.
+export function renamedRecords(
+  scope: shareScope,
+  pools: ReadonlyMap<PoolName, readonly PoolMember[]>
+): [ExternalName, SharedExternal][] {
+  const renamed: [ExternalName, SharedExternal][] = [];
+  for (const [poolName, members] of pools)
+    for (const { name } of members)
+      if (scope[name]!.poolName !== poolName) renamed.push([name, { ...scope[name]!, poolName }]);
+  return renamed;
 }

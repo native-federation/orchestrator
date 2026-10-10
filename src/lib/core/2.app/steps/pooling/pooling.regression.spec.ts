@@ -559,7 +559,7 @@ describe('pooling regressions', () => {
    * stored as `poolWinner`.
    *
    * r0 ships m0 and m4; r1 ships m1..m4; all at 18.1.1. Neither build serves the other, both agree, so the
-   * election ties and arrival order elects r0.
+   * election ties and record order elects r0.
    */
   describe('re-election keeps a tied winner', () => {
     let p: ReturnType<typeof portfolio>;
@@ -615,8 +615,8 @@ describe('pooling regressions', () => {
   });
 
   /**
-   * Found by the property suite: two equal builds tying for a subpool were told apart by arrival order,
-   * so a permuted manifest renamed the subpool, and a re-election, which reads arrival from the record pooling
+   * Found by the property suite: two equal builds tying for a subpool were told apart by record order,
+   * so a permuted manifest renamed the subpool, and a re-election, which reads that order from the record pooling
    * rewrote, could pick the other build and move a remote off the global map. A subpool tie now goes by name.
    *
    * The host ships the family at 18.0.0, which neither `^17` remote accepts. team/b and team/a ship one 17.0.0

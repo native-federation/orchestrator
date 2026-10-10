@@ -24,7 +24,7 @@ describe('rows', () => {
       expect(shape(versions.sort(newest))).toEqual(['2.10.0:share:[b]', '2.9.0:skip:[a]']);
     });
 
-    // Within-tag order is observable (round 1's arrival-order ties, determine's `versions[0]`): the dynamic
+    // Within-tag order is observable (round 1's record-order ties, determine's `versions[0]`): the dynamic
     // verdict write relies on this to keep a record's rows where they were.
     it("leaves one tag's rows in the order they came", () => {
       const versions = [

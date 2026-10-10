@@ -15,8 +15,7 @@ import {
 } from 'lib/core/1.domain';
 import { copiesByRemote } from 'lib/core/1.domain/pooling/builds';
 import { buildPools, type PoolMember, type PoolName } from 'lib/core/1.domain/pooling/membership';
-import { renamedRecords, renamesOf } from 'lib/core/1.domain/pooling/plan';
-import { scopeHasPoolState } from 'lib/core/1.domain/pooling/pool-state';
+import { renamedRecords, scopeHasPoolState } from 'lib/core/1.domain/pooling/pool-state';
 import {
   committedView,
   type CopyMove,
@@ -41,22 +40,15 @@ export function createPoolDynamicExternals(
   // The committed map is immutable, so this only rewrites the loaded remote's own actions and copies, never
   // another remote's. See docs/version-resolver.md §"Scope and dynamic init".
   return ({ entry, actions }) => {
-    for (const [shareScope, names] of poolableNames(entry, actions)) {
+    for (const [scope, names] of poolableNames(entry, actions)) {
       // A label anywhere in the committed scope forms pools this entry is subject to — its own label is not
       // required, and the pool covers the whole external, this entry's copies included.
-      const committed = ports.sharedExternalsRepo.getFromScope(shareScope);
+      const committed = ports.sharedExternalsRepo.getFromScope(scope);
       if (!scopeHasPoolState(committed)) continue;
 
       const { pools } = buildPools(committed);
-      const moves = judgeScope(
-        entry.name,
-        names,
-        actions,
-        pools,
-        Object.keys(committed),
-        shareScope
-      );
-      writeMoves(entry.name, moves, committed, pools, shareScope);
+      const moves = judgeScope(entry.name, names, actions, pools, Object.keys(committed), scope);
+      writeMoves(entry.name, moves, committed, pools, scope);
     }
 
     return Promise.resolve({ entry, actions });
@@ -69,9 +61,9 @@ export function createPoolDynamicExternals(
     actions: SharedInfoActions,
     pools: ReadonlyMap<PoolName, PoolMember[]>,
     recordOrder: ExternalName[],
-    shareScope: string
+    scope: string
   ): Map<ExternalName, CopyMove> {
-    const policy = { shareScope, selfFill: maySelfFill(shareScope), scopeUrlOf };
+    const policy = { shareScope: scope, selfFill: maySelfFill(scope), scopeUrlOf };
     const moves = new Map<ExternalName, CopyMove>();
     const selfServe = (members: PoolMember[], cause: PoolCause) => {
       for (const { name } of members) {
@@ -92,7 +84,7 @@ export function createPoolDynamicExternals(
       const view = committedView(pool, shipped, recordOrder, remote);
       const verdict = judgeRemote(shipped.get(remote) ?? [], view, accepts);
       if (verdict !== 'global') {
-        config.log.warn(8, `[${shareScope}] ${selfServeWarning(remote, verdict, mine.length)}`);
+        config.log.warn(8, `[${scope}] ${selfServeWarning(remote, verdict, mine.length)}`);
         selfServe(mine, verdict.cause);
         continue;
       }
@@ -100,7 +92,7 @@ export function createPoolDynamicExternals(
       const cover = coverFromMap(remote, mine, view, actions, policy);
       if ('unmapped' in cover) {
         // Half its family on the map's files and half on its own build would tear it.
-        warnUnmapped(shareScope, remote, cover.unmapped);
+        warnUnmapped(scope, remote, cover.unmapped);
         selfServe(mine, 'uncovered');
         continue;
       }
@@ -118,36 +110,37 @@ export function createPoolDynamicExternals(
     return moves;
   }
 
-  // Writes the moves back so a reload rebuilds the map this delta publishes, not the one `update-cache` recorded.
+  // Writes the moves back so a reload rebuilds the map this delta publishes, not the one `update-cache`
+  // recorded.
   function writeMoves(
     remote: RemoteName,
     moves: ReadonlyMap<ExternalName, CopyMove>,
     committed: shareScope,
     pools: ReadonlyMap<PoolName, PoolMember[]>,
-    shareScope: string
+    scope: string
   ): void {
     const written: Record<string, SharedExternal> = {};
     for (const [name, move] of moves) {
       written[name] = recordMove(committed[name]!, remote, move, ports.versionCheck.compare);
-      ports.sharedExternalsRepo.addOrUpdate(name, written[name], shareScope);
+      ports.sharedExternalsRepo.addOrUpdate(name, written[name], scope);
     }
     const merged = { ...committed, ...written };
-    for (const [name, record] of renamedRecords(merged, renamesOf(merged, pools)))
-      ports.sharedExternalsRepo.addOrUpdate(name, record, shareScope);
+    for (const [name, record] of renamedRecords(merged, pools))
+      ports.sharedExternalsRepo.addOrUpdate(name, record, scope);
   }
 
   // Whether an entrypoint a skip leaves uncovered may come from the remote's own build: the coverage policies
   // refuse it, and so does the next page of a named scope, for a skip-only package, under `strictImportMap`.
-  function maySelfFill(shareScope: string): boolean {
+  function maySelfFill(scope: string): boolean {
     if (config.strict.strictEntryPointCoverage || config.profile.scopeUncoveredEntrypoints)
       return false;
-    return shareScope === GLOBAL_SCOPE || !config.strict.strictImportMap;
+    return scope === GLOBAL_SCOPE || !config.strict.strictImportMap;
   }
 
-  function warnUnmapped(shareScope: string, remote: RemoteName, build: RemoteName): void {
+  function warnUnmapped(scope: string, remote: RemoteName, build: RemoteName): void {
     config.log.warn(
       8,
-      `[${shareScope}][${remote}] '${build}' is not in the cache, so its files cannot be mapped.`
+      `[${scope}][${remote}] '${build}' is not in the cache, so its files cannot be mapped.`
     );
   }
 }
@@ -163,9 +156,9 @@ function poolableNames(
     if (!external.singleton || !actions[name]) continue;
     if (external.shareScope === STRICT_SCOPE) continue;
 
-    const shareScope = external.shareScope ?? GLOBAL_SCOPE;
-    let names = declared.get(shareScope);
-    if (!names) declared.set(shareScope, (names = new Set()));
+    const scope = external.shareScope ?? GLOBAL_SCOPE;
+    let names = declared.get(scope);
+    if (!names) declared.set(scope, (names = new Set()));
     names.add(name);
   }
   return declared;

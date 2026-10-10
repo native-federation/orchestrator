@@ -30,25 +30,3 @@ export function planElection(scope: DeepReadonly<shareScope>, poolable: boolean)
       dissolved.set(name, { ...withoutPoolResults(external), dirty: true });
   return { pools, dissolved, labelledAlone };
 }
-
-// Every member whose stored `poolName` is not its pool's: a pool nobody re-elected can still be renamed by
-// another. Each member must be a key of `scope`. An external in no pool keeps its stored name until the next
-// dirty init strips it.
-export function renamesOf(
-  scope: DeepReadonly<shareScope>,
-  pools: ReadonlyMap<PoolName, readonly PoolMember[]>
-): [ExternalName, PoolName][] {
-  const renames: [ExternalName, PoolName][] = [];
-  for (const [poolName, members] of pools)
-    for (const { name } of members)
-      if (scope[name]!.poolName !== poolName) renames.push([name, poolName]);
-  return renames;
-}
-
-// The record of each renamed member under its new pool name, pool results kept: its pool was not re-elected.
-export function renamedRecords(
-  scope: shareScope,
-  renames: readonly [ExternalName, PoolName][]
-): [ExternalName, SharedExternal][] {
-  return renames.map(([name, poolName]) => [name, { ...scope[name]!, poolName }]);
-}

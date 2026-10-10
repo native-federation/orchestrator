@@ -22,7 +22,7 @@ import { agrees, shippedTogether } from './rules';
 // The dynamic gate: a remote loaded at runtime resolves through the committed global map or serves its whole
 // pool family itself. See docs/version-resolver.md §"Scope and dynamic init".
 
-export type CommittedView = {
+type CommittedView = {
   builds: Map<RemoteName, Build>;
   // What the committed `imports` serves, per specifier.
   global: Map<Specifier, { tag: VersionName; remote: RemoteName; file: string }>;
@@ -35,7 +35,7 @@ export type GateMiss =
   | { cause: 'uncovered'; unshipped: true };
 
 // A member whose action the map now serves: `toSkip` turns its share or resolver scope into a skip.
-export type MapCover = {
+type MapCover = {
   name: ExternalName;
   toSkip: boolean;
   covered: Specifier[];

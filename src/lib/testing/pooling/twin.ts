@@ -172,8 +172,7 @@ export async function twinGate(
     }
     const shape = r.cause ? 'AG-i' : r.servedBy === R ? 'KB' : 'SG';
     globals.push({ specifier: s, shape });
-    if (shape !== 'KB' && r.cause === 'incompatible')
-      reds.push({ check: 'rejected', specifier: s, detail });
+    if (r.cause === 'incompatible') reds.push({ check: 'rejected', specifier: s, detail });
     const c = committed(s);
     if (c !== undefined && tUrl !== c)
       reds.push({ check: 'iv', specifier: s, detail: { ...detail, committed: c } });

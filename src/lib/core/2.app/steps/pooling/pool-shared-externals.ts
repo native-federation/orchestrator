@@ -74,7 +74,7 @@ export function createPoolSharedExternals(
     return members.map(m => [m.name, { ...memberRecord(m, placed), poolWinner: placed.winner }]);
   }
 
-  // The strict refusal, then why each remote missed round 1.
+  // The strict refusal, then why each remote missed round 1, or why a served build keeps its subpool.
   function report(
     poolName: PoolName,
     members: PoolMember[],

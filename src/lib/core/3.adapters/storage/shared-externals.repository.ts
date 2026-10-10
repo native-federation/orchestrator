@@ -89,7 +89,7 @@ const createSharedExternalsRepository = (config: StorageConfig): ForSharedExtern
           if (poolName !== undefined) lostPools.add(poolName);
           delete scope[name];
         }
-        // A deleted external leaves nothing dirty behind, so mark its pool's siblings dirty or the next init skips the scope.
+        // Nothing dirty is left behind, so mark its pool's siblings dirty or the next init skips the scope.
         if (lostPools.size > 0)
           for (const external of Object.values(scope))
             if (external.poolName !== undefined && lostPools.has(external.poolName))
