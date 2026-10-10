@@ -1013,7 +1013,7 @@ describe('createPoolDynamicExternals', () => {
 
     // Committed pools x = {p, q} and y = {r, s}. The loaded remote labels its copy of r `x`, which joins
     // both into one pool named `x` (three declarations against two). s is no member the load declares and
-    // gets no verdict, yet its stored `y` must become `x`: the next init spreads dirty by stored name.
+    // gets no verdict, yet its stored `y` must become `x`, the pool the record now computes.
     it('renames a committed member of a pool a load merged into another', async () => {
       const entry = entryWith(shared('r', { pool: 'x' }));
       const labelled = (name: string, pool: string) =>
@@ -1068,7 +1068,7 @@ describe('createPoolDynamicExternals', () => {
 
       await poolDynamicExternals({ entry, actions: { rxjs: { action: 'skip' } } });
 
-      // The next init spreads dirty by the stored name before it strips it, so the name must survive the load.
+      // An external in no pool keeps its stored name until the next dirty init strips it.
       expect(adapters.sharedExternalsRepo.addOrUpdate).not.toHaveBeenCalled();
     });
   });

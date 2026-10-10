@@ -32,13 +32,12 @@ const record = (
 });
 
 const shape = (plan: ElectionPlan) => ({
-  dirtyPools: [...plan.dirtyPools].map(([name, members]) => [name, members.map(m => m.name)]),
+  pools: [...plan.pools].map(([name, members]) => [name, members.map(m => m.name)]),
   dissolved: [...plan.dissolved.keys()],
-  renames: plan.renames,
   labelledAlone: plan.labelledAlone,
 });
 
-const EMPTY = { dirtyPools: [], dissolved: [], renames: [], labelledAlone: [] };
+const EMPTY = { pools: [], dissolved: [], labelledAlone: [] };
 
 describe('planElection', () => {
   beforeEach(() => {
@@ -76,7 +75,7 @@ describe('planElection', () => {
     expect(buildPools).not.toHaveBeenCalled();
   });
 
-  it('re-elects a pool whole when one member is dirty, and leaves a clean pool out of it', () => {
+  it('re-elects every pool of the scope when one member is dirty, clean pools included', () => {
     const scope: shareScope = {
       a: record({ dirty: true, pool: 'g' }),
       b: record({ pool: 'g', poolName: 'g' }),
@@ -86,26 +85,19 @@ describe('planElection', () => {
 
     const plan = planElection(scope, true);
 
-    expect(shape(plan)).toEqual({ ...EMPTY, dirtyPools: [['g', ['a', 'b']]] });
+    expect(shape(plan)).toEqual({
+      ...EMPTY,
+      pools: [
+        ['g', ['a', 'b']],
+        ['h', ['c', 'd']],
+      ],
+    });
     // Members are handed over as stored: the clean member is not marked dirty in the plan or the scope.
-    expect(plan.dirtyPools.get('g')![1]!.external).toBe(scope['b']);
+    expect(plan.pools.get('g')![1]!.external).toBe(scope['b']);
     expect(scope['b']!.dirty).toBe(false);
   });
 
-  it('re-elects a clean pool that a dirty external reaches through a stored poolName', () => {
-    // `x` now pools alone with nobody, but stored `g` with b and c: the spread (reelection.spec.ts) drags the
-    // pool it left into re-election.
-    const scope: shareScope = {
-      x: record({ dirty: true, poolName: 'g' }),
-      b: record({ pool: 'g', poolName: 'g' }),
-      c: record({ pool: 'g', poolName: 'g' }),
-    };
-
-    expect(shape(planElection(scope, true)).dirtyPools).toEqual([['g', ['b', 'c']]]);
-  });
-
-  it('strips every external that left every pool and marks it dirty, reached by the spread or not', () => {
-    // `far` stored a pool name nothing dirty shares: it is stripped anyway, scope-wide.
+  it('strips every external that left every pool and marks it dirty', () => {
     const scope: shareScope = {
       a: record({ dirty: true }),
       near: record({ poolName: 'g', servedBy: 'team/b' }),
@@ -121,18 +113,6 @@ describe('planElection', () => {
       expect(external.dirty).toBe(true);
     }
     expect(plan.dissolved.get('near')).toEqual({ ...record(), dirty: true });
-  });
-
-  it("renames a clean pool's member whose stored poolName is not the computed one", () => {
-    const scope: shareScope = {
-      a: record({ dirty: true, pool: 'g' }),
-      b: record({ pool: 'g' }),
-      c: record({ pool: 'h', poolName: 'old' }),
-      d: record({ pool: 'h', poolName: 'h' }),
-    };
-
-    // The dirty pool is renamed by its election, not here.
-    expect(shape(planElection(scope, true)).renames).toEqual([['c', 'h']]);
   });
 
   it('lists a labelled external that pooled with nothing', () => {
@@ -166,7 +146,7 @@ describe('planElection', () => {
     ];
     const sorted = (plan: ElectionPlan) => {
       const s = shape(plan);
-      return { ...s, dissolved: s.dissolved.sort(), renames: s.renames.sort() };
+      return { ...s, pools: s.pools.sort(), dissolved: s.dissolved.sort() };
     };
 
     expect(sorted(planElection(Object.fromEntries([...entries].reverse()), true))).toEqual(

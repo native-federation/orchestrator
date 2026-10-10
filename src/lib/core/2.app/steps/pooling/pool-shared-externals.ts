@@ -8,7 +8,7 @@ import { acceptsTag } from 'lib/core/1.domain/externals/compatibility';
 import { type Copy, copiesByRemote } from 'lib/core/1.domain/pooling/builds';
 import { elect, type PoolMiss } from 'lib/core/1.domain/pooling/election';
 import type { PoolMember, PoolName } from 'lib/core/1.domain/pooling/membership';
-import { type ElectionPlan, planElection, renamedRecords } from 'lib/core/1.domain/pooling/plan';
+import { type ElectionPlan, planElection } from 'lib/core/1.domain/pooling/plan';
 import { memberRecord, type PlacedPool, previousWinner } from 'lib/core/1.domain/pooling/placement';
 import type { Specifier } from 'lib/core/1.domain/externals/specifier';
 
@@ -26,12 +26,10 @@ export function createPoolSharedExternals(
       try {
         const plan = planElection(sharedExternals, repo.scopeType(scope) !== 'strict');
         logPlan(plan, scope);
-        for (const [poolName, members] of plan.dirtyPools)
+        for (const [poolName, members] of plan.pools)
           for (const [name, record] of poolRecords(poolName, members, scope))
             repo.addOrUpdate(name, record, scope);
         for (const [name, external] of plan.dissolved) repo.addOrUpdate(name, external, scope);
-        for (const [name, record] of renamedRecords(sharedExternals, plan.renames))
-          repo.addOrUpdate(name, record, scope);
       } catch (error) {
         if (error instanceof NFError) return Promise.reject(error);
         config.log.error(3, `[${scope}] failed to pool shared externals.`, {
@@ -47,11 +45,6 @@ export function createPoolSharedExternals(
   };
 
   function logPlan(plan: ElectionPlan, scope: string): void {
-    let spread = 0;
-    for (const members of plan.dirtyPools.values())
-      spread += members.filter(m => !m.external.dirty).length;
-    if (spread > 0)
-      config.log.debug(3, `[${scope}] ${spread} clean pool member(s) re-elected with their pool.`);
     if (plan.dissolved.size > 0)
       config.log.debug(
         3,

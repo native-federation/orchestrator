@@ -511,7 +511,7 @@ describe('pooling properties: redeploys (generated portfolios)', { timeout: TIME
     run(16, redeploys(true), 100, warmEqualsReelected));
 
   // Found at offset 202: a redeploy relabels an external out of its pool; the half that keeps its stored
-  // name has no dirty member, so only the spread by stored name re-elects it.
+  // name has no dirty member, so only re-electing every pool of a dirty scope re-elects it.
   it('redeploy: a label change that splits a pool re-elects both halves', () =>
     run(202, redeploys(), 100, warmEqualsReelected, { fixed: true }));
 

@@ -9,11 +9,11 @@ import { type CopySpec, portfolio } from 'lib/testing/pooling/portfolio';
 import { outcome } from 'lib/testing/pooling/property-harness';
 
 /**
- * When the init flow re-elects a pool, and what it does to stored pool state it does not re-elect. A pool
- * is one unit of state: whenever any member changed, every member is elected again as one family, and a
- * pool nobody changed keeps what storage holds. Pool state on an external that left every pool is stale by
- * definition and is cleared. See docs/version-resolver.md §"How the verdicts land in the record and the
- * map".
+ * When the init flow re-elects a pool, and what it does to stored pool state it does not re-elect. A share
+ * scope is one unit of state: whenever any external in it changed, every pool of it is elected again, each
+ * as one family, and a scope nobody changed keeps what storage holds. Pool state on an external that left
+ * every pool is stale by definition and is cleared. See docs/version-resolver.md §"How the verdicts land in
+ * the record and the map".
  *
  * Every init runs the real flow on the portfolio harness. The "stale" records below are ones a re-election
  * would change (an island stored without its `poolCause`), so whether a pool was re-elected can be read
@@ -91,18 +91,6 @@ describe('pooling re-election', () => {
     );
   };
 
-  it('re-elects the whole pool when one member changed', async () => {
-    seedStaleIsland('framework', { core: true, common: false });
-
-    await p.runInit();
-
-    // common was not dirty, and is elected with core all the same.
-    expect(causes()).toEqual([
-      'mfe3@@framework/common: incompatible',
-      'mfe3@@framework/core: incompatible',
-    ]);
-  });
-
   it('leaves a pool alone when no member changed: a plain reload re-elects nothing', async () => {
     seedStaleIsland('framework', { core: false, common: false });
 
@@ -111,18 +99,8 @@ describe('pooling re-election', () => {
     expect(causes()).toEqual([]);
   });
 
-  it('does not cross pool boundaries', async () => {
-    // Two npm scopes are two pools, so the changed one must not drag the other in.
-    seedStaleIsland('one', { core: true, common: false });
-    seedStaleIsland('two', { core: false, common: false });
-
-    await p.runInit();
-
-    expect(causes()).toEqual(['mfe3@@one/common: incompatible', 'mfe3@@one/core: incompatible']);
-  });
-
-  // Fails until rework 20 D-5: anything dirty in a share scope re-elects every pool of that scope.
-  it.fails('re-elects every pool of the scope when one pool changed', async () => {
+  // Also pins the whole pool: one/common was not dirty, and is elected with one/core all the same.
+  it('re-elects every pool of the scope when one pool changed', async () => {
     seedStaleIsland('one', { core: true, common: false });
     seedStaleIsland('two', { core: false, common: false });
 
@@ -136,76 +114,21 @@ describe('pooling re-election', () => {
     ]);
   });
 
-  // Fails until rework 20 D-5, as above: here the change is an external in no pool.
-  it.fails('re-elects every pool of the scope when an external in no pool changed', async () => {
-    seedStaleIsland('framework', { core: false, common: false });
-    p.seed('rxjs', [p.version('7.0.0', 'rxjs', [copy('mfe1', '^7.0.0')])]);
-
-    await p.runInit();
-
-    expect(causes()).toEqual([
-      'mfe3@@framework/common: incompatible',
-      'mfe3@@framework/core: incompatible',
-    ]);
-  });
-
-  // Dirty spreads over the stored pool names and the computed pools together, to a fixpoint. The pools
-  // as computed now: a = {s1, s3}, b = {s2, t1}, c = {t2, t3}; as stored: S = {s1, s2, s3} and
-  // T = {t1, t2, t3}. s2 is dirty: S drags in s1 and s3, b drags in t1, and only the next hop, T, reaches
-  // c, which holds the stale island. Defensive: no generated portfolio reaches a record where one hop
-  // differs from the closure (an init stores every name as computed), but the closure costs nothing and
-  // does not depend on every other path writing merged names right.
-  it('spreads dirty across stored and computed pools transitively', async () => {
-    const plain = (name: string, label: string, poolName: string, dirty: boolean) =>
-      p.seed(
-        name,
-        [p.version('1.0.0', name, [{ remote: 'mfe1', req: '^1.0.0', pool: label }], 'share')],
-        dirty,
-        { poolName, poolWinner: 'mfe1' }
-      );
-    plain('s1', 'a', 'S', false);
-    plain('s3', 'a', 'S', false);
-    plain('s2', 'b', 'S', true);
-    plain('t1', 'b', 'T', false);
-    // c as `seedStaleIsland` stores it: mfe3 runs t2 at 18 against the 17 majority, with no `poolCause`.
-    const c = (remote: string, req: string) => ({ remote, req, pool: 'c' });
-    const stored = { poolName: 'T', poolWinner: 'mfe1' };
-    p.seed(
-      't2',
-      [
-        p.version('17.0.0', 't2', [c('mfe1', '^17.0.0'), c('mfe2', '^17.0.0')], 'share'),
-        p.version('18.0.0', 't2', [c('mfe3', '^18.0.0')], 'scope'),
-      ],
-      false,
-      stored
-    );
-    p.seed(
-      't3',
-      [
-        p.version('17.0.0', 't3', [c('mfe1', '^17.0.0')], 'share'),
-        p.version('17.0.0', 't3', [c('mfe3', '^17.0.0')], 'scope'),
-      ],
-      false,
-      stored
-    );
-
-    await p.runInit();
-
-    expect(causes()).toEqual(['mfe3@t2: incompatible', 'mfe3@t3: incompatible']);
-  });
-
-  it('renames a pool nobody changed, without re-electing it', async () => {
+  // Stored under an old name, so this also pins that a re-election renames the pool: the members are
+  // written under the computed name, mfe1 wins, and the island gains its cause.
+  it('re-elects every pool of the scope when an external in no pool changed', async () => {
     seedStaleIsland('framework', { core: false, common: false }, 'old-name');
-    // Something else in the scope changed, so this init does run pooling over the scope.
     p.seed('rxjs', [p.version('7.0.0', 'rxjs', [copy('mfe1', '^7.0.0')])]);
 
     await p.runInit();
 
     expect(p.record('@framework/core').poolName).toBe('framework');
     expect(p.record('@framework/common').poolName).toBe('framework');
-    // A rename is no election: the stored winner rides along, and no island gains its cause.
     expect(p.record('@framework/core').poolWinner).toBe('mfe1');
-    expect(causes()).toEqual([]);
+    expect(causes()).toEqual([
+      'mfe3@@framework/common: incompatible',
+      'mfe3@@framework/core: incompatible',
+    ]);
   });
 
   // Regression for a leftover `servedBy` pointing a copy at a build after its pool had dissolved
@@ -303,9 +226,8 @@ describe('pooling re-election', () => {
      * Redeploys that change a pool without dirtying the part that must be re-elected, which a warm page used
      * to keep as a stale election a full re-election of the same state would not make. The oracle is that
      * equivalence: warm after the redeploy ≡ every pool re-elected on the next page (`settled`). They pass
-     * because a dirty external spreads dirty to every external with the same stored `poolName` (read before
-     * pooling clears it) and `removeFromAllScopes` marks the same-`poolName` survivors of an external it
-     * deletes dirty.
+     * because any dirty external re-elects every pool of its scope and `removeFromAllScopes` marks the
+     * same-`poolName` survivors of an external it deletes dirty.
      *
      * The equivalence alone holds vacuously when nothing stores a `poolName` (`reelect()` then re-elects
      * nothing), so each case also asserts the warm page directly.
@@ -396,9 +318,9 @@ describe('pooling re-election', () => {
       // F3. a and b are labelled `x` by everyone; c is labelled `y` by W and Q, but R labels it `x`, which
       // joins all three into one pool, where Q's c 1.0.0 islands Q's whole family `incompatible`. R redeploys
       // labelling c `y`: the pool splits into {a, b} and a lone c, but only c (whose copies changed) is
-      // dirty. Unless dirty spreads by stored name, the untouched half keeps the merged election: Q's a and b
-      // stay in `scope` rows (a second download of the global 2.0.0, `incompatible`) where a re-election
-      // shares them. The stored names must be read before pooling clears them.
+      // dirty. Unless every pool of the scope is re-elected, the untouched half keeps the merged election: Q's
+      // a and b stay in `scope` rows (a second download of the global 2.0.0, `incompatible`) where a
+      // re-election shares them.
       it('re-elects both halves when a label change splits a pool', async () => {
         const W = remote(
           'W',
@@ -425,8 +347,8 @@ describe('pooling re-election', () => {
 
       // P1. Per-remote labels: Y labels a and b `p`, X labels a `q`, and W, V, U label c1 and c2 `q`; X's
       // label joins everything into one pool `q`, won by Y. X redeploys without `a`: the pool splits into
-      // {a, b} (now `p`) and {c1, c2}, which keeps the name `q` and has no dirty member. Unless dirty spreads
-      // by stored name, warm keeps `q`'s stale election: `poolWinner` Y, which ships no member of `q`, U's
+      // {a, b} (now `p`) and {c1, c2}, which keeps the name `q` and has no dirty member. Unless every pool of
+      // the scope is re-elected, warm keeps `q`'s stale election: `poolWinner` Y, which ships no member of `q`, U's
       // 18 as a subpool for V, and W `uncovered`. A re-election elects V's 18 for `q` (global) and islands W
       // as `incompatible`.
       it('re-elects the half of a split pool that keeps its name', async () => {

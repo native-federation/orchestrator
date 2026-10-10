@@ -1,53 +1,39 @@
 import type { ExternalName, SharedExternal, shareScope } from '../externals/external.contract';
 import { buildPools, type PoolMember, type PoolName } from './membership';
 import { hasPoolResults, scopeHasPoolState, withoutPoolResults } from './pool-state';
-import { reelectedNames } from './reelection';
 import type { DeepReadonly } from 'lib/utils/deep-readonly';
 
 export type ElectionPlan = {
-  dirtyPools: Map<PoolName, PoolMember[]>;
+  pools: Map<PoolName, PoolMember[]>;
   // Externals in no pool that still carry pool results, stripped and dirty so determine re-elects them.
   dissolved: Map<ExternalName, SharedExternal>;
-  // Members of a pool nobody re-elects whose stored `poolName` is not the computed one.
-  renames: [ExternalName, PoolName][];
   labelledAlone: ExternalName[];
 };
 
-// Reads the scope, never writes it. A pool is one unit of state: any dirty member re-elects it whole. See
+// Reads the scope, never writes it. Any dirty external re-elects every pool of its scope. See
 // docs/version-resolver.md §"How the verdicts land in the record and the map".
 export function planElection(scope: DeepReadonly<shareScope>, poolable: boolean): ElectionPlan {
-  const plan: ElectionPlan = {
-    dirtyPools: new Map(),
-    dissolved: new Map(),
-    renames: [],
-    labelledAlone: [],
-  };
   // Nothing dirty ⇒ nothing to re-elect, so skip before building the graph. Measured, this was the whole
   // pooling cost of a warm init.
-  if (!poolable || !Object.values(scope).some(external => external.dirty)) return plan;
-  if (!scopeHasPoolState(scope)) return plan;
+  if (
+    !poolable ||
+    !Object.values(scope).some(external => external.dirty) ||
+    !scopeHasPoolState(scope)
+  )
+    return { pools: new Map(), dissolved: new Map(), labelledAlone: [] };
 
   const { pools, labelledAlone } = buildPools(scope);
-  plan.labelledAlone = labelledAlone;
-  const reelected = reelectedNames(scope, pools);
-  const pooled = new Set<ExternalName>();
-  const clean = new Map<PoolName, PoolMember[]>();
-  for (const [poolName, members] of pools) {
-    for (const { name } of members) pooled.add(name);
-    if (members.some(m => reelected.has(m.name))) plan.dirtyPools.set(poolName, members);
-    else clean.set(poolName, members);
-  }
-  plan.renames = renamesOf(scope, clean);
-
+  const pooled = new Set([...pools.values()].flatMap(members => members.map(m => m.name)));
+  const dissolved = new Map<ExternalName, SharedExternal>();
   for (const [name, external] of Object.entries(scope))
     if (!pooled.has(name) && hasPoolResults(external))
-      plan.dissolved.set(name, { ...withoutPoolResults(external), dirty: true });
-  return plan;
+      dissolved.set(name, { ...withoutPoolResults(external), dirty: true });
+  return { pools, dissolved, labelledAlone };
 }
 
 // Every member whose stored `poolName` is not its pool's: a pool nobody re-elected can still be renamed by
-// another. Each member must be a key of `scope`. An external in no pool keeps its stored name, which the next
-// init's plan spreads dirty by before it strips it.
+// another. Each member must be a key of `scope`. An external in no pool keeps its stored name until the next
+// dirty init strips it.
 export function renamesOf(
   scope: DeepReadonly<shareScope>,
   pools: ReadonlyMap<PoolName, readonly PoolMember[]>

@@ -795,9 +795,9 @@ the file.
 the `skip` copies, so flat and dense builds of one specifier cannot race on external order. A copy carrying a
 `servedBy` never fills the global map: it runs another build.
 
-A pool is re-elected as a **unit**, and every member of a re-elected pool is written back: pooling's election
-plan (`planElection`) re-elects every member as soon as one is dirty, so pooling never reads back half of its
-own previous verdict.
+Pools are re-elected per **scope**, and every member of a re-elected pool is written back: pooling's election
+plan (`planElection`) re-elects every pool of a scope with any dirty external, so pooling never reads back half
+of its own previous verdict and a warm init elects what a cold one would.
 
 #### Declare the coupling you actually have
 
@@ -1273,9 +1273,9 @@ sequenceDiagram
 
 **Why this matters**: The dirty flag prevents unnecessary re-resolution of dependencies that haven't changed within their scope, improving performance when the same micro frontends are loaded repeatedly.
 
-Pooling runs before step 3. It skips any scope with no dirty external, re-elects every pool with a dirty
-member and writes those members clean; step 3 then elects whatever is still dirty. A warm init — every remote
-already cached, nothing dirty — therefore costs neither resolution nor pooling.
+Pooling runs before step 3. It skips any scope with no dirty external, re-elects every pool of a scope with
+any dirty external and writes those members clean; step 3 then elects whatever is still dirty. A warm init —
+every remote already cached, nothing dirty — therefore costs neither resolution nor pooling.
 
 ## Understanding "strictVersion"
 

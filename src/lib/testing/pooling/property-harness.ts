@@ -398,8 +398,8 @@ export function strayNames(record: shareScope): string[] {
   return out;
 }
 
-// Every stored `poolName` that differs from the pool the record computes now (undefined in no pool). Warm
-// re-election spreads dirty by stored name, so a name out of sync is a pool nothing would re-elect whole.
+// Every stored `poolName` that differs from the pool the record computes now (undefined in no pool). An
+// election writes every member under its pool's name, so a name out of sync is a record no election wrote.
 // `pooledOnly` skips externals in no pool: a dynamic load leaves their stale names for the next init.
 export function poolNameDrift(record: shareScope, { pooledOnly = false } = {}): string[] {
   const computed = new Map<string, string>();

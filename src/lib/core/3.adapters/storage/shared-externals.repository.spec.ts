@@ -575,10 +575,10 @@ describe('createSharedExternalsRepository', () => {
         },
       });
     });
-    // A pool's stored name is the only trace of its membership once a member is gone: the next init
-    // spreads dirty from dirty members by that name, and a deleted external is no member any more. Only
-    // its same-named survivors in the same scope are marked; a lost copy alone already dirties its own
-    // external, which spreads from there.
+    // A pool's stored name is the only trace of its membership once a member is gone, and a deleted
+    // external is no member any more: marking its same-named survivors dirty makes the next init re-elect
+    // every pool of that scope. Only survivors in the same scope are marked; a lost copy alone already
+    // dirties its own external.
     it('should mark the same-pool survivors of a deleted external dirty, in that scope only', () => {
       const only = (name: string, remote: string, poolName?: string): SharedExternal => ({
         dirty: false,
