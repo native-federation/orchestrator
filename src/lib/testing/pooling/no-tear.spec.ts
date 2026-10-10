@@ -91,6 +91,31 @@ describe('findIncoherentRemotes', () => {
     expect(incoherent).toEqual([]);
   });
 
+  // The coherent map above, but mfe-a's router points at a file no member copy emits: a file outside the
+  // pool, whose tag nobody can know, so no build witnesses it.
+  it('catches a pooled specifier mapped to a file no member copy emits', () => {
+    const incoherent = findIncoherentRemotes({
+      importMap: {
+        imports: { '@angular/core': 'http://mfe-b/@angular/core.js' },
+        scopes: {
+          'http://mfe-a/': {
+            '@angular/core': 'http://mfe-a/@angular/core.js',
+            '@angular/router': 'http://elsewhere/@angular/router.js',
+          },
+        },
+      },
+      members: members(),
+      scopeUrls: SCOPE,
+    });
+
+    expect(incoherent).toEqual([
+      expect.objectContaining({
+        remote: 'team/mfe-a',
+        resolved: { '@angular/core': '22.1.0', '@angular/router': '<untaggable>' },
+      }),
+    ]);
+  });
+
   // Origin is free, tag is not: mfe-a taking core from a *different* remote that ships the same tag
   // is interchangeable, so it must not register as incoherent (I3 is per version).
   it('does not mind which remote served a tag, only which tag', () => {

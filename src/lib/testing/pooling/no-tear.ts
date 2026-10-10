@@ -104,8 +104,8 @@ export function findIncoherentRemotes({
       // Not served anywhere: the member left the shared set entirely, which is a coverage outcome
       // rather than an incoherent pair, so it cannot be judged here.
       if (url === undefined) continue;
-      const tag = tagOfUrl.get(url);
-      if (tag !== undefined) resolved[specifier] = tag;
+      // A file no member copy emits is outside the pool, so no build can witness it.
+      resolved[specifier] = tagOfUrl.get(url) ?? '<untaggable>';
     }
 
     const entries = Object.entries(resolved);
