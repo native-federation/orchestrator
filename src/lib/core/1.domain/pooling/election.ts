@@ -22,11 +22,10 @@ type ElectionInput = {
   latestFirst: boolean;
 };
 
-// Why a remote missed round 1. `with`: the specifiers no build shipped together with `gap`, for a remote the
-// map serves but no build witnesses.
+// Why a remote missed round 1. `unshipped`: the map serves every specifier, but no build shipped them together.
 export type PoolMiss =
   | { cause: 'incompatible'; member: ExternalName; tag: VersionName; strict: boolean }
-  | { cause: 'uncovered'; gap: Specifier; with?: Specifier[] };
+  | { cause: 'uncovered'; gap: Specifier; unshipped?: true };
 
 // A subpool's build is placed in its own subpool.
 export type Placement =
@@ -90,29 +89,15 @@ export function elect(input: ElectionInput): Election {
     servesAt(copies, tags, acceptsTag);
   const witnessed = (remote: RemoteName) =>
     shippedTogether(shipped.get(remote)!, globalTags, builds.values());
-  // The first specifier no build ships next to the ones before it, and a smallest set of those it clashes with.
+  // The first specifier no build ships next to the ones before it.
   const unwitnessed = (remote: RemoteName) => {
     const specifiers = shipped.get(remote)!.flatMap(c => c.specifiers);
-    const matches = [...shipped.keys()].map(owner => {
-      const { tags } = buildFor(owner);
-      return specifiers.map(s => tags.tagOf(s) === globalTags.get(s));
-    });
-    let alive = matches;
-    let end = -1;
-    for (let i = 0; i < specifiers.length && end === -1; i++) {
-      alive = alive.filter(m => m[i]);
-      if (alive.length === 0) end = i;
+    let alive = [...builds.values()];
+    for (const s of specifiers) {
+      alive = alive.filter(b => b.tags.tagOf(s) === globalTags.get(s));
+      if (alive.length === 0) return s;
     }
-    if (end === -1) return undefined;
-
-    const together = (indices: number[]) => matches.some(m => indices.every(i => m[i]));
-    let clash = Array.from({ length: end }, (_, i) => i);
-    for (let i = 0; i < end; i++) {
-      // By specifier, not index: two members may list the same one, and dropping it drops every repeat.
-      const without = clash.filter(c => specifiers[c] !== specifiers[i]);
-      if (!together([...without, end])) clash = without;
-    }
-    return { gap: specifiers[end]!, with: clash.map(i => specifiers[i]!) };
+    return undefined;
   };
 
   // In record order: the order remotes first appear in the pool's versions, which round 1's ties fall back to.
@@ -147,8 +132,8 @@ export function elect(input: ElectionInput): Election {
     for (const copy of shipped.get(remote)!)
       for (const s of copy.specifiers)
         if (!globalTags.has(s)) return { cause: 'uncovered', gap: s };
-    const torn = unwitnessed(remote);
-    if (torn) return { cause: 'uncovered', ...torn };
+    const gap = unwitnessed(remote);
+    if (gap) return { cause: 'uncovered', gap, unshipped: true };
     // Everyone else the extended coverage serves is global, so only a subpool's build can lack a reason.
     if (subpools.some(p => p.build === remote)) return undefined;
     throw new Error(`'${remote}' missed the global map with nothing it rejects or lacks.`);

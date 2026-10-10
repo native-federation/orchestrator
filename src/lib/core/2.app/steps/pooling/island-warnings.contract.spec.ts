@@ -93,7 +93,7 @@ describe('island warnings (contract)', () => {
 
       expect(p.islands()).toEqual({ 'team/mfe-a': 'uncovered' });
       expect(warnings()).toEqual([
-        "[__GLOBAL__][pool:framework] 'team/mfe-a' serves its own family: no elected build offers every entrypoint it imports at a version it accepts — '@framework/router' is the gap, closest is 'team/host'. All 2 members it imports are scoped for it.",
+        "[__GLOBAL__][pool:framework] 'team/mfe-a' serves its own family: no elected build offers every entrypoint it imports at a version it accepts (gap '@framework/router', closest 'team/host'). All 2 members it imports are scoped for it.",
       ]);
     });
 
@@ -149,8 +149,8 @@ describe('island warnings (contract)', () => {
 
       expect(p.islands()).toEqual({ 'team/mfe-b': 'uncovered', 'team/mfe-c': 'uncovered' });
       expect(warnings()).toEqual([
-        "[__GLOBAL__][pool:framework] 'team/mfe-b' serves its own family: no elected build offers every entrypoint it imports at a version it accepts — '@framework/cdk' is the gap, closest is 'team/mfe-a'. It takes the elected files where its versions match and serves the rest of its 2 members itself.",
-        "[__GLOBAL__][pool:framework] 'team/mfe-c' serves its own family: no elected build offers every entrypoint it imports at a version it accepts — '@framework/cdk' is the gap, closest is 'team/mfe-a'. It takes the elected files where its versions match and serves the rest of its 2 members itself.",
+        "[__GLOBAL__][pool:framework] 'team/mfe-b' serves its own family: no elected build offers every entrypoint it imports at a version it accepts (gap '@framework/cdk', closest 'team/mfe-a'). It takes the elected files where its versions match and serves the rest of its 2 members itself.",
+        "[__GLOBAL__][pool:framework] 'team/mfe-c' serves its own family: no elected build offers every entrypoint it imports at a version it accepts (gap '@framework/cdk', closest 'team/mfe-a'). It takes the elected files where its versions match and serves the rest of its 2 members itself.",
       ]);
     });
 
@@ -199,7 +199,7 @@ describe('island warnings (contract)', () => {
 
     it('witness miss: no build shipped the pair the extended coverage would serve', async () => {
       // pooling.regression.spec.ts, "extension witness", first case. r0 accepts every tag the map
-      // publishes, so the sentence names the unwitnessed pair rather than a version it rejects.
+      // publishes, so the sentence names the unwitnessed gap rather than a version it rejects.
       const caret = (tag: string, external: string, remote: string) =>
         p.version(tag, external, [{ remote, req: `^${tag}`, strict: false }]);
       p.seed('@lib/m0', [
@@ -215,7 +215,7 @@ describe('island warnings (contract)', () => {
 
       expect(p.islands()).toEqual({ 'team/r0': 'uncovered' });
       expect(warnings()).toEqual([
-        "[__GLOBAL__][pool:lib] 'team/r0' serves its own family: no build shipped '@lib/m0@18.0.1' together with '@lib/m1@18.0.1' — '@lib/m1' is the gap, closest is 'team/r1'. All 2 members it imports are scoped for it.",
+        "[__GLOBAL__][pool:lib] 'team/r0' serves its own family: no build shipped its entrypoints together at the elected versions (gap '@lib/m1', closest 'team/r1'). All 2 members it imports are scoped for it.",
       ]);
     });
   });
@@ -261,8 +261,8 @@ describe('island warnings (contract)', () => {
 
       expect(p.islands()).toEqual({ 'team/mfe-a': 'uncovered', 'team/mfe-b': 'uncovered' });
       expect(warnings()).toEqual([
-        "[__GLOBAL__][pool:angular] 'team/mfe-b' serves its own family: no elected build offers every entrypoint it imports at a version it accepts — '@angular/router' is the gap, closest is 'team/host'. It takes the elected files where its versions match and serves the rest of its 2 members itself.",
-        "[__GLOBAL__][pool:angular] 'team/mfe-a' serves its own family: no elected build offers every entrypoint it imports at a version it accepts — '@angular/router' is the gap, closest is 'team/host'. It takes the elected files where its versions match and serves the rest of its 1 members itself.",
+        "[__GLOBAL__][pool:angular] 'team/mfe-b' serves its own family: no elected build offers every entrypoint it imports at a version it accepts (gap '@angular/router', closest 'team/host'). It takes the elected files where its versions match and serves the rest of its 2 members itself.",
+        "[__GLOBAL__][pool:angular] 'team/mfe-a' serves its own family: no elected build offers every entrypoint it imports at a version it accepts (gap '@angular/router', closest 'team/host'). It takes the elected files where its versions match and serves the rest of its 1 members itself.",
       ]);
     });
 
@@ -289,8 +289,8 @@ describe('island warnings (contract)', () => {
 
       expect(p.islands()).toEqual({ 'team/mfe-b': 'uncovered', 'team/mfe-c': 'uncovered' });
       expect(warnings()).toEqual([
-        "[__GLOBAL__][pool:angular] 'team/mfe-b' serves its own family: no elected build offers every entrypoint it imports at a version it accepts — '@angular/cdk' is the gap, closest is 'team/mfe-a'. It takes the elected files where its versions match and serves the rest of its 2 members itself.",
-        "[__GLOBAL__][pool:angular] 'team/mfe-c' serves its own family: no elected build offers every entrypoint it imports at a version it accepts — '@angular/cdk' is the gap, closest is 'team/mfe-a'. It takes the elected files where its versions match and serves the rest of its 2 members itself.",
+        "[__GLOBAL__][pool:angular] 'team/mfe-b' serves its own family: no elected build offers every entrypoint it imports at a version it accepts (gap '@angular/cdk', closest 'team/mfe-a'). It takes the elected files where its versions match and serves the rest of its 2 members itself.",
+        "[__GLOBAL__][pool:angular] 'team/mfe-c' serves its own family: no elected build offers every entrypoint it imports at a version it accepts (gap '@angular/cdk', closest 'team/mfe-a'). It takes the elected files where its versions match and serves the rest of its 2 members itself.",
       ]);
     });
 
@@ -311,7 +311,7 @@ describe('island warnings (contract)', () => {
 
       expect(p.islands()).toEqual({ 'team/mfe-b': 'uncovered' });
       expect(warnings()).toEqual([
-        "[__GLOBAL__][pool:angular] 'team/mfe-b' serves its own family: no elected build offers every entrypoint it imports at a version it accepts — '@angular/forms' is the gap, closest is 'team/mfe-a'. All 2 members it imports are scoped for it.",
+        "[__GLOBAL__][pool:angular] 'team/mfe-b' serves its own family: no elected build offers every entrypoint it imports at a version it accepts (gap '@angular/forms', closest 'team/mfe-a'). All 2 members it imports are scoped for it.",
       ]);
     });
 
@@ -399,7 +399,32 @@ describe('island warnings (contract)', () => {
 
       expect(p.islands()).toEqual({ 'team/mfe-b': 'uncovered' });
       expect(warnings()).toEqual([
-        "[__GLOBAL__] 'team/mfe-b' serves its own family: no committed build offers every entrypoint it imports at a version it accepts — '@framework/forms' is the gap. All 2 members it imports are scoped for it.",
+        "[__GLOBAL__] 'team/mfe-b' serves its own family: no committed build offers every entrypoint it imports at a version it accepts (gap '@framework/forms'). All 2 members it imports are scoped for it.",
+      ]);
+    });
+
+    it('unshipped: no committed build shipped the combination the map serves', async () => {
+      // mfe-a ships only core and mfe-c only router, so the map serves the pair from two builds; mfe-b
+      // accepts both tags but ships its own, and no committed build witnesses the pair.
+      p.seed('@framework/core', [
+        p.version('22.1.0', '@framework/core', [{ remote: 'team/mfe-a', req: '^22.0.0' }]),
+      ]);
+      p.seed('@framework/router', [
+        p.version('22.1.0', '@framework/router', [{ remote: 'team/mfe-c', req: '^22.0.0' }]),
+      ]);
+      await p.runInit();
+      vi.mocked(p.config.log.warn).mockClear();
+
+      await p.runDynamic(
+        entry('team/mfe-b', [
+          ['@framework/core', '22.0.5', '^22.0.0'],
+          ['@framework/router', '22.0.5', '^22.0.0'],
+        ])
+      );
+
+      expect(p.islands()).toEqual({ 'team/mfe-b': 'uncovered' });
+      expect(warnings()).toEqual([
+        "[__GLOBAL__] 'team/mfe-b' serves its own family: no committed build shipped the map's combination for it. All 2 members it imports are scoped for it.",
       ]);
     });
 

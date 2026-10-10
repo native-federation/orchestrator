@@ -82,11 +82,10 @@ describe('missOf', () => {
    * The witness case (a coverage no single build shipped), with many entrypoints: round 1 elects a's
    * 1.0.0 build with 40 entrypoints, and three 1.0.0 builds ship m, k and n pairwise next to bare `a`. Each
    * drifted remote ships a, its entrypoints, m, k and n at 1.1.x and accepts every 1.0.0 tag, but no build
-   * shipped m, k and n together, so it runs its own subpool. Pinned answer by answer because the search for
-   * the gap and the smallest clashing set was rewritten from repeated `shippedTogether` calls to one match
-   * row per build; the old and new code give this exact output.
+   * shipped m, k and n together, so it runs its own subpool. Pinned answer by answer: the gap is the first
+   * specifier no build ships next to the ones before it.
    */
-  it('names the first unwitnessed specifier and a smallest clash on a many-entrypoint portfolio', () => {
+  it('names the first unwitnessed specifier on a many-entrypoint portfolio', () => {
     const full = entrypoints('a', 40);
     const builds: Build[] = [
       ...[0, 1, 2, 3, 4].map(i => ship(`w${i}`, { a: full })),
@@ -104,12 +103,11 @@ describe('missOf', () => {
     expect(inSubpool(election, 'x3')).toEqual(['x1', 'x2', 'x3', 'y']);
     expect(election.misses.size).toBe(4);
     // Every prefix up to k is shipped together (amk, with a's entrypoints witnessed at a's tag); n is the gap.
-    // amn and akn each ship n next to one of m and k, so the smallest clash is both, and none of a's.
     for (const remote of ['x1', 'x2', 'x3', 'y'])
       expect(election.misses.get(remote)).toEqual({
         cause: 'uncovered',
         gap: 'n',
-        with: ['m', 'k'],
+        unshipped: true,
       });
   });
 
@@ -142,32 +140,6 @@ describe('missOf', () => {
       tag: '1.0.0',
       strict: false,
     });
-  });
-
-  // A dense build may list one specifier under two members: here `k` under both k and kk. The clash search
-  // drops a specifier by value, so both listings of `k` stay or go together. Dropping by index kept only the
-  // second listing and answered ['m', 'k']; the search this replaced answered ['m', 'k', 'k'] as here.
-  it('keeps or drops a specifier two members list as one', () => {
-    const full = entrypoints('a', 40);
-    const builds: Build[] = [
-      ...[0, 1, 2, 3, 4].map(i => ship(`w${i}`, { a: full })),
-      ship('amk', { a: ['a'], m: ['m'], k: ['k'], kk: ['k'] }),
-      ship('amn', { a: ['a'], m: ['m'], n: ['n'] }),
-      ship('akn', { a: ['a'], k: ['k'], n: ['n'] }),
-      ...[1, 2, 3].map(i =>
-        drifted(`x${i}`, `1.1.${i}`, { a: full, m: ['m'], k: ['k'], kk: ['k'], n: ['n'] })
-      ),
-    ];
-    const election = electFrom(builds);
-
-    expect(inSubpool(election, 'x3')).toEqual(['x1', 'x2', 'x3']);
-    expect(election.misses.size).toBe(3);
-    for (const remote of ['x1', 'x2', 'x3'])
-      expect(election.misses.get(remote)).toEqual({
-        cause: 'uncovered',
-        gap: 'n',
-        with: ['m', 'k', 'k'],
-      });
   });
 });
 

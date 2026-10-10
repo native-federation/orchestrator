@@ -10,7 +10,6 @@ import { elect, type PoolMiss } from 'lib/core/1.domain/pooling/election';
 import type { PoolMember, PoolName } from 'lib/core/1.domain/pooling/membership';
 import { type ElectionPlan, planElection } from 'lib/core/1.domain/pooling/plan';
 import { memberRecord, type PlacedPool, previousWinner } from 'lib/core/1.domain/pooling/placement';
-import type { Specifier } from 'lib/core/1.domain/externals/specifier';
 
 export function createPoolSharedExternals(
   config: LoggingConfig & ModeConfig,
@@ -138,10 +137,9 @@ function missWarning(
           ? `It takes the elected files where its versions match and serves the rest of its ${imports} members itself.`
           : `All ${imports} members it imports are scoped for it.`;
 
-  const at = (s: Specifier) => `'${s}@${placed.globalTags.tagOf(s)!}'`;
   if (miss.cause === 'incompatible')
     return `'${remote}' is islanded: its range rejects '${miss.member}@${miss.tag}' of the elected build '${placed.winner}'. ${where}`;
-  if (miss.with)
-    return `'${remote}' serves its own family: no build shipped ${miss.with.map(at).join(', ')} together with ${at(miss.gap)} — '${miss.gap}' is the gap, closest is '${placed.winner}'. ${where}`;
-  return `'${remote}' serves its own family: no elected build offers every entrypoint it imports at a version it accepts — '${miss.gap}' is the gap, closest is '${placed.winner}'. ${where}`;
+  if (miss.unshipped)
+    return `'${remote}' serves its own family: no build shipped its entrypoints together at the elected versions (gap '${miss.gap}', closest '${placed.winner}'). ${where}`;
+  return `'${remote}' serves its own family: no elected build offers every entrypoint it imports at a version it accepts (gap '${miss.gap}', closest '${placed.winner}'). ${where}`;
 }
