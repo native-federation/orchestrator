@@ -609,6 +609,23 @@ from one build that shipped it together — the elected one, another remote's, o
 are elected by pooling alone; the per-external resolver leaves them untouched (see
 [Determine Shared Versions](#determine-shared-versions)).
 
+### Pooling terms
+
+| term | meaning |
+| --- | --- |
+| **label** | The `pool` field a remote sets on a shared external in its `remoteEntry.json`. Pooling's input, stored as declared and never rewritten (see [Enabling pooling](#enabling-pooling)). |
+| **pool** | The externals of one share scope that labels connect, a secondary entrypoint joining its package. Named after the label most of its copies declare and stored as `poolName`. |
+| **member** | An external in a pool. |
+| **copy** | One remote's entry for one member at one version (a `SharedVersionMeta` in the record). |
+| **build** | Everything one remote ships in a pool, as *specifier → tag*. Builds are the election's candidates: each remote ends up on the global map, in a subpool, or on its own build. |
+| **global map** | The pool's specifiers in `imports`; a named shareScope has no `imports` of its own, so there each remote's own scope maps those files. A remote **resolves globally** when it runs those files. |
+| **winner** | The build round 1 elects; its coverage seeds the global map. Stored as `poolWinner`. |
+| **extended global tags** | The global map's tags once extension has added the packages the winner does not ship (step 4 of [How pooling resolves](#how-pooling-resolves)); a remote they serve moves onto the global map when one build shipped the combination it would resolve. |
+| **subpool** | Remotes off the global map that run one remote's build through scopes. Named after that remote; its members' copies record it as `servedBy`. |
+| **self-served** | A remote that runs its own build for its whole family, or, when it agrees with the global map, for everything the global map does not give it. Its scoped copies record why as `poolCause`. |
+| **island** | A self-served remote whose range rejects a tag of the elected build (`poolCause: incompatible`); the log says it "is islanded". One the elected build does not cover is `uncovered` and "serves its own family". |
+| `poolCause`, `servedBy`, `poolWinner` | The results pooling stores on the record; see [What pooling stores](#what-pooling-stores). |
+
 ### Enabling pooling
 
 Pooling is opt-in and inert by default. An external joins a pool through a `pool` label on its shared
@@ -763,9 +780,9 @@ is also why a pooled remote is never torn whichever entrypoint-coverage setting 
 > mix builds always pays for its own family. Because the election maximises the remotes one build serves and
 > then places the rest in subpools, it also *saves* downloads where per-member election split a family: on the
 > recorded eleven-remote portfolio the `@angular/*` files the map can fetch drop from 75 to 54, the
-> seven-remote capture is unchanged at 37, and no measured portfolio rose. A warm init pays nothing: with no
-> member re-elected, pooling does no work and writes nothing. The escape hatch is to not pool the family (no
-> `pool` label), not a per-portfolio knob. `e2e/pooling/capture.e2e.spec.ts` and
+> seven-remote capture is unchanged at 37, and no measured portfolio rose. A warm init with nothing dirty
+> in a scope pays nothing there: pooling does no work and writes nothing. The escape hatch is to not pool
+> the family (no `pool` label), not a per-portfolio knob. `e2e/pooling/capture.e2e.spec.ts` and
 > `src/lib/core/2.app/steps/pooling/capture.integration.spec.ts` reproduce the figures.
 
 #### How the verdicts land in the record and the map
@@ -858,9 +875,11 @@ portfolio had deliberately pooled apart.
 
 #### What pooling logs
 
-Every line is prefixed `[<scope>][pool:<name>]`, with `<name>` the pool's name as stored. Every remote not on
-the elected build gets a `warn`, subpool members included, ending in one of four clauses that say where its
-copies come from:
+Every line starts with a prefix, given per line below: `[<scope>][pool:<name>]` for init's lines about one pool
+(`<name>` is the pool's name as stored), `[<scope>]` for init's lines about a whole scope and for the dynamic
+gate's, and `[<scope>][<remote>]` for the dynamic line about a build missing from the cache. At init, every
+remote not on the elected build gets a `warn`, subpool members included, ending in one of four clauses that say
+where its copies come from:
 
 - `All N members it imports are scoped for it.` — it serves its whole family itself;
 - `It runs in subpool '<build>': all N members it imports come from that build.` — it runs another remote's
@@ -869,19 +888,21 @@ copies come from:
 - `It takes the elected files where its versions match and serves the rest of its N members itself.` — it
   agrees with the global map (rule 5).
 
-| level | line | what to do |
-| --- | --- | --- |
-| `warn` | `'<remote>' is islanded: its range rejects '<member>@<tag>' of the elected build '<winner>'. <where>` | A range rejects a tag of the elected build. Align that remote's version or range, or accept the cost. N counts what that remote imports, not the pool. |
-| `warn` | `'<remote>' serves its own family: no elected build offers every entrypoint it imports at a version it accepts (gap '<gap>', closest '<winner>'). <where>` | Coverage: `<gap>` is the first specifier the elected build does not serve. Shipping it in the elected build, or dropping it from this remote, recovers the dedup. |
-| `warn` | `'<remote>' serves its own family: no build shipped its entrypoints together at the elected versions (gap '<gap>', closest '<winner>'). <where>` | Witness: the extended global tags serve everything this remote imports at versions it accepts, but no one build shipped that combination (step 4). `<gap>` is the first specifier no build ships next to the ones before it. Shipping those versions together in one build recovers the dedup. |
-| `warn` | `'<remote>' is islanded: its range rejects '<specifier>@<tag>' of the committed map. All N members it imports are scoped for it.` | Dynamic init only — a range rejects a tag the committed map serves (see [Scope and dynamic init](#scope-and-dynamic-init)). |
-| `warn` | `'<remote>' serves its own family: no committed build offers every entrypoint it imports at a version it accepts (gap '<gap>'). All N members it imports are scoped for it.` | Dynamic init only — the coverage finding read off the committed record. |
-| `warn` | `'<remote>' serves its own family: no committed build shipped the map's combination for it. All N members it imports are scoped for it.` | Dynamic init only — the witness finding: the committed map serves everything this remote imports at versions it accepts, but no committed build shipped those versions together. |
-| `warn` | `'<build>' keeps subpool '<build>': the elected build would serve it, but K other remote(s) in it need its build.` | A subpool's build the global map would serve, kept for the members that need it. Nothing to fix on that remote; aligning the other members moves the whole subpool onto the global map. |
-| `warn` | `'<build>' is not in the cache, so its files cannot be mapped.` | Dynamic init in a named scope only, prefixed `[<scope>][<remote>]`: the committed map serves the loaded remote's family from `<build>`, whose scope URL is gone, so the remote serves itself (`uncovered`). |
-| `error` | `version-incompatible remotes cannot be pooled: {…}.` | Logged before the `strictExternalCompatibility` throw, naming every remote whose `strictVersion` range rejects the elected build. |
-| `debug` | `re-electing N pool(s): K dirty external(s).` | Prefixed `[<scope>]`, once per scope whose pools are re-elected: K externals of the scope are dirty, and any dirty external re-elects every pool of its scope. A clean warm init skips pooling and logs nothing. |
-| `debug` | `'<external>' has a 'pool' label that joins no other external; likely a typo or a missing sibling.` | Prefixed `[<scope>]`: the label pools nothing. Fix the label or add the sibling it was meant to join. |
+| level | prefix | line | what to do |
+| --- | --- | --- | --- |
+| `warn` | `[<scope>][pool:<name>]` | `'<remote>' is islanded: its range rejects '<member>@<tag>' of the elected build '<winner>'. <where>` | A range rejects a tag of the elected build. Align that remote's version or range, or accept the cost. N counts what that remote imports, not the pool. |
+| `warn` | `[<scope>][pool:<name>]` | `'<remote>' serves its own family: no elected build offers every entrypoint it imports at a version it accepts (gap '<gap>', closest '<winner>'). <where>` | Coverage: `<gap>` is the first specifier the elected build does not serve. Shipping it in the elected build, or dropping it from this remote, recovers the dedup. |
+| `warn` | `[<scope>][pool:<name>]` | `'<remote>' serves its own family: no build shipped its entrypoints together at the elected versions (gap '<gap>', closest '<winner>'). <where>` | Witness: the extended global tags serve everything this remote imports at versions it accepts, but no one build shipped that combination (step 4). `<gap>` is the first specifier no build ships next to the ones before it. Shipping those versions together in one build recovers the dedup. |
+| `warn` | `[<scope>]` | `'<remote>' is islanded: its range rejects '<specifier>@<tag>' of the committed map. All N members it imports are scoped for it.` | Dynamic init only — a range rejects a tag the committed map serves (see [Scope and dynamic init](#scope-and-dynamic-init)). |
+| `warn` | `[<scope>]` | `'<remote>' serves its own family: no committed build offers every entrypoint it imports at a version it accepts (gap '<gap>'). All N members it imports are scoped for it.` | Dynamic init only — the coverage finding read off the committed record. |
+| `warn` | `[<scope>]` | `'<remote>' serves its own family: no committed build shipped the map's combination for it. All N members it imports are scoped for it.` | Dynamic init only — the witness finding: the committed map serves everything this remote imports at versions it accepts, but no committed build shipped those versions together. |
+| `warn` | `[<scope>][pool:<name>]` | `'<build>' keeps subpool '<build>': the elected build would serve it, but K other remote(s) in it need its build.` | A subpool's build the global map would serve, kept for the members that need it. Nothing to fix on that remote; aligning the other members moves the whole subpool onto the global map. |
+| `warn` | `[<scope>][<remote>]` | `'<build>' is not in the cache, so its files cannot be mapped.` | Dynamic init in a named scope only: the committed map serves the loaded remote's family from `<build>`, whose scope URL is gone, so the remote serves itself (`uncovered`). |
+| `error` | `[<scope>][pool:<name>]` | `version-incompatible remotes cannot be pooled: {…}.` | Logged before the `strictExternalCompatibility` throw, naming every remote whose `strictVersion` range rejects the elected build. |
+| `error` | `[<scope>]` | `failed to pool shared externals.` | An unexpected error while pooling the scope; the init rejects with `Could not pool shared externals in scope <scope>.` |
+| `debug` | `[<scope>]` | `re-electing N pool(s): K dirty external(s).` | Once per scope whose pools are re-elected: K externals of the scope are dirty, and any dirty external re-elects every pool of its scope. A clean warm init skips pooling and logs nothing. |
+| `debug` | `[<scope>]` | `'<external>' has a 'pool' label that joins no other external; likely a typo or a missing sibling.` | The label pools nothing. Fix the label or add the sibling it was meant to join. |
+| `debug` | `[<scope>]` | `N external(s) left every pool; cleared their pool state for re-election.` | Their stored pool results are dropped and they are marked dirty, so `determine` re-elects them (see [What pooling stores](#what-pooling-stores)). |
 
 #### What pooling stores
 
@@ -914,9 +935,10 @@ members store different ones or it ships no member any more; a member that joine
 stored rather than inferred from the `share` rows: every package the winner does not ship itself is published
 from another build, so counting bases can name the wrong one.
 
-The dynamic path writes the same fields, for the loaded remote's copies only: a copy it scopes moves into a
-`scope` version at its own tag with its `poolCause` (a `share` version only that copy held leaves with it), and
-a copy it redirects keeps its place with a `servedBy`. Without that, the record would keep `update-cache`'s
+The dynamic path writes `poolCause` only, for the loaded remote's copies: a copy it scopes moves into a `scope`
+version at its own tag with its `poolCause`, dropping any stale `servedBy` (a `share` version only that copy
+held leaves with it); a copy that runs the map's files moves from the row `update-cache` put it in into a
+`skip` row at its tag, so it publishes nothing. Without that, the record would keep `update-cache`'s
 verdicts, and a reload — which rebuilds the map from the record without re-electing anything — would publish
 the combination the delta had refused.
 
