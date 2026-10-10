@@ -881,11 +881,10 @@ gate's, and `[<scope>][<remote>]` for the dynamic line about a build missing fro
 remote not on the elected build gets a `warn`, subpool members included, ending in one of four clauses that say
 where its copies come from:
 
-- `All N members it imports are scoped for it.` — it serves its whole family itself;
-- `It runs in subpool '<build>': all N members it imports come from that build.` — it runs another remote's
-  build;
-- `Its build runs subpool '<self>' for its N members and K other remote(s).` — its build runs the subpool;
-- `It takes the elected files where its versions match and serves the rest of its N members itself.` — it
+- `All N of its members are scoped for it.` — it serves its whole family itself;
+- `It runs in subpool '<build>' for all N of its members.` — it runs another remote's build;
+- `Its build serves subpool '<self>': its N members and K other remote(s).` — its build runs the subpool;
+- `It takes the elected files where its versions match; the rest of its N members are scoped for it.` — it
   agrees with the global map (rule 5).
 
 | level | prefix | line | what to do |
@@ -893,9 +892,9 @@ where its copies come from:
 | `warn` | `[<scope>][pool:<name>]` | `'<remote>' is islanded: its range rejects '<member>@<tag>' of the elected build '<winner>'. <where>` | A range rejects a tag of the elected build. Align that remote's version or range, or accept the cost. N counts what that remote imports, not the pool. |
 | `warn` | `[<scope>][pool:<name>]` | `'<remote>' serves its own family: no elected build offers every entrypoint it imports at a version it accepts (gap '<gap>', closest '<winner>'). <where>` | Coverage: `<gap>` is the first specifier the elected build does not serve. Shipping it in the elected build, or dropping it from this remote, recovers the dedup. |
 | `warn` | `[<scope>][pool:<name>]` | `'<remote>' serves its own family: no build shipped its entrypoints together at the elected versions (gap '<gap>', closest '<winner>'). <where>` | Witness: the extended global tags serve everything this remote imports at versions it accepts, but no one build shipped that combination (step 4). `<gap>` is the first specifier no build ships next to the ones before it. Shipping those versions together in one build recovers the dedup. |
-| `warn` | `[<scope>]` | `'<remote>' is islanded: its range rejects '<specifier>@<tag>' of the committed map. All N members it imports are scoped for it.` | Dynamic init only — a range rejects a tag the committed map serves (see [Scope and dynamic init](#scope-and-dynamic-init)). |
-| `warn` | `[<scope>]` | `'<remote>' serves its own family: no committed build offers every entrypoint it imports at a version it accepts (gap '<gap>'). All N members it imports are scoped for it.` | Dynamic init only — the coverage finding read off the committed record. |
-| `warn` | `[<scope>]` | `'<remote>' serves its own family: no committed build shipped the map's combination for it. All N members it imports are scoped for it.` | Dynamic init only — the witness finding: the committed map serves everything this remote imports at versions it accepts, but no committed build shipped those versions together. |
+| `warn` | `[<scope>]` | `'<remote>' is islanded: its range rejects '<specifier>@<tag>' of the committed map. All N of its members are scoped for it.` | Dynamic init only — a range rejects a tag the committed map serves (see [Scope and dynamic init](#scope-and-dynamic-init)). |
+| `warn` | `[<scope>]` | `'<remote>' serves its own family: no committed build offers every entrypoint it imports at a version it accepts (gap '<gap>'). All N of its members are scoped for it.` | Dynamic init only — the coverage finding read off the committed record. |
+| `warn` | `[<scope>]` | `'<remote>' serves its own family: no committed build shipped the map's combination for it. All N of its members are scoped for it.` | Dynamic init only — the witness finding: the committed map serves everything this remote imports at versions it accepts, but no committed build shipped those versions together. |
 | `warn` | `[<scope>][pool:<name>]` | `'<build>' keeps subpool '<build>': the elected build would serve it, but K other remote(s) in it need its build.` | A subpool's build the global map would serve, kept for the members that need it. Nothing to fix on that remote; aligning the other members moves the whole subpool onto the global map. |
 | `warn` | `[<scope>][<remote>]` | `'<build>' is not in the cache, so its files cannot be mapped.` | Dynamic init in a named scope only: the committed map serves the loaded remote's family from `<build>`, whose scope URL is gone, so the remote serves itself (`uncovered`). |
 | `error` | `[<scope>][pool:<name>]` | `version-incompatible remotes cannot be pooled: {…}.` | Logged before the `strictExternalCompatibility` throw, naming every remote whose `strictVersion` range rejects the elected build. |

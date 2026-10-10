@@ -166,7 +166,7 @@ function poolableNames(
 
 // Wording is pinned in `island-warnings.contract.spec.ts` alone; tools read islands from the record.
 function selfServeWarning(remote: RemoteName, miss: GateMiss, members: number): string {
-  const where = `All ${members} members it imports are scoped for it.`;
+  const where = `All ${members} of its members are scoped for it.`;
   if (miss.cause === 'incompatible')
     return `'${remote}' is islanded: its range rejects '${miss.specifier}@${miss.tag}' of the committed map. ${where}`;
   if ('unshipped' in miss)
