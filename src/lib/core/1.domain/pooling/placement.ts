@@ -25,15 +25,10 @@ export function memberRecord(member: PoolMember, pool: PlacedPool): SharedExtern
   const { globalTags, placements } = pool;
   // A package can ship only secondary entrypoints (`material/table` without `material`), so its shared tag
   // is whatever round 1 serves any of its entrypoints at.
-  // An entrypoint round 1 does not serve itself still has its package's tag, which is what rule 5 compares.
   let sharedTag: VersionName | undefined;
-  let pinned = false;
   for (const version of member.external.versions)
     for (const meta of version.remotes)
-      for (const s in meta.entries) {
-        sharedTag ??= globalTags.get(s);
-        pinned ||= globalTags.tagOf(s) !== undefined;
-      }
+      for (const s in meta.entries) sharedTag ??= globalTags.get(s);
 
   const runsOn = (name: RemoteName) => {
     const placement = placements.get(name)!;
@@ -57,7 +52,6 @@ export function memberRecord(member: PoolMember, pool: PlacedPool): SharedExtern
     const runs = runsOn(meta.name);
     return (
       pool.agreeing.has(runs) &&
-      pinned &&
       Object.keys(meta.entries).every(
         s => globalTags.get(s) === tag && claimableAt.get(tag)?.has(s) === true
       )
