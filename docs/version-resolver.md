@@ -231,7 +231,7 @@ declares, and thus the primary — and the cache keeps it sorted on insert by th
 2. **cached** — an already-served copy; repointing it would invalidate a committed import map and force a
    redundant download.
 3. **widest coverage** — the copy declaring the most entrypoints, so fewest builds are needed.
-4. **arrival order** — ties keep the incumbent, so generated import maps stay byte-stable.
+4. **record order** — ties keep the incumbent, so generated import maps stay byte-stable.
 
 Rule 3 is what makes a superset copy win: given `{table}`, `{table}` and `{sort, table}` of one version,
 the third becomes the basis and serves both specifiers from a single build. Rules 1 and 2 deliberately
@@ -611,7 +611,7 @@ are elected by pooling alone; the per-external resolver leaves them untouched (s
 
 ### Enabling pooling
 
-Pooling is opt-in and inert by default. An external joins a pool through a `pool` tag on its shared
+Pooling is opt-in and inert by default. An external joins a pool through a `pool` label on its shared
 external in `remoteEntry.json` (mirrors `shareScope`), set per external in the federation config at build
 time:
 
@@ -620,32 +620,32 @@ time:
 { "packageName": "@framework/core", "version": "22.0.5", "requiredVersion": "^22.0.0", "pool": "framework" }
 ```
 
-**A pool is a name.** Every external tagged `framework`, by any remote, is in the `framework` pool. Formally a
-pool is the **connected component** of a graph with a node per external and a node per tag name, and an edge
-from each external to every name some remote tagged it with. Two consequences:
+**A pool is a name.** Every external labelled `framework`, by any remote, is in the `framework` pool. Formally a
+pool is the **connected component** of a graph with a node per external and a node per label, and an edge
+from each external to every label some remote gave it. Two consequences:
 
-- Remotes do not need to tag the same members: mfe-A tagging `core` + `common` and mfe-B tagging `router` +
+- Remotes do not need to label the same members: mfe-A labelling `core` + `common` and mfe-B labelling `router` +
   `forms` with `framework` make one four-member pool.
 - **Names that share an external merge.** mfe-A calling a family `angular` and mfe-B calling it `ng-core` still
-  pool together once both tag one common external. A per-remote single name would not remove this need — the
+  pool together once both label one common external. A per-remote single name would not remove this need — the
   conflicts are cross-remote by nature (an explicit `ng-core` on one side, a build's npm-scope default
   `angular` on the other).
 
-Tagging every package of an npm scope with that scope (`@framework/core`, `@framework/common` → `framework`)
-is the usual way to pool a framework family. To pull a cross-scope sibling in, tag it with the family's name:
-`@design-system/ui` tagged `framework` joins the framework pool.
+Labelling every package of an npm scope with that scope (`@framework/core`, `@framework/common` → `framework`)
+is the usual way to pool a framework family. To pull a cross-scope sibling in, label it with the family's name:
+`@design-system/ui` labelled `framework` joins the framework pool.
 
-One edge needs no tag: a secondary entrypoint is always joined to its package (`@framework/core/testing` →
+One edge needs no label: a secondary entrypoint is always joined to its package (`@framework/core/testing` →
 `@framework/core`), whoever declares either. A package and its entrypoints are one artefact, so they must not
 be separable — they genuinely tear when they are, with one remote's `@framework/forms` served beside another's
-`@framework/forms/signals`. The edge is not itself a reason to pool: with no tag, a package and its entrypoints
-form no pool. A member carrying a tag that pools with nothing is almost always a typo or a missing sibling, so
+`@framework/forms/signals`. The edge is not itself a reason to pool: with no label, a package and its entrypoints
+form no pool. A member carrying a label that pools with nothing is almost always a typo or a missing sibling, so
 it is logged.
 
-**A pool is named after the tag most of its copies declare** (ties break alphabetically), so a family tagged
+**A pool is named after the label most of its copies declare** (ties break alphabetically), so a family labelled
 `framework` logs and stores as `framework` whatever else some remote called it. A name belongs to exactly one
-pool, so no suffixing is ever needed. A coupling no remote declares — two externals no tag connects — cannot be
-expressed; this is by design.
+pool, so no suffixing is ever needed. A coupling no remote declares — two externals no label connects — cannot
+be expressed; this is by design.
 
 ### How pooling resolves
 
@@ -681,7 +681,7 @@ order:
 3. most remotes that agree without being served — what separates a build its peers share from an outlier when
    no build serves more than itself;
 4. the build the stored record already elected (so a re-election on equal terms does not flip the family);
-5. the newer variant, then arrival order, then name.
+5. the newer variant, then record order (the order remotes first appear in the pool's versions).
 
 One variant is **newer** than another when the first member both ship, in the pool's member order (by name),
 whose tags differ is newer in it — two unrelated version lines, such as `rxjs` and `@angular/core`, are never
@@ -694,8 +694,8 @@ subpool of a build that disagrees with the winner.
 **3. Later rounds form subpools.** Among the remotes round 1 does not serve, each one's **own** build is a
 candidate (no same-tag borrowing), and the one serving the most waiting remotes — itself included — forms a
 **subpool**: those remotes run that one build, and the subpool is named after its remote. A tie goes to the
-newer variant, then to the name that sorts first (code-unit order), never to arrival: no stored winner keeps
-a subpool, and the record pooling rewrites reorders arrival, so a re-election would flip between equal
+newer variant, then to the name that sorts first (code-unit order), never to record order: no stored winner
+keeps a subpool, and the record pooling rewrites changes that order, so a re-election would flip between equal
 builds. Rounds repeat while some build serves at least two; earlier rounds never change. A subpool runs its
 build's files through scopes (`servedBy`).
 
@@ -765,7 +765,7 @@ is also why a pooled remote is never torn whichever entrypoint-coverage setting 
 > recorded eleven-remote portfolio the `@angular/*` files the map can fetch drop from 75 to 54, the
 > seven-remote capture is unchanged at 37, and no measured portfolio rose. A warm init pays nothing: with no
 > member re-elected, pooling does no work and writes nothing. The escape hatch is to not pool the family (no
-> `pool` tag), not a per-portfolio knob. `e2e/pooling/capture.e2e.spec.ts` and
+> `pool` label), not a per-portfolio knob. `e2e/pooling/capture.e2e.spec.ts` and
 > `src/lib/core/2.app/steps/pooling/capture.integration.spec.ts` reproduce the figures.
 
 #### How the verdicts land in the record and the map
@@ -812,16 +812,16 @@ changes which verdict the portfolio owner sees: a range that rejects the elected
 island (`incompatible`) and, under `strictExternalCompatibility`, refused — a version problem with a name —
 while a coverage miss is a statement about what nobody built.
 
-**Tag the whole family.** A member left untagged pools only if some *other* remote tags it, or as an entrypoint
-of a tagged package, and the failure is quiet: the member is still shared, just no longer coordinated with the
-family. A build that emits flat entries makes this easy to get wrong — `@framework/core` and
-`@framework/core/primitives/di` are two externals, and tagging only the first leaves the second relying on the
-package edge rather than on your tag.
+**Label the whole family.** A member left unlabelled pools only if some *other* remote labels it, or as an
+entrypoint of a labelled package, and the failure is quiet: the member is still shared, just no longer
+coordinated with the family. A build that emits flat entries makes this easy to get wrong — `@framework/core`
+and `@framework/core/primitives/di` are two externals, and labelling only the first leaves the second relying
+on the package edge rather than on your label.
 
 #### Unscoped lockstep families (react/react-dom)
 
 A lockstep pair with no npm scope — `react` + `react-dom`, `vue` + `vue-router` — cannot be grouped by scope,
-and the coupling cannot be inferred: a remote entry carries no `peerDependencies`. Declare it with a tag:
+and the coupling cannot be inferred: a remote entry carries no `peerDependencies`. Declare it with a label:
 
 ```json
 // In remoteEntry.json
@@ -845,15 +845,15 @@ and the coupling cannot be inferred: a remote entry carries no `peerDependencies
 }
 ```
 
-**One remote declaring this is enough for the whole portfolio.** The tag decides which externals form the
+**One remote declaring this is enough for the whole portfolio.** The label decides which externals form the
 pool; the pool then operates on the whole `SharedExternal` for each member: every version, every remote. So
-remotes that never declared a `pool` tag are still subject to the family's coherence rules for those two
+remotes that never declared a `pool` label are still subject to the family's coherence rules for those two
 packages. That is deliberate (one remote can fix a portfolio it does not own), but worth knowing before adding
-a tag.
+a label.
 
 This holds on both paths, because both read membership out of the **committed record** rather than out of the
-entry in front of them: a remote loaded by `initRemoteEntry` is subject to a pool some other remote's tag
-formed. Without that, an untagged remote loaded later is exactly the consumer that bridges two builds the
+entry in front of them: a remote loaded by `initRemoteEntry` is subject to a pool some other remote's label
+formed. Without that, an unlabelled remote loaded later is exactly the consumer that bridges two builds the
 portfolio had deliberately pooled apart.
 
 #### What pooling logs
@@ -876,6 +876,7 @@ copies come from:
 | `warn` | `'<remote>' is islanded: its range rejects '<specifier>@<tag>' of the committed map. All N members it imports are scoped for it.` | Dynamic init only — a range rejects a tag the committed map serves (see [Scope and dynamic init](#scope-and-dynamic-init)). |
 | `warn` | `'<remote>' serves its own family: no committed build offers every entrypoint it imports at a version it accepts — '<gap>' is the gap. All N members it imports are scoped for it.` | Dynamic init only — the coverage finding read off the committed record. |
 | `warn` | `'<build>' keeps subpool '<build>': the elected build would serve it, but K other remote(s) in it need its build.` | A subpool's build the global map would serve, kept for the members that need it. Nothing to fix on that remote; aligning the other members moves the whole subpool onto the global map. |
+| `warn` | `'<build>' is not in the cache, so its files cannot be mapped.` | Dynamic init in a named scope only, prefixed `[<scope>][<remote>]`: the committed map serves the loaded remote's family from `<build>`, whose scope URL is gone, so the remote serves itself (`uncovered`). |
 | `error` | `version-incompatible remotes cannot be pooled: {…}.` | Logged before the `strictExternalCompatibility` throw, naming every remote whose `strictVersion` range rejects the elected build. |
 
 #### What pooling stores
@@ -888,20 +889,20 @@ have to re-derive them. Every field is omitted when it does not apply.
 | --- | --- | --- |
 | `SharedExternal` | `poolName` | the pool this external resolves in: the most-declared name of the merged pool |
 | `SharedExternal` | `poolWinner` | the round-1 winner of the pool's last election; a rename keeps it |
-| `SharedVersionMeta` | `pool` | the `pool` tag this remote declared — pooling's input, never rewritten |
+| `SharedVersionMeta` | `pool` | the `pool` label this remote declared — pooling's input, never rewritten |
 | `SharedVersionMeta` | `servedBy` | the build of the subpool this copy runs in — the remote itself on its own build's copies |
 | `SharedVersionMeta` | `poolCause` | why pooling made this copy serve itself: `incompatible` (a range rejects a tag of the elected build) or `uncovered` (the elected build does not serve every specifier it imports) |
 
 Only pooling writes these, so an external in no pool any more has nothing left to explain: when a pool dissolves
-— the remote whose tag formed it redeployed without it, say — pooling drops `poolName`, `poolWinner`,
+— the remote whose label formed it redeployed without it, say — pooling drops `poolName`, `poolWinner`,
 `servedBy` and `poolCause` from its former members and writes them dirty, so `determine`, which runs after it,
 re-elects them. A leftover
 `servedBy` would otherwise keep mapping that copy onto a build nothing chose any more.
 
 `poolCause` is the one thing the `scope` action cannot say on its own: a copy scoped for a range violation and
 one scoped because no build covers it look identical otherwise. The detail behind it — the gap, the closest
-build — is in the matching `warn` line only. Membership is kept apart from the tags on purpose: pooling
-recomputes pools from the copies' `pool` tags every time it runs, so writing its own result back into its
+build — is in the matching `warn` line only. Membership is kept apart from the labels on purpose: pooling
+recomputes pools from the copies' `pool` labels every time it runs, so writing its own result back into its
 input would keep a pool alive after the remote that formed it had left.
 
 The stored election is also an input: `poolWinner` keeps an otherwise exact tie (rank 4 above), unless two
@@ -918,31 +919,44 @@ the combination the delta had refused.
 ### Scope and dynamic init
 
 Pooling applies to the **global scope and named shareScopes**; the `strict` scope is never pooled. It runs in
-both the initial pipeline and dynamic init (`initRemoteEntry`), and is gated on the resolver having re-elected
-something — a warm init that adds no remotes does no pooling work at all.
+both the initial pipeline and dynamic init (`initRemoteEntry`). Init skips a scope with no dirty external, so a
+warm init that changes no remote does no pooling work at all; the dynamic pass skips a scope whose record holds
+no `pool` label and no stored pool result.
 
 Because the import map is immutable once committed, the dynamic pass holds no new election: it judges only the
 newly loaded remote against the **committed** record, never retro-corrects committed remotes, and coordinates
 each shareScope independently. Membership comes from the committed record, so the loaded remote is subject to
-every pool the portfolio has — including one formed by another remote's `pool` tag — and only the members it
+every pool the portfolio has — including one formed by another remote's `pool` label — and only the members it
 declares itself can have their verdict rewritten. The committed view excludes the loaded remote's own copies,
-which `update-cache` has already stored but the committed map holds none of. In order:
+which `update-cache` has already stored but the committed map holds none of. For each pool, the loaded remote
+either resolves globally or serves itself — it never joins a committed subpool, even one whose build would serve
+it. In order:
 
 1. **The global map.** It resolves through the committed `imports` when no range rejects a tag the map serves
    and either it **agrees** with the map on everything both ship — then the packages it adds are its own to
    publish — or the map serves every specifier it imports and some committed build shipped that exact
-   combination. The second check matters for records written before variant election, whose global map can
-   mix builds per member. A range rejecting a global tag moves it on with cause `incompatible`. A member the
+   combination. That second check matters because the global map can combine tags from several builds
+   (same-tag loans and extended global tags), so a remote that does not agree must run a combination one
+   committed build shipped. A range rejecting a global tag moves it on with cause `incompatible`. A member the
    resolver scoped is judged the same way: a strict range that rejects the map's tag islands the family as
    `incompatible`, while a copy `scopeUncoveredEntrypoints` scoped for an entrypoint the shared version lacks
    becomes a skip when the map serves every entrypoint it ships, as at init.
-2. **Otherwise it serves its own family.** Every self-serving remote is warned, in the same sentences as init.
+2. **Otherwise it serves its own family**, with its `poolCause` recorded, and is warned in the dynamic lines of
+   [What pooling logs](#what-pooling-logs). A remote in a named scope whose map files belong to a remote no
+   longer in the cache serves itself too (`uncovered`): its scope cannot map those files, and half its family on
+   them and half on its own build would tear it. That case logs
+   `'<build>' is not in the cache, so its files cannot be mapped.`
 
 This gate is not redundant even though init enforced its own. Init guarantees no _remote_ runs a combination
 nothing shipped, but a remote loaded later is exactly the consumer that could bridge two builds the committed
 map keeps apart.
 
-**Known limitation.** A load whose `pool` tag turns a lone tagged external into a pool can expose an
+**Accepted: one version, two files.** A loaded remote resolving globally publishes the packages it adds through
+the `share` row `update-cache` opened for it, so it can fill a free `imports` key at a tag that already runs
+elsewhere — from a remote init left off the global map, say. Two copies of that version then run on the page, each
+with its own family. Pooling guarantees no tear, not one instance per version.
+
+**Known limitation.** A load whose `pool` label turns a lone labelled external into a pool can expose an
 entrypoint [self-fill](#entrypoint-coverage-and-tearing) the committed map already holds for that external.
 The committed map is immutable, so this cannot be repaired at runtime; the next init re-elects the pool
 coherently.
