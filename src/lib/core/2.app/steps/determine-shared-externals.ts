@@ -1,16 +1,16 @@
 import type { ForDeterminingSharedExternals } from '../driver-ports/init/for-determining-shared-externals.port';
-import {
-  type ExternalName,
-  GLOBAL_SCOPE,
-  type SharedExternal,
-  type SharedVersion,
-} from 'lib/core/1.domain';
+import { GLOBAL_SCOPE, type SharedExternal, type SharedVersion } from 'lib/core/1.domain';
 import { countUncoveredEntrypoints, versionEntries } from 'lib/core/1.domain/externals/basis';
+import {
+  type AcceptsTag,
+  acceptsTag as createAcceptsTag,
+  versionAcceptance,
+} from 'lib/core/1.domain/externals/compatibility';
 import { NFError } from 'lib/core/native-federation.error';
 import type { DrivingContract } from '../driving-ports/driving.contract';
 import type { LoggingConfig } from '../config/log.contract';
 import type { ModeConfig } from '../config/mode.contract';
-import { createApplyWinner, type IsCompatible, versionAcceptance } from './apply-winner';
+import { createApplyWinner } from './apply-winner';
 
 export function createDetermineSharedExternals(
   config: LoggingConfig & ModeConfig,
@@ -22,8 +22,9 @@ export function createDetermineSharedExternals(
    * Step 3: Determine which version is the optimal version to share.
    *
    * The shared external versions that were merged into the cache/storage caused the shared
-   * external to be 'dirty', this step cleans all dirty externals in the storage by calculating
-   * the most optimal version to share since only 1 version can be shared globally. Every other copy
+   * external to be 'dirty', this step re-elects every dirty external by calculating the most optimal
+   * version to share since only 1 version can be shared globally. Pooling runs first and writes every
+   * member it elects with `dirty: false`, so determine never sees one. Every other copy
    * either skips onto the winner or, where its own range rejects it and `strictVersion` is set, is split
    * out into a scoped external of its own tag.
    *
@@ -36,42 +37,26 @@ export function createDetermineSharedExternals(
    *
    * @param config
    * @param adapters
-   * @returns the externals it re-elected, per scope — pooling's signal for what changed, since this
-   * step clears `dirty` on everything it touches.
    */
   return () => {
-    // The selection loop asks this O(versions² × demands) times but has only
-    // (candidate tag × distinct requiredVersion) distinct questions to ask. Scoped to one resolve,
-    // so the map needs no bound.
-    const memo = new Map<string, boolean>();
-    const isCompatible: IsCompatible = (tag, requiredVersion) => {
-      const key = `${tag}|${requiredVersion}`;
-      let hit = memo.get(key);
-      if (hit === undefined) {
-        hit = ports.versionCheck.isCompatible(tag, requiredVersion);
-        memo.set(key, hit);
-      }
-      return hit;
-    };
-
-    const touched = new Map<string, Set<ExternalName>>();
+    const acceptsTag = createAcceptsTag(
+      ports.versionCheck.isCompatible,
+      ports.versionCheck.compare
+    );
 
     for (const shareScope of ports.sharedExternalsRepo.getScopes()) {
       const sharedExternals = ports.sharedExternalsRepo.getFromScope(shareScope);
 
       try {
-        const elected = new Set<ExternalName>();
         Object.entries(sharedExternals)
           .filter(([_, e]) => e.dirty)
           .forEach(([name, external]) => {
             ports.sharedExternalsRepo.addOrUpdate(
               name,
-              setVersionActions(name, external, isCompatible),
+              setVersionActions(name, external, acceptsTag),
               shareScope
             );
-            elected.add(name);
           });
-        if (elected.size > 0) touched.set(shareScope, elected);
       } catch (error) {
         config.log.error(
           3,
@@ -89,12 +74,11 @@ export function createDetermineSharedExternals(
         );
       }
     }
-    return Promise.resolve(touched);
+    return Promise.resolve();
   };
 
   // Entrypoints declared by the versions `winner` would skip that its own copies can't serve. Prices
-  // exactly the tears `applyWinner.findTears` would report, so an anchored copy — which resolves through
-  // its pooling anchor, not through the winner — is no more a tear here than it is there.
+  // exactly the tears `applyWinner.findTears` would report.
   function uncoveredTears(
     external: SharedExternal,
     winner: SharedVersion,
@@ -104,23 +88,20 @@ export function createDetermineSharedExternals(
     return external.versions.reduce((sum, v) => {
       if (v === winner) return sum;
       if (!accepts(v, winner.tag)) return sum;
-      return v.remotes.reduce(
-        (n, r) => (r.servedBy ? n : n + countUncoveredEntrypoints(r, basis)),
-        sum
-      );
+      return v.remotes.reduce((n, r) => n + countUncoveredEntrypoints(r, basis), sum);
     }, 0);
   }
 
   function setVersionActions(
     externalName: string,
     external: SharedExternal,
-    isCompatible: IsCompatible
+    acceptsTag: AcceptsTag
   ) {
     if (external.versions.length === 1) {
-      return applyWinner(externalName, external, external.versions[0]!, isCompatible);
+      return applyWinner(externalName, external, external.versions[0]!, acceptsTag);
     }
 
-    const acceptance = versionAcceptance(external, isCompatible);
+    const acceptance = versionAcceptance(external, acceptsTag);
     const { accepts } = acceptance;
 
     let sharedVersion = external.versions.find(v => v.host);
@@ -157,15 +138,13 @@ export function createDetermineSharedExternals(
       const costOf = (version: SharedVersion, tag: string) =>
         selfServing
           .get(version)!
-          .reduce((n, g) => (isCompatible(tag, g.requiredVersion) ? n : n + g.copies), 0);
+          .reduce(
+            (n, g) => (acceptsTag(tag, version.tag, g.requiredVersion) ? n : n + g.copies),
+            0
+          );
 
       external.versions.forEach(vA => {
-        const extraDownloads = external.versions.reduce(
-          // A copy of the winner is never redirected, so it never self-serves however its own range
-          // reads — see `applyWinner`, which does not split the winner either.
-          (sum, vB) => (vB === vA ? sum : sum + costOf(vB, vA.tag)),
-          0
-        );
+        const extraDownloads = external.versions.reduce((sum, vB) => sum + costOf(vB, vA.tag), 0);
         // Tiebreak equal-download candidates toward the one that leaves fewest entrypoints
         // uncovered across the versions it would skip (fewest tears / scope-promotions).
         if (extraDownloads < leastExtraDownloads) {
@@ -189,6 +168,6 @@ export function createDetermineSharedExternals(
     }
 
     // Determine action of other versions based on chosen sharedVersion
-    return applyWinner(externalName, external, sharedVersion, isCompatible, acceptance);
+    return applyWinner(externalName, external, sharedVersion, acceptsTag, acceptance);
   }
 }

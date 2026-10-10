@@ -51,10 +51,12 @@ describe('initFederation (storage commits)', () => {
     const keys = setItem.mock.calls.map(([key]) => key);
 
     expect(keys).toEqual([...new Set(keys)]);
+    // `version` is the stamp a cold storage gets once; see `createStorageConfig`.
     expect([...keys].sort()).toEqual([
       'cold.remotes',
       'cold.scoped-externals',
       'cold.shared-externals',
+      'cold.version',
     ]);
   });
 

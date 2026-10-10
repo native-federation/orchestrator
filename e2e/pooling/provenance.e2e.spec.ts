@@ -3,7 +3,7 @@ import { dep, remote, SCOPE, HOST_NAME } from '../harness/portfolio';
 import type { RemoteEntry } from 'lib/core/1.domain';
 
 /**
- * **The provenance promise, as it now holds.** `docs/version-resolver.md` §"The provenance promise".
+ * **The provenance promise, as it now holds.** `docs/version-resolver.md` §"How pooling resolves".
  *
  * Six portfolios in which a remote was served a coupled family assembled from builds that never shipped
  * it together — not islanded, nothing logged — plus two shapes that generalize them: the second hop (a
@@ -39,30 +39,22 @@ test.describe('provenance: the init path keeps a family on one build', () => {
     // map at all, the pair `asymmetric: the split family › islands across a minor gap` locks as a
     // must-island, reached by a route neither gate inspected.
     //
-    // Now mfe3 is covered by neither build and takes its whole family from its own.
-    // **Delta: +2 downloads** (2 → 4).
+    // Under the gate pipeline mfe3 took its whole family from its own build (4 downloads). Electing the
+    // family, mfe3's own build serves mfe1 too, so it is the global one; only mfe2, whose ^22.1.0 rejects
+    // router@22.0.5, runs its own router. 3 downloads, and mfe3 runs exactly the pair it shipped.
     await nf.init([
       remote('team/mfe1', SCOPE.mfe1, [dep('@angular/core', '22.0.5', { req: '^22.0.0' })]),
       remote('team/mfe2', SCOPE.mfe2, [dep('@angular/router', '22.1.0', { req: '^22.1.0' })]),
       consumesBoth(),
     ]);
 
-    expect(await nf.islands()).toEqual(['team/mfe3 self-serves, no build covers @angular/router']);
-    expect(await nf.warns()).toEqual([
-      expect.stringContaining(
-        "'team/mfe3' serves its own family: no shared build offers every entrypoint it imports at a version it accepts — '@angular/router' is the gap, closest is 'team/mfe1'. All 2 members it imports are scoped for it."
-      ),
-    ]);
+    expect(await nf.islands()).toEqual(['team/mfe2 incompatible']);
 
-    // The two sole providers keep their global mappings; only the consumer is scoped, and to its own files.
     const map = await nf.map();
-    expect(map.imports['@angular/core']).toBe('http://mfe1/@angular/core.js');
-    expect(map.imports['@angular/router']).toBe('http://mfe2/@angular/router.js');
+    expect(map.imports['@angular/core']).toBe('http://mfe3/@angular/core.js');
+    expect(map.imports['@angular/router']).toBe('http://mfe3/@angular/router.js');
     expect(map.scopes).toEqual({
-      [SCOPE.mfe3]: {
-        '@angular/core': 'http://mfe3/@angular/core.js',
-        '@angular/router': 'http://mfe3/@angular/router.js',
-      },
+      [SCOPE.mfe2]: { '@angular/router': 'http://mfe2/@angular/router.js' },
     });
 
     expect((await nf.load('team/mfe3')).seen).toEqual({
@@ -70,7 +62,7 @@ test.describe('provenance: the init path keeps a family on one build', () => {
       '@angular/router': 'mfe3|@angular/router@22.0.5',
     });
     await nf.loadAll();
-    expect(nf.downloads()).toHaveLength(4);
+    expect(nf.downloads()).toHaveLength(3);
   });
 
   test('reaches the same verdict on the same portfolio in every manifest order', async ({ nf }) => {
@@ -85,8 +77,8 @@ test.describe('provenance: the init path keeps a family on one build', () => {
     // mfe2 was the basis, the draw set was two disjoint builds, and the identical split passed in silence.
     // Three of six orderings islanded the consumer, three served it a torn family.
     //
-    // Coverage does not read arrival order: no build covers {core, router} in any ordering, so all six
-    // agree, down to which build the report names as closest.
+    // The election does not read arrival order here: the consumer's build serves the core-only remote in
+    // every ordering, so all six elect it and island the router-only remote, down to the sentence.
     const consumer = consumesBoth();
     const coreOnly = remote('team/mfe2', SCOPE.mfe2, [
       dep('@angular/core', '22.0.5', { req: '^22.0.0' }),
@@ -113,7 +105,7 @@ test.describe('provenance: the init path keeps a family on one build', () => {
       reports[label] = await nf.warns();
     }
 
-    const selfServes = ['team/mfe3 self-serves, no build covers @angular/router'];
+    const selfServes = ['team/mfe1 incompatible'];
     expect(verdicts).toEqual({
       'consumer, core, router': selfServes,
       'consumer, router, core': selfServes,
@@ -126,11 +118,8 @@ test.describe('provenance: the init path keeps a family on one build', () => {
     // Down to the sentence: one warning per ordering, naming the same gap and the same closest build.
     // A verdict that agreed while the report drifted would still churn the map across inits.
     expect(new Set(Object.values(reports).map(warns => JSON.stringify(warns))).size).toBe(1);
-    expect(reports['core, router, consumer']).toEqual([
-      expect.stringContaining(
-        "'team/mfe3' serves its own family: no shared build offers every entrypoint it imports at a version it accepts — '@angular/router' is the gap, closest is 'team/mfe2'. All 2 members it imports are scoped for it."
-      ),
-    ]);
+    // The wording itself is pinned in island-warnings.contract.spec.ts.
+    expect(reports['core, router, consumer']).toHaveLength(1);
   });
 
   test('gives way on the consumer, never on the host, when the host half-serves a family', async ({
@@ -142,9 +131,10 @@ test.describe('provenance: the init path keeps a family on one build', () => {
     // that pair with no verdict and no warning.
     //
     // This is #63's own second repro with the one change that hid it: the router provider does not ship
-    // core, so the consumer is not itself the router basis. The resolution is constraint 5 — the host
-    // keeps its pin absolutely and the mixing consumer pays the download. **Delta: +1 download** (2 → 3):
-    // mfe2 stops fetching the host's core and fetches its own core and router instead.
+    // core, so the consumer is not itself the router basis. The host's build is round 1 whatever it serves,
+    // and both remotes agree with it — but they ship router at two tags, so router is not published for
+    // either. mfe2 takes the host's core (its own 22.0.5) and runs its own router beside it, never mfe1's
+    // 22.1.0; mfe1 runs its own router. 3 downloads.
     await nf.init(
       [
         remote('team/mfe1', SCOPE.mfe1, [dep('@angular/router', '22.1.0', { req: '^22.1.0' })]),
@@ -160,28 +150,19 @@ test.describe('provenance: the init path keeps a family on one build', () => {
       }
     );
 
-    expect(await nf.islands()).toEqual(['team/mfe2 self-serves, no build covers @angular/router']);
-    // The host is the closest build — it covers core and misses only router. Naming it is the useful
-    // report here: the portfolio owner's options are to ship router from the host or to accept the cost.
-    expect(await nf.warns()).toEqual([
-      expect.stringContaining(
-        `'team/mfe2' serves its own family: no shared build offers every entrypoint it imports at a version it accepts — '@angular/router' is the gap, closest is '${HOST_NAME}'. All 2 members it imports are scoped for it.`
-      ),
-    ]);
+    expect(await nf.islands()).toEqual(['team/mfe1 uncovered', 'team/mfe2 uncovered']);
 
-    // The host's pin still owns the global mapping, and mfe1 still publishes the router it solely provides.
+    // The host's pin owns the global mapping; router is in nobody's global set.
     const map = await nf.map();
     expect(map.imports['@angular/core']).toBe('http://host.service/@angular/core.js');
-    expect(map.imports['@angular/router']).toBe('http://mfe1/@angular/router.js');
+    expect(map.imports['@angular/router']).toBeUndefined();
     expect(map.scopes).toEqual({
-      [SCOPE.mfe2]: {
-        '@angular/core': 'http://mfe2/@angular/core.js',
-        '@angular/router': 'http://mfe2/@angular/router.js',
-      },
+      [SCOPE.mfe1]: { '@angular/router': 'http://mfe1/@angular/router.js' },
+      [SCOPE.mfe2]: { '@angular/router': 'http://mfe2/@angular/router.js' },
     });
 
     expect((await nf.load('team/mfe2')).seen).toEqual({
-      '@angular/core': 'mfe2|@angular/core@22.0.5',
+      '@angular/core': 'host.service|@angular/core@22.0.5',
       '@angular/router': 'mfe2|@angular/router@22.0.5',
     });
     await nf.loadAll();
@@ -233,15 +214,18 @@ test.describe('provenance: the dynamic path mirrors it', () => {
  * comparing the serving builds more tightly (case 6's builds agree exactly on everything they share).
  */
 test.describe('provenance: the cases no tag comparison can reach', () => {
-  test('makes a declared bridge-tag coupling constrain what the tagger runs', async ({ nf }) => {
-    // Case 5. `docs/version-resolver.md` §"Declare the coupling you actually have" recommends co-tagging a
-    // bridge member to express a coupling scope tagging cannot see. Under the old promise the tag bought
+  test('makes a declared bridge-label coupling constrain what the labeller runs', async ({
+    nf,
+  }) => {
+    // Case 5. `docs/version-resolver.md` §"Declare the coupling you actually have" recommends co-labelling a
+    // bridge member to express a coupling scope labelling cannot see. Under the old promise the label bought
     // gate 1 only: a design-system remote ships design-system packages and a shell ships framework ones,
     // so the two serving builds are disjoint *by construction* and gate 2 could never fire on them — the
     // declaration was honoured by grouping the members and then ignored.
     //
-    // Coverage makes it mean something: mfe3 declared the coupling and gets it, from its own build.
-    // **Delta: +2 downloads** (2 → 4).
+    // The election makes it mean something: mfe3 declared the coupling, and its build — ui@2.0.0 beside
+    // core@22.0.5 — is the one that serves all three remotes (both ranges take it), so everybody runs the
+    // pair mfe3 shipped. 2 downloads; the gate pipeline paid 4 to give mfe3 its own.
     await nf.init([
       remote('team/mfe1', SCOPE.mfe1, [dep('@ds/ui', '2.1.0', { req: '^2.0.0', pool: 'ng-ds' })]),
       remote('team/mfe2', SCOPE.mfe2, [
@@ -253,23 +237,18 @@ test.describe('provenance: the cases no tag comparison can reach', () => {
       ]),
     ]);
 
-    expect(await nf.islands()).toEqual(['team/mfe3 self-serves, no build covers @ds/ui']);
+    expect(await nf.islands()).toEqual([]);
 
-    // mfe3 shipped ui@2.0.0 beside core@22.0.5 and ran ui@2.1.0 beside core@22.1.0. The two packages
+    // mfe3 shipped ui@2.0.0 beside core@22.0.5 and once ran ui@2.1.0 beside core@22.1.0. The two packages
     // version independently, so no tag-distance rule has a line to compare here — which is the case that
     // forced the fix to be framed around provenance. Now it runs the pair it shipped.
     expect((await nf.load('team/mfe3')).seen).toEqual({
       '@ds/ui': 'mfe3|@ds/ui@2.0.0',
       '@angular/core': 'mfe3|@angular/core@22.0.5',
     });
-    expect((await nf.map()).scopes).toEqual({
-      [SCOPE.mfe3]: {
-        '@ds/ui': 'http://mfe3/@ds/ui.js',
-        '@angular/core': 'http://mfe3/@angular/core.js',
-      },
-    });
+    expect((await nf.map()).scopes).toBeUndefined();
     await nf.loadAll();
-    expect(nf.downloads()).toHaveLength(4);
+    expect(nf.downloads()).toHaveLength(2);
   });
 
   test('keeps a lockstep pair together though both providers agree exactly on their overlap', async ({
@@ -278,10 +257,11 @@ test.describe('provenance: the cases no tag comparison can reach', () => {
     // Case 6, and the case that fixes the framing. Nothing is disjoint here: both serving builds ship
     // core@22.0.5 and agree on it *byte for byte*, so the old verdict survives any tightening of the
     // comparison — minor line, patch, or exact tag equality alike. The pair that matters, material against
-    // cdk, is in neither build. Coverage asks a different question and reaches it.
-    // **Delta: +2 downloads** (3 → 5).
+    // cdk, is in neither build. mfe1's build is elected (both others agree with it), and cdk — shipped at
+    // two tags by the remotes that agree — is published for neither, so each keeps its own beside the
+    // elected files it matches. 4 downloads; the gate pipeline paid 5.
     //
-    // material and cdk are one npm scope, so scope tagging groups them, and they are a vendor lockstep
+    // material and cdk are one npm scope, so scope labelling groups them, and they are a vendor lockstep
     // pair: 22.0.5 against 22.1.0 is a combination the vendor never shipped.
     await nf.init([
       remote('team/mfe1', SCOPE.mfe1, [
@@ -298,33 +278,28 @@ test.describe('provenance: the cases no tag comparison can reach', () => {
       ]),
     ]);
 
-    expect(await nf.islands()).toEqual([
-      'team/mfe3 self-serves, no build covers @angular/material',
-    ]);
+    expect(await nf.islands()).toEqual(['team/mfe2 uncovered', 'team/mfe3 uncovered']);
 
-    // Coverage is not a verdict and would have moved mfe3 onto its own build in silence; the warning is
-    // what makes the promise's main cost auditable. Note the pool name: material, cdk and core are one
-    // pool tagged `angular`, but only the two members mfe3 imports are scoped for it.
-    expect(await nf.warns()).toEqual([
-      expect.stringContaining(
-        "[pool:angular] 'team/mfe3' serves its own family: no shared build offers every entrypoint it imports at a version it accepts — '@angular/material' is the gap, closest is 'team/mfe2'. All 2 members it imports are scoped for it."
-      ),
-    ]);
+    // material, cdk and core are one pool labelled `angular`.
+    const store = await nf.store();
+    expect(
+      ['@angular/core', '@angular/material', '@angular/cdk'].map(
+        name => store['__GLOBAL__']![name]!.poolName
+      )
+    ).toEqual(['angular', 'angular', 'angular']);
 
+    // Each runs exactly the tags its own build shipped: the lockstep pair stays 22.0.5 for mfe3, and mfe2's
+    // cdk@22.1.0 never meets mfe3's material.
     expect((await nf.load('team/mfe3')).seen).toEqual({
-      '@angular/material': 'mfe3|@angular/material@22.0.5',
+      '@angular/material': 'mfe1|@angular/material@22.0.5',
       '@angular/cdk': 'mfe3|@angular/cdk@22.0.5',
     });
-
-    // And the witness in the same portfolio: mfe2 keeps deduping core off mfe1's build, because the map
-    // serves it core@22.0.5 and cdk@22.1.0 — exactly the tags mfe2's own build shipped. At equal versions
-    // provider identity is irrelevant, so that is a combination some build really did compile.
     expect((await nf.load('team/mfe2')).seen).toEqual({
       '@angular/core': 'mfe1|@angular/core@22.0.5',
       '@angular/cdk': 'mfe2|@angular/cdk@22.1.0',
     });
     await nf.loadAll();
-    expect(nf.downloads()).toHaveLength(5);
+    expect(nf.downloads()).toHaveLength(4);
   });
 });
 
@@ -338,7 +313,7 @@ test.describe('provenance: the cases no tag comparison can reach', () => {
  * passed green. `dep(..., { peers })` gives an external real imports, and `nf.bindings()` reports what
  * they bound to. Measured independently with handcrafted import maps in Chromium: a scope entry pointing
  * at another origin's build does beat the global `imports` for importers under that prefix, so the fix is
- * the anchor self-scope of `docs/version-resolver.md` §"The provenance promise" and not a change to
+ * the subpool build's self-scope of `docs/version-resolver.md` §"How pooling resolves" and not a change to
  * `ImportMap`.
  */
 test.describe('provenance: the second hop', () => {
@@ -366,23 +341,21 @@ test.describe('provenance: the second hop', () => {
     // router's `import '@angular/core'` fell through to the global winner: every consumer of that router
     // ran it against core@22.0.9, a pair nothing compiled, invisible in `seen`.
     //
-    // Now no build ships the combination the global mapping offers mfe1, so mfe1 serves its own family
-    // and its scope names both members. Its router therefore binds its own core, whoever imports it.
+    // Electing the family, mfe1's matched pair serves all four remotes (^22.0.0 takes 22.0.6), so it is the
+    // global map and its router binds its own core through `imports`, whoever imports it.
     await nf.init(torn());
     await nf.loadAll();
 
     const map = await nf.map();
-    // The self-scope names exactly the member mfe1 lost. Router needs no entry: its global mapping is
-    // already mfe1's file, and a scope repeating the global mapping is not emitted (Performance §9).
-    expect(map.scopes?.[SCOPE.mfe1]).toEqual({ '@angular/core': 'http://mfe1/@angular/core.js' });
+    expect(map.scopes).toBeUndefined();
+    expect(map.imports['@angular/core']).toBe('http://mfe1/@angular/core.js');
     expect(map.imports['@angular/router']).toBe('http://mfe1/@angular/router.js');
     expect((await nf.bindings())['mfe1|@angular/router@22.0.6']).toEqual({
       '@angular/core': 'mfe1|@angular/core@22.0.6',
     });
 
-    // And the consumer rides that build coherently: mfe1's build covers what mfe3 imports, so mfe3 is
-    // anchored on it and resolves both members from mfe1 — the router file it gets is the one whose peer
-    // edge the scope above repaired. One router copy exists on the page, so there is nothing else to bind.
+    // And the consumer rides that build coherently: mfe3 resolves both members from mfe1. One router copy
+    // exists on the page, so there is nothing else to bind.
     expect((await nf.load('team/mfe3')).seen).toEqual({
       '@angular/core': 'mfe1|@angular/core@22.0.6',
       '@angular/router': 'mfe1|@angular/router@22.0.6',
@@ -390,7 +363,7 @@ test.describe('provenance: the second hop', () => {
     expect(await nf.bindings()).toEqual({
       'mfe1|@angular/router@22.0.6': { '@angular/core': 'mfe1|@angular/core@22.0.6' },
     });
-    expect(nf.downloads()).toHaveLength(3);
+    expect(nf.downloads()).toHaveLength(2);
   });
 
   test('keeps the provider own family on its own build', async ({ nf }) => {
@@ -408,7 +381,8 @@ test.describe('provenance: the second hop', () => {
     nf,
   }) => {
     // The control, so the assertions above cannot pass by accident: give the provider a scope of its
-    // own — here by islanding it on a real incompatibility — and the same peer edge binds its own core.
+    // own — here by islanding it: the two 21.2.0 remotes outnumber it and its ~22.0.6 rejects their build —
+    // and the same peer edge binds its own core.
     // `bindings()` is reporting the map, not the fixture.
     await nf.init([
       remote('team/mfe1', SCOPE.mfe1, [
@@ -420,7 +394,7 @@ test.describe('provenance: the second hop', () => {
     ]);
     await nf.loadAll();
 
-    expect(await nf.islands()).toEqual(['team/mfe1 on @angular/core@22.0.6']);
+    expect(await nf.islands()).toEqual(['team/mfe1 incompatible']);
     expect(await nf.bindings()).toEqual({
       'mfe1|@angular/router@22.0.6': { '@angular/core': 'mfe1|@angular/core@22.0.6' },
     });

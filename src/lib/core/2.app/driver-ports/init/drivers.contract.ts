@@ -1,7 +1,6 @@
 import type { ForCommittingChanges } from './for-committing-changes.port';
 import type { ForDeterminingSharedExternals } from './for-determining-shared-externals.port';
 import type { ForPoolingSharedExternals } from './for-pooling-shared-externals.port';
-import type { ForMarkingPoolsForReelection } from './for-marking-pools-for-reelection.port';
 import type { ForPoolingDynamicExternals } from './for-pooling-dynamic-externals.port';
 import type { ForExposingModuleLoader } from './for-exposing-module-loader.port';
 import type { ForGeneratingImportMap } from './for-generating-import-map';
@@ -16,7 +15,6 @@ import type { DrivingContract } from 'lib/core/2.app/driving-ports/driving.contr
 export type InitDriversContract = {
   getRemoteEntries: ForGettingRemoteEntries;
   processRemoteEntries: ForProcessingRemoteEntries;
-  markPoolsForReelection: ForMarkingPoolsForReelection;
   determineSharedExternals: ForDeterminingSharedExternals;
   poolSharedExternals: ForPoolingSharedExternals;
   generateImportMap: ForGeneratingImportMap;

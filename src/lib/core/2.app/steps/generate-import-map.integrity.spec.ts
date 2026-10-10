@@ -12,11 +12,12 @@ import {
   mockRemoteInfo_MFE2,
 } from 'lib/testing/domain/remote-info/remote-info.mock';
 import {
+  mockExternal,
   mockExternal_A,
   mockExternal_E,
   mockExternal_F,
 } from 'lib/testing/domain/externals/external.mock';
-import { mockVersion_A } from 'lib/testing/domain/externals/version.mock';
+import { mockVersion, mockVersion_A } from 'lib/testing/domain/externals/version.mock';
 import { mockScopeUrl_MFE1, mockScopeUrl_MFE2 } from 'lib/testing/domain/scope-url.mock';
 
 const HASH_A = 'sha384-AAA';
@@ -167,6 +168,66 @@ describe('createGenerateImportMap (integrity)', () => {
     expect(actual.integrity).toEqual({
       [mockScopeUrl_MFE1({ file: 'dep-a.js' })]: HASH_A,
     });
+  });
+
+  // mfe1 ships `dep-a/sub` flat and only skips it; mfe2's shared `dep-a` lists it as an entry, so mfe1's scope
+  // points at mfe2's file. Its hash is mfe2's; mfe1's own copy, mapped nowhere, gets no hash, no chunks and
+  // no `cached` mark (so the record is not rewritten).
+  it('should add integrity for a share-scope file another external serves, and nothing of its own', async () => {
+    const integrity1 = { 'dep-a-sub.js': HASH_B, 'mfe1-chunk.js': HASH_CHUNK };
+    const integrity2 = { 'dep-a.js': HASH_A, 'dep-a-sub.js': HASH_E };
+    adapters.remoteInfoRepo.tryGet = vi.fn(remote => {
+      if (remote === 'team/mfe1') return Optional.of(remoteInfoFor('team/mfe1', integrity1));
+      if (remote === 'team/mfe2') return Optional.of(remoteInfoFor('team/mfe2', integrity2));
+      return Optional.empty<RemoteInfo>();
+    });
+    adapters.sharedExternalsRepo.getScopes = vi.fn(() => ['custom-scope']);
+    const sharedForScope = {
+      'dep-a': mockExternal_A({
+        dirty: false,
+        versions: [
+          mockVersion_A.v2_1_2({
+            action: 'share',
+            remotes: {
+              'team/mfe2': { entries: { 'dep-a': 'dep-a.js', 'dep-a/sub': 'dep-a-sub.js' } },
+            },
+          }),
+        ],
+      }),
+      'dep-a/sub': mockExternal.shared([
+        mockVersion.shared('2.1.1', 'dep-a/sub', {
+          action: 'skip',
+          remotes: { 'team/mfe1': { file: 'dep-a-sub.js', bundle: 'mfe1-bundle' } },
+        }),
+      ]),
+    };
+    adapters.sharedExternalsRepo.getFromScope = vi.fn(scope =>
+      scope === 'custom-scope' ? sharedForScope : {}
+    );
+    adapters.sharedChunksRepo.tryGet = vi.fn((remote, bundle) =>
+      remote === 'team/mfe1' && bundle === 'mfe1-bundle'
+        ? Optional.of(['mfe1-chunk.js'])
+        : Optional.empty()
+    );
+
+    const actual = await generateImportMap();
+
+    expect(actual.scopes).toEqual({
+      [mockScopeUrl_MFE1()]: { 'dep-a/sub': mockScopeUrl_MFE2({ file: 'dep-a-sub.js' }) },
+      [mockScopeUrl_MFE2()]: {
+        'dep-a': mockScopeUrl_MFE2({ file: 'dep-a.js' }),
+        'dep-a/sub': mockScopeUrl_MFE2({ file: 'dep-a-sub.js' }),
+      },
+    });
+    expect(actual.integrity).toEqual({
+      [mockScopeUrl_MFE2({ file: 'dep-a.js' })]: HASH_A,
+      [mockScopeUrl_MFE2({ file: 'dep-a-sub.js' })]: HASH_E,
+    });
+    expect(adapters.sharedExternalsRepo.addOrUpdate).not.toHaveBeenCalledWith(
+      'dep-a/sub',
+      expect.anything(),
+      expect.anything()
+    );
   });
 
   it('should add integrity for chunk imports', async () => {

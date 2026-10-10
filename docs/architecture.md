@@ -586,7 +586,7 @@ The repository is organized **flow-first**: every published subpath of the packa
 
 ```
 core/
-  1.domain/            Pure domain contracts and their invariants (remote entries, externals, import maps)
+  1.domain/            Pure domain contracts, their invariants and pure policy (remote entries, externals, import maps, pooling)
   2.app/               Application logic
     flows/               The pipelines: which steps run in which order (init, initRemoteEntry)
     steps/               The pipeline steps (1-6 run during init, 7-9 back initRemoteEntry)
@@ -617,5 +617,31 @@ Enforced by ESLint (`no-restricted-imports` in `eslint.config.js`):
 
 1. Internal code never imports a `*.index.ts` barrel — those are for package consumers only. Import the concrete module instead.
 2. `registry`, `audit` and `node` may depend on `core` and `utils`, never on each other. `core` depends on no flow folder.
+3. `core/1.domain` is pure: it imports nothing from core's outer layers (`2.app`, `3.adapters`, `4.config`, `5.di`). Logging and storage stay with the caller: a domain function returns what the step should log or write (for example `buildPools` returns the externals whose pool label joined nothing, and the pooling step logs them).
+4. Only `core/5.di` imports the pipeline steps (`core/2.app/steps/**`), which it wires into the flows. Everything else, flows and adapters included, reaches a step through its driver port. `src/lib/testing` is exempt, since the test harness runs the real steps.
+5. A step never imports another step, i.e. any module `5.di` wires (`init.factory.ts`). Steps share code through `1.domain`, or through a template that is not itself a step, such as `store-remote-entry` (used by `process-remote-entries` and `update-cache`) or `apply-winner` (used by `determine-shared-externals`).
+6. Inside the domain, `core/1.domain/externals` never imports `core/1.domain/pooling`: pooling builds on the externals model, never the other way round.
+
+### Pooling
+
+[Dependency pooling](./version-resolver.md#dependency-pooling) follows the same layering. Its policy is pure and lives in `core/1.domain/pooling`; the two steps read the record through the storage port, call that policy, then log and write what it returns.
+
+| Piece                                                                                  | Where                                                                                         |
+| -------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| Membership: pools from labels and package edges, each pool's name                      | `1.domain/pooling/membership.ts` (`buildPools`)                                               |
+| The init plan: which pools to re-elect, which externals to strip of stale pool results | `1.domain/pooling/plan.ts` (`planElection`)                                                   |
+| What each remote's build ships for a pool                                              | `1.domain/pooling/builds.ts`                                                                  |
+| The rules both paths judge by: serves, agrees, shipped together                        | `1.domain/pooling/rules.ts`                                                                   |
+| The election: round 1, subpools, extension, each remote's placement                    | `1.domain/pooling/election.ts` (`elect`)                                                      |
+| The records an election writes, one row per `(tag, action)`                            | `1.domain/pooling/placement.ts` (`memberRecord`)                                              |
+| Stored pool results: detect, strip, follow a rename                                    | `1.domain/pooling/pool-state.ts`                                                              |
+| The dynamic gate: the committed view, the verdict, the moved record                    | `1.domain/pooling/gate.ts`                                                                    |
+| The stored fields (`poolName`, `poolWinner`; `pool`, `servedBy`, `poolCause`)          | `1.domain/externals/external.contract.ts`, `1.domain/externals/version.contract.ts`           |
+| The init step: plan, elect, log, write; throws under `strictExternalCompatibility`     | `2.app/steps/pooling/pool-shared-externals.ts`, port `for-pooling-shared-externals.port.ts`   |
+| The dynamic step: judge the loaded remote, rewrite its actions, write its moved copies | `2.app/steps/pooling/pool-dynamic-externals.ts`, port `for-pooling-dynamic-externals.port.ts` |
+| Mapping a subpool's copies onto its build (`servedBy`)                                 | `2.app/steps/generate-import-map.ts`                                                          |
+| Marking a pool's other members dirty when removing a remote empties a member           | `3.adapters/storage/shared-externals.repository.ts`                                           |
+
+The two pipelines stay separate. Init runs `processRemoteEntries → poolSharedExternals → determineSharedExternals → generateImportMap → commitChanges` and re-elects every pool of a scope with a dirty external; pooling runs before `determine`, which leaves pooled externals alone. `initRemoteEntry` runs `updateCache → poolDynamicExternals → convertToImportMap → commitChanges`: a committed import map cannot change, so it elects nothing and only judges the loaded remote against the committed record (see [Scope and dynamic init](./version-resolver.md#scope-and-dynamic-init)).
 
 Adding a new flow means adding a new folder under `src/lib/`, a `<name>.index.ts` barrel next to the existing ones, and one bundle entry in `build.js`.

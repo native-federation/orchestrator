@@ -7,10 +7,10 @@ import {
   type SharedVersionMeta,
   GLOBAL_SCOPE,
 } from 'lib/core/1.domain';
+import { acceptsTag } from 'lib/core/1.domain/externals/compatibility';
 import {
   addRemoteToVersion,
   committedEntries,
-  findVersionForTag,
   uncoveredEntrypoints,
   versionEntries,
 } from 'lib/core/1.domain/externals/basis';
@@ -38,6 +38,11 @@ export function createUpdateCache(
 ): ForUpdatingCache {
   const storeRemoteEntry = createStoreRemoteEntry(config, ports, 8);
   const removeCachedRemoteEntries = createRemoveCachedRemoteEntries(ports);
+  // Read per call so a port swapped after wiring is honoured.
+  const accepts = acceptsTag(
+    (tag, range) => ports.versionCheck.isCompatible(tag, range),
+    (a, b) => ports.versionCheck.compare(a, b)
+  );
 
   /**
    * Step 8 (dynamic init): merge a runtime-loaded remoteEntry into the cache. The
@@ -93,8 +98,7 @@ export function createUpdateCache(
     let action: SharedVersionAction = scopeType === 'strict' ? 'share' : 'skip';
 
     const sharedVersion = cached.versions.find(c => c.action === 'share');
-    const isCompatible =
-      !sharedVersion || ports.versionCheck.isCompatible(sharedVersion.tag, remote.requiredVersion);
+    const isCompatible = !sharedVersion || accepts(sharedVersion.tag, tag, remote.requiredVersion);
 
     if (action === 'skip' && !isCompatible && remote.strictVersion) {
       action = 'scope';
@@ -141,7 +145,10 @@ export function createUpdateCache(
       }
     }
 
-    const matchingVersion = findVersionForTag(cached.versions, tag);
+    // A `scope` row is another remote's own files, and a `skip` row nobody shares serves nothing globally.
+    const matchingVersion = sharedVersion
+      ? cached.versions.find(v => v.tag === tag && v.action !== 'scope')
+      : undefined;
 
     if (action === 'scope') {
       // Inside a shareable version a later import-map build would redirect it to the basis.

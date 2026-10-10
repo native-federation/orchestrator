@@ -489,10 +489,10 @@ describe('createGetShared', () => {
       );
     });
 
-    // `team/mfe1` is a copy pooling anchored on another build, so the import map already runs it on that
-    // build's files. Handing MF a `get()` for its own `/testing` file would load a second build of the
+    // `team/mfe1` is a copy pooling placed in another build's subpool, so the import map already runs it on
+    // that build's files. Handing MF a `get()` for its own `/testing` file would load a second build of the
     // package behind MF's back — the one thing MF's shared scope exists to prevent.
-    it('does not source an entrypoint from a copy pooling anchored on a foreign build', async () => {
+    it("does not source an entrypoint from a copy pooling placed in a foreign build's subpool", async () => {
       const ports = setup(
         global({
           '@angular/core': mockExternal.shared([

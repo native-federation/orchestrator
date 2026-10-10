@@ -5,12 +5,12 @@ import { dep, remote, SCOPE } from '../harness/portfolio';
  * Which externals a `remoteEntry` puts in the same family.
  *
  * Membership is the connected component of a graph with two kinds of edge: the npm scope of a package
- * name (scope tagging, portfolio-global) and a declared `pool` tag (remote-local for membership, but
+ * name (scope labelling, portfolio-global) and a declared `pool` label (remote-local for membership, but
  * the gates then operate on the whole external). Everything else — how many builds a family may draw
  * on, who islands — only ever applies *within* one pool.
  *
- * Every case here varies one field of the declaration and nothing else. Several run with scope tagging
- * **off**, because that is how a `pool` tag is shown to form a family by itself — not a test of the flag,
+ * Every case here varies one field of the declaration and nothing else. Several run with scope labelling
+ * **off**, because that is how a `pool` label is shown to form a family by itself — not a test of the flag,
  * which is `flag.e2e.spec.ts`. What the family then does with its version lines is `symmetric` and
  * `asymmetric`.
  */
@@ -40,7 +40,7 @@ test.describe('membership: npm scope', () => {
       '@angular/core': 'http://mfe2/@angular/core.js',
       '@angular/router': 'http://mfe2/@angular/router.js',
     });
-    expect(await nf.islands()).toEqual(['team/mfe2 on @angular/core@17.0.0']);
+    expect(await nf.islands()).toEqual(['team/mfe2 incompatible']);
 
     // What the island means at runtime: mfe2's code runs its own framework and the shared design
     // system, and only one @design/ui was ever instantiated for the page.
@@ -74,8 +74,8 @@ test.describe('membership: npm scope', () => {
     expect(await nf.islands()).toEqual([]);
   });
 
-  test('an unscoped name is not scope-tagged, so its family can mix majors', async ({ nf }) => {
-    // The status quo the `pool` tag exists to fix: with no tag and no npm scope, react and react-dom
+  test('an unscoped name is not scope-labelled, so its family can mix majors', async ({ nf }) => {
+    // The status quo the `pool` label exists to fix: with no label and no npm scope, react and react-dom
     // are unrelated externals. mfe2 scopes the react it rejects and dedups react-dom@18.2.0 — react 17
     // against react-dom 18, which is exactly the split-family shape, just outside pooling's reach.
     await nf.init([
@@ -98,14 +98,14 @@ test.describe('membership: npm scope', () => {
   });
 });
 
-test.describe('membership: the `pool` tag', () => {
-  const tagged = (pool: string) => (pkg: string, version: string, req?: string) =>
+test.describe('membership: the `pool` label', () => {
+  const labelled = (pool: string) => (pkg: string, version: string, req?: string) =>
     dep(pkg, version, { pool, ...(req ? { req } : {}) });
 
   test('joins two npm scopes into one family', async ({ nf }) => {
     // The design system declares itself part of the framework family, so an incompatible consumer can
     // no longer take the design system either — the case the two-pool test above deliberately allows.
-    const ng = tagged('framework');
+    const ng = labelled('framework');
     await nf.init([
       remote('team/mfe1', SCOPE.mfe1, [ng('@angular/core', '18.0.0'), ng('@design/ui', '1.0.0')]),
       remote('team/mfe2', SCOPE.mfe2, [ng('@angular/core', '17.0.0'), ng('@design/ui', '1.0.0')]),
@@ -118,12 +118,14 @@ test.describe('membership: the `pool` tag', () => {
     expect((await nf.loadAll())['team/mfe2']!.seen['@design/ui']).toBe('mfe2|@design/ui@1.0.0');
   });
 
-  test('pools an unscoped lockstep family portfolio-wide from one remote’s tag', async ({ nf }) => {
+  test('pools an unscoped lockstep family portfolio-wide from one remote’s label', async ({
+    nf,
+  }) => {
     // The react/react-dom recipe. Auto-scoping only matches scoped npm names, so react can never be
-    // scope-tagged — but a `pool` tag is remote-local for *membership* only, while the gates operate on
+    // scope-labelled — but a `pool` label is remote-local for *membership* only, while the gates operate on
     // the whole external. One remote declaring `pool: 'react'` on both packages therefore pools the
     // family for every remote, including mfe2 which declared nothing.
-    const react = tagged('react');
+    const react = labelled('react');
     await nf.init(
       [
         remote('team/mfe1', SCOPE.mfe1, [react('react', '18.2.0'), react('react-dom', '18.2.0')]),
@@ -139,7 +141,7 @@ test.describe('membership: the `pool` tag', () => {
       react: 'http://mfe2/react.js',
       'react-dom': 'http://mfe2/react-dom.js',
     });
-    expect(await nf.islands()).toEqual(['team/mfe2 on react@17.0.2']);
+    expect(await nf.islands()).toEqual(['team/mfe2 incompatible']);
 
     // The point of the recipe: neither remote ends up with a mismatched pair.
     const loaded = await nf.loadAll();
@@ -149,9 +151,9 @@ test.describe('membership: the `pool` tag', () => {
     });
   });
 
-  test('warns about a tag that pooled with nothing', async ({ nf }) => {
-    // A tag nothing else joined is a typo or a missing sibling, and silently degrading to "no pool" is
-    // exactly the failure #63 is about — so it is called out. Auto-scope singletons stay silent.
+  test('pools nothing for a label that joins no other external', async ({ nf }) => {
+    // A label nothing else joined is a typo or a missing sibling; it pools nothing and is logged at debug
+    // (pinned in island-warnings.contract.spec.ts). Auto-scope singletons stay silent.
     await nf.init(
       [
         remote('team/mfe1', SCOPE.mfe1, [
@@ -166,11 +168,7 @@ test.describe('membership: the `pool` tag', () => {
       { pooling: false }
     );
 
-    expect(await nf.warns()).toContainEqual(
-      expect.stringContaining(
-        "[@angular/core] declares a 'pool' tag but no other external joined its pool"
-      )
-    );
+    expect((await nf.store())['__GLOBAL__']!['@angular/core']!.poolName).toBeUndefined();
     // And it really did not pool: mfe2 scopes only the member it rejects.
     expect((await nf.map()).scopes?.[SCOPE.mfe2]).toEqual({
       '@angular/core': 'http://mfe2/@angular/core.js',
@@ -211,8 +209,9 @@ test.describe('membership: shareScope and singleton', () => {
       '@angular/router': 'http://mfe2/@angular/router.js',
     });
 
-    // The warning is tagged with the shareScope it happened in.
-    expect(await nf.warns()).toContainEqual(expect.stringContaining('[widgets][pool:angular]'));
+    // The pool lives in the shareScope it was elected in.
+    expect(await nf.islands()).toEqual(['team/mfe2 incompatible']);
+    expect((await nf.store())['widgets']!['@angular/core']!.poolName).toBe('angular');
 
     // A named share scope is served entirely through import-map scopes, so a remote outside it must
     // resolve nothing — mfe3 dedups mfe1's build, but only because it declared the same scope.

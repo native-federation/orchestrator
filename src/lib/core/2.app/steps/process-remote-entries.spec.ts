@@ -151,12 +151,12 @@ describe('createProcessRemoteEntries', () => {
     });
   });
 
-  // A declared `pool` tag reaches storage on the version meta as `pool`, which is what
-  // `hasPoolState()` reads.
+  // A declared `pool` label reaches storage on the version meta as `pool`, which is what
+  // `scopeHasPoolState()` reads.
   // This step used to also set an in-memory flag; it no longer does, because a warm init may not
-  // refetch the tagged remote at all (see shared-externals.repository.spec.ts).
-  describe('pool tags reach storage', () => {
-    it('stores the pool tag on the version meta', async () => {
+  // refetch the labelled remote at all (see 1.domain/pooling/pool-state.spec.ts).
+  describe('pool labels reach storage', () => {
+    it('stores the pool label on the version meta', async () => {
       const remoteEntries = [
         mockRemoteEntry_MFE1({
           shared: [mockSharedInfo('dep-a', { singleton: true, pool: 'grp' })],
@@ -169,7 +169,7 @@ describe('createProcessRemoteEntries', () => {
       expect(stored.versions[0].remotes[0].pool).toBe('grp');
     });
 
-    it('leaves the meta without a tag when none is declared', async () => {
+    it('leaves the meta without a label when none is declared', async () => {
       const remoteEntries = [
         mockRemoteEntry_MFE1({
           shared: [mockSharedInfo('dep-a', { singleton: true })],

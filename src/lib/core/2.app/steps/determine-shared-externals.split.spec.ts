@@ -8,14 +8,17 @@ import { createSharedExternalsRepository } from 'lib/core/3.adapters/storage/sha
 import { createVersionCheck } from 'lib/core/3.adapters/checks/version.check';
 import { globalThisStorageEntry } from 'lib/core/4.config/storage/global-this.storage';
 import { createDetermineSharedExternals } from './determine-shared-externals';
+import { createGenerateImportMap } from './generate-import-map';
+import { Optional } from 'lib/utils/optional';
+import type { RemoteInfo } from 'lib/core/1.domain';
 import { createProcessRemoteEntries } from './process-remote-entries';
 import { mockRemoteEntry_MFE2 } from 'lib/testing/domain/remote-entry/remote-entry.mock';
 import { mockSharedInfo } from 'lib/testing/domain/remote-entry/shared-info.mock';
 
 /**
  * Verdict granularity: `applyWinner` marks the copies that objected, not the rows they sit in. The whole
- * portfolio effect is in `pooling/per-copy-verdicts.regression.spec.ts`; this file is the mechanics —
- * what splits, what does not, and what the resulting record looks like.
+ * portfolio effect is in `pooling/pooling.regression.spec.ts` (per-copy verdicts); this file is the
+ * mechanics — what splits, what does not, and what the resulting record looks like.
  */
 describe('determine: splitting a version on election', () => {
   let config: ConfigContract;
@@ -152,7 +155,7 @@ describe('determine: splitting a version on election', () => {
     await createDetermineSharedExternals(config, adapters)();
 
     // Host precedence makes the host row the winner, so the winner exemption covers it — which is what
-    // keeps a host copy out of a `scope` row, where `rebuildMember` would drop its `host` bit.
+    // keeps a host copy out of a `scope` row, where `memberRecord` would drop its `host` bit.
     expect(rows()).toEqual(['22.1.0:share:[team/host,team/mfe2]', '21.0.0:scope:[team/mfe3]']);
   });
 
@@ -206,6 +209,30 @@ describe('determine: splitting a version on election', () => {
     expect(rows()).toEqual([majorityRow('2.2.0', 4), '2.1.0:scope:[team/mfe-c,team/mfe-a]']);
   });
 
+  it("puts a torn newer copy's scope row above an older winner", async () => {
+    // The newer copy is not strict, so it dedups to the older winner; coverage then tears it and empties
+    // its row. Its scope row has to take the emptied row's place, not land after the winner's.
+    config.profile.scopeUncoveredEntrypoints = true;
+    seed([
+      version('2.2.0', [
+        {
+          remote: 'team/mfe-n',
+          req: '^2.2.0',
+          strict: false,
+          entries: { 'dep-a': 'a.js', 'dep-a/extra': 'x.js' },
+        },
+      ]),
+      version(
+        '2.1.0',
+        Array.from({ length: 4 }, (_, i) => ({ remote: `team/maj${i + 1}`, req: '~2.1.0' }))
+      ),
+    ]);
+
+    await createDetermineSharedExternals(config, adapters)();
+
+    expect(rows()).toEqual(['2.2.0:scope:[team/mfe-n]', majorityRow('2.1.0', 4)]);
+  });
+
   it('still refuses the portfolio under strictExternalCompatibility', async () => {
     config.strict.strictExternalCompatibility = true;
     seed([
@@ -220,78 +247,27 @@ describe('determine: splitting a version on election', () => {
     await expect(createDetermineSharedExternals(config, adapters)()).rejects.toThrow();
   });
 
-  /**
-   * A warm init reads `servedBy` written by the previous portfolio's pooling — determine runs before
-   * `poolSharedExternals` (init.flow.ts), so these anchors are always already in the record. An anchored
-   * copy resolves through its anchor's build, not through the shared version, which cuts both ways: what it
-   * bundles cannot cover anyone else, and the shared version cannot tear it.
-   */
-  describe('copies pooling anchored on a foreign build', () => {
-    it('scopes a torn copy an anchored sibling only appeared to cover', async () => {
-      config.profile.scopeUncoveredEntrypoints = true;
-      const winner = majority('2.2.0', 4);
-      // The widest copy of the winner is the anchored one, so only it declares `/extra`.
-      Object.assign(winner.remotes[3]!, {
-        servedBy: 'team/mfe9',
-        entries: { 'dep-a': 'a.js', 'dep-a/extra': 'x.js' },
-      });
-      seed([
-        winner,
-        version('2.1.0', [
-          {
-            remote: 'team/mfe-a',
-            req: '^2.1.0',
-            entries: { 'dep-a': 'a.js', 'dep-a/extra': 'x.js' },
-          },
-        ]),
-      ]);
+  // Pooling runs first and leaves nothing dirty with pool results (plan.spec.ts, the portfolio harness), so
+  // determine never reads a `servedBy`. Should a stale one reach it anyway, it means nothing here: the copy
+  // is priced and scoped like any other.
+  it('elects a copy carrying a stale servedBy as if it carried none', async () => {
+    config.profile.scopeUncoveredEntrypoints = true;
+    seed([
+      majority('2.2.0', 4),
+      version('2.1.0', [
+        {
+          remote: 'team/mfe-a',
+          req: '^2.1.0',
+          servedBy: 'team/mfe9',
+          entries: { 'dep-a': 'a.js', 'dep-a/extra': 'x.js' },
+        },
+      ]),
+    ]);
 
-      await createDetermineSharedExternals(config, adapters)();
+    await createDetermineSharedExternals(config, adapters)();
 
-      // The anchored copy bundles `/extra`, but the map serves it mfe9's file in its own scope only —
-      // nothing publishes `/extra` for mfe-a, so mfe-a is genuinely torn and takes its own build.
-      expect(rows()).toEqual([majorityRow('2.2.0', 4), '2.1.0:scope:[team/mfe-a]']);
-    });
-
-    it('keeps an anchored copy deduping, since its anchor already serves it', async () => {
-      config.profile.scopeUncoveredEntrypoints = true;
-      seed([
-        majority('2.2.0', 4),
-        version('2.1.0', [
-          {
-            remote: 'team/mfe-a',
-            req: '^2.1.0',
-            servedBy: 'team/mfe9',
-            entries: { 'dep-a': 'a.js', 'dep-a/extra': 'x.js' },
-          },
-        ]),
-      ]);
-
-      await createDetermineSharedExternals(config, adapters)();
-
-      // Scoping it would throw away the dedup pooling arranged, to fix a tear that does not exist: the
-      // map names mfe9's files for both of its specifiers.
-      expect(rows()).toEqual([majorityRow('2.2.0', 4), '2.1.0:skip:[team/mfe-a]']);
-    });
-
-    it('does not refuse the portfolio for an anchored copy under strictEntryPointCoverage', async () => {
-      config.strict.strictEntryPointCoverage = true;
-      seed([
-        majority('2.2.0', 4),
-        version('2.1.0', [
-          {
-            remote: 'team/mfe-a',
-            req: '^2.1.0',
-            servedBy: 'team/mfe9',
-            entries: { 'dep-a': 'a.js', 'dep-a/extra': 'x.js' },
-          },
-        ]),
-      ]);
-
-      // The throw happens before pooling runs, so nothing downstream can walk it back.
-      await expect(createDetermineSharedExternals(config, adapters)()).resolves.toBeDefined();
-      expect(rows()).toEqual([majorityRow('2.2.0', 4), '2.1.0:skip:[team/mfe-a]']);
-    });
+    // Nothing the shared 2.2.0 ships covers `/extra`, so mfe-a is torn and takes its own build.
+    expect(rows()).toEqual([majorityRow('2.2.0', 4), '2.1.0:scope:[team/mfe-a]']);
   });
 
   // The objective has to price a rejected row at the copies that really self-serve. Charging it for every
@@ -361,6 +337,41 @@ describe('determine: splitting a version on election', () => {
     });
   });
 
+  it("keeps the winner's share row when it is the second row at its tag", async () => {
+    // [share T, skip T] at one tag is what a dissolved pool leaves behind: the subpool row `memberRecord`
+    // wrote beside the share row stays once `withoutPoolResults` strips its copies' servedBy. team/c's row
+    // exposes more entrypoints, so the tear tie-break (same tag, same cost) elects it. Merging the tag's
+    // rows must fold team/a into the winner, not the winner into team/a's row — or no row is `share`.
+    const share = version('2.0.0', [
+      { remote: 'team/a', req: '^2.0.0', entries: { 'dep-a': 'a.js' } },
+    ]);
+    share.action = 'share';
+    const skip = version('2.0.0', [
+      { remote: 'team/c', req: '^2.0.0', entries: { 'dep-a': 'a.js', 'dep-a/extra': 'extra.js' } },
+    ]);
+    seed([share, skip]);
+
+    await createDetermineSharedExternals(config, adapters)();
+
+    // The winner's copy first: `remotes[0]` is the build that serves the tag.
+    expect(rows()).toEqual(['2.0.0:share:[team/c,team/a]']);
+
+    // So the map serves dep-a globally, every entrypoint from team/c's build.
+    adapters.remoteInfoRepo.getAll = vi.fn(() => ({}));
+    adapters.scopedExternalsRepo.getAll = vi.fn(() => ({}));
+    adapters.remoteInfoRepo.tryGet = vi.fn(remote =>
+      Optional.of({
+        scopeUrl: `http://${remote.slice('team/'.length)}/`,
+        exposes: [],
+      } as RemoteInfo)
+    );
+    const importMap = await createGenerateImportMap(config, adapters)();
+    expect(importMap.imports).toEqual({
+      'dep-a': 'http://c/a.js',
+      'dep-a/extra': 'http://c/extra.js',
+    });
+  });
+
   it('routes a joiner at a split tag into the deduping row, then re-splits it', async () => {
     // `findVersionForTag` prefers the non-`scope` row, so a joiner at a tag that now has two lands in the
     // one that dedups whatever its own range says. That is only correct because joining dirties the
@@ -401,7 +412,7 @@ describe('determine: splitting a version on election', () => {
     await createDetermineSharedExternals(config, adapters)();
 
     // Re-split, and merged with the scope row that was already there rather than left as a second one at
-    // the same tag: `findVersionForTag` and `rebuildMember` both read a tag as at most one row per action.
+    // the same tag: `findVersionForTag` and `memberRecord` both read a tag as at most one row per action.
     // Within a scope row the order is immaterial — every copy self-serves, so `remotes[0]` is not a basis.
     expect(rows()).toEqual([
       majorityRow('2.2.0', 4),

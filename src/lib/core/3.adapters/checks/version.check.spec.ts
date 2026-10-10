@@ -1,5 +1,7 @@
 import { ForVersionChecking } from 'lib/core/2.app/driving-ports/for-version-checking.port';
 import { createVersionCheck } from './version.check';
+import semverSatisfies from 'semver/functions/satisfies';
+import semverCompare from 'semver/functions/compare';
 /**
  *   === VERSION RULES ===
  *   ^               = patch AND minor can be higher
@@ -274,6 +276,37 @@ describe('versionCheck', () => {
       expect(versionCheck.compare('1.1.1', '1.1.2')).toBe(-1);
       expect(versionCheck.compare('1.1.1', '1.2.1')).toBe(-1);
       expect(versionCheck.compare('1.1.1', '2.1.1')).toBe(-1);
+    });
+  });
+
+  // Both checks are memoized per instance; a repeated (or reversed) call must still return what semver
+  // itself returns, so each pair is asked twice. `compare` parses loosely, as `semverCompare(a, b, true)`.
+  describe('memoization', () => {
+    const versions = ['1.2.3', 'v1.2.3', '1.2.4-rc.1', '1.2.4', '2.0.0-beta.0', '2.0.0'];
+    const ranges = ['^1.2.3', '~1.2.3', '>=1.2.4-rc.0 <2.0.0', '1.2.3', '^2.0.0-beta.0', '*'];
+
+    it('should answer isCompatible exactly as semver satisfies does, on every repeat', () => {
+      for (let round = 0; round < 2; round++)
+        for (const range of ranges)
+          for (const version of versions)
+            expect(versionCheck.isCompatible(version, range), `${version} ${range}`).toBe(
+              semverSatisfies(version, range)
+            );
+    });
+
+    it('should answer compare exactly as a loose semver compare does, on every repeat', () => {
+      for (let round = 0; round < 2; round++)
+        for (const a of versions)
+          for (const b of versions)
+            expect(versionCheck.compare(a, b), `${a} ${b}`).toBe(semverCompare(a, b, true));
+    });
+
+    it('should compare loosely', () => {
+      // `=1.2.3` only parses in loose mode.
+      expect(versionCheck.compare('v1.2.3', '1.2.3')).toBe(0);
+      expect(versionCheck.compare('=1.2.3', '1.2.4')).toBe(-1);
+      expect(versionCheck.compare('1.2.4-rc.1', '1.2.4')).toBe(-1);
+      expect(() => semverCompare('=1.2.3', '1.2.4')).toThrow();
     });
   });
 

@@ -8,8 +8,8 @@ import { dep, remote, SCOPE } from '../harness/portfolio';
  * itself (that is how an island is persisted). `determine` re-elects only *dirty* externals, and an
  * external is dirty only when a remote of its own merged, so a joiner that ships some members of a pool
  * and not others used to leave the rest carrying last run's pooling verdict — which gate 1 then read back
- * as an incompatibility. `mark-pools-for-reelection` closes that by re-electing a pool as a unit, so pooling
- * runs on a pool exactly when every member of it was re-elected.
+ * as an incompatibility. Pooling's election plan closes that by re-electing a pool as a unit whenever any
+ * member of it is dirty.
  * See docs/version-resolver.md §"How pooling resolves".
  *
  * Every `nf.init` here is a real page load against the same `sessionStorage`.
@@ -21,7 +21,9 @@ test.describe('incremental: a pool is re-elected as a unit', () => {
     dep('@angular/core', '22.1.0', { req: '^22.0.0' }),
     dep('@angular/router', '22.1.0', { req: '^22.0.0' }),
   ]);
-  const pinned = remote('team/mfe2', SCOPE.mfe2, [dep('@angular/core', '22.0.5', { req: '~22.0.5' })]);
+  const pinned = remote('team/mfe2', SCOPE.mfe2, [
+    dep('@angular/core', '22.0.5', { req: '~22.0.5' }),
+  ]);
   const coreOnly = remote('team/mfe3', SCOPE.mfe3, [
     dep('@angular/core', '22.1.0', { req: '^22.0.0' }),
   ]);
@@ -32,7 +34,7 @@ test.describe('incremental: a pool is re-elected as a unit', () => {
 
     // mfe1 wins `core` with its own build and ships the only `router`, so it is coherent here. It used
     // to stay islanded on the `router` verdict pooling wrote during the first init.
-    expect(await nf.islands()).toEqual(['team/mfe2 on @angular/core@22.0.5']);
+    expect(await nf.islands()).toEqual(['team/mfe2 incompatible']);
 
     // And `router` is still a shared member rather than a leftover scope with no provider.
     const store = await nf.store();
@@ -59,7 +61,7 @@ test.describe('incremental: a pool is re-elected as a unit', () => {
   });
 
   test('keeps a pool resolvable when the joiner lands on the pinned tag', async ({ nf }) => {
-    // The variant that used to collapse the pool completely: no member kept a shared version at all, so
+    // The case that used to collapse the pool completely: no member kept a shared version at all, so
     // the import map carried no framework entry and three remotes each downloaded their own copy.
     const joinsPinned = remote('team/mfe3', SCOPE.mfe3, [
       dep('@angular/core', '22.0.5', { req: '^22.0.0' }),
@@ -74,7 +76,7 @@ test.describe('incremental: a pool is re-elected as a unit', () => {
     const map = await nf.map();
     expect(map.imports['@angular/core']).toBe('http://mfe1/@angular/core.js');
     expect(map.imports['@angular/router']).toBe('http://mfe1/@angular/router.js');
-    expect(await nf.islands()).not.toContain('team/mfe1 on @angular/router@22.1.0');
+    expect(await nf.islands()).not.toContain('team/mfe1 incompatible');
   });
 
   test('reaches a fixed point: a third load re-decides nothing', async ({ nf }) => {
@@ -109,28 +111,30 @@ test.describe('incremental: a pool is re-elected as a unit', () => {
   });
 });
 
-test.describe('incremental: a tag-formed pool on a warm cache', () => {
-  // Auto-pooling off, so only the explicit `pool` tag groups these — and the tagged remotes are cached
-  // by the second init, which is why `hasPoolTag()` has to read storage rather than this init's entries.
-  const anchor = remote('team/mfe1', SCOPE.mfe1, [
+test.describe('incremental: a label-formed pool on a warm cache', () => {
+  // Auto-pooling off, so only the explicit `pool` label groups these — and the labelled remotes are cached
+  // by the second init, which is why `scopeHasPoolState()` has to read storage rather than this init's entries.
+  const base = remote('team/mfe1', SCOPE.mfe1, [
     dep('core-pkg', '22.1.0', { req: '^22.0.0', pool: 'fw' }),
     dep('router-pkg', '22.1.0', { req: '^22.0.0', pool: 'fw' }),
   ]);
   const pinned = remote('team/mfe2', SCOPE.mfe2, [
     dep('core-pkg', '22.0.5', { req: '~22.0.5', pool: 'fw' }),
   ]);
-  // Declares no tag of its own and touches only one member of the pool.
-  const untagged = remote('team/mfe3', SCOPE.mfe3, [dep('core-pkg', '22.1.0', { req: '^22.0.0' })]);
+  // Declares no label of its own and touches only one member of the pool.
+  const unlabelled = remote('team/mfe3', SCOPE.mfe3, [
+    dep('core-pkg', '22.1.0', { req: '^22.0.0' }),
+  ]);
 
-  test('still coordinates the pool when no fetched entry declares the tag', async ({ nf }) => {
-    await nf.init([anchor, pinned], { pooling: false });
-    await nf.init([anchor, pinned, untagged], { pooling: false });
+  test('still coordinates the pool when no fetched entry declares the label', async ({ nf }) => {
+    await nf.init([base, pinned], { pooling: false });
+    await nf.init([base, pinned, unlabelled], { pooling: false });
 
-    expect(nf.fetches()).toEqual([untagged.url]);
+    expect(nf.fetches()).toEqual([unlabelled.url]);
 
     const store = await nf.store();
     expect(storedActions(store, 'router-pkg')).toEqual(['22.1.0:share']);
-    expect(await nf.islands()).toEqual(['team/mfe2 on core-pkg@22.0.5']);
+    expect(await nf.islands()).toEqual(['team/mfe2 incompatible']);
 
     await nf.loadAll();
     expect(nf.downloads()).toHaveLength(3);

@@ -5,7 +5,6 @@ import {
   angularTags as angularTagsIn,
   rootOf,
   sharedTags as sharedTagsIn,
-  splitPackages as splitPackagesIn,
 } from '../harness/coherence';
 
 /**
@@ -13,7 +12,7 @@ import {
  * synthetic siblings — driven through the real init flow in a real browser.
  *
  * Everything else in this folder is a two- or three-remote fixture built to isolate one rule. This file
- * is the opposite: real entries, 6–37 shared externals each, multi-entrypoint packages, `pool` tags on
+ * is the opposite: real entries, 6–37 shared externals each, multi-entrypoint packages, `pool` labels on
  * some remotes and not others, a non-global share scope, chunk bundles, and one remote still on the
  * older sparse remoteEntry format. It is the check that the rules compose on input nobody designed for
  * them — and, because every remote's exposed module is really loaded, that the resulting map is one a
@@ -24,7 +23,7 @@ import {
  *
  * - `mfe1` — the cross-major outlier (Angular 21.2.18, flat/sparse externals, flat chunks, 37 of them),
  *   and the sole provider of `animations`, `compiler`, `platform-browser-dynamic`, `forms/signals`
- * - `mfe2` — Angular 22.0.8 with `@angular/cdk/*` exact-pinned at 22.0.6, no `pool` tags
+ * - `mfe2` — Angular 22.0.8 with `@angular/cdk/*` exact-pinned at 22.0.6, no `pool` labels
  * - `mfe8` — a second previous-major remote, one patch off `mfe1` (21.2.15)
  * - `mfe11` — the widest Angular set of any remote, entirely from one older-but-consistent 22.0.6 build
  */
@@ -37,7 +36,6 @@ const run = (nf: Federation, names: FixtureName[], opts: { namespace?: string } 
 // the flag off; here they always read the `capture` namespace.
 const sharedTags = (nf: Federation, namespace = 'capture') => sharedTagsIn(nf, namespace);
 const angularTags = (nf: Federation, namespace = 'capture') => angularTagsIn(nf, namespace);
-const splitPackages = (nf: Federation, namespace = 'capture') => splitPackagesIn(nf, namespace);
 
 /**
  * Which origins served a remote's `@angular/*` imports. Scoped to that pool deliberately: `rxjs` and
@@ -52,7 +50,20 @@ const angularOrigins = (loaded: Loaded) =>
   );
 
 test.describe('capture: the captured seven', () => {
-  test('serves the whole Angular family from one major, on two patch tags', async ({ nf }) => {
+  test('islands exactly one remote, on a real range violation', async ({ nf }) => {
+    await run(nf, CAPTURED_SEVEN);
+
+    // The cross-major remote cannot use the shared 22 build, so it serves its own 21.2.18 family.
+    // Nothing else islands: several remotes legitimately draw from two or three builds that agree at
+    // minor granularity, and those are left alone. Nothing is `uncovered` either: every other remote
+    // is witnessed.
+    expect(await nf.islands()).toEqual(['team/mfe1 incompatible']);
+  });
+
+  test('gives every remote a runnable, single-line Angular family', async ({ nf }) => {
+    // The end of the contract: each remote's exposed module statically imports all 6–37 entrypoints its
+    // remoteEntry declares, so this loading at all means every declared external resolved. What it then
+    // holds is one Angular minor line per remote — 22.0 for the six modern remotes, 21.2 for the island.
     await run(nf, CAPTURED_SEVEN);
 
     // Six of the seven remotes run Angular 22; one runs 21.2.18 and is the only one islanded. What
@@ -76,25 +87,7 @@ test.describe('capture: the captured seven', () => {
       '@angular/cdk/portal': '22.0.6',
       '@angular/material': '22.0.6',
     });
-    expect(await splitPackages(nf)).toEqual({});
-  });
-
-  test('islands exactly one remote, on a real range violation', async ({ nf }) => {
-    await run(nf, CAPTURED_SEVEN);
-
-    // The cross-major remote cannot use the shared 22 build, so it serves its own 21.2.18 family.
-    // Nothing else islands: several remotes legitimately draw from two or three builds that agree at
-    // minor granularity, and those are left alone.
-    expect(await nf.islands()).toEqual(['team/mfe1 on @angular/common@21.2.18']);
-    // Nothing else self-serves either: every other remote is witnessed, so no coverage warning fires.
-    expect((await nf.warns()).filter(msg => msg.includes('serves its own family'))).toEqual([]);
-  });
-
-  test('gives every remote a runnable, single-line Angular family', async ({ nf }) => {
-    // The end of the contract: each remote's exposed module statically imports all 6–37 entrypoints its
-    // remoteEntry declares, so this loading at all means every declared external resolved. What it then
-    // holds is one Angular minor line per remote — 22.0 for the six modern remotes, 21.2 for the island.
-    await run(nf, CAPTURED_SEVEN);
+    expect(await nf.tears()).toEqual([]);
 
     const loaded = await nf.loadAll();
     expect(angularLinesPerRemote(loaded)).toEqual({
@@ -135,41 +128,6 @@ test.describe('capture: the captured seven', () => {
   });
 });
 
-test.describe('capture: one more previous-major remote joins', () => {
-  test('islands only the two cross-major remotes, not the modern majority', async ({ nf }) => {
-    // The download objective's stress case. `mfe8` runs Angular 21.2.15 — a second, distinct
-    // 21 patch tag — and conflicts with nobody the other remotes care about. When extra downloads were
-    // counted per *version* rather than per remote copy, the two 21 versions outvoted the three modern
-    // remotes that all agreed on 22.0.8: `@angular/router`'s winner moved to the 21 line, the modern
-    // remotes' own copies became incompatible with it, and whole-family islanding spread that single
-    // mis-election across five of eight remotes.
-    //
-    // Counting copies, both sides cost the same and the newest tag keeps it, so only the two remotes
-    // that genuinely cannot use Angular 22 island.
-    await run(nf, [...CAPTURED_SEVEN, 'mfe8']);
-
-    expect(await nf.islands()).toEqual([
-      'team/mfe1 on @angular/common@21.2.18',
-      'team/mfe8 on @angular/common@21.2.15',
-    ]);
-
-    const scopedRemotes = Object.values(await nf.store('capture'))
-      .flatMap(externals => Object.values(externals))
-      .flatMap(external => external.versions.filter(v => v.action === 'scope'))
-      .flatMap(v => v.remotes.map(r => r.name));
-    expect([...new Set(scopedRemotes)].sort()).toEqual(['team/mfe1', 'team/mfe8']);
-
-    // The shared Angular set is untouched by their arrival.
-    expect(new Set(Object.values(await angularTags(nf)))).toEqual(new Set(['22.0.8', '22.0.6']));
-    expect(await splitPackages(nf)).toEqual({});
-
-    // The two islands are on distinct patch tags, so each runs its own build rather than sharing one.
-    const loaded = await nf.loadAll();
-    expect(loaded['team/mfe1']!.seen['@angular/core']).toBe('mfe1|@angular/core@21.2.18');
-    expect(loaded['team/mfe8']!.seen['@angular/core']).toBe('mfe8|@angular/core@21.2.15');
-  });
-});
-
 test.describe('capture: the synthetic siblings', () => {
   test('self-serves the superset remote no build can cover', async ({ nf }) => {
     // **Rewritten for the provenance promise** (#63); it read `keeps a consistent older superset remote
@@ -188,10 +146,11 @@ test.describe('capture: the synthetic siblings', () => {
     await run(nf, [...CAPTURED_SEVEN, 'mfe11']);
 
     expect(await nf.islands()).toEqual([
-      'team/mfe1 on @angular/common@21.2.18',
-      'team/mfe11 self-serves, no build covers @angular/material',
+      'team/mfe1 incompatible',
+      'team/mfe11 subpool team/mfe11',
+      'team/mfe2 subpool team/mfe11',
     ]);
-    expect(await splitPackages(nf)).toEqual({});
+    expect(await nf.tears()).toEqual([]);
 
     // Its whole family from its own build, on one line — where it used to be one member and two
     // entrypoints of its own beside nine deduped ones.
@@ -201,9 +160,11 @@ test.describe('capture: the synthetic siblings', () => {
 
     const map = await nf.map();
     // The seven's shared platform-browser is unchanged, and its `/animations` entrypoints leave the global
-    // map with mfe11: the only build that carried them is now serving only itself.
-    expect(map.imports['@angular/platform-browser']).toBe(
-      'http://mfe2/_angular_platform_browser.djzJcPG8PR.js'
+    // map with mfe11: the only build that carried them is now serving only itself. Same file, whichever
+    // build serves it: mfe3, mfe4 and mfe5 tie on round 1 (each borrows `material/sort` at its own Material
+    // tag), and record order breaks it.
+    expect(map.imports['@angular/platform-browser']).toMatch(
+      /^http:\/\/mfe\d+\/_angular_platform_browser\.djzJcPG8PR\.js$/
     );
     expect(map.imports['@angular/platform-browser/animations']).toBeUndefined();
     expect(map.scopes?.['http://mfe11/']?.['@angular/platform-browser/animations']).toContain(
@@ -224,10 +185,7 @@ test.describe('capture: the synthetic siblings', () => {
     // **Delta: +12 downloads** (46 → 58), and the trigger is an entrypoint gap rather than a minor gap.
     await run(nf, [...CAPTURED_SEVEN, 'mfe9'], { namespace: 'pin' });
     const withPin = await sharedTags(nf, 'pin');
-    expect(await nf.islands()).toEqual([
-      'team/mfe1 on @angular/common@21.2.18',
-      'team/mfe9 self-serves, no build covers @angular/platform-browser/animations',
-    ]);
+    expect(await nf.islands()).toEqual(['team/mfe1 incompatible', 'team/mfe9 uncovered']);
 
     // Its own build throughout, one line, and every specifier it imports scoped to it.
     const loaded = await nf.loadAll();
@@ -244,18 +202,18 @@ test.describe('capture: the synthetic siblings', () => {
   test('shares a cross-scope design system and an unscoped lockstep pair', async ({ nf }) => {
     // `mfe10` is the awkward one: its `@acme/design-system*` packages carry `pool: ng-core`,
     // which joins a different npm scope to the Angular family at a completely different version line
-    // (4.2.0 beside 22.0.x); it pairs `react` + `react-dom` under `pool: react`, a family scope tagging
+    // (4.2.0 beside 22.0.x); it pairs `react` + `react-dom` under `pool: react`, a family scope labelling
     // can never group because the names are unscoped; and one of its entrypoints lives in a non-global
     // share scope. Nothing here conflicts, so nothing new islands — pools of unrelated version lines
     // are not a coherence problem by themselves.
     await run(nf, [...CAPTURED_SEVEN, 'mfe10']);
 
-    expect(await nf.islands()).toEqual(['team/mfe1 on @angular/common@21.2.18']);
+    expect(await nf.islands()).toEqual(['team/mfe1 incompatible']);
     const tags = await sharedTags(nf);
     expect(tags['react']).toBe('18.3.1');
     expect(tags['react-dom']).toBe('18.3.1');
     expect(tags['@acme/design-system']).toBe('4.2.0');
-    expect(await splitPackages(nf)).toEqual({});
+    expect(await nf.tears()).toEqual([]);
 
     // The lockstep pair really is one build, and the entrypoint in the `team-a` share scope resolves
     // from inside that remote — a scope-only mapping no global import covers.
@@ -271,14 +229,18 @@ test.describe('capture: the synthetic siblings', () => {
   test('holds the whole eleven-remote portfolio coherent', async ({ nf }) => {
     await run(nf, [...CAPTURED_SEVEN, 'mfe8', 'mfe9', 'mfe10', 'mfe11']);
 
-    // Two islands, both cross-major; every remaining shared Angular external on one major; no package
-    // split across tags anywhere.
+    // The two cross-major remotes leave round 1, and mfe11, which runs 22.0.6 and ships the material root
+    // no 22.0.8 build carries. Every remaining shared Angular external on one major; no package split.
+    // mfe2's exact cdk 22.0.6 pins run on mfe11's build, so its cdk is not published globally: that is
+    // the gap both warnings name, not material.
     expect(await nf.islands()).toEqual([
-      'team/mfe1 on @angular/common@21.2.18',
-      'team/mfe8 on @angular/common@21.2.15',
+      'team/mfe1 subpool team/mfe1',
+      'team/mfe11 subpool team/mfe11',
+      'team/mfe2 subpool team/mfe11',
+      'team/mfe8 subpool team/mfe1',
     ]);
     expect(new Set(Object.values(await angularTags(nf)))).toEqual(new Set(['22.0.8', '22.0.6']));
-    expect(await splitPackages(nf)).toEqual({});
+    expect(await nf.tears()).toEqual([]);
 
     // Eleven remotes, ~50 shared externals, every declared entrypoint resolvable, and no remote left
     // holding two Angular minor lines.

@@ -1,46 +1,15 @@
 import type { SharedExternal, SharedVersion, SharedVersionMeta } from 'lib/core/1.domain';
-import {
-  uncoveredEntrypoints,
-  versionDemands,
-  versionEntries,
-} from 'lib/core/1.domain/externals/basis';
+import { uncoveredEntrypoints, versionEntries } from 'lib/core/1.domain/externals/basis';
+import { mergeRows, rowAt } from 'lib/core/1.domain/externals/rows';
+import type { AcceptsTag, VersionAcceptance } from 'lib/core/1.domain/externals/compatibility';
 import { NFError } from 'lib/core/native-federation.error';
 import type { LoggingConfig } from '../config/log.contract';
 import type { ModeConfig } from '../config/mode.contract';
 
-export type IsCompatible = (tag: string, requiredVersion: string) => boolean;
-
-export type VersionAcceptance = {
-  // A version can only be redirected to `tag` if none of its remotes rejects that tag.
-  accepts: (version: SharedVersion, tag: string) => boolean;
-  // A representative copy that makes the redirect unsafe: it rejects `tag` while `strictVersion` is set,
-  // so it keeps its own build instead of being deduped away. One is enough for the message and the
-  // strict check; `applyWinner` enumerates the rest itself when it splits the version.
-  objector: (version: SharedVersion, tag: string) => SharedVersionMeta | undefined;
-};
-
-// Every compatibility question is asked of the whole version, not of its basis: see `versionDemands`.
-// Computed once per external, since the selection loop is O(versions²).
-export function versionAcceptance(
-  external: SharedExternal,
-  isCompatible: IsCompatible
-): VersionAcceptance {
-  const demands = new Map<SharedVersion, SharedVersionMeta[]>(
-    external.versions.map(v => [v, versionDemands(v)])
-  );
-
-  return {
-    accepts: (version, tag) =>
-      demands.get(version)!.every(d => isCompatible(tag, d.requiredVersion)),
-    objector: (version, tag) =>
-      demands.get(version)!.find(d => d.strictVersion && !isCompatible(tag, d.requiredVersion)),
-  };
-}
-
 /**
  * The tail of winner election: derive every other version's verdict from the chosen one, apply the
- * entrypoint coverage policy, clear `dirty`. `determine` is the only caller, and passes its memoized
- * `isCompatible` plus the `acceptance` it already built for the election.
+ * entrypoint coverage policy, clear `dirty`. `determine` is the only caller, and passes its
+ * `acceptsTag` plus the `acceptance` it already built for the election.
  *
  * A hazard for anyone who ever adds a second caller that re-points a winner: `findTears` keys off the
  * winner's merged entries, so moving the winner moves the surface coverage is measured against.
@@ -50,13 +19,12 @@ export function createApplyWinner(config: LoggingConfig & ModeConfig) {
     externalName: string,
     external: SharedExternal,
     winner: SharedVersion,
-    isCompatible: IsCompatible,
+    acceptsTag: AcceptsTag,
     acceptance?: VersionAcceptance
   ): SharedExternal {
-    // A lone version has nothing to redirect, so it is never asked a compatibility question — which
-    // is also why it is never strict-checked against its own tag.
+    // Every copy accepts its own tag, so a lone version, like the winner, is never redirected or split.
     if (external.versions.length > 1) {
-      const { accepts, objector } = acceptance ?? versionAcceptance(external, isCompatible);
+      const { accepts, objector } = acceptance!;
 
       const rebuilt: SharedVersion[] = [];
 
@@ -79,11 +47,6 @@ export function createApplyWinner(config: LoggingConfig & ModeConfig) {
           throw new NFError(`External ${externalName}@${v.tag} could not be shared.`);
         }
 
-        // The winner is never redirected, so its copies are never really asked to accept its own tag;
-        // its verdict is `winner.action` below. Splitting it would scope copies that dedup today. Covers
-        // the host row too, which host precedence always makes the winner.
-        if (v === winner) continue;
-
         if (!strict) {
           v.action = 'skip';
           continue;
@@ -92,7 +55,9 @@ export function createApplyWinner(config: LoggingConfig & ModeConfig) {
         // `accepts` aggregates over the whole version because one version is one file served from one
         // basis — but only the copies that themselves reject the winner have to keep their own build.
         const objecting = new Set(
-          v.remotes.filter(r => r.strictVersion && !isCompatible(winner.tag, r.requiredVersion))
+          v.remotes.filter(
+            r => r.strictVersion && !acceptsTag(winner.tag, v.tag, r.requiredVersion)
+          )
         );
 
         if (objecting.size === v.remotes.length) {
@@ -107,20 +72,11 @@ export function createApplyWinner(config: LoggingConfig & ModeConfig) {
         rebuilt.push({ tag: v.tag, host: false, action: 'scope', remotes: [...objecting] });
       }
 
-      // One row per (tag, action). A warm record can already hold a `scope` row at the tag a split
-      // produces — a joiner lands in the deduping row of a split tag and re-splits out of it — and both
-      // `findVersionForTag` and `rebuildMember` read a tag as at most one row per action. Merged after the
-      // loop, not during it: a row's verdict is not final until the winner has been applied to it.
-      const merged = new Map<string, SharedVersion>();
-      external.versions = rebuilt.filter(v => {
-        const first = merged.get(`${v.tag}|${v.action}`);
-        if (!first) {
-          merged.set(`${v.tag}|${v.action}`, v);
-          return true;
-        }
-        first.remotes.push(...v.remotes);
-        return false;
-      });
+      // One row per (tag, action), which the record keeps: a warm record can already hold a `scope` row at
+      // the tag a split produces. Merged after the loop, not during it: a row's verdict is not final until
+      // the winner has been applied to it. The winner absorbs its tag's other rows, or the `share` below
+      // would land on a row merged away.
+      external.versions = mergeRows(rebuilt, winner);
     }
 
     winner.action = 'share';
@@ -168,10 +124,6 @@ export function createApplyWinner(config: LoggingConfig & ModeConfig) {
       if (version === shared) continue;
 
       version.remotes.forEach(remote => {
-        // Pooling anchored this copy elsewhere: the map names that build's files for it, so the shared
-        // version is not what it resolves through and cannot tear it.
-        if (remote.servedBy) return;
-
         const uncovered = uncoveredEntrypoints(remote, basis);
         if (uncovered.length > 0) tears.push({ version, remote, uncovered });
       });
@@ -182,12 +134,12 @@ export function createApplyWinner(config: LoggingConfig & ModeConfig) {
 
   function scopeTornRemotes(externalName: string, external: SharedExternal, tears: Tear[]): void {
     const torn = new Set(tears.map(t => t.remote));
-    const demotedByTag = new Map<string, SharedVersionMeta[]>();
+    const demotedBySource = new Map<SharedVersion, SharedVersionMeta[]>();
 
     for (const { version, remote, uncovered } of tears) {
-      const group = demotedByTag.get(version.tag);
+      const group = demotedBySource.get(version);
       if (group) group.push(remote);
-      else demotedByTag.set(version.tag, [remote]);
+      else demotedBySource.set(version, [remote]);
 
       config.log.debug(
         3,
@@ -200,13 +152,18 @@ export function createApplyWinner(config: LoggingConfig & ModeConfig) {
         version.remotes = version.remotes.filter(r => !torn.has(r));
       }
     }
-    external.versions = external.versions.filter(v => v.remotes.length > 0);
 
-    for (const [tag, remotes] of demotedByTag) {
-      const scoped = external.versions.find(v => v.tag === tag && v.action === 'scope');
+    // Inserted before the emptied rows go, so a scope row can take its source's place, as the split's does.
+    for (const [source, remotes] of demotedBySource) {
+      const { tag } = source;
+      const scoped = rowAt(external.versions, tag, 'scope');
       if (scoped) scoped.remotes.push(...remotes);
-      else external.versions.push({ tag, host: false, action: 'scope', remotes });
+      else {
+        const at = external.versions.indexOf(source) + 1;
+        external.versions.splice(at, 0, { tag, host: false, action: 'scope', remotes });
+      }
     }
+    external.versions = external.versions.filter(v => v.remotes.length > 0);
   }
 }
 

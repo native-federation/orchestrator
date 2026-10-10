@@ -59,8 +59,9 @@ Native import maps are the default. `{ shim: true }` switches a test to the
 
 Pooling coordinates a *family* of externals — a monorepo's packages, which are only safe when they come
 from one build. Two gates decide whether a remote may take the dedups the resolver granted it: a remote
-that is version-incompatible on any member serves its whole family from its own build, and so does a
-remote for which no single build ships every specifier it imports at versions it accepts.
+that is version-incompatible on any member serves its whole family from its own build or runs another
+remote's build in a subpool, and so does a remote for which no single build ships every specifier it
+imports at versions it accepts.
 
 The files are organized by what the *portfolio* looks like, not by which field of a `remoteEntry` it uses,
 because that is what decides the verdict: whether the remotes of a family declare the same members, and
@@ -68,18 +69,14 @@ which shape the build emitted them in.
 
 | spec            | the permutation it covers                                                                                                                                                                                                                                                             |
 | --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `flag`          | **the only file about the harness `pooling` option** (tag every scoped external with its npm scope, as the build does by default). One portfolio, tagged and untagged: the split family it prevents, the sibling it stops bridging, the two-major shared set it repairs, the dynamic path, what it costs (one download on the minimal case, nothing on the capture), and the boundary — an explicit `pool` tag works without scope tags, entrypoint coverage is decided identically either way |
-| `membership`    | what puts two externals in one family: npm scope, `pool` tag, `shareScope`, `singleton`, multiple entrypoints of one package                                                                                                                                                          |
+| `flag`          | **the only file about the harness `pooling` option** (label every scoped external with its npm scope, as the build does by default). One portfolio, labelled and unlabelled: the split family it prevents, the sibling it stops bridging, the two-major shared set it repairs, the dynamic path, what it costs (one download on the minimal case, nothing on the capture), and the boundary — an explicit `pool` label works without scope labels, entrypoint coverage is decided identically either way |
+| `membership`    | what puts two externals in one family: npm scope, `pool` label, `shareScope`, `singleton`, multiple entrypoints of one package                                                                                                                                                          |
 | `symmetric`     | **families whose remotes declare the same members**, so only version lines differ: patch drift, minor gap, major gap, mutually exclusive pins, a 2-2 split with no majority, all-or-nothing islanding, host precedence, and the copy-weighted election (`profile.latestSharedExternal`, tiebreaks) |
-| `asymmetric`    | **families whose remotes declare different members**: containment, ragged coverage, disjoint builds, sole-provided members and entrypoints leaving the shared set with their island, the cascade to a fixed point, and a characterised residual (per-member elections can still split a pool) |
+| `asymmetric`    | **families whose remotes declare different members**: containment, ragged coverage, disjoint builds, sole-provided members and entrypoints leaving the shared set with their island, the cascade to a fixed point |
 | `entrypoints`   | asymmetry inside one package — the `entries` field: widest-remote basis, sibling self-fill and what it costs in builds on the page, `profile.scopeUncoveredEntrypoints`, a remote joining an already-resolved version. A **resolver** policy, not a pooling one                          |
 | `vendor-shapes` | **the four shapes a build emits**: externals dense (`entries`) or flat (one element per entrypoint), × chunking dense (a `chunks` property) or flat (`@nf-internal/chunk-*` pseudo-externals). The verdict is shape-invariant; where the shape does show through — `feature.convertFlatSharedInfo`, and chunks mapped per declaring vs serving remote — it is pinned exactly |
 | `lifecycle`     | warm reload, incremental portfolios, the manifest-as-URL form, the dynamic path with both gates mirrored (including that the dynamic verdicts are persisted, so a reload reproduces the delta), and how the browser treats a second import map |
 | `capture`       | the recorded portfolios in `fixtures/` — real entries, 6–37 externals each, a non-global share scope, two in the older flat format — as the check that the rules compose on input nobody designed for them |
-
-Two blocks are **characterisations**, not requirements — they pin current behaviour that is known to be
-imperfect and reference the follow-up that owns it. A failure there is probably good news; read the
-comment before "fixing" it.
 
 ## `sse/` — the build-notification stream
 
