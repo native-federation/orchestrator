@@ -305,7 +305,7 @@ test.describe('symmetric: host precedence', () => {
     // What the old promise did: island both, each running its own core and router — 4 downloads. What the
     // new one does: mfe1 serves its own family and mfe2, whose ranges accept 22.1.0, *dedups onto mfe1's
     // build* rather than downloading a second copy of the same two files. Subpools are what make that
-    // possible; a single global build has none to offer mfe2 but the host's. Under variant election the
+    // possible; a single global build has none to offer mfe2 but the host's. Under build election the
     // host's build is round 1, and mfe2 joins mfe1's subpool: still 2 downloads. Every
     // remote outside round 1 is reported, and router — which the host does not ship and neither remote
     // agrees with the host on core to publish — lives in their scopes.

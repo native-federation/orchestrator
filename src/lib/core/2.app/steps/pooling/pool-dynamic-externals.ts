@@ -22,7 +22,7 @@ import {
   coverFromMap,
   type GateMiss,
   judgeRemote,
-  recordMove,
+  movedRecord,
 } from 'lib/core/1.domain/pooling/gate';
 import { acceptsTag } from 'lib/core/1.domain/externals/compatibility';
 
@@ -121,7 +121,7 @@ export function createPoolDynamicExternals(
   ): void {
     const written: Record<string, SharedExternal> = {};
     for (const [name, move] of moves) {
-      written[name] = recordMove(committed[name]!, remote, move, ports.versionCheck.compare);
+      written[name] = movedRecord(committed[name]!, remote, move, ports.versionCheck.compare);
       ports.sharedExternalsRepo.addOrUpdate(name, written[name], scope);
     }
     const merged = { ...committed, ...written };

@@ -28,7 +28,7 @@ export function createPoolSharedExternals(
         for (const [poolName, members] of plan.pools)
           for (const [name, record] of poolRecords(poolName, members, scope))
             repo.addOrUpdate(name, record, scope);
-        for (const [name, external] of plan.dissolved) repo.addOrUpdate(name, external, scope);
+        for (const [name, external] of plan.stripped) repo.addOrUpdate(name, external, scope);
       } catch (error) {
         if (error instanceof NFError) return Promise.reject(error);
         config.log.error(3, `[${scope}] failed to pool shared externals.`, {
@@ -44,10 +44,10 @@ export function createPoolSharedExternals(
   };
 
   function logPlan(plan: ElectionPlan, scope: string): void {
-    if (plan.dissolved.size > 0)
+    if (plan.stripped.size > 0)
       config.log.debug(
         3,
-        `[${scope}] ${plan.dissolved.size} external(s) left every pool; cleared their pool state for re-election.`
+        `[${scope}] ${plan.stripped.size} external(s) left every pool; cleared their pool state for re-election.`
       );
     for (const name of plan.labelledAlone)
       config.log.warn(

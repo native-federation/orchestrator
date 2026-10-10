@@ -244,7 +244,7 @@ describe('createPoolSharedExternals', () => {
    * later rounds place what is left in subpools, and everyone left serves themselves. The actions on the
    * seeded rows are ignored — pooling elects its members — except the stored winner, which breaks ties.
    */
-  describe('variant election', () => {
+  describe('build election', () => {
     it('elects the build that serves the most remotes, even an older one', async () => {
       // a ships core + forms at 17.0.0, b only core at 17.1.0. Both ranges take either, but only a's
       // build serves both remotes, so the family runs 17.0.0 and b dedups onto it.
@@ -298,7 +298,8 @@ describe('createPoolSharedExternals', () => {
       expect(shareOf('@framework/common')).toMatchObject({ tag: '17.0.0', host: true });
     });
 
-    // Two builds that each serve only themselves and agree with nobody; a arrives first and is newer.
+    // Two builds that each serve only themselves and agree with nobody; a comes first in record order and is
+    // newer.
     const seedTied = (winners: { core?: string; common?: string }) => {
       for (const [name, poolWinner] of [
         ['@framework/core', winners.core],

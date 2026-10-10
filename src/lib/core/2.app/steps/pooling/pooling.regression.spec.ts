@@ -14,7 +14,7 @@ describe('pooling regressions', () => {
    * at two versions — `@angular/core` from one remote, `@angular/router` from another — and the remote
    * consuming both ran a mismatched framework family.
    *
-   * Variant election closes it by construction: a pool elects whole builds, and a remote runs the elected
+   * This closes it by construction: a pool elects whole builds, and a remote runs the elected
    * build only when it ships every entrypoint the remote imports at versions its `requiredVersion` accepts.
    * Otherwise it runs a later round's build or its own, taking the elected files only where it agrees with
    * them on everything both ship.
@@ -451,9 +451,9 @@ describe('pooling regressions', () => {
 
   /**
    * Found by the no-tear property (pooling.property.init.spec.ts). Round 1's winner lacked a package, and the
-   * extension published it from another build that agrees with the winner; every remote the extended coverage
-   * then served moved onto the global map. One shipping both packages at an older tag resolved the winner's
-   * `m0@18.0.1` beside the other build's `m1@18.0.1`: a pair no build shipped.
+   * extension published it from another build that agrees with the winner; every remote the extended global
+   * tags then served moved onto the global map. One shipping both packages at an older tag resolved the
+   * winner's `m0@18.0.1` beside the other build's `m1@18.0.1`: a pair no build shipped.
    *
    * The extension may still publish the package, but a remote moves onto it only when one build witnesses
    * the combination it would resolve; otherwise it serves itself, `uncovered`.
@@ -461,7 +461,7 @@ describe('pooling regressions', () => {
    * Shrunk from the property suite (POOLING_PROPERTY_SEED=1..3, SCALE=5); every range is the caret of its own
    * tag unless a case says otherwise, and `@lib/*` shares one npm-scope label.
    */
-  describe('extension witness: a remote moves onto the extended coverage only when one build shipped it', () => {
+  describe('extension witness: the extended global tags take a remote only when one build shipped it', () => {
     const SCOPE = {
       'team/r0': 'http://r0/',
       'team/r1': 'http://r1/',
@@ -603,8 +603,9 @@ describe('pooling regressions', () => {
       const coldMap = await p.runInit();
       const coldM4 = structuredClone(p.record('@fam/m4'));
 
-      // r1 starts shipping '@fam/a'. Members are ordered by name, so it now arrives first: the tie still
-      // holds, and only the stored winner keeps it from flipping to r1. The joiner has no `poolWinner` yet.
+      // r1 starts shipping '@fam/a'. Members are ordered by name, so r1 now comes first in record order: the
+      // tie still holds, and only the stored winner keeps it from flipping to r1. The joiner has no
+      // `poolWinner` yet.
       seed('@fam/a', ['r1']);
       const warmMap = await p.runInit();
 
@@ -620,7 +621,8 @@ describe('pooling regressions', () => {
    * rewrote, could pick the other build and move a remote off the global map. A subpool tie now goes by name.
    *
    * The host ships the family at 18.0.0, which neither `^17` remote accepts. team/b and team/a ship one 17.0.0
-   * build, so each one's build serves both; team/b arrives first and still runs team/a's build.
+   * build, so each one's build serves both; team/b comes first in record order and still runs team/a's
+   * build.
    */
   describe('equal subpool builds are told apart by name, whatever the registration order', () => {
     const SCOPE = { 'team/host': 'http://host/', 'team/a': 'http://a/', 'team/b': 'http://b/' };
@@ -982,7 +984,7 @@ describe('pooling regressions', () => {
     });
 
     // As above, but n's subpool survives the extension: m3 (router@17.3.1, Z@17.3.5) stays in it, as the
-    // extended coverage does not serve Z, while m1 (router@17.3.1, Y@17.3.0) moves onto the global map. When
+    // extended global tags do not serve Z, while m1 (router@17.3.1, Y@17.3.0) moves onto the global map. When
     // the fixpoint drops Y again, no new subpool can form around m1, so it has to rejoin subpool n, the one
     // it left, instead of going `alone` and serving its whole family itself.
     it('returns a remote the fixpoint takes off the global map to the subpool it left', async () => {

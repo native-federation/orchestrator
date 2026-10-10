@@ -197,7 +197,7 @@ describe('island warnings (contract)', () => {
       ]);
     });
 
-    it('witness miss: no build shipped the pair the extended coverage would serve', async () => {
+    it('witness miss: no build shipped the pair the extended global tags would serve', async () => {
       // pooling.regression.spec.ts, "extension witness", first case. r0 accepts every tag the map
       // publishes, so the sentence names the unwitnessed gap rather than a version it rejects.
       const caret = (tag: string, external: string, remote: string) =>

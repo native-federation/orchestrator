@@ -660,15 +660,15 @@ Pooling runs per share scope, per pool; the `strict` scope is never pooled. Ever
 by **specifier**, never by external name: a flat build declares `@framework/core/testing` as an external of
 its own where a dense one lists it as an entry of `@framework/core`, so names cannot be compared.
 
-**1. Variants.** Each remote's build is one candidate: a map *specifier → tag* of everything it ships in the
+**1. Builds.** Each remote's build is one candidate: a map *specifier → tag* of everything it ships in the
 pool. Two notions are read off it for every other remote R:
 
-- the variant **serves** R when every specifier R imports is in it, at a tag R's `requiredVersion` accepts
+- the build **serves** R when every specifier R imports is in it, at a tag R's `requiredVersion` accepts
   (whether or not R set `strictVersion`);
-- R **agrees** with it when every specifier both ship is at the same tag — a specifier the variant does not
-  ship is compared through its package's tag, since `core/testing@22.0.6` beside a variant's `core@22.0.8` is
+- R **agrees** with it when every specifier both ship is at the same tag — a specifier the build does not
+  ship is compared through its package's tag, since `core/testing@22.0.6` beside a build's `core@22.0.8` is
   two cores whoever lists the entrypoint. A package's tag is its root's, else that of any entrypoint the
-  variant ships: `material/sort@17.0.2` beside `material/table@17.0.0` is two Materials too.
+  build ships: `material/sort@17.0.2` beside `material/table@17.0.0` is two Materials too.
 
 **2. Round 1 elects the global map.** Every build is a candidate — only the host's when a host ships the pool,
 since the host cannot be repointed. A candidate's coverage is its own specifiers plus the **same-tag**
@@ -676,14 +676,14 @@ entrypoints of the builds that agree with it: at one tag, `core/testing@22.0.8` 
 same published artefact (see [Merging within a version](#merging-within-a-version)). Candidates rank by, in
 order:
 
-1. the newer variant first, under [`profile.latestSharedExternal`](./config.md#modeConfig);
+1. the newer build first, under [`profile.latestSharedExternal`](./config.md#modeConfig);
 2. **most remotes served**;
 3. most remotes that agree without being served — what separates a build its peers share from an outlier when
    no build serves more than itself;
 4. the build the stored record already elected (so a re-election on equal terms does not flip the family);
-5. the newer variant, then record order (the order remotes first appear in the pool's versions).
+5. the newer build, then record order (the order remotes first appear in the pool's versions).
 
-One variant is **newer** than another when the first member both ship, in the pool's member order (by name),
+One build is **newer** than another when the first member both ship, in the pool's member order (by name),
 whose tags differ is newer in it — two unrelated version lines, such as `rxjs` and `@angular/core`, are never
 compared.
 
@@ -694,7 +694,7 @@ subpool of a build that disagrees with the winner.
 **3. Later rounds form subpools.** Among the remotes round 1 does not serve, each one's **own** build is a
 candidate (no same-tag borrowing), and the one serving the most waiting remotes — itself included — forms a
 **subpool**: those remotes run that one build, and the subpool is named after its remote. A tie goes to the
-newer variant, then to the name that sorts first (code-unit order), never to record order: no stored winner
+newer build, then to the name that sorts first (code-unit order), never to record order: no stored winner
 keeps a subpool, and the record pooling rewrites changes that order, so a re-election would flip between equal
 builds. Rounds repeat while some build serves at least two; earlier rounds never change. A subpool runs its
 build's files through scopes (`servedBy`).
@@ -703,7 +703,7 @@ build's files through scopes (`servedBy`).
 round 1 that agrees with the coverage, and whose files would resolve globally, ships it at one tag. A build's
 files resolve globally when it runs every member it ships from the global map: a file's own imports resolve
 in its owner's scope, so a file of a build that serves any member itself binds that build's copy for
-whoever takes it. Every remote the extended coverage now serves moves onto the global map, in a subpool or
+whoever takes it. Every remote the extended global tags now serve moves onto the global map, in a subpool or
 not — but a subpool's build only once no other member needs it, so a subpool moves as a whole or keeps its
 build. A subpool left with its build alone dissolves: that remote moves onto the global map when served, else
 serves itself. It runs after the rounds so the rounds can place what it does not settle. Then the coverage
@@ -729,7 +729,7 @@ member reaches it first.
 
 ```mermaid
 flowchart TD
-    A[Pool: externals sharing a name, one scope] --> B[Variants: each remote's build,<br/>specifier → tag]
+    A[Pool: externals sharing a name, one scope] --> B[Builds: one per remote,<br/>specifier → tag]
     B --> R1[Round 1: the candidate serving most remotes<br/>host forced; coverage borrows same-tag<br/>entrypoints from agreeing builds]
     R1 --> G[Global map = its coverage]
     R1 --> P[Remotes it does not serve]
@@ -873,7 +873,7 @@ copies come from:
 | --- | --- | --- |
 | `warn` | `'<remote>' is islanded: its range rejects '<member>@<tag>' of the elected build '<winner>'. <where>` | A range rejects a tag of the elected build. Align that remote's version or range, or accept the cost. N counts what that remote imports, not the pool. |
 | `warn` | `'<remote>' serves its own family: no elected build offers every entrypoint it imports at a version it accepts (gap '<gap>', closest '<winner>'). <where>` | Coverage: `<gap>` is the first specifier the elected build does not serve. Shipping it in the elected build, or dropping it from this remote, recovers the dedup. |
-| `warn` | `'<remote>' serves its own family: no build shipped its entrypoints together at the elected versions (gap '<gap>', closest '<winner>'). <where>` | Witness: the extended coverage serves everything this remote imports at versions it accepts, but no one build shipped that combination (step 4). `<gap>` is the first specifier no build ships next to the ones before it. Shipping those versions together in one build recovers the dedup. |
+| `warn` | `'<remote>' serves its own family: no build shipped its entrypoints together at the elected versions (gap '<gap>', closest '<winner>'). <where>` | Witness: the extended global tags serve everything this remote imports at versions it accepts, but no one build shipped that combination (step 4). `<gap>` is the first specifier no build ships next to the ones before it. Shipping those versions together in one build recovers the dedup. |
 | `warn` | `'<remote>' is islanded: its range rejects '<specifier>@<tag>' of the committed map. All N members it imports are scoped for it.` | Dynamic init only — a range rejects a tag the committed map serves (see [Scope and dynamic init](#scope-and-dynamic-init)). |
 | `warn` | `'<remote>' serves its own family: no committed build offers every entrypoint it imports at a version it accepts (gap '<gap>'). All N members it imports are scoped for it.` | Dynamic init only — the coverage finding read off the committed record. |
 | `warn` | `'<remote>' serves its own family: no committed build shipped the map's combination for it. All N members it imports are scoped for it.` | Dynamic init only — the witness finding: the committed map serves everything this remote imports at versions it accepts, but no committed build shipped those versions together. |

@@ -12,7 +12,7 @@ import { emittedUrls, findIncoherentRemotes, findSplitRemotes } from 'lib/testin
  * second hop there; `findSplitRemotes` follows every possible one statically.
  *
  * Also the download baseline for the pool: the distinct `@angular/*` files the map can fetch. Under the
- * gate pipeline (4.7.0) these were 37 and 75. Variant election serves eleven in 54: mfe8 now runs mfe1's
+ * gate pipeline (4.7.0) these were 37 and 75. Build election serves eleven in 54: mfe8 now runs mfe1's
  * 21.2.18 build instead of its own, and mfe2 (cdk pinned at 22.0.6) runs mfe11's 22.0.6 build.
  */
 const FIXTURES = resolve(__dirname, '../../../../../../e2e/fixtures');

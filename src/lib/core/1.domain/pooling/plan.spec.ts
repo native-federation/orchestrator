@@ -33,11 +33,11 @@ const record = (
 
 const shape = (plan: ElectionPlan) => ({
   pools: [...plan.pools].map(([name, members]) => [name, members.map(m => m.name)]),
-  dissolved: [...plan.dissolved.keys()],
+  stripped: [...plan.stripped.keys()],
   labelledAlone: plan.labelledAlone,
 });
 
-const EMPTY = { pools: [], dissolved: [], labelledAlone: [] };
+const EMPTY = { pools: [], stripped: [], labelledAlone: [] };
 
 describe('planElection', () => {
   beforeEach(() => {
@@ -107,12 +107,12 @@ describe('planElection', () => {
 
     const plan = planElection(scope, true);
 
-    expect([...plan.dissolved.keys()]).toEqual(['near', 'far']);
-    for (const external of plan.dissolved.values()) {
+    expect([...plan.stripped.keys()]).toEqual(['near', 'far']);
+    for (const external of plan.stripped.values()) {
       expect(hasPoolResults(external)).toBe(false);
       expect(external.dirty).toBe(true);
     }
-    expect(plan.dissolved.get('near')).toEqual({ ...record(), dirty: true });
+    expect(plan.stripped.get('near')).toEqual({ ...record(), dirty: true });
   });
 
   it('lists a labelled external that pooled with nothing', () => {
@@ -146,7 +146,7 @@ describe('planElection', () => {
     ];
     const sorted = (plan: ElectionPlan) => {
       const s = shape(plan);
-      return { ...s, pools: s.pools.sort(), dissolved: s.dissolved.sort() };
+      return { ...s, pools: s.pools.sort(), stripped: s.stripped.sort() };
     };
 
     expect(sorted(planElection(Object.fromEntries([...entries].reverse()), true))).toEqual(

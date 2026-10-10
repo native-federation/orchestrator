@@ -61,7 +61,7 @@ test.describe('incremental: a pool is re-elected as a unit', () => {
   });
 
   test('keeps a pool resolvable when the joiner lands on the pinned tag', async ({ nf }) => {
-    // The variant that used to collapse the pool completely: no member kept a shared version at all, so
+    // The case that used to collapse the pool completely: no member kept a shared version at all, so
     // the import map carried no framework entry and three remotes each downloaded their own copy.
     const joinsPinned = remote('team/mfe3', SCOPE.mfe3, [
       dep('@angular/core', '22.0.5', { req: '^22.0.0' }),

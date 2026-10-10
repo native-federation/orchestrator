@@ -75,7 +75,7 @@ export function committedView(
   return { builds, global };
 }
 
-// The init rules against a map that can no longer change (§"Scope and dynamic init", step 2). A resolver
+// The init rules against a map that can no longer change (§"Scope and dynamic init", step 1). A resolver
 // scope needs no rule of its own: a range that rejects the map's tag is a miss here too.
 export function judgeRemote(
   copies: readonly Copy[],
@@ -128,7 +128,7 @@ export function coverFromMap(
 
 // A fresh record with only the loaded remote's copy moved: into a `scope` row at its tag, or into a skip row
 // that runs the map's files.
-export function recordMove(
+export function movedRecord(
   external: SharedExternal,
   remote: RemoteName,
   move: CopyMove,

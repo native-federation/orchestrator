@@ -6,7 +6,7 @@ import type { DeepReadonly } from 'lib/utils/deep-readonly';
 export type ElectionPlan = {
   pools: Map<PoolName, PoolMember[]>;
   // Externals in no pool that still carry pool results, stripped and dirty so determine re-elects them.
-  dissolved: Map<ExternalName, SharedExternal>;
+  stripped: Map<ExternalName, SharedExternal>;
   labelledAlone: ExternalName[];
 };
 
@@ -20,13 +20,13 @@ export function planElection(scope: DeepReadonly<shareScope>, poolable: boolean)
     !Object.values(scope).some(external => external.dirty) ||
     !scopeHasPoolState(scope)
   )
-    return { pools: new Map(), dissolved: new Map(), labelledAlone: [] };
+    return { pools: new Map(), stripped: new Map(), labelledAlone: [] };
 
   const { pools, labelledAlone } = buildPools(scope);
   const pooled = new Set([...pools.values()].flatMap(members => members.map(m => m.name)));
-  const dissolved = new Map<ExternalName, SharedExternal>();
+  const stripped = new Map<ExternalName, SharedExternal>();
   for (const [name, external] of Object.entries(scope))
     if (!pooled.has(name) && hasPoolResults(external))
-      dissolved.set(name, { ...withoutPoolResults(external), dirty: true });
-  return { pools, dissolved, labelledAlone };
+      stripped.set(name, { ...withoutPoolResults(external), dirty: true });
+  return { pools, stripped, labelledAlone };
 }

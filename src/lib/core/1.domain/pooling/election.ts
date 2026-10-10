@@ -134,7 +134,7 @@ export function elect(input: ElectionInput): Election {
         if (!globalTags.has(s)) return { cause: 'uncovered', gap: s };
     const gap = unwitnessed(remote);
     if (gap) return { cause: 'uncovered', gap, unshipped: true };
-    // Everyone else the extended coverage serves is global, so only a subpool's build can lack a reason.
+    // Everyone else the extended global tags serve is global, so only a subpool's build can lack a reason.
     if (subpools.some(p => p.build === remote)) return undefined;
     throw new Error(`'${remote}' missed the global map with nothing it rejects or lacks.`);
   };
@@ -196,13 +196,13 @@ export function elect(input: ElectionInput): Election {
       })
     );
     for (;;) {
-      const waiting = new Set(pending);
+      const stillPending = new Set(pending);
       // A tie goes by name, never record order; see docs/version-resolver.md §"How pooling resolves", step 3.
       const candidates = [...pending]
         .sort(compareStrings)
         .map(owner => {
           const { build, served } = servable.get(owner)!;
-          return { build, served: served.filter(r => waiting.has(r)) };
+          return { build, served: served.filter(r => stillPending.has(r)) };
         })
         .filter(c => c.served.includes(c.build.owner) && c.served.length >= 2);
       const best = rank(candidates, [c => c.served.length]);
@@ -238,7 +238,7 @@ export function elect(input: ElectionInput): Election {
       }
   for (const extra of extras.values())
     if (extra) for (const s of extra.specifiers) globalTags.set(s, extra.tag);
-  // Whoever the extended coverage now serves resolves globally, in a subpool or not — but a subpool's build
+  // Whoever the extended global tags now serve resolves globally, in a subpool or not — but a subpool's build
   // only once no other member needs it. A subpool of one is none: its build goes global when served, else
   // serves itself.
   const takesExtended = (remote: RemoteName) =>

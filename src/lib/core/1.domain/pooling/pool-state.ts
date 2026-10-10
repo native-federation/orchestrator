@@ -35,9 +35,8 @@ export function scopeHasPoolState(scope: DeepReadonly<shareScope>): boolean {
 }
 
 // The record of every member whose stored `poolName` is not its pool's, under the new name, pool results
-// kept: a pool nobody re-elected can still be renamed by another. Each member must be a key of `scope`,
-// which holds the stored name. An external in no pool keeps its stored name until the next dirty init
-// strips it.
+// kept: a pool nobody re-elected can still be renamed by another. An external in no pool keeps its stored
+// name until the next dirty init strips it.
 export function renamedRecords(
   scope: shareScope,
   pools: ReadonlyMap<PoolName, readonly PoolMember[]>
