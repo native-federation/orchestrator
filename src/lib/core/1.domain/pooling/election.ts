@@ -257,16 +257,13 @@ export function elect(input: ElectionInput): Election {
     return false;
   });
 
-  // A published file binds its imports from its owner's scope, so only a build that takes every member it
-  // ships from the global map may publish one. Drop what no such build ships until nothing changes; whoever
-  // that leaves unserved joins the first subpool whose build serves it, else goes back to the later rounds.
-  const runsAll = (build: RemoteName) =>
-    agrees(shipped.get(build)!, globalTags) &&
-    shipped.get(build)!.every(c => c.specifiers.every(s => globalTags.tagOf(s) !== undefined));
+  // The global map publishes only global remotes' copies, so drop each tag no global remote ships until
+  // nothing changes; whoever that leaves unserved joins the first subpool whose build serves it, else goes
+  // back to the later rounds.
   const settle = (): boolean => {
     let demoted = false;
     for (;;) {
-      const publishers = remotes.filter(r => globalRemotes.has(r) || runsAll(runsOn(r)));
+      const publishers = remotes.filter(r => globalRemotes.has(r));
       const kept = [...globalTags].filter(([s, tag]) =>
         publishers.some(r => buildFor(r).tags.get(s) === tag)
       );

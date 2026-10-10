@@ -724,7 +724,7 @@ whoever takes it. Every remote the extended global tags now serve moves onto the
 not — but a subpool's build only once no other member needs it, so a subpool moves as a whole or keeps its
 build. A subpool left with its build alone dissolves: that remote moves onto the global map when served, else
 serves itself. It runs after the rounds so the rounds can place what it does not settle. Then the coverage
-keeps only what a build whose files resolve globally ships at its tag, a borrowed entrypoint included, and a
+keeps only what a remote on the global map ships at its tag, a borrowed entrypoint included, and a
 remote it no longer serves leaves the global map: it joins the first subpool whose build serves it, else
 another round of subpools, until nothing changes.
 Served is not enough to move: **one build must have shipped the combination the remote would resolve**,
