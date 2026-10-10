@@ -640,7 +640,7 @@ One edge needs no label: a secondary entrypoint is always joined to its package 
 be separable — they genuinely tear when they are, with one remote's `@framework/forms` served beside another's
 `@framework/forms/signals`. The edge is not itself a reason to pool: with no label, a package and its entrypoints
 form no pool. A member carrying a label that pools with nothing is almost always a typo or a missing sibling, so
-it is logged.
+it is logged at `debug`.
 
 **A pool is named after the label most of its copies declare** (ties break alphabetically), so a family labelled
 `framework` logs and stores as `framework` whatever else some remote called it. A name belongs to exactly one
@@ -880,6 +880,8 @@ copies come from:
 | `warn` | `'<build>' keeps subpool '<build>': the elected build would serve it, but K other remote(s) in it need its build.` | A subpool's build the global map would serve, kept for the members that need it. Nothing to fix on that remote; aligning the other members moves the whole subpool onto the global map. |
 | `warn` | `'<build>' is not in the cache, so its files cannot be mapped.` | Dynamic init in a named scope only, prefixed `[<scope>][<remote>]`: the committed map serves the loaded remote's family from `<build>`, whose scope URL is gone, so the remote serves itself (`uncovered`). |
 | `error` | `version-incompatible remotes cannot be pooled: {…}.` | Logged before the `strictExternalCompatibility` throw, naming every remote whose `strictVersion` range rejects the elected build. |
+| `debug` | `re-electing N pool(s): K dirty external(s).` | Prefixed `[<scope>]`, once per scope whose pools are re-elected: K externals of the scope are dirty, and any dirty external re-elects every pool of its scope. A clean warm init skips pooling and logs nothing. |
+| `debug` | `'<external>' has a 'pool' label that joins no other external; likely a typo or a missing sibling.` | Prefixed `[<scope>]`: the label pools nothing. Fix the label or add the sibling it was meant to join. |
 
 #### What pooling stores
 

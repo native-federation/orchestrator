@@ -151,9 +151,9 @@ test.describe('membership: the `pool` label', () => {
     });
   });
 
-  test('warns about a label that pooled with nothing', async ({ nf }) => {
-    // A label nothing else joined is a typo or a missing sibling, and silently degrading to "no pool" is
-    // exactly the failure #63 is about — so it is called out. Auto-scope singletons stay silent.
+  test('pools nothing for a label that joins no other external', async ({ nf }) => {
+    // A label nothing else joined is a typo or a missing sibling; it pools nothing and is logged at debug
+    // (pinned in island-warnings.contract.spec.ts). Auto-scope singletons stay silent.
     await nf.init(
       [
         remote('team/mfe1', SCOPE.mfe1, [

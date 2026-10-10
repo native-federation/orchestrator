@@ -340,21 +340,41 @@ describe('island warnings (contract)', () => {
     });
   });
 
-  it('warns about a pool label nothing else joined', async () => {
-    // e2e membership: "warns about a label that pooled with nothing". An unscoped name, so the explicit
-    // (misspelt) label is the only one.
-    p.seed('core-pkg', [
-      p.version('18.0.0', 'core-pkg', [
-        { remote: 'team/mfe-a', req: '^18.0.0', pool: 'framwork' },
-        { remote: 'team/mfe-b', req: '^18.0.0' },
-      ]),
-    ]);
+  describe('debug', () => {
+    const debugs = () => vi.mocked(p.config.log.debug).mock.calls.map(([, msg]) => msg);
 
-    await p.runInit();
+    it('a pool label nothing else joined: debug, not a warning', async () => {
+      // e2e membership: "pools nothing for a label that joins no other external". An unscoped name, so the
+      // explicit (misspelt) label is the only one.
+      p.seed('core-pkg', [
+        p.version('18.0.0', 'core-pkg', [
+          { remote: 'team/mfe-a', req: '^18.0.0', pool: 'framwork' },
+          { remote: 'team/mfe-b', req: '^18.0.0' },
+        ]),
+      ]);
 
-    expect(warnings()).toEqual([
-      "[core-pkg] declares a 'pool' tag but no other external joined its pool; likely a typo or a missing sibling.",
-    ]);
+      await p.runInit();
+
+      expect(warnings()).toEqual([]);
+      expect(debugs()).toContain(
+        "[__GLOBAL__] 'core-pkg' has a 'pool' label that joins no other external; likely a typo or a missing sibling."
+      );
+    });
+
+    it('re-electing: one line per dirty scope with pools', async () => {
+      p.seed('@framework/core', [
+        p.version('22.1.0', '@framework/core', [{ remote: 'team/mfe-a', req: '^22.0.0' }]),
+      ]);
+      p.seed('@framework/router', [
+        p.version('22.1.0', '@framework/router', [{ remote: 'team/mfe-a', req: '^22.0.0' }]),
+      ]);
+
+      await p.runInit();
+
+      expect(debugs().filter(msg => msg.includes('re-electing'))).toEqual([
+        '[__GLOBAL__] re-electing 1 pool(s): 2 dirty external(s).',
+      ]);
+    });
   });
 
   describe('dynamic', () => {

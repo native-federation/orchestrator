@@ -1,5 +1,5 @@
 import type { ForPoolingSharedExternals } from '../../driver-ports/init/for-pooling-shared-externals.port';
-import type { ExternalName, RemoteName, SharedExternal } from 'lib/core/1.domain';
+import type { ExternalName, RemoteName, SharedExternal, shareScope } from 'lib/core/1.domain';
 import { NFError } from 'lib/core/native-federation.error';
 import type { DrivingContract } from '../../driving-ports/driving.contract';
 import type { LoggingConfig } from '../../config/log.contract';
@@ -24,7 +24,7 @@ export function createPoolSharedExternals(
       const sharedExternals = repo.getFromScope(scope);
       try {
         const plan = planElection(sharedExternals, repo.scopeType(scope) !== 'strict');
-        logPlan(plan, scope);
+        logPlan(plan, sharedExternals, scope);
         for (const [poolName, members] of plan.pools)
           for (const [name, record] of poolRecords(poolName, members, scope))
             repo.addOrUpdate(name, record, scope);
@@ -43,16 +43,23 @@ export function createPoolSharedExternals(
     return Promise.resolve();
   };
 
-  function logPlan(plan: ElectionPlan, scope: string): void {
+  function logPlan(plan: ElectionPlan, sharedExternals: shareScope, scope: string): void {
+    if (plan.pools.size > 0) {
+      const dirty = Object.values(sharedExternals).filter(external => external.dirty).length;
+      config.log.debug(
+        3,
+        `[${scope}] re-electing ${plan.pools.size} pool(s): ${dirty} dirty external(s).`
+      );
+    }
     if (plan.stripped.size > 0)
       config.log.debug(
         3,
         `[${scope}] ${plan.stripped.size} external(s) left every pool; cleared their pool state for re-election.`
       );
     for (const name of plan.labelledAlone)
-      config.log.warn(
+      config.log.debug(
         3,
-        `[${name}] declares a 'pool' tag but no other external joined its pool; likely a typo or a missing sibling.`
+        `[${scope}] '${name}' has a 'pool' label that joins no other external; likely a typo or a missing sibling.`
       );
   }
 
