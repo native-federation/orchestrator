@@ -38,9 +38,7 @@ export type Election = {
   // The winner's specifiers, same-tag loans from agreeing builds, and packages they all add at one tag.
   globalTags: SpecifierTags;
   // Remotes outside round 1 that agree with the winner on everything both ship (rule 5).
-  agreeing: Set<RemoteName>;
-  // Those of `agreeing` that take every member they ship from the global map, so may publish its files.
-  publishers: Set<RemoteName>;
+  agreeing: ReadonlySet<RemoteName>;
   placements: ReadonlyMap<RemoteName, Placement>;
   // Every remote off the global map, in the warning order (subpools in election order, then self): a
   // rejected tag (a strict range's first, as `strictExternalCompatibility` refuses that), else a gap, else
@@ -173,14 +171,14 @@ export function elect(input: ElectionInput): Election {
   const newerThan = (c: Candidate) => round1.filter(o => newer(c.build, o.build) > 0).length;
   // Remotes that agree without being served still take this build's files (rule 5): when no build serves
   // more than itself, that is what separates a build its peers share from an outlier.
-  const agreeing = (c: Candidate) => {
+  const agreeingCount = (c: Candidate) => {
     const served = new Set(c.served);
     return remotes.filter(r => !served.has(r) && agrees(shipped.get(r)!, c.tags)).length;
   };
   const round1Winner = rank(round1, [
     ...(input.latestFirst ? [newerThan] : []),
     c => c.served.length,
-    agreeing,
+    agreeingCount,
     c => (c.build.owner === input.previous ? 1 : 0),
   ])!;
 
@@ -304,20 +302,16 @@ export function elect(input: ElectionInput): Election {
   while (settle()) formSubpools();
 
   const self = pending.sort((a, b) => firstSeen.get(a)! - firstSeen.get(b)!);
-  const election: Election = {
+  const agreeing = new Set(
+    [...subpools.map(p => p.build), ...self].filter(r => agrees(shipped.get(r)!, globalTags))
+  );
+  return {
     winner,
     winnerIsHost: hostRemote !== undefined,
     globalTags,
-    agreeing: new Set(),
-    publishers: new Set(),
+    agreeing,
     ...placeRemotes(globalRemotes, subpools, self, missOf),
   };
-  for (const remote of [...subpools.map(p => p.build), ...self])
-    if (agrees(shipped.get(remote)!, globalTags)) {
-      election.agreeing.add(remote);
-      if (runsAll(remote)) election.publishers.add(remote);
-    }
-  return election;
 }
 
 function placeRemotes(

@@ -39,10 +39,9 @@ export function memberRecord(member: PoolMember, pool: PlacedPool): SharedExtern
     const placement = placements.get(name)!;
     return placement.kind === 'subpool' ? placement.build : name;
   };
-  const claimsGlobally = (name: RemoteName) =>
-    placements.get(name)!.kind === 'global' || pool.publishers.has(runsOn(name));
+  const claimsGlobally = (name: RemoteName) => placements.get(name)!.kind === 'global';
   // What those copies of this member ship, per tag. The import map maps a specifier from whichever external
-  // reaches it first, so a publisher in another member's record cannot stop a copy of this one claiming it.
+  // reaches it first, so a global copy in another member's record cannot stop a copy of this one claiming it.
   const claimableAt = new Map<VersionName, Set<Specifier>>();
   for (const version of member.external.versions)
     for (const { name, entries } of version.remotes)
@@ -52,17 +51,15 @@ export function memberRecord(member: PoolMember, pool: PlacedPool): SharedExtern
         for (const s in entries) specifiers.add(s);
       }
 
-  // Rule 5: a build agreeing with round 1 takes its files wherever round 1 publishes this package; one that
-  // serves some member itself only where a claiming copy at its tag lists every file it takes.
+  // Rule 5: a build agreeing with round 1 takes its files where a global copy at its tag lists every file it takes.
   const takesGlobalFiles = (meta: SharedVersionMeta, tag: VersionName) => {
     const runs = runsOn(meta.name);
     return (
       pool.agreeing.has(runs) &&
       pinned &&
-      (pool.publishers.has(runs) ||
-        Object.keys(meta.entries).every(
-          s => globalTags.get(s) === tag && claimableAt.get(tag)?.has(s) === true
-        ))
+      Object.keys(meta.entries).every(
+        s => globalTags.get(s) === tag && claimableAt.get(tag)?.has(s) === true
+      )
     );
   };
 
