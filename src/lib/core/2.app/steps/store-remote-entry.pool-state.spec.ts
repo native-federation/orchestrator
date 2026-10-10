@@ -66,4 +66,22 @@ describe('store-remote-entry: pool results on commit', () => {
     expect(record.poolName).toBe('fam');
     expect(record.poolWinner).toBe('team/mfe-a');
   });
+
+  // The commit spreads the cached record, so a field added to SharedExternal later is carried over without
+  // touching the commit; listing fields one by one would drop it silently.
+  it('keeps a field it does not know about when another remote is committed onto the record', async () => {
+    await createProcessRemoteEntries(config, adapters)([entry('team/mfe-a')]);
+    const stored = adapters.sharedExternalsRepo.getFromScope(undefined)['@fam/core']!;
+    adapters.sharedExternalsRepo.addOrUpdate(
+      '@fam/core',
+      { ...stored, futureField: 'kept' } as typeof stored,
+      undefined
+    );
+
+    await createProcessRemoteEntries(config, adapters)([entry('team/mfe-b')]);
+
+    const record = adapters.sharedExternalsRepo.getFromScope(undefined)['@fam/core']!;
+    expect(record.versions[0]!.remotes.map(r => r.name)).toEqual(['team/mfe-a', 'team/mfe-b']);
+    expect(record).toMatchObject({ futureField: 'kept' });
+  });
 });

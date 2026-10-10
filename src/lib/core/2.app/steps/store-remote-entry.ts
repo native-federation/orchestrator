@@ -208,9 +208,7 @@ export function createStoreRemoteEntry(
         ports.sharedExternalsRepo.addOrUpdate(
           sharedInfo.packageName,
           {
-            dirty: cached.dirty,
-            ...(cached.poolName !== undefined && { poolName: cached.poolName }),
-            ...(cached.poolWinner !== undefined && { poolWinner: cached.poolWinner }),
+            ...cached,
             versions: cached.versions.sort((a, b) => ports.versionCheck.compare(b.tag, a.tag)),
           },
           sharedInfo.shareScope
