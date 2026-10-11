@@ -190,7 +190,9 @@ export const portfolioArbitrary = (
             }),
             { minLength: o.minRemotes ?? 1, maxLength: o.maxRemotes ?? 20 }
           ),
-          host: fc.option(fc.nat()),
+          // Half the portfolios have no host: a host is round 1's only candidate, which leaves its ranking
+          // untested.
+          host: fc.option(fc.nat(), { freq: 2 }),
           // Under strict, a pool's builds mostly stay on one major line, which a `major` range accepts whole.
           mixedMajors: fc.tuple(
             ...poolSizes.map(() =>

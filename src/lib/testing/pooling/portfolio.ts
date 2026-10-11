@@ -26,7 +26,7 @@ import { createInitDrivers } from 'lib/core/5.di/init.factory';
 import { createInitFlow } from 'lib/core/2.app/flows/init.flow';
 import { createInitRemoteEntryFlow } from 'lib/core/2.app/flows/init-remote-entry.flow';
 import { hasPoolResults } from 'lib/core/1.domain/pooling/pool-state';
-import { emittedUrls, tearsByPool } from './no-tear';
+import { emittedUrls, tearsByPool, withLabelledPools } from './no-tear';
 import { type CopySpec, storedRecord, version } from './portfolio-fixtures';
 
 export type { CopySpec };
@@ -214,12 +214,19 @@ export const portfolio = (
         )
       : scopeUrls;
 
+  // The oracles group the record by the pools its labels make, not by the stored `poolName` the election under
+  // test writes. The strict scope is never pooled.
+  const labelled = (): shareScope =>
+    adapters.sharedExternalsRepo.scopeType(scope) === 'strict'
+      ? stored()
+      : withLabelledPools(stored());
+
   const assertNoTear = (importMap: ImportMap) => {
     if (!checkTear) return;
     expect(
       tearsByPool({
         importMap,
-        externals: { [scope]: stored() },
+        externals: { [scope]: labelled() },
         scopeUrls: knownScopeUrls(),
         hosts,
       })
@@ -230,7 +237,7 @@ export const portfolio = (
   // specifier a pooled copy ships must map, in its remote's scope or in `imports`.
   const assertResolves = (importMap: ImportMap) => {
     const unresolved: string[] = [];
-    for (const external of Object.values(stored())) {
+    for (const external of Object.values(labelled())) {
       if (external.poolName === undefined) continue;
       for (const version of external.versions)
         for (const meta of version.remotes) {

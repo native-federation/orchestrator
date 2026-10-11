@@ -1,6 +1,12 @@
 import type { SharedExternal } from 'lib/core/1.domain';
 import { mockVersionRemote } from '../domain/externals/version.mock';
-import { emittedUrls, findIncoherentRemotes, findSplitRemotes, tearsByPool } from './no-tear';
+import {
+  emittedUrls,
+  findIncoherentRemotes,
+  findSplitRemotes,
+  tearsByPool,
+  withLabelledPools,
+} from './no-tear';
 
 /**
  * The guard's own test. A checker that cannot fail is worse than no checker, so the torn case comes
@@ -551,6 +557,29 @@ describe('tearsByPool', () => {
     expect(
       tearsByPool({ importMap, externals: externals(), scopeUrls: SCOPE, hosts: ['team/mfe-a'] })
     ).toEqual([]);
+  });
+
+  it('groups by the labels, not the stored names, once the record is passed through withLabelledPools', () => {
+    // The fw pool's members carry its label on every copy but no stored name. Grouped by name, core and router
+    // are each an unpooled package of their own, so mfe-a's core@1.0.0 beside router@2.0.0 goes unseen.
+    const label = ({ poolName: _stored, ...e }: SharedExternal, pool: string): SharedExternal => ({
+      ...e,
+      versions: e.versions.map(v => ({ ...v, remotes: v.remotes.map(r => ({ ...r, pool })) })),
+    });
+    const { __GLOBAL__: all } = externals();
+    const record = {
+      '@fw/core': label(all['@fw/core']!, 'fw'),
+      '@fw/router': label(all['@fw/router']!, 'fw'),
+      '@ds/kit': label(all['@ds/kit']!, 'ds'),
+      '@ds/icons': label(all['@ds/icons']!, 'ds'),
+    };
+    const pools = (externals: Record<string, SharedExternal>) =>
+      tearsByPool({ importMap, externals: { __GLOBAL__: externals }, scopeUrls: SCOPE }).map(
+        t => t.pool
+      );
+
+    expect(pools(record)).toEqual([]);
+    expect(pools(withLabelledPools(record))).toEqual(['__GLOBAL__|fw']);
   });
 
   it('keeps share scopes apart', () => {

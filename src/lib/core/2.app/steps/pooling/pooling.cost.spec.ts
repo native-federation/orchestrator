@@ -1,11 +1,35 @@
 import type { DenseSharedInfo, RemoteEntry } from 'lib/core/1.domain';
-import { buildPools } from 'lib/core/1.domain/pooling/membership';
 import { portfolio } from 'lib/testing/pooling/portfolio';
 
-// Wraps the real `buildPools` so a test can count pool-graph builds through the whole init flow.
+// The portfolio's oracles build the pool graph too, after the flow resolves, so only in-flow builds count.
+const state = vi.hoisted(() => ({ inFlow: false, flowBuilds: vi.fn() }));
+const { flowBuilds } = state;
 vi.mock('lib/core/1.domain/pooling/membership', async importOriginal => {
   const actual = await importOriginal<typeof import('lib/core/1.domain/pooling/membership')>();
-  return { ...actual, buildPools: vi.fn(actual.buildPools) };
+  return {
+    ...actual,
+    buildPools: (...args: Parameters<typeof actual.buildPools>) => {
+      if (state.inFlow) state.flowBuilds();
+      return actual.buildPools(...args);
+    },
+  };
+});
+vi.mock('lib/core/2.app/flows/init.flow', async importOriginal => {
+  const actual = await importOriginal<typeof import('lib/core/2.app/flows/init.flow')>();
+  return {
+    ...actual,
+    createInitFlow: (...args: Parameters<typeof actual.createInitFlow>) => {
+      const flow = actual.createInitFlow(...args);
+      return async (...input: Parameters<typeof flow>) => {
+        state.inFlow = true;
+        try {
+          return await flow(...input);
+        } finally {
+          state.inFlow = false;
+        }
+      };
+    },
+  };
 });
 
 const shared = (packageName: string, version: string): DenseSharedInfo =>
@@ -39,18 +63,18 @@ describe('pooling cost', () => {
     const b = entry('team/b', 'http://b/remoteEntry.json', '17.1.0');
 
     // Control: the mock sees the flow's calls at all.
-    vi.mocked(buildPools).mockClear();
+    flowBuilds.mockClear();
     await p.runInit([a, b]);
-    expect(buildPools).toHaveBeenCalled();
+    expect(flowBuilds).toHaveBeenCalled();
 
     p.reload();
-    vi.mocked(buildPools).mockClear();
+    flowBuilds.mockClear();
     await p.runInit([a, b]);
-    expect(buildPools).not.toHaveBeenCalled();
+    expect(flowBuilds).not.toHaveBeenCalled();
 
     // Control: a redeploy dirties the pool, so the graph is built again.
     p.reload();
     await p.runInit([a, entry('team/b', 'http://b/v2/remoteEntry.json', '17.2.0')]);
-    expect(buildPools).toHaveBeenCalled();
+    expect(flowBuilds).toHaveBeenCalled();
   });
 });

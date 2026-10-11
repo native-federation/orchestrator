@@ -1,12 +1,18 @@
 import fc from 'fast-check';
-import { GLOBAL_SCOPE, type ImportMap, type RemoteEntry, type shareScope } from 'lib/core/1.domain';
+import {
+  GLOBAL_SCOPE,
+  STRICT_SCOPE,
+  type ImportMap,
+  type RemoteEntry,
+  type shareScope,
+} from 'lib/core/1.domain';
 import { NFError } from 'lib/core/native-federation.error';
 import { acceptsTag } from 'lib/core/1.domain/externals/compatibility';
 import { owningPackage } from 'lib/core/1.domain/externals/specifier';
 import { buildPools } from 'lib/core/1.domain/pooling/membership';
 import { createVersionCheck } from 'lib/core/3.adapters/checks/version.check';
 import * as _path from 'lib/utils/path';
-import { type GroupTear, tearsByPool } from './no-tear';
+import { type GroupTear, tearsByPool, withLabelledPools } from './no-tear';
 import { hostOf, scopeUrlOf, toRemoteEntries, type PortfolioSpec } from './generate-portfolio';
 import { portfolio } from './portfolio';
 
@@ -60,9 +66,10 @@ export function pools(record: shareScope): Map<string, shareScope> {
   return byPool;
 }
 
-// The oracle per stored pool. Unpooled packages are left out on purpose: outside a pool the import-map
-// builders self-fill an entrypoint the shared version lacks from the consumer's own build, a documented
-// between-versions tear that pooling makes no promise about.
+// The oracle per pool, as the labels make it rather than as the record names it; the strict scope, never
+// pooled, is read as stored. Unpooled packages are left out on purpose: outside a pool the import-map builders
+// self-fill an entrypoint the shared version lacks from the consumer's own build, a documented between-versions
+// tear that pooling makes no promise about.
 export function poolTears(
   importMap: ImportMap,
   record: shareScope,
@@ -72,7 +79,7 @@ export function poolTears(
 ): GroupTear[] {
   return tearsByPool({
     importMap,
-    externals: { [scope]: record },
+    externals: { [scope]: scope === STRICT_SCOPE ? record : withLabelledPools(record) },
     scopeUrls,
     hosts: host === undefined ? [] : [host],
   }).filter(tear => !tear.pool.startsWith(`${scope}|package:`));
@@ -158,6 +165,8 @@ export function openPortfolio(
       assertNoTear: false,
     }
   );
+  // True while nothing has run on the page yet: it is new already, so the next step (a `reload` included)
+  // opens no other page.
   let fresh = true;
   const next = () => {
     if (!fresh) p.reload();

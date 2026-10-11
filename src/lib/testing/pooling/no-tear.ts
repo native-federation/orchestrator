@@ -8,6 +8,7 @@ import type {
 } from 'lib/core/1.domain';
 import * as _path from 'lib/utils/path';
 import { owningPackage } from 'lib/core/1.domain/externals/specifier';
+import { buildPools } from 'lib/core/1.domain/pooling/membership';
 
 // Re-exported so harnesses outside `src` depend on `lib/testing` only, not on where the step code lives.
 export { owningPackage };
@@ -294,4 +295,18 @@ export function tearsByPool({
     if (tear.incoherent.length > 0 || tear.split.length > 0) tears.push(tear);
   }
   return tears;
+}
+
+// The record with each `poolName` replaced by the pool its labels make, so an oracle need not trust the names
+// the election wrote: a missing or wrong name moves members out of their pool's group and hides their tear.
+export function withLabelledPools(record: shareScope): shareScope {
+  const poolOf = new Map<ExternalName, string>();
+  for (const [pool, members] of buildPools(record).pools)
+    for (const { name } of members) poolOf.set(name, pool);
+  return Object.fromEntries(
+    Object.entries(record).map(([name, { poolName: _stored, ...external }]) => {
+      const pool = poolOf.get(name);
+      return [name, pool === undefined ? external : { ...external, poolName: pool }];
+    })
+  );
 }
