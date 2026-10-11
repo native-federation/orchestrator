@@ -145,23 +145,29 @@ export function elect(input: ElectionInput): Election {
     tags: SpecifierTags;
     loans: Map<Specifier, RemoteName[]>;
     served: RemoteName[];
+    // Remotes that agree without being served still take this build's files (rule 5): when no build serves
+    // more than itself, that is what separates a build its peers share from an outlier.
+    agreeing: number;
   };
+  const scored = new Map<string, Omit<Candidate, 'build'>>();
   const round1 = (hostRemote ? [hostRemote] : remotes).map<Candidate>(owner => {
     const build = buildFor(owner);
-    const { tags, loans } = withSameTagEntries(build);
-    return { build, tags, loans, served: remotes.filter(r => serves(shipped.get(r)!, tags)) };
+    // Keyed in insertion order, which decides `tagOf`; an owner's own copies never lend.
+    const key = JSON.stringify([[...build.tags], [...build.tagByMember]]);
+    let score = scored.get(key);
+    if (!score) {
+      const { tags, loans } = withSameTagEntries(build);
+      const served = new Set(remotes.filter(r => serves(shipped.get(r)!, tags)));
+      const agreeing = remotes.filter(r => !served.has(r) && agrees(shipped.get(r)!, tags)).length;
+      scored.set(key, (score = { tags, loans, served: [...served], agreeing }));
+    }
+    return { build, ...score };
   });
   const newerThan = (c: Candidate) => round1.filter(o => newer(c.build, o.build) > 0).length;
-  // Remotes that agree without being served still take this build's files (rule 5): when no build serves
-  // more than itself, that is what separates a build its peers share from an outlier.
-  const agreeingCount = (c: Candidate) => {
-    const served = new Set(c.served);
-    return remotes.filter(r => !served.has(r) && agrees(shipped.get(r)!, c.tags)).length;
-  };
   const round1Winner = rank(round1, [
     ...(input.latestFirst ? [newerThan] : []),
     c => c.served.length,
-    agreeingCount,
+    c => c.agreeing,
     c => (c.build.owner === input.previous ? 1 : 0),
   ])!;
 
