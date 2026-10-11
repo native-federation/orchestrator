@@ -631,7 +631,7 @@ Enforced by ESLint (`no-restricted-imports` in `eslint.config.js`):
 | Membership: pools from labels and package edges, each pool's name                      | `1.domain/pooling/membership.ts` (`buildPools`)                                               |
 | The init plan: which pools to re-elect, which externals to strip of stale pool results | `1.domain/pooling/plan.ts` (`planElection`)                                                   |
 | What each remote's build ships for a pool                                              | `1.domain/pooling/builds.ts`                                                                  |
-| The rules both paths judge by: serves, agrees, shipped together                        | `1.domain/pooling/rules.ts`                                                                   |
+| The rules both paths judge by: serves, agrees, the unwitnessed gap                     | `1.domain/pooling/rules.ts`                                                                   |
 | The election: round 1, subpools, extension, each remote's placement                    | `1.domain/pooling/election.ts` (`elect`)                                                      |
 | The records pooling writes: election rows, a moved copy, a rename, stripped results    | `1.domain/pooling/records.ts` (`memberRecord`)                                                |
 | Stored pool results: detect them in a record or a scope                                | `1.domain/pooling/pool-state.ts`                                                              |
