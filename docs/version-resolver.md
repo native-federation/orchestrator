@@ -618,7 +618,7 @@ are elected by pooling alone; the per-external resolver leaves them untouched (s
 | **member** | An external in a pool. |
 | **copy** | One remote's entry for one member at one version (a `SharedVersionMeta` in the record). |
 | **build** | Everything one remote ships in a pool, as *specifier → tag*. Builds are the election's candidates: each remote ends up on the global map, in a subpool, or on its own build. |
-| **global map** | The pool's specifiers in `imports`; a named shareScope has no `imports` of its own, so there each remote's own scope maps those files. A remote **resolves globally** when it runs those files. |
+| **global map** | The pool's specifiers in `imports`; a named shareScope has no `imports` of its own, so there each remote's own scope maps those files. A remote **resolves globally** when it runs those files. Not the global *scope* (`__GLOBAL__`): every pooled scope, named ones included, has its own global map. |
 | **winner** | The build round 1 elects; its coverage seeds the global map. Stored as `poolWinner`. |
 | **extended global tags** | The global map's tags once extension has added the packages the winner does not ship (step 4 of [How pooling resolves](#how-pooling-resolves)); a remote they serve moves onto the global map when one build shipped the combination it would resolve. |
 | **subpool** | Remotes off the global map that run one remote's build through scopes. Named after that remote; its members' copies record it as `servedBy`. |
@@ -959,17 +959,17 @@ which `update-cache` has already stored but the committed map holds none of. For
 either resolves globally or serves itself — it never joins a committed subpool, even one whose build would serve
 it. In order:
 
-1. **The global map.** It resolves through the committed `imports` when no range rejects a tag the map serves
-   and either it **agrees** with the map on everything both ship — then the packages it adds are its own to
-   publish — or the map serves every specifier it imports and some committed build shipped that exact
-   combination. That second check matters because the global map can combine tags from several builds
-   (same-tag loans and extended global tags), so a remote that does not agree must run a combination one
-   committed build shipped. It also needs no committed build serving it to run a pool-mate off the map. A build
-   can publish before its pool forms, so the map can serve one remote's specifiers from builds that bind a
-   pool-mate differently. A range rejecting a global tag moves it on with cause `incompatible`. A member the
-   resolver scoped is judged the same way: a strict range that rejects the map's tag islands the family as
-   `incompatible`, while a copy `scopeUncoveredEntrypoints` scoped for an entrypoint the shared version lacks
-   becomes a skip when the map serves every entrypoint it ships, as at init.
+1. **The global map.** It resolves through the committed global map (`imports`, or the shareScope's scopes in a
+   named shareScope) when no range rejects a tag the map serves and either it **agrees** with the map on
+   everything both ship — then the packages it adds are its own to publish — or the map serves every specifier
+   it imports and some committed build shipped that exact combination. That second check matters because the
+   global map can combine tags from several builds (same-tag loans and extended global tags), so a remote that
+   does not agree must run a combination one committed build shipped. It also needs no committed build serving
+   it to run a pool-mate off the map. A build can publish before its pool forms, so the map can serve one
+   remote's specifiers from builds that bind a pool-mate differently. A range rejecting a global tag moves it on
+   with cause `incompatible`. A member the resolver scoped is judged the same way: a strict range that rejects
+   the map's tag islands the family as `incompatible`, while a copy `scopeUncoveredEntrypoints` scoped for an
+   entrypoint the shared version lacks becomes a skip when the map serves every entrypoint it ships, as at init.
 2. **Otherwise it serves its own family**, with its `poolCause` recorded, and is warned in the dynamic lines of
    [What pooling logs](#what-pooling-logs). A remote in a named scope whose map files belong to a remote no
    longer in the cache serves itself too (`uncovered`): its scope cannot map those files, and half its family on

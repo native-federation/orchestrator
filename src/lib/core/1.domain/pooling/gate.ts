@@ -24,7 +24,7 @@ import { agrees, shippedTogether } from './rules';
 
 type CommittedView = {
   builds: Map<RemoteName, Build>;
-  // What the committed `imports` serves, per specifier.
+  // What the committed global map serves per specifier: `imports`, or the shareScope's scopes.
   global: Map<Specifier, { tag: VersionName; remote: RemoteName; file: string }>;
   // Per build, the specifiers it runs from its own or a subpool's files, at the tag it runs.
   runsOffMap: Map<RemoteName, Map<Specifier, VersionName>>;
