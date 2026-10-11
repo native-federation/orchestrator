@@ -72,7 +72,7 @@ export type PortfolioOptions = {
 
 export type DynamicLoad = {
   actions: SharedInfoActions;
-  /** The map this page committed before the load, generated from the record. */
+  /** The map this page held before the load: its init's plus every earlier load's delta. */
   committed: ImportMap;
   /** The delta the load hands the browser. */
   importMap: ImportMap;
@@ -96,6 +96,8 @@ export const portfolio = (
   // What the flows fetch: remote entries by URL, handed out as fresh copies the way a fetch parses them.
   const published = new Map<string, RemoteEntry>();
   let installed: ImportMap | undefined;
+  // The map the browser holds: import maps only grow, so a later load runs over every earlier one.
+  let page: ImportMap | undefined;
   let actions: SharedInfoActions | undefined;
   let writes = 0;
 
@@ -262,6 +264,7 @@ export const portfolio = (
     const importMap = installed!;
     assertNoTear(importMap);
     assertResolves(importMap);
+    page = importMap;
     return importMap;
   };
 
@@ -279,17 +282,19 @@ export const portfolio = (
     return runInit();
   };
 
-  // The dynamic flow for one remote entry, fetched by URL. The committed map is generated from the record as
-  // it stood before the load.
+  // The dynamic flow for one remote entry, fetched by URL, over the map this page holds: its init's plus every
+  // earlier load's delta. Regenerating it from the record would publish earlier loads' copies in `imports` and
+  // mark them `cached`, which no real page does. A page that ran no init (seeded) generates it once.
   const runDynamic = async (entry: RemoteEntry): Promise<DynamicLoad> => {
     published.set(entry.url, entry);
-    const committed = await drivers.generateImportMap();
+    const committed = page ?? (await drivers.generateImportMap());
     installed = undefined;
     actions = undefined;
     await createInitRemoteEntryFlow({ flow: drivers, adapters, config })(entry.url);
     if (!installed || !actions) throw new Error(`'${entry.name}' was not loaded.`);
     const importMap: ImportMap = installed;
     const merged = addToImportMap(committed, importMap);
+    page = merged;
     assertNoTear(merged);
     assertResolves(merged);
     return { actions, committed, importMap, merged };
@@ -304,6 +309,7 @@ export const portfolio = (
     adapters.sharedChunksRepo.commit();
     ({ config, adapters, drivers } = wire(false));
     writes = 0;
+    page = undefined;
   };
 
   /**
