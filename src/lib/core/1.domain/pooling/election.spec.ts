@@ -173,4 +173,32 @@ describe('subpool rounds', () => {
     expect(inSubpool(election, 'y')).toEqual([]);
     expect(election.placements.get('y')).toEqual({ kind: 'self', cause: 'incompatible' });
   });
+
+  /**
+   * w wins round 1 and borrows p/a@1.0.1 from l and g, which agree with it. g is served, so a global remote
+   * already publishes p/a and l is no lender: l (x uncovered) may join b's subpool though b disagrees with
+   * the global tags (q@1.0.1). Only a loan no round-1 remote ships keeps its lender out of such a subpool
+   * (docs/version-resolver.md §"How pooling resolves", step 2). Counting l as a lender anyway keeps l out of
+   * b's subpool; l then adds x to the global tags and goes global, and b is left serving itself. Shrunk from a
+   * fuzz counterexample.
+   */
+  it('lets a remote whose loan a global remote already ships join a subpool whose build disagrees', () => {
+    const at = (tag: string, req: string, ...specifiers: string[]) => ({ tag, req, specifiers });
+    const election = electFrom([
+      { name: 'w', copies: { p: at('1.0.1', '1.0.1', 'p/b'), q: at('1.0.0', '1.0.0', 'q/a') } },
+      {
+        name: 'b',
+        copies: {
+          p: at('1.0.1', '^1.0.0', 'p/a'),
+          q: at('1.0.1', '^1.0.0', 'q'),
+          x: at('1.0.0', '^1.0.0', 'x'),
+        },
+      },
+      { name: 'l', copies: { p: at('1.0.1', '^1.0.0', 'p/a'), x: at('1.0.0', '^1.0.0', 'x') } },
+      { name: 'g', copies: { p: at('1.0.1', '^1.0.0', 'p/a'), q: at('1.0.0', '^1.0.0', 'q/a') } },
+    ]);
+
+    expect(inGlobal(election)).toEqual(['w', 'g']);
+    expect(inSubpool(election, 'b')).toEqual(['b', 'l']);
+  });
 });
