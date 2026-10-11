@@ -32,6 +32,9 @@ describe('createPoolSharedExternals', () => {
       'mfe1',
       'mfe2',
       'mfe3',
+      'mfe4',
+      'mfe5',
+      'mfe6',
       'R',
     ].map(name => [name, `http://${name}/`])
   );
@@ -452,6 +455,29 @@ describe('createPoolSharedExternals', () => {
 
         expect(shareOf('@framework/core')!.remotes[0]!.name).toBe('x');
       });
+
+      it('reads past a first member both ship at one tag to the first whose tags differ', async () => {
+        p.config.profile.latestSharedExternal = true;
+        // x and y both run core@17.9.0, so core cannot decide; zz does, and x's 9.1.0 is newer. y's build
+        // also serves w, which would win it round 1 without the flag. Deciding on core alone calls the two
+        // builds equally new and elects y.
+        p.seed('@framework/core', [
+          at('17.9.0', '@framework/core', [
+            copy('x', '~17.9.0'),
+            copy('y', '~17.9.0'),
+            copy('w', '~17.9.0'),
+          ]),
+        ]);
+        p.seed('@framework/zz', [
+          at('9.1.0', '@framework/zz', [copy('x', '~9.1.0')]),
+          at('9.0.0', '@framework/zz', [copy('y', '~9.0.0'), copy('w', '~9.0.0')]),
+        ]);
+
+        await p.runInit();
+
+        expect(p.record('@framework/core').poolWinner).toBe('x');
+        expect(shareOf('@framework/zz')!.tag).toBe('9.1.0');
+      });
     });
 
     it('breaks a tie on served remotes toward the build more remotes agree with', async () => {
@@ -493,6 +519,43 @@ describe('createPoolSharedExternals', () => {
         'legacy-a@@framework/core: served by legacy-a',
         'legacy-a@@framework/router: served by legacy-a',
         'legacy-b@@framework/core: served by legacy-a',
+      ]);
+    });
+
+    // Round 1 is greedy: it elects the build serving the most remotes, and the later rounds work with what
+    // is left (docs/version-resolver.md §"How pooling resolves", step 2). Every remote ships core and router
+    // at one tag. The 2.0.0 builds serve mfe1-4, 1.0.0 serves mfe1, mfe3 and mfe5, and 3.0.0 serves mfe2,
+    // mfe4 and mfe6. So 2.0.0 goes global, and mfe5 and mfe6, whose ranges take no other remote's tag, serve
+    // themselves: three builds of each member run. Two would do (1.0.0 global for mfe1, mfe3 and mfe5, a 3.0.0
+    // subpool for mfe2, mfe4 and mfe6), but that answer serves fewer remotes in round 1. Pinned as the
+    // documented choice, not the optimum.
+    it('elects the build serving the most remotes, though fewer builds would serve everyone', async () => {
+      for (const name of ['@framework/core', '@framework/router'])
+        p.seed(name, [
+          at('3.0.0', name, [copy('mfe6', '~3.0.0')]),
+          at('2.0.0', name, [
+            copy('mfe1', '>=1.0.0 <3.0.0'),
+            copy('mfe2', '>=2.0.0'),
+            copy('mfe3', '>=1.0.0 <3.0.0'),
+            copy('mfe4', '>=2.0.0'),
+          ]),
+          at('1.0.0', name, [copy('mfe5', '~1.0.0')]),
+        ]);
+
+      const importMap = await p.runInit();
+
+      expect(p.record('@framework/core').poolWinner).toBe('mfe1');
+      expect(importMap.imports['@framework/core']).toBe('http://mfe1/@framework/core.js');
+      expect(rowsOf('@framework/core')).toEqual([
+        '3.0.0:scope:[mfe6]',
+        '2.0.0:share:[mfe1,mfe2,mfe3,mfe4]',
+        '1.0.0:scope:[mfe5]',
+      ]);
+      expect(verdicts()).toEqual([
+        'mfe5@@framework/core: incompatible',
+        'mfe5@@framework/router: incompatible',
+        'mfe6@@framework/core: incompatible',
+        'mfe6@@framework/router: incompatible',
       ]);
     });
 
