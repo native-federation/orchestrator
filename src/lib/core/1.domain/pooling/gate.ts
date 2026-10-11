@@ -17,7 +17,7 @@ import { type Specifier, SpecifierTags } from 'lib/core/1.domain/externals/speci
 import * as _path from 'lib/utils/path';
 import { type Build, buildOf, type Copy } from './builds';
 import type { PoolMember } from './membership';
-import { agrees, shippedTogether } from './rules';
+import { agrees, unwitnessedGap } from './rules';
 
 // See docs/version-resolver.md §"Scope and dynamic init".
 
@@ -110,7 +110,7 @@ export function judgeRemote(
   // committed build must be.
   if (agrees(copies, globalTags)) return 'global';
   if (missing !== undefined) return { cause: 'uncovered', specifier: missing };
-  if (shippedTogether(copies, globalTags, view.builds.values())) return 'global';
+  if (unwitnessedGap(copies, globalTags, view.builds.values()) === undefined) return 'global';
   return { cause: 'uncovered', unshipped: true };
 }
 
@@ -292,6 +292,8 @@ function forEachGlobalClaim(
     );
     if (shareRow) claim(shareRow);
   }
+  // A pooled skip copy's specifiers are claimed first by a share row at the global tag (one tag per
+  // package), so a stale `cached` only repeats a claim.
   for (const member of walk)
     for (const version of member.external.versions) if (version.action === 'skip') claim(version);
 }

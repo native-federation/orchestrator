@@ -1,5 +1,5 @@
 import type { AcceptsTag } from 'lib/core/1.domain/externals/compatibility';
-import type { SpecifierTags } from 'lib/core/1.domain/externals/specifier';
+import type { Specifier, SpecifierTags } from 'lib/core/1.domain/externals/specifier';
 import type { Build, Copy } from './builds';
 
 // Plain loops: the election calls these per remote pair.
@@ -29,17 +29,20 @@ export function serves(
   return true;
 }
 
-// One build must have shipped the combination the copies would run at these tags; a build witnesses its
-// packages' other entrypoints at its tag.
-export function shippedTogether(
+// One build must have shipped the combination the copies would run at these tags; a build witnesses
+// its packages' other entrypoints at its tag. The gap is the first specifier no build ships next to
+// the ones before it.
+export function unwitnessedGap(
   copies: readonly Copy[],
   tags: SpecifierTags,
   builds: Iterable<Build>
-): boolean {
-  next: for (const build of builds) {
-    for (const copy of copies)
-      for (const s of copy.specifiers) if (build.tags.tagOf(s) !== tags.get(s)) continue next;
-    return true;
+): Specifier | undefined {
+  const specifiers = copies.flatMap(c => c.specifiers);
+  let gap = 0;
+  for (const build of builds) {
+    const miss = specifiers.findIndex(s => build.tags.tagOf(s) !== tags.get(s));
+    if (miss === -1) return undefined;
+    gap = Math.max(gap, miss);
   }
-  return false;
+  return specifiers[gap];
 }

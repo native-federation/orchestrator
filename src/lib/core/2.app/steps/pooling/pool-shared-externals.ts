@@ -72,7 +72,7 @@ export function createPoolSharedExternals(
       members,
       acceptsTag: acceptsTag(ports.versionCheck.isCompatible, compare),
       compare,
-      previous: previousWinner(members),
+      previousWinner: previousWinner(members),
       latestFirst: config.profile.latestSharedExternal,
     });
     const placed: PlacedPool = { ...election, poolName, compare };
@@ -102,7 +102,7 @@ export function createPoolSharedExternals(
     const subpoolSizes = new Map<RemoteName, number>();
     for (const placement of placed.placements.values())
       if (placement.kind === 'subpool')
-        subpoolSizes.set(placement.build, (subpoolSizes.get(placement.build) ?? 0) + 1);
+        subpoolSizes.set(placement.owner, (subpoolSizes.get(placement.owner) ?? 0) + 1);
     let shipped: Map<RemoteName, Copy[]> | undefined;
     for (const [remote, miss] of misses) {
       if (miss === undefined) {
@@ -135,8 +135,8 @@ function missWarning(
   const { imports, subpoolSize } = counts;
   const placement = placed.placements.get(remote)!;
   const where =
-    placement.kind === 'subpool' && placement.build !== remote
-      ? `It runs in subpool '${placement.build}' for all ${imports} of its members.`
+    placement.kind === 'subpool' && placement.owner !== remote
+      ? `It runs in subpool '${placement.owner}' for all ${imports} of its members.`
       : subpoolSize > 1
         ? `Its build serves subpool '${remote}': its ${imports} members and ${subpoolSize - 1} other remote(s).`
         : placed.agreeing.has(remote)

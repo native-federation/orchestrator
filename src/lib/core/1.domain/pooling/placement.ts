@@ -27,7 +27,7 @@ export function memberRecord(member: PoolMember, pool: PlacedPool): SharedExtern
 
   const runsOn = (name: RemoteName) => {
     const placement = placements.get(name)!;
-    return placement.kind === 'subpool' ? placement.build : name;
+    return placement.kind === 'subpool' ? placement.owner : name;
   };
   const claimsGlobally = (name: RemoteName) => placements.get(name)!.kind === 'global';
   // What those copies of this member ship, per tag. The import map maps a specifier from whichever external
@@ -71,7 +71,7 @@ export function memberRecord(member: PoolMember, pool: PlacedPool): SharedExtern
       if (placement.kind === 'global' || takesGlobalFiles(meta, version.tag))
         place(version.tag, version.tag === sharedTag ? 'share' : 'skip', meta);
       else if (placement.kind === 'subpool')
-        place(version.tag, 'skip', { ...meta, servedBy: placement.build });
+        place(version.tag, 'skip', { ...meta, servedBy: placement.owner });
       else place(version.tag, 'scope', { ...meta, poolCause: placement.cause });
     }
 

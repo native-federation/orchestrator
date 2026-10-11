@@ -53,7 +53,7 @@ const inGlobal = (election: Election) =>
   [...election.placements].filter(([, p]) => p.kind === 'global').map(([r]) => r);
 const inSubpool = (election: Election, build: string) =>
   [...election.placements]
-    .filter(([, p]) => p.kind === 'subpool' && p.build === build)
+    .filter(([, p]) => p.kind === 'subpool' && p.owner === build)
     .map(([r]) => r);
 
 describe('missOf', () => {

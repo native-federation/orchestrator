@@ -1,6 +1,6 @@
 import { SpecifierTags } from 'lib/core/1.domain/externals/specifier';
 import { buildOf, type Copy } from './builds';
-import { shippedTogether } from './rules';
+import { unwitnessedGap } from './rules';
 
 const copy = (member: string, tag: string, specifiers: string[]): Copy => ({
   member,
@@ -11,7 +11,7 @@ const copy = (member: string, tag: string, specifiers: string[]): Copy => ({
   specifiers,
 });
 
-describe('shippedTogether', () => {
+describe('unwitnessedGap', () => {
   // mfe-s ships `@fw/core` at 1.0.1 but never lists `@fw/core/testing`; copies of one version merge their
   // entries, so its core build still witnesses that entrypoint at 1.0.1, not at any other tag.
   const builds = [
@@ -30,7 +30,7 @@ describe('shippedTogether', () => {
       ['@fw/core/testing', '1.0.1'],
       ['@fw/common', '1.0.0'],
     ]);
-    expect(shippedTogether(loaded, tags, builds)).toBe(true);
+    expect(unwitnessedGap(loaded, tags, builds)).toBeUndefined();
   });
 
   it("does not witness it at another tag than the package's", () => {
@@ -38,6 +38,6 @@ describe('shippedTogether', () => {
       ['@fw/core/testing', '1.0.0'],
       ['@fw/common', '1.0.0'],
     ]);
-    expect(shippedTogether(loaded, tags, builds)).toBe(false);
+    expect(unwitnessedGap(loaded, tags, builds)).toBe('@fw/core/testing');
   });
 });
