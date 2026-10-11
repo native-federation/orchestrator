@@ -372,6 +372,41 @@ describe('createPoolSharedExternals', () => {
       expect(p.record('@framework/common').poolWinner).toBe('b');
     });
 
+    // m4 is the only member both ship, so neither build serves the other and record order elects x. The
+    // stored winner used to be inferred from the bases of the `share` rows, which a's own rows (m1..m3)
+    // outnumber, so re-electing every member flipped it to a.
+    it('keeps a tied winner when every member is re-elected and when a joiner reorders the record', async () => {
+      const seed = (name: string, remotes: string[]) =>
+        p.seed(name, [
+          at(
+            '17.0.0',
+            name,
+            remotes.map(remote => copy(remote))
+          ),
+        ]);
+      seed('@fam/m0', ['x']);
+      for (const name of ['@fam/m1', '@fam/m2', '@fam/m3']) seed(name, ['a']);
+      seed('@fam/m4', ['x', 'a']);
+
+      const coldMap = await p.runInit();
+      const coldRecord = structuredClone(p.stored());
+      expect(coldMap.imports['@fam/m4']).toBe('http://x/@fam/m4.js');
+
+      for (const [name, external] of Object.entries(p.stored()))
+        p.adapters.sharedExternalsRepo.addOrUpdate(name, { ...external, dirty: true }, undefined);
+      expect(await p.runInit()).toEqual(coldMap);
+      expect(p.stored()).toEqual(coldRecord);
+
+      // Members are ordered by name, so a's joiner puts a first in record order; the tie still holds, and only
+      // the stored winner keeps it. The joiner has no `poolWinner` yet.
+      seed('@fam/a', ['a']);
+      const warmMap = await p.runInit();
+
+      expect(p.record('@fam/m4')).toEqual(coldRecord['@fam/m4']);
+      expect(warmMap.imports['@fam/m4']).toBe('http://x/@fam/m4.js');
+      expect(Object.values(p.stored()).map(e => e.poolWinner)).toEqual(Array(6).fill('x'));
+    });
+
     it('ignores a stored winner that ships no member any more', async () => {
       seedTied({ core: 'gone', common: 'gone' });
 

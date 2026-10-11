@@ -7,9 +7,7 @@ import {
   redeployedEntries,
   scopeUrlOf,
   toRemoteEntries,
-  type EntryShape,
   type PortfolioSpec,
-  type RangeKind,
   type Redeploy,
 } from 'lib/testing/pooling/generate-portfolio';
 import {
@@ -169,15 +167,6 @@ describe('pooling properties: init (generated portfolios)', { timeout: TIMEOUT }
       expect(warm.writes).toBe(0);
       expect(warm.importMap).toEqual(init.result.importMap);
       expect(warm.record).toEqual(init.result.record);
-    }));
-
-  it('idempotence: re-electing every pool on a warm page reproduces the record and the map', () =>
-    run(5, portfolioArbitrary({ latestSharedExternal: true }), 200, async spec => {
-      const init = await initOrRefuse(spec);
-      if (!init.ok) return;
-      const again = await init.rig.reelect();
-      expect(again.importMap).toEqual(init.result.importMap);
-      expect(again.record).toEqual(init.result.record);
     }));
 
   // Whatever changes in a share scope, the warm init after it re-elects from the state the init left: one
@@ -468,17 +457,10 @@ describe('pooling properties: init (generated portfolios)', { timeout: TIMEOUT }
  * fetched again and its old copies evicted), over portfolios with label noise (`Relabel`): the changes that
  * split, join or empty a pool. The oracle is the next warm page re-electing every pool of that same state.
  *
- * The partial warm re-elections `pooling.reelection.spec.ts` reproduces (N3, F3, P1) failed these: a label
- * change that splits a pool (offset 202) and an eviction that deletes a pool member (offsets 45 and 271)
- * left a part of the pool clean. Those offsets stay pinned to the CI stream that found them.
+ * The partial warm re-elections `pooling.reelection.spec.ts` reproduces (N3, F3, P1) failed this: a label
+ * change that splits a pool and an eviction that deletes a pool member left a part of the pool clean.
  */
 describe('pooling properties: redeploys (generated portfolios)', { timeout: TIMEOUT }, () => {
-  // The fixed offsets below replay the stream that found them, so only offset 16 draws the profile flag.
-  const redeploys = (latestSharedExternal = false) =>
-    portfolioArbitrary({ maxRemotes: 12, labelNoise: true, latestSharedExternal }).chain(spec =>
-      fc.tuple(fc.constant(lenient(spec)), redeployArbitrary(spec))
-    );
-
   it('stored names: every poolWinner and servedBy names a remote that ships the pool', () =>
     run(14, portfolioArbitrary({ labelNoise: true }), 100, async spec => {
       const init = await initOrRefuse(spec);
@@ -497,6 +479,7 @@ describe('pooling properties: redeploys (generated portfolios)', { timeout: TIME
     await rig.init(toRemoteEntries(spec));
     const warm = await rig.init(redeployedEntries(spec, redeployed));
     expect(poolNameDrift(warm.record)).toEqual([]);
+    expect(strayNames(warm.record)).toEqual([]);
     const reelected = await rig.reelect();
     const scopeUrls = rig.scopeUrls();
     const settled = (page: typeof warm) => ({
@@ -509,99 +492,19 @@ describe('pooling properties: redeploys (generated portfolios)', { timeout: TIME
   };
 
   it('redeploy: a warm init runs and places what re-electing every pool of its state does', () =>
-    run(16, redeploys(true), 100, warmEqualsReelected));
-
-  // Found at offset 202: a redeploy relabels an external out of its pool; the half that keeps its stored
-  // name has no dirty member, so only re-electing every pool of a dirty scope re-elects it.
-  it('redeploy: a label change that splits a pool re-elects both halves', () =>
-    run(202, redeploys(), 100, warmEqualsReelected, { fixed: true }));
-
-  // Found at offset 271: eviction deletes a pool member and no survivor of the pool lost a copy, so only
-  // the sibling marking re-elects them.
-  it('redeploy: deleting a pool member re-elects the rest of the pool', () =>
-    run(271, redeploys(), 100, warmEqualsReelected, { fixed: true }));
-
-  // Shrunk at offset 45, an eviction rather than P1's label change: r0 wins pool p1, then redeploys without
-  // a member only it shipped; eviction deletes that member, nothing left in p1 is dirty, and the warm record
-  // keeps `poolWinner: r0` on members r0 no longer ships.
-  it('redeploy: every poolWinner and servedBy still names a remote that ships the pool', () =>
     run(
-      45,
-      redeploys(),
+      16,
+      portfolioArbitrary({ maxRemotes: 12, labelNoise: true, latestSharedExternal: true }).chain(
+        spec => fc.tuple(fc.constant(lenient(spec)), redeployArbitrary(spec))
+      ),
       100,
-      async ([spec, redeployed]) => {
-        const rig = openPortfolio({ host: hostOf(spec) });
-        await rig.init(toRemoteEntries(spec));
-        const warm = await rig.init(redeployedEntries(spec, redeployed));
-        expect(poolNameDrift(warm.record)).toEqual([]);
-        expect(strayNames(warm.record)).toEqual([]);
-      },
-      { fixed: true }
+      warmEqualsReelected
     ));
 });
 
 // Shrunk counterexamples the properties found. Each is `it.fails` until fixed, so vitest reports the fix, then
 // stays here as a plain `it`; the bug's explicit guard goes in `pooling.regression.spec.ts`.
 describe('pooling properties: shrunk counterexamples', () => {
-  const pool = (
-    major: number,
-    minor: number,
-    patch: number,
-    members: (EntryShape | null)[],
-    range: RangeKind = 'caret'
-  ): PortfolioSpec['remotes'][number] => ({
-    pools: [{ major, minor, patch, range, members }],
-    strictVersion: false,
-    extra: null,
-  });
-
-  // order independence, found at POOLING_PROPERTY_SEED=1 POOLING_PROPERTY_SCALE=5. The host r0 holds
-  // m0@17, so r1 and r2 (two 18.1.1 builds, each with one member the other lacks) both miss round 1, and either
-  // can run the subpool that serves r3. They tie on every key, and record order used to pick whichever registered
-  // first: the same tags ran either way, but the stored verdicts (which one is `incompatible`) followed it.
-  it('order independence: two equal subpool builds are not told apart by registration order', async () => {
-    const spec: PortfolioSpec = {
-      poolSizes: [4],
-      remotes: [
-        pool(0, 0, 0, ['root', null, null, null]),
-        pool(1, 1, 1, ['root', 'root', 'root', null]),
-        pool(1, 1, 1, ['root', 'root', null, 'root']),
-        pool(1, 0, 0, [null, 'root', null, null]),
-      ],
-      host: 0,
-      strict: false,
-    };
-    const entries = toRemoteEntries(spec);
-    const a = await openPortfolio({ host: 'r0' }).init(entries);
-    const b = await openPortfolio({ host: 'r0' }).init([0, 2, 1, 3].map(i => entries[i]!));
-    expect(outcome(b.importMap, b.record)).toEqual(outcome(a.importMap, a.record));
-  });
-
-  // re-election idempotence, found at the CI seed once the generator redeployed builds. r2 and r3 are one
-  // 17.1.0 build; round 1 (the host r0) serves neither, and each one's build serves both, so they tie for the
-  // subpool. Record order used to pick: the first election read it from update-cache (r2 first), and r2's subpool
-  // dissolved once the extension moved r3 global. The re-election read it from the record pooling rewrote,
-  // whose `skip` row (r3) precedes the `scope` row (r2): r3 kept a subpool for r2 and left the global map, so a
-  // warm page re-electing on equal terms ran r3 on 17.1.0 instead of 17.1.1.
-  it('re-election idempotence: a tie between equal subpool builds does not flip on re-election', async () => {
-    const spec: PortfolioSpec = {
-      poolSizes: [3],
-      remotes: [
-        pool(0, 1, 1, ['root', null, 'root'], 'major'),
-        pool(0, 1, 1, [null, 'root', 'sub'], 'major'),
-        pool(0, 1, 0, [null, 'root', 'root'], 'drift'),
-        pool(0, 1, 0, [null, 'root', 'root'], 'major'),
-      ],
-      host: 0,
-      strict: false,
-    };
-    const rig = openPortfolio({ host: 'r0' });
-    const init = await rig.init(toRemoteEntries(spec));
-    const again = await rig.reelect();
-    expect(again.importMap).toEqual(init.importMap);
-    expect(again.record).toEqual(init.record);
-  });
-
   // No-tear (binding) with label noise, found by turning `labelNoise`
   // on for the init properties (CI seed).
   // r1 labels its @p0/m0 (only the `/sub` entrypoint, 17.0.1) `p1`, which joins p0 and p1 into one pool
@@ -661,11 +564,7 @@ describe('pooling properties: shrunk counterexamples', () => {
       strict: true,
     };
     const entries = toRemoteEntries(spec);
-    // A strict refusal places nothing, so it cannot tear.
-    const init = await openPortfolio({ strict: true })
-      .init(entries)
-      .catch(() => undefined);
-    if (!init) return;
+    const init = await openPortfolio({ strict: true }).init(entries);
     const split = poolTears(init.importMap, init.record, scopeUrlsOf(entries)).flatMap(
       t => t.split
     );

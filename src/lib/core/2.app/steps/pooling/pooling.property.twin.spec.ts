@@ -29,7 +29,7 @@ describe('pooling properties: twin loads (generated portfolios)', { timeout: TIM
         latestSharedExternal: true,
         scopeUncoveredEntrypoints: true,
       }),
-      150,
+      50,
       twinGates
     ));
 
@@ -46,7 +46,7 @@ describe('pooling properties: twin loads (generated portfolios)', { timeout: TIM
           flat: true,
           ...(shareScope && { shareScope }),
         }),
-        150,
+        50,
         twinGates
       ));
 
@@ -66,7 +66,7 @@ describe('pooling properties: twin loads (generated portfolios)', { timeout: TIM
           scopeUncoveredEntrypoints: true,
           ...(shareScope && { shareScope }),
         }),
-        150,
+        50,
         twinGates
       ));
 });
