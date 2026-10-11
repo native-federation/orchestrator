@@ -54,7 +54,6 @@ export function createPoolDynamicExternals(
     return Promise.resolve({ entry, actions });
   };
 
-  // Rewrites the loaded remote's actions pool by pool and returns how its copies move in the record.
   function judgeScope(
     remote: RemoteName,
     names: ReadonlySet<ExternalName>,
@@ -145,7 +144,6 @@ export function createPoolDynamicExternals(
   }
 }
 
-// The poolable singletons whose actions may be rewritten, per share scope; membership comes from the record.
 function poolableNames(
   entry: RemoteEntry,
   actions: SharedInfoActions

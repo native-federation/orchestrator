@@ -2,8 +2,8 @@ import type { AcceptsTag } from 'lib/core/1.domain/externals/compatibility';
 import type { SpecifierTags } from 'lib/core/1.domain/externals/specifier';
 import type { Build, Copy } from './builds';
 
-// One remote's copies against a set of tags, as the election and the dynamic gate both judge them; see
-// docs/version-resolver.md §"How pooling resolves". Plain loops: the election calls these per remote pair.
+// Plain loops: the election calls these per remote pair.
+// See docs/version-resolver.md §"How pooling resolves".
 
 // A specifier the tags do not list is still pinned by its package's tag: a flat `core/testing` at 22.0.6 next
 // to a build's `core` at 22.0.8 is two cores, whoever lists the entrypoint.

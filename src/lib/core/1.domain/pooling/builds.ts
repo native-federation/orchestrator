@@ -2,8 +2,7 @@ import type { ExternalName, RemoteName, VersionName } from 'lib/core/1.domain';
 import { type Specifier, SpecifierTags } from 'lib/core/1.domain/externals/specifier';
 import type { PoolMember } from './membership';
 
-// What one remote's build ships for a pool, read from the stored record; the election and the dynamic gate
-// both read it, keyed by specifier so flat and dense builds of one package compare.
+// Keyed by specifier so flat and dense builds of one package compare.
 
 export type Copy = {
   member: ExternalName;

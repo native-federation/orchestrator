@@ -13,7 +13,7 @@ export type PoolMember = {
 
 export type Membership = {
   pools: Map<PoolName, PoolMember[]>;
-  // Labelled externals that pooled with nothing, in scope order: likely a typo or a missing sibling.
+  // In scope order.
   labelledAlone: ExternalName[];
 };
 
@@ -42,9 +42,8 @@ function unionFind() {
 const extNode = (name: ExternalName): string => `ext\x00${name}`;
 const labelNode = (label: string): string => `label\x00${label}`;
 
-// A pool is a connected component of `external -> label` edges (one per declared label, whichever remote
-// declared it) and `entrypoint -> package` edges; only pools of >=2 members are returned. See
-// docs/version-resolver.md.
+// A pool is a connected component of `external -> label` and `entrypoint -> package` edges; see
+// docs/version-resolver.md §"Enabling pooling".
 export function buildPools(sharedExternals: DeepReadonly<shareScope>): Membership {
   const { find, union } = unionFind();
   // One entry per declaring copy, which `mostDeclaredLabel` counts.

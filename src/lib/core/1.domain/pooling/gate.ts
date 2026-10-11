@@ -19,8 +19,7 @@ import { type Build, buildOf, type Copy } from './builds';
 import type { PoolMember } from './membership';
 import { agrees, shippedTogether } from './rules';
 
-// The dynamic gate: a remote loaded at runtime resolves through the committed global map or serves its whole
-// pool family itself. See docs/version-resolver.md §"Scope and dynamic init".
+// See docs/version-resolver.md §"Scope and dynamic init".
 
 type CommittedView = {
   builds: Map<RemoteName, Build>;
@@ -30,15 +29,13 @@ type CommittedView = {
   runsOffMap: Map<RemoteName, Map<Specifier, VersionName>>;
 };
 
-// Why the loaded remote cannot resolve through the committed map; the step words it.
 export type GateMiss =
   | { cause: 'incompatible'; specifier: Specifier; tag: VersionName }
   | { cause: 'uncovered'; specifier: Specifier }
   | { cause: 'uncovered'; unshipped: true }
   | { cause: 'uncovered'; build: RemoteName; specifier: Specifier; tag: VersionName };
 
-// A member whose action the map now serves: `toSkip` moves its copy out of a share row (opened or joined) or a
-// resolver scope into a skip row.
+// `toSkip`: the copy moves out of a share row (opened or joined) or a resolver scope into a skip row.
 type MapCover = {
   name: ExternalName;
   toSkip: boolean;
@@ -52,7 +49,6 @@ type MapPolicy = {
   scopeUrlOf: (remote: RemoteName) => string | undefined;
 };
 
-// How the loaded remote's copy of one member moves in the record.
 export type CopyMove = { cause: PoolCause } | { fromMap: true };
 
 // A `scope` copy counts as served by its build: its files are already in the map under its own scope.
@@ -95,8 +91,8 @@ export function committedView(
   return { builds, global, runsOffMap };
 }
 
-// The init rules against a map that can no longer change (§"Scope and dynamic init", step 1). A resolver
-// scope needs no rule of its own: a range that rejects the map's tag is a miss here too.
+// See docs/version-resolver.md §"Scope and dynamic init", step 1. A resolver scope needs no rule of its own:
+// a range that rejects the map's tag is a miss here too.
 export function judgeRemote(
   copies: readonly Copy[],
   view: CommittedView,
@@ -153,8 +149,7 @@ export function coverFromMap(
   return { covers };
 }
 
-// A fresh record with only the loaded remote's copy moved: into a `scope` row at its tag, or into a skip row
-// that runs the map's files.
+// A fresh record, only the loaded remote's copy moved.
 export function movedRecord(
   external: SharedExternal,
   remote: RemoteName,
@@ -187,8 +182,6 @@ export function movedRecord(
   return { ...external, versions: versions.sort(byTag(compare)) };
 }
 
-// The copy's specifiers the map serves, beside what the resolver covered, or a serving build a named scope
-// cannot map.
 function mapFiles(
   copy: SharedVersionMeta,
   view: CommittedView,
@@ -210,8 +203,6 @@ function mapFiles(
   return { covered, override };
 }
 
-// The remote's copies against the committed global map: the first tag a range rejects and the first
-// entrypoint the map does not serve.
 function scan(copies: readonly Copy[], view: CommittedView, accepts: AcceptsTag) {
   let rejected: { specifier: Specifier; tag: VersionName } | undefined;
   let missing: Specifier | undefined;

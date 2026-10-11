@@ -10,17 +10,12 @@ import type { Specifier } from 'lib/core/1.domain/externals/specifier';
 import type { Election } from './election';
 import type { PoolMember, PoolName } from './membership';
 
-// The records that follow from where each remote of one pool runs; pure, the step writes them.
-// See docs/version-resolver.md §"How the verdicts land in the record and the map".
-
-// Everything `memberRecord` reads of one pool.
 export type PlacedPool = Election & {
   poolName: PoolName;
   compare: (a: VersionName, b: VersionName) => number;
 };
 
-// One member's record, one row per `(tag, action)`; see docs/version-resolver.md §"How the verdicts land in
-// the record and the map".
+// One row per (tag, action); see docs/version-resolver.md §"How the verdicts land in the record and the map".
 export function memberRecord(member: PoolMember, pool: PlacedPool): SharedExternal {
   const { globalTags, placements } = pool;
   // A package can ship only secondary entrypoints (`material/table` without `material`), so its shared tag
@@ -85,7 +80,6 @@ export function memberRecord(member: PoolMember, pool: PlacedPool): SharedExtern
   for (const row of rows)
     row.remotes.sort((a, b) => Number(!claimsGlobally(a.name)) - Number(!claimsGlobally(b.name)));
 
-  // Within a tag `share`, `skip`, then `scope`.
   const order = { share: 0, skip: 1, scope: 2 };
   const newest = byTag(pool.compare);
   const versions = rows.sort((a, b) => newest(a, b) || order[a.action] - order[b.action]);

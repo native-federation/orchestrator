@@ -5,16 +5,15 @@ import type { DeepReadonly } from 'lib/utils/deep-readonly';
 
 export type ElectionPlan = {
   pools: Map<PoolName, PoolMember[]>;
-  // Externals in no pool that still carry pool results, stripped and dirty so determine re-elects them.
+  // Dirty so determine re-elects them.
   stripped: Map<ExternalName, SharedExternal>;
   labelledAlone: ExternalName[];
 };
 
-// Reads the scope, never writes it. Any dirty external re-elects every pool of its scope. See
-// docs/version-resolver.md §"How the verdicts land in the record and the map".
+// Any dirty external re-elects every pool of its scope.
+// See docs/version-resolver.md §"How the verdicts land in the record and the map".
 export function planElection(scope: DeepReadonly<shareScope>, poolable: boolean): ElectionPlan {
-  // Nothing dirty ⇒ nothing to re-elect, so skip before building the graph. Measured, this was the whole
-  // pooling cost of a warm init.
+  // Skip before building the graph: measured, that was the whole pooling cost of a warm init.
   if (
     !poolable ||
     !Object.values(scope).some(external => external.dirty) ||

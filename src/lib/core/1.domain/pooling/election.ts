@@ -10,19 +10,18 @@ import type { PoolMember } from './membership';
 import { agrees, serves as servesAt, shippedTogether } from './rules';
 import { compareStrings } from 'lib/utils/compare-strings';
 
-// Who serves each remote of one pool, keyed by specifier; pure, `pool-shared-externals.ts` turns it into
-// verdicts. See docs/version-resolver.md §"How pooling resolves".
+// See docs/version-resolver.md §"How pooling resolves".
 
 type ElectionInput = {
   members: readonly PoolMember[];
   acceptsTag: AcceptsTag;
   compare: (a: VersionName, b: VersionName) => number;
-  // The round-1 winner the stored record carries from the last election, for the tie rule.
+  // The stored record's winner, which breaks round-1 ties.
   previous?: RemoteName;
   latestFirst: boolean;
 };
 
-// Why a remote missed round 1. `unshipped`: the map serves every specifier, but no build shipped them together.
+// `unshipped`: the map serves every specifier, but no build shipped them together.
 export type PoolMiss =
   | { cause: 'incompatible'; member: ExternalName; tag: VersionName; strict: boolean }
   | { cause: 'uncovered'; gap: Specifier; unshipped?: true };
@@ -34,14 +33,13 @@ export type Placement =
 export type Election = {
   winner: RemoteName;
   winnerIsHost: boolean;
-  // The winner's specifiers, same-tag loans from agreeing builds, and packages they all add at one tag.
   globalTags: SpecifierTags;
-  // Remotes outside round 1 that agree with the winner on everything both ship (rule 5).
+  // Subpool builds and self-serving remotes that agree with the final global tags (rule 5).
   agreeing: ReadonlySet<RemoteName>;
   placements: ReadonlyMap<RemoteName, Placement>;
-  // Every remote off the global map, in the warning order (subpools in election order, then self): a
-  // rejected tag (a strict range's first, as `strictExternalCompatibility` refuses that), else a gap, else
-  // specifiers no one build shipped together. Undefined only for a subpool's build the global map would serve.
+  // In warning order: subpools in election order, then self. A strict range's rejection wins, as
+  // `strictExternalCompatibility` refuses that. Undefined only for a subpool's build the global map
+  // would serve.
   misses: ReadonlyMap<RemoteName, PoolMiss | undefined>;
 };
 
@@ -55,8 +53,8 @@ export function elect(input: ElectionInput): Election {
   for (const [owner, copies] of shipped) builds.set(owner, buildOf(owner, copies));
   const buildFor = (owner: RemoteName) => builds.get(owner)!;
 
-  // Which build is newer: the first member both ship, in pool order, whose tags differ decides, so two
-  // unrelated version lines are never compared.
+  // The first member both ship, in pool order, whose tags differ decides, so two unrelated version lines are
+  // never compared.
   const newer = (a: Build, b: Build): number => {
     for (const { name } of members) {
       const tagA = a.tagByMember.get(name);
@@ -104,7 +102,7 @@ export function elect(input: ElectionInput): Election {
   const remotes = [...shipped.keys()];
   const firstSeen = new Map(remotes.map((r, i) => [r, i]));
 
-  // Highest first on every key, then the newer build; the sort is stable, so the input order breaks the rest.
+  // The sort is stable, so the input order breaks what the keys and the newer build leave tied.
   const rank = <C extends { build: Build }>(candidates: C[], keys: ((c: C) => number)[]) => {
     const scored = candidates.map(c => ({ c, k: keys.map(key => key(c)) }));
     scored.sort((a, b) => {
@@ -181,8 +179,7 @@ export function elect(input: ElectionInput): Election {
     if (![...globalRemotes].some(r => shipsAt(r, specifier, globalTags.get(specifier)!)))
       for (const remote of from) lenders.add(remote);
 
-  // Later rounds: subpools among the remotes still waiting, each led by a build that serves itself and at
-  // least one more.
+  // Later rounds: subpools among the remotes still waiting.
   let pending = remotes.filter(r => !globalRemotes.has(r));
   const admits = (owner: RemoteName, remote: RemoteName) =>
     remote === owner || !lenders.has(remote) || agrees(shipped.get(owner)!, globalTags);
