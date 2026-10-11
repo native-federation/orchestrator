@@ -8,5 +8,5 @@
     "emitDeclarationOnly": true,
     "sourceMap": true
   },
-  "exclude": ["dist", "src/**/*.spec.ts", "src/**/*.mock.ts"]
+  "exclude": ["dist", "src/**/*.spec.ts", "src/**/*.mock.ts", "src/lib/testing/**"]
 }

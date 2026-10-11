@@ -25,6 +25,9 @@ jobs:
       - name: Build OK
         run: pnpm build
 
+      - name: Test harness types OK
+        run: pnpm tsc --noEmit -p tsconfig.testing.json
+
       - name: Lint OK
         run: pnpm lint
 
