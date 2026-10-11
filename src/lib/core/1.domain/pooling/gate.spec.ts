@@ -1,4 +1,9 @@
-import type { SharedExternal, SharedVersion, SharedVersionAction } from 'lib/core/1.domain';
+import {
+  GLOBAL_SCOPE,
+  type SharedExternal,
+  type SharedVersion,
+  type SharedVersionAction,
+} from 'lib/core/1.domain';
 import { mockVersionRemote } from 'lib/testing/domain/externals/version.mock';
 import { copiesByRemote } from './builds';
 import { committedView, coverFromMap } from './gate';
@@ -10,13 +15,15 @@ import type { PoolMember } from './membership';
  */
 
 // A remote's copy of one member: `req` is its own range, `entries` the specifiers it carries (defaulting to
-// just the member itself, which is what a flat build emits).
+// just the member itself, which is what a flat build emits). A copy is `cached` unless it says otherwise, as
+// generate-import-map marks every copy the committed map publishes; the global map counts only those.
 type Copy = {
   remote: string;
   req?: string;
   entries?: Record<string, string>;
   host?: boolean;
   servedBy?: string;
+  cached?: boolean;
 };
 
 const member = (
@@ -35,6 +42,7 @@ const member = (
           requiredVersion: c.req ?? '^22.0.0',
           entries: c.entries ?? { [name]: `${name}.js` },
           servedBy: c.servedBy,
+          cached: c.cached ?? true,
         })
       ),
     })),
@@ -64,12 +72,15 @@ const soleProviderIsland = (): PoolMember[] => [
 ];
 
 // The fixtures list members in the order they are stored; `without` is the remote being loaded.
-const viewOf = (members: PoolMember[], without?: string) =>
+const viewOf = (members: PoolMember[], without?: string, shareScope = GLOBAL_SCOPE) =>
   committedView(
     members,
     copiesByRemote(members),
     members.map(m => m.name),
-    without
+    {
+      shareScope,
+      without,
+    }
   );
 
 describe('committedView', () => {
@@ -180,6 +191,44 @@ describe('committedView', () => {
       expect([...viewOf(members).global.keys()]).toEqual(['@ng/core']);
     });
 
+    // `joiner` was loaded at runtime into the share row at its tag, and `late` into the skip row: each served its
+    // extra entrypoint into its own scope alone, so neither is `cached` and `imports` holds neither entrypoint.
+    // A later load inheriting `imports` would be told the map serves what it does not.
+    const runtimeJoiners = () => [
+      member('@ng/core', [
+        {
+          tag: '22.0.8',
+          action: 'share',
+          copies: [
+            { remote: 'mfe5' },
+            {
+              remote: 'joiner',
+              cached: false,
+              entries: { '@ng/core': 'c.js', '@ng/core/new': 'n.js' },
+            },
+          ],
+        },
+        {
+          tag: '22.0.8',
+          copies: [{ remote: 'late', cached: false, entries: { '@ng/core/late': 'l.js' } }],
+        },
+      ]),
+    ];
+
+    it('leaves out a copy the committed map does not publish', () => {
+      expect([...viewOf(runtimeJoiners()).global.keys()]).toEqual(['@ng/core']);
+    });
+
+    // A named scope has no `imports` to inherit: the load's own scope gets an override, which may name any copy,
+    // as update-cache's `provided` does there.
+    it('counts that copy in a named scope', () => {
+      expect([...viewOf(runtimeJoiners(), undefined, 'team').global]).toEqual([
+        ['@ng/core', { tag: '22.0.8', remote: 'mfe5', file: '@ng/core.js' }],
+        ['@ng/core/new', { tag: '22.0.8', remote: 'joiner', file: 'n.js' }],
+        ['@ng/core/late', { tag: '22.0.8', remote: 'late', file: 'l.js' }],
+      ]);
+    });
+
     // A flat build ships `@ng/core/testing` as a package of its own, a dense one as an entry of `@ng/core`, and
     // both share it. `generate-import-map` hands it to the package stored first, whatever the pool's name order.
     it('names the package stored first for a specifier two shared packages claim', () => {
@@ -199,12 +248,10 @@ describe('committedView', () => {
       ];
 
       expect(
-        committedView(
-          members,
-          copiesByRemote(members),
-          ['@ng/core/testing', '@ng/core'],
-          'loaded'
-        ).global.get('@ng/core/testing')
+        committedView(members, copiesByRemote(members), ['@ng/core/testing', '@ng/core'], {
+          shareScope: GLOBAL_SCOPE,
+          without: 'loaded',
+        }).global.get('@ng/core/testing')
       ).toMatchObject({
         remote: 'flat',
       });

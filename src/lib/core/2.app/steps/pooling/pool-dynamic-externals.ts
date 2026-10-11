@@ -80,7 +80,10 @@ export function createPoolDynamicExternals(
       if (mine.length === 0) continue;
 
       const shipped = copiesByRemote(pool);
-      const view = committedView(pool, shipped, recordOrder, remote);
+      const view = committedView(pool, shipped, recordOrder, {
+        shareScope: scope,
+        without: remote,
+      });
       const verdict = judgeRemote(shipped.get(remote) ?? [], view, accepts);
       if (verdict !== 'global') {
         config.log.warn(8, `[${scope}] ${selfServeWarning(remote, verdict, mine.length)}`);

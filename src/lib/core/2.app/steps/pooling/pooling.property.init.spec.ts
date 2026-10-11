@@ -1,5 +1,5 @@
 import fc from 'fast-check';
-import type { ImportMap, shareScope } from 'lib/core/1.domain';
+import { GLOBAL_SCOPE, type ImportMap, type shareScope } from 'lib/core/1.domain';
 import {
   hostOf,
   portfolioArbitrary,
@@ -303,7 +303,8 @@ describe('pooling properties: init (generated portfolios)', { timeout: TIMEOUT }
         const { global } = committedView(
           poolMembers,
           copiesByRemote(poolMembers),
-          Object.keys(record)
+          Object.keys(record),
+          { shareScope: GLOBAL_SCOPE }
         );
         const view: Record<string, string> = {};
         for (const [specifier, { remote, file }] of global)

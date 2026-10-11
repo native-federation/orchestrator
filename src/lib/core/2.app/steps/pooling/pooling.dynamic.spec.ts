@@ -106,6 +106,77 @@ describe('pooling (dynamic)', () => {
       expect(p.islands()).toEqual({ legacy: 'incompatible', mfe: 'incompatible' });
     });
   });
+  /**
+   * A load that joins a committed share row at its tag serves the entrypoints the row lacks into its own scope
+   * alone: the committed `imports` never gain them. A later load on the same page inherits `imports`, so it must
+   * not be told the map serves them; it serves them itself.
+   */
+  describe('a later load on the same page', () => {
+    const fw = (version: string, core: string[]) => [
+      shared('@fw/core', version, '^17.0.0', { entrypoints: core.filter(s => s !== '@fw/core') }),
+      shared('@fw/common', version, '^17.0.0'),
+    ];
+    // The committed build ships `@fw/core/sub` and `@fw/common/sub` without either root.
+    const entrypointOnly = (info: DenseSharedInfo): DenseSharedInfo => ({
+      ...info,
+      entries: {
+        [`${info.packageName}/sub`]: info.entries[info.packageName]!.replace('.js', '_sub.js'),
+      },
+    });
+
+    it('serves an entrypoint an earlier load served into its own scope alone', async () => {
+      await p.runInit([entry('a', ...fw('17.0.1', ['@fw/core']))]);
+      await p.runDynamic(entry('l1', ...fw('17.0.1', ['@fw/core', '@fw/core/new'])));
+
+      const { merged } = await p.runDynamic(
+        entry('l2', ...fw('17.0.1', ['@fw/core', '@fw/core/new']))
+      );
+
+      expect(merged.scopes?.['http://l1/']?.['@fw/core/new']).toBe(file('l1', '@fw/core/new'));
+      expect(merged.imports['@fw/core/new']).toBeUndefined();
+      expect(resolves(merged, 'l2', '@fw/core/new')).toBe(file('l2', '@fw/core/new'));
+      expect(resolves(merged, 'l2', '@fw/core')).toBe(file('a', '@fw/core'));
+    });
+
+    // A shape a property run found: the host shares only secondary entrypoints, so the first
+    // load to ship the roots serves them into its own scope.
+    it('serves the roots an earlier load joined an entrypoint-only host with', async () => {
+      await p.runInit([entry('a', ...fw('17.0.1', ['@fw/core']).map(entrypointOnly))]);
+      await p.runDynamic(entry('l1', ...fw('17.0.1', ['@fw/core', '@fw/core/sub'])));
+
+      const { merged } = await p.runDynamic(
+        entry('l2', ...fw('17.0.1', ['@fw/core', '@fw/core/sub']))
+      );
+
+      expect(resolves(merged, 'l2', '@fw/core')).toBe(file('l2', '@fw/core'));
+      expect(resolves(merged, 'l2', '@fw/common')).toBe(file('l2', '@fw/common'));
+      expect(resolves(merged, 'l2', '@fw/core/sub')).toBe(file('a', '@fw/core/sub'));
+    });
+
+    // A named scope has no `imports` to inherit: the load's own scope gets an override, which may name the
+    // earlier load's file, so a load at another tag still takes the map through a committed build's witness.
+    it('points a named-scope load at the file an earlier load serves', async () => {
+      const team = (infos: DenseSharedInfo[]) => infos.map(i => ({ ...i, shareScope: 'team' }));
+      const page = portfolio(
+        {},
+        { storage: 'nf-pooling-dynamic-team', realRepositories: true, scope: 'team' }
+      );
+      await page.runInit([entry('a', ...team(fw('17.0.1', ['@fw/core'])))]);
+      await page.runDynamic(entry('l1', ...team(fw('17.0.1', ['@fw/core', '@fw/core/new']))));
+
+      const { actions, merged } = await page.runDynamic(
+        entry('l2', ...team(fw('17.0.2', ['@fw/core', '@fw/core/new'])))
+      );
+
+      expect(page.islands()).toEqual({});
+      expect(actions['@fw/core']).toMatchObject({
+        action: 'skip',
+        override: { '@fw/core': file('a', '@fw/core'), '@fw/core/new': file('l1', '@fw/core/new') },
+      });
+      expect(resolves(merged, 'l2', '@fw/core/new')).toBe(file('l1', '@fw/core/new'));
+    });
+  });
+
   describe('under scopeUncoveredEntrypoints', () => {
     const options = { realRepositories: true, scopeUncoveredEntrypoints: true } as const;
     const fw = (entrypoints: string[] = []) => [

@@ -58,12 +58,15 @@ export function committedView(
   members: PoolMember[],
   shipped: ReadonlyMap<RemoteName, readonly Copy[]>,
   recordOrder: ExternalName[],
-  without?: RemoteName
+  { shareScope, without }: { shareScope: string; without?: RemoteName }
 ): CommittedView {
   const global: CommittedView['global'] = new Map();
 
+  // `imports` holds only the copies marked cached; a named scope's override may name any copy.
+  const publishes = (meta: SharedVersionMeta) =>
+    meta.name !== without && (shareScope !== GLOBAL_SCOPE || meta.cached);
   // Mirrors what `generate-import-map` emitted, so `global` is what the committed map really serves.
-  forEachGlobalClaim(members, recordOrder, without, (specifier, tag, meta) => {
+  forEachGlobalClaim(members, recordOrder, without, publishes, (specifier, tag, meta) => {
     if (!global.has(specifier))
       global.set(specifier, { tag, remote: meta.name, file: meta.entries[specifier]! });
   });
@@ -264,12 +267,13 @@ function recordFromMap(external: SharedExternal, remote: RemoteName): SharedExte
 }
 
 // The order `generate-import-map` fills `imports` in: every `share` version, then every `skip` copy; the
-// caller keeps the first claim per specifier. `forEachVersionEntry` decides which copies may claim, so a copy
-// served by another build never publishes.
+// caller keeps the first claim per specifier. Only a copy `publishes` accepts may claim, and
+// `forEachVersionEntry` keeps out a copy served by another build.
 function forEachGlobalClaim(
   members: PoolMember[],
   recordOrder: ExternalName[],
   without: RemoteName | undefined,
+  publishes: (meta: SharedVersionMeta) => boolean,
   visit: (specifier: Specifier, tag: VersionName, meta: SharedVersionMeta) => void
 ): void {
   // The record's order: generate-import-map claims `imports` and named scopes (`claimsOf`) in it.
@@ -277,10 +281,8 @@ function forEachGlobalClaim(
   const walk = [...members].sort((a, b) => rank.get(a.name)! - rank.get(b.name)!);
 
   const claim = (version: DeepReadonly<SharedVersion>) =>
-    forEachVersionEntry(
-      version,
-      meta => meta.name !== without,
-      (specifier, meta) => visit(specifier, version.tag, meta)
+    forEachVersionEntry(version, publishes, (specifier, meta) =>
+      visit(specifier, version.tag, meta)
     );
 
   for (const member of walk) {

@@ -24,6 +24,9 @@ import { createVersionCheck } from 'lib/core/3.adapters/checks/version.check';
 // `update-cache` runs before this step and commits the loaded remote's own copies too, so a fixture that
 // leaves `mfe` out of the record models a state production cannot reach — and the gate reads what the
 // remote imports off exactly those copies. Every portfolio below that expects a verdict lists `mfe`.
+//
+// Every copy is `cached`, as generate-import-map marks a copy the committed map publishes: the gate counts only
+// those as serving `imports`. mfe's flag is never read, being the load's own.
 const committed = (
   name: string,
   ...versions: {
@@ -44,6 +47,7 @@ const committed = (
       mockVersionRemote(remote, name, {
         requiredVersion: `^${v.tag.split('.')[0]}.0.0`,
         pool: v.pool,
+        cached: true,
       })
     ),
   })),
