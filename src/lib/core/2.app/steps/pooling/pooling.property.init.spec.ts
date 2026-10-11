@@ -16,7 +16,7 @@ import {
   copiesOf,
   electedTags,
   initOrRefuse,
-  judgeRemote,
+  oracleVerdict,
   lenient,
   openPortfolio,
   outcome,
@@ -319,7 +319,7 @@ describe('pooling properties: init (generated portfolios)', { timeout: TIMEOUT }
         for (const remote of remotes) {
           const { causes } = placementOf(remote, copies);
           if (causes.length === 0) continue;
-          const { rejects, missing, witnessed } = judgeRemote(remote, copies, elected, remotes);
+          const { rejects, missing, witnessed } = oracleVerdict(remote, copies, elected, remotes);
           const at = { pool, remote, causes };
           // One election, one reason per remote.
           expect(at).toEqual({ ...at, causes: [causes[0]] });
@@ -345,7 +345,7 @@ describe('pooling properties: init (generated portfolios)', { timeout: TIMEOUT }
         const elected = electedTags(importMap, copies);
         const remotes = [...new Set(copies.map(c => c.remote))];
         for (const remote of remotes) {
-          const { rejects, missing, witnessed } = judgeRemote(remote, copies, elected, remotes);
+          const { rejects, missing, witnessed } = oracleVerdict(remote, copies, elected, remotes);
           if (rejects || missing || !witnessed) continue;
           const { causes, servedBy, servesOthers } = placementOf(remote, copies);
           // The one exception is documented: a subpool's build stays for the other members that need it.

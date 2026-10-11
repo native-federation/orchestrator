@@ -15,23 +15,22 @@ import {
 } from 'lib/core/1.domain';
 import { copiesByRemote } from 'lib/core/1.domain/pooling/builds';
 import { buildPools, type PoolMember, type PoolName } from 'lib/core/1.domain/pooling/membership';
-import { renamedRecords, scopeHasPoolState } from 'lib/core/1.domain/pooling/pool-state';
+import { scopeHasPoolState } from 'lib/core/1.domain/pooling/pool-state';
 import {
   committedView,
-  type CopyMove,
   coverFromMap,
   type GateMiss,
   judgeRemote,
-  movedRecord,
 } from 'lib/core/1.domain/pooling/gate';
-import { acceptsTag } from 'lib/core/1.domain/externals/compatibility';
+import { type CopyMove, movedRecord, renamedRecords } from 'lib/core/1.domain/pooling/records';
+import { createAcceptsTag } from 'lib/core/1.domain/externals/compatibility';
 
 export function createPoolDynamicExternals(
   config: LoggingConfig & ModeConfig,
   ports: Pick<DrivingContract, 'sharedExternalsRepo' | 'remoteInfoRepo' | 'versionCheck'>
 ): ForPoolingDynamicExternals {
   // Read per call so a port swapped after wiring is honoured.
-  const accepts = acceptsTag(
+  const accepts = createAcceptsTag(
     (tag, range) => ports.versionCheck.isCompatible(tag, range),
     (a, b) => ports.versionCheck.compare(a, b)
   );
@@ -170,8 +169,8 @@ function selfServeWarning(remote: RemoteName, miss: GateMiss, members: number): 
   const where = `All ${members} of its members are scoped for it.`;
   if (miss.cause === 'incompatible')
     return `'${remote}' is islanded: its range rejects '${miss.specifier}@${miss.tag}' of the committed map. ${where}`;
-  if ('build' in miss)
-    return `'${remote}' serves its own family: committed build '${miss.build}' serves it but runs '${miss.specifier}@${miss.tag}' off the map. ${where}`;
+  if ('owner' in miss)
+    return `'${remote}' serves its own family: committed build '${miss.owner}' serves it but runs '${miss.specifier}@${miss.tag}' off the map. ${where}`;
   if ('unshipped' in miss)
     return `'${remote}' serves its own family: no committed build shipped the map's combination for it. ${where}`;
   return `'${remote}' serves its own family: no committed build offers every entrypoint it imports at a version it accepts (gap '${miss.specifier}'). ${where}`;

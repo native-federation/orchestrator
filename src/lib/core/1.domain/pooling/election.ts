@@ -134,7 +134,7 @@ function withLoans(pool: Pool, build: Build) {
     if (remote === build.owner || !agrees(copies, build.tags)) continue;
     for (const copy of copies)
       for (const specifier of copy.specifiers)
-        if (!build.tags.has(specifier) && build.tags.tagOf(specifier) === copy.tag) {
+        if (!build.tags.has(specifier) && build.tags.pinnedTag(specifier) === copy.tag) {
           tags.set(specifier, copy.tag);
           loans.set(specifier, [...(loans.get(specifier) ?? []), remote]);
         }
@@ -157,7 +157,7 @@ function roundOne(pool: Pool, hostRemote: RemoteName | undefined): State {
   const scored = new Map<string, Omit<Candidate, 'build'>>();
   const round1 = (hostRemote ? [hostRemote] : remotes).map<Candidate>(owner => {
     const build = pool.builds.get(owner)!;
-    // Keyed in insertion order, which decides `tagOf`; an owner's own copies never lend.
+    // Keyed in insertion order, which decides `pinnedTag`; an owner's own copies never lend.
     const key = JSON.stringify([[...build.tags], [...build.tagByMember]]);
     let score = scored.get(key);
     if (!score) {
@@ -265,7 +265,7 @@ function addExtensions(pool: Pool, state: State): void {
   for (const remote of contributors)
     for (const copy of pool.shipped.get(remote)!)
       for (const s of copy.specifiers) {
-        if (globalTags.tagOf(s) !== undefined) continue;
+        if (globalTags.pinnedTag(s) !== undefined) continue;
         const pkg = owningPackage(s) ?? s;
         const seen = extensions.get(pkg);
         if (seen === null) continue;
@@ -325,6 +325,17 @@ function missOf(pool: Pool, state: State, remote: RemoteName): PoolMiss | undefi
   // Everyone else the extended global tags serve is global, so only a subpool's owner can lack a reason.
   if (state.subpools.some(p => p.owner === remote)) return undefined;
   throw new Error(`'${remote}' missed the global map with nothing it rejects or lacks.`);
+}
+
+// A member that joined since carries no winner yet; only two stored winners that conflict void it.
+export function previousWinner(members: PoolMember[]): RemoteName | undefined {
+  const winners = new Set(members.flatMap(m => m.external.poolWinner ?? []));
+  const [winner] = winners;
+  if (winners.size !== 1) return undefined;
+  const ships = members.some(m =>
+    m.external.versions.some(v => v.remotes.some(r => r.name === winner))
+  );
+  return ships ? winner : undefined;
 }
 
 function placeRemotes(

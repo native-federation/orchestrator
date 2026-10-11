@@ -41,7 +41,7 @@ export class SpecifierTags extends Map<Specifier, VersionName> {
     this.packages.clear();
   }
 
-  tagOf(specifier: Specifier): VersionName | undefined {
+  pinnedTag(specifier: Specifier): VersionName | undefined {
     return this.get(specifier) ?? this.packages.get(owningPackage(specifier) ?? specifier);
   }
 }

@@ -1,6 +1,6 @@
 import type { SharedExternal, SharedVersion } from 'lib/core/1.domain';
 import { mockVersionRemote } from 'lib/testing/domain/externals/version.mock';
-import { acceptsTag } from 'lib/core/1.domain/externals/compatibility';
+import { createAcceptsTag } from 'lib/core/1.domain/externals/compatibility';
 import { createVersionCheck } from 'lib/core/3.adapters/checks/version.check';
 import { type Election, elect } from './election';
 import type { PoolMember } from './membership';
@@ -43,7 +43,7 @@ const members = (builds: Build[]): PoolMember[] => {
 const electFrom = (builds: Build[]) =>
   elect({
     members: members(builds),
-    acceptsTag: acceptsTag(versionCheck.isCompatible, versionCheck.compare),
+    acceptsTag: createAcceptsTag(versionCheck.isCompatible, versionCheck.compare),
     compare: versionCheck.compare,
     latestFirst: false,
   });

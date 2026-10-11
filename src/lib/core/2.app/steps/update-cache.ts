@@ -7,7 +7,7 @@ import {
   type SharedVersionMeta,
   GLOBAL_SCOPE,
 } from 'lib/core/1.domain';
-import { acceptsTag } from 'lib/core/1.domain/externals/compatibility';
+import { createAcceptsTag } from 'lib/core/1.domain/externals/compatibility';
 import {
   addRemoteToVersion,
   committedEntries,
@@ -39,7 +39,7 @@ export function createUpdateCache(
   const storeRemoteEntry = createStoreRemoteEntry(config, ports, 8);
   const removeCachedRemoteEntries = createRemoveCachedRemoteEntries(ports);
   // Read per call so a port swapped after wiring is honoured.
-  const accepts = acceptsTag(
+  const accepts = createAcceptsTag(
     (tag, range) => ports.versionCheck.isCompatible(tag, range),
     (a, b) => ports.versionCheck.compare(a, b)
   );

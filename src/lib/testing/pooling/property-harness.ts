@@ -7,7 +7,7 @@ import {
   type shareScope,
 } from 'lib/core/1.domain';
 import { NFError } from 'lib/core/native-federation.error';
-import { acceptsTag } from 'lib/core/1.domain/externals/compatibility';
+import { createAcceptsTag } from 'lib/core/1.domain/externals/compatibility';
 import { owningPackage } from 'lib/core/1.domain/externals/specifier';
 import { buildPools } from 'lib/core/1.domain/pooling/membership';
 import { createVersionCheck } from 'lib/core/3.adapters/checks/version.check';
@@ -280,7 +280,7 @@ export const unmapped = (runs: Record<string, string | null>): string[] =>
 
 export const lenient = (spec: PortfolioSpec): PortfolioSpec => ({ ...spec, strict: false });
 
-export const accepts = acceptsTag(versionCheck.isCompatible, versionCheck.compare);
+export const accepts = createAcceptsTag(versionCheck.isCompatible, versionCheck.compare);
 
 // One copy of a pool member, as the quality properties read it.
 type PoolCopy = {
@@ -339,7 +339,7 @@ export function electedTags(importMap: ImportMap, copies: PoolCopy[]): Map<strin
  * - `agrees`: every tag it ships is the elected one, compared through the package where the map lacks the
  *   specifier (the dynamic gate's shortcut to the global map).
  */
-export function judgeRemote(
+export function oracleVerdict(
   remote: string,
   copies: PoolCopy[],
   elected: Map<string, string>,

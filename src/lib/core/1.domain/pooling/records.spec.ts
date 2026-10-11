@@ -1,0 +1,124 @@
+import type { SharedExternal, SharedVersion, shareScope } from 'lib/core/1.domain';
+import { mockVersionRemote } from 'lib/testing/domain/externals/version.mock';
+import { createAcceptsTag } from 'lib/core/1.domain/externals/compatibility';
+import { createVersionCheck } from 'lib/core/3.adapters/checks/version.check';
+import { elect } from './election';
+import type { PoolMember } from './membership';
+import { memberRecord, type PlacedPool, renamedRecords } from './records';
+
+/**
+ * The records the init step writes are computed here, before any write, and nothing here may change what it
+ * reads. Which rows they hold is the step's spec (`pool-shared-externals.spec.ts`).
+ */
+const { compare, isCompatible } = createVersionCheck();
+
+// A pool already elected once: copies carry the verdicts of last time, which a new record must not keep and
+// the read must not strip from the stored one.
+const pool = (): PoolMember[] =>
+  ['@x/core', '@x/common'].map(name => ({
+    name,
+    external: {
+      dirty: true,
+      poolName: 'x',
+      poolWinner: 'team/a',
+      versions: [
+        {
+          tag: '17.0.0',
+          host: true,
+          action: 'share',
+          remotes: [
+            mockVersionRemote('team/h', name, { requiredVersion: '^17.0.0' }),
+            mockVersionRemote('team/a', name, { requiredVersion: '^17.0.0' }),
+          ],
+        },
+        {
+          tag: '16.0.0',
+          host: false,
+          action: 'scope',
+          remotes: [
+            mockVersionRemote('team/b', name, {
+              requiredVersion: '~16.0.0',
+              poolCause: 'incompatible',
+            }),
+            mockVersionRemote('team/c', name, { requiredVersion: '~16.0.0', servedBy: 'team/b' }),
+          ],
+        },
+      ] satisfies SharedVersion[],
+    },
+  }));
+
+describe('memberRecord', () => {
+  it('memberRecord reads an elected pool without changing it', () => {
+    const members = pool();
+    const before = structuredClone(members);
+    const election = elect({
+      members,
+      acceptsTag: createAcceptsTag(isCompatible, compare),
+      compare,
+      latestFirst: false,
+    });
+    const placed: PlacedPool = { ...election, poolName: 'x' };
+
+    const records = members.map(m => memberRecord(m, placed, compare));
+
+    expect(members).toStrictEqual(before);
+    // b and c run one build at 16.0.0: a subpool, so the record is new and not a copy of the stored one.
+    expect(records[0]!.versions.map(v => `${v.tag}:${v.action}`)).toEqual([
+      '17.0.0:share',
+      '16.0.0:skip',
+    ]);
+  });
+});
+
+describe('renamedRecords', () => {
+  const pooled = (poolName?: string): SharedExternal => ({
+    dirty: false,
+    ...(poolName === undefined ? {} : { poolName }),
+    poolWinner: 'team/a',
+    versions: [
+      {
+        tag: '17.0.0',
+        host: false,
+        action: 'skip',
+        remotes: [mockVersionRemote('team/b', '@framework/core', { servedBy: 'team/c' })],
+      },
+    ],
+  });
+  const pool = (scope: shareScope, ...names: string[]) =>
+    names.map(name => ({ name, external: scope[name]! }));
+
+  // A dynamic load writes the pools it judged; one it merged renames committed members it never rewrote.
+  it('names a member that stored no pool yet, and skips one already named right', () => {
+    const scope: shareScope = { core: pooled('framework'), common: pooled() };
+
+    expect(renamedRecords(scope, new Map([['framework', pool(scope, 'core', 'common')]]))).toEqual([
+      ['common', { ...pooled(), poolName: 'framework' }],
+    ]);
+  });
+
+  it('renames a member stored under another name, and nothing in no pool', () => {
+    const scope: shareScope = { '@framework/core': pooled('old'), stale: pooled('gone') };
+
+    expect(renamedRecords(scope, new Map([['angular', pool(scope, '@framework/core')]]))).toEqual([
+      ['@framework/core', { ...pooled('old'), poolName: 'angular' }],
+    ]);
+  });
+
+  it('reads the stored name from the scope, not from the member it was handed', () => {
+    // The dynamic path passes the committed records merged with what it just wrote.
+    const before = pooled('old');
+    const scope: shareScope = { a: pooled('p') };
+
+    expect(renamedRecords(scope, new Map([['p', [{ name: 'a', external: before }]]]))).toEqual([]);
+  });
+
+  it('keeps poolWinner and servedBy on a rename: the pool was not re-elected', () => {
+    const record = pooled('framework');
+    const scope: shareScope = { '@framework/core': record };
+
+    expect(renamedRecords(scope, new Map([['angular', pool(scope, '@framework/core')]]))).toEqual([
+      ['@framework/core', { ...pooled('framework'), poolName: 'angular' }],
+    ]);
+    expect(record).toEqual(pooled('framework'));
+  });
+});

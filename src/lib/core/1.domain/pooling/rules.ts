@@ -10,7 +10,7 @@ import type { Build, Copy } from './builds';
 export function agrees(copies: readonly Copy[], tags: SpecifierTags): boolean {
   for (const copy of copies)
     for (const s of copy.specifiers) {
-      const tag = tags.tagOf(s);
+      const tag = tags.pinnedTag(s);
       if (tag !== undefined && tag !== copy.tag) return false;
     }
   return true;
@@ -40,7 +40,7 @@ export function unwitnessedGap(
   const specifiers = copies.flatMap(c => c.specifiers);
   let gap = 0;
   for (const build of builds) {
-    const miss = specifiers.findIndex(s => build.tags.tagOf(s) !== tags.get(s));
+    const miss = specifiers.findIndex(s => build.tags.pinnedTag(s) !== tags.get(s));
     if (miss === -1) return undefined;
     gap = Math.max(gap, miss);
   }

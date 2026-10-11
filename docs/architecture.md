@@ -633,9 +633,9 @@ Enforced by ESLint (`no-restricted-imports` in `eslint.config.js`):
 | What each remote's build ships for a pool                                              | `1.domain/pooling/builds.ts`                                                                  |
 | The rules both paths judge by: serves, agrees, shipped together                        | `1.domain/pooling/rules.ts`                                                                   |
 | The election: round 1, subpools, extension, each remote's placement                    | `1.domain/pooling/election.ts` (`elect`)                                                      |
-| The records an election writes, one row per `(tag, action)`                            | `1.domain/pooling/placement.ts` (`memberRecord`)                                              |
-| Stored pool results: detect, strip, follow a rename                                    | `1.domain/pooling/pool-state.ts`                                                              |
-| The dynamic gate: the committed view, the verdict, the moved record                    | `1.domain/pooling/gate.ts`                                                                    |
+| The records pooling writes: election rows, a moved copy, a rename, stripped results    | `1.domain/pooling/records.ts` (`memberRecord`)                                                |
+| Stored pool results: detect them in a record or a scope                                | `1.domain/pooling/pool-state.ts`                                                              |
+| The dynamic gate: the committed view, the verdict, the files it takes from the map     | `1.domain/pooling/gate.ts`                                                                    |
 | The stored fields (`poolName`, `poolWinner`; `pool`, `servedBy`, `poolCause`)          | `1.domain/externals/external.contract.ts`, `1.domain/externals/version.contract.ts`           |
 | The init step: plan, elect, log, write; throws under `strictExternalCompatibility`     | `2.app/steps/pooling/pool-shared-externals.ts`, port `for-pooling-shared-externals.port.ts`   |
 | The dynamic step: judge the loaded remote, rewrite its actions, write its moved copies | `2.app/steps/pooling/pool-dynamic-externals.ts`, port `for-pooling-dynamic-externals.port.ts` |

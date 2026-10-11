@@ -6,7 +6,7 @@ export type AcceptsTag = (offered: string, ownTag: string, requiredVersion: stri
 
 // A copy runs the build it ships whatever its range says, so a range that excludes its own version (one
 // drifted from the lockfile) never rejects that version. Semver-equal, not string-equal: `v1.0.0` is `1.0.0`.
-export function acceptsTag(
+export function createAcceptsTag(
   isCompatible: (tag: string, requiredVersion: string) => boolean,
   compare: (a: string, b: string) => number
 ): AcceptsTag {

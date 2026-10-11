@@ -2,17 +2,14 @@ import type { DeepReadonly } from 'lib/utils/deep-readonly';
 import {
   type ExternalName,
   GLOBAL_SCOPE,
-  type PoolCause,
   type RemoteName,
-  type SharedExternal,
   type SharedInfoActions,
   type SharedVersion,
   type SharedVersionMeta,
   type VersionName,
 } from 'lib/core/1.domain';
-import { addRemoteToVersion, forEachVersionEntry } from 'lib/core/1.domain/externals/basis';
+import { forEachVersionEntry } from 'lib/core/1.domain/externals/basis';
 import type { AcceptsTag } from 'lib/core/1.domain/externals/compatibility';
-import { byTag, rowAt } from 'lib/core/1.domain/externals/rows';
 import { type Specifier, SpecifierTags } from 'lib/core/1.domain/externals/specifier';
 import * as _path from 'lib/utils/path';
 import { type Build, buildOf, type Copy } from './builds';
@@ -33,7 +30,7 @@ export type GateMiss =
   | { cause: 'incompatible'; specifier: Specifier; tag: VersionName }
   | { cause: 'uncovered'; specifier: Specifier }
   | { cause: 'uncovered'; unshipped: true }
-  | { cause: 'uncovered'; build: RemoteName; specifier: Specifier; tag: VersionName };
+  | { cause: 'uncovered'; owner: RemoteName; specifier: Specifier; tag: VersionName };
 
 // `toSkip`: the copy moves out of a share row (opened or joined) or a resolver scope into a skip row.
 type MapCover = {
@@ -48,8 +45,6 @@ type MapPolicy = {
   selfFill: boolean;
   scopeUrlOf: (remote: RemoteName) => string | undefined;
 };
-
-export type CopyMove = { cause: PoolCause } | { fromMap: true };
 
 // A `scope` copy counts as served by its build: its files are already in the map under its own scope.
 // `without` is left out: `update-cache` has already stored a loaded remote's copies, but the committed map holds
@@ -86,7 +81,7 @@ export function committedView(
         for (const specifier in meta.entries)
           runs.set(
             specifier,
-            (meta.servedBy ? builds.get(meta.servedBy)?.tags.tagOf(specifier) : undefined) ??
+            (meta.servedBy ? builds.get(meta.servedBy)?.tags.pinnedTag(specifier) : undefined) ??
               version.tag
           );
       }
@@ -152,39 +147,6 @@ export function coverFromMap(
   return { covers };
 }
 
-// A fresh record, only the loaded remote's copy moved.
-export function movedRecord(
-  external: SharedExternal,
-  remote: RemoteName,
-  move: CopyMove,
-  compare: (a: VersionName, b: VersionName) => number
-): SharedExternal {
-  if ('fromMap' in move) return recordFromMap(external, remote);
-
-  const moved: { tag: string; meta: SharedVersionMeta }[] = [];
-  const versions = external.versions
-    .map(v => {
-      const copy = v.remotes.find(r => r.name === remote);
-      if (!copy) return v;
-      const { servedBy: _servedBy, ...rest } = copy;
-      const meta = { ...rest, cached: true, poolCause: move.cause };
-      if (v.action === 'scope')
-        return { ...v, remotes: v.remotes.map(r => (r === copy ? meta : r)) };
-      moved.push({ tag: v.tag, meta });
-      return { ...v, remotes: v.remotes.filter(r => r !== copy) };
-    })
-    // A version only the loaded remote held — a `share` it introduced — leaves with it.
-    .filter(v => v.remotes.length > 0);
-
-  for (const { tag, meta } of moved) {
-    const scoped = rowAt(versions, tag, 'scope');
-    if (!scoped) versions.push({ tag, action: 'scope', host: false, remotes: [meta] });
-    else versions[versions.indexOf(scoped)] = { ...scoped, remotes: [...scoped.remotes, meta] };
-  }
-
-  return { ...external, versions: versions.sort(byTag(compare)) };
-}
-
 function mapFiles(
   copy: SharedVersionMeta,
   view: CommittedView,
@@ -235,35 +197,13 @@ function offMapBinding(copies: readonly Copy[], view: CommittedView, globalTags:
   for (const build of servers)
     for (const [specifier, tag] of view.runsOffMap.get(build) ?? []) {
       const reached =
-        globalTags.tagOf(specifier) ?? own.tagOf(specifier) ?? firstRun.tagOf(specifier);
+        globalTags.pinnedTag(specifier) ??
+        own.pinnedTag(specifier) ??
+        firstRun.pinnedTag(specifier);
       if (reached === undefined) firstRun.set(specifier, tag);
-      else if (reached !== tag) return { build, specifier, tag };
+      else if (reached !== tag) return { owner: build, specifier, tag };
     }
   return undefined;
-}
-
-// A copy that now runs the map's files moves into a skip row at its tag: it publishes nothing. A tag keeps one
-// row per action, so it joins a skip row already there.
-function recordFromMap(external: SharedExternal, remote: RemoteName): SharedExternal {
-  // The copy sits alone in the share row it opened, among other islands in a scope row, or in a share row it
-  // joined at the same tag, whose other copies stay.
-  const opened = external.versions.find(
-    v => v.action !== 'skip' && v.remotes.some(r => r.name === remote)
-  )!;
-  const meta = { ...opened.remotes.find(r => r.name === remote)!, cached: false };
-  const joined = rowAt(external.versions, opened.tag, 'skip');
-  const into = joined
-    ? { ...joined, remotes: [...joined.remotes] }
-    : { ...opened, action: 'skip' as const, remotes: [] };
-  addRemoteToVersion(into, meta);
-
-  const versions = external.versions.flatMap(v => {
-    if (v === joined) return [into];
-    if (v !== opened) return [v];
-    const left = { ...v, remotes: v.remotes.filter(r => r.name !== remote) };
-    return [...(left.remotes.length > 0 ? [left] : []), ...(joined ? [] : [into])];
-  });
-  return { ...external, versions };
 }
 
 // The order `generate-import-map` fills `imports` in: every `share` version, then every `skip` copy; the

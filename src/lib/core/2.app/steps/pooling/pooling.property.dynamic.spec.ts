@@ -15,7 +15,7 @@ import {
   copiesOf,
   electedTags,
   initOrRefuse,
-  judgeRemote,
+  oracleVerdict,
   lenient,
   openPortfolio,
   outcome,
@@ -261,7 +261,7 @@ describe('pooling properties: dynamic loads (generated portfolios)', { timeout: 
           if (!copies.some(c => c.remote === added.name)) continue;
           const elected = electedTags(committed, copies);
           const builds = [...new Set(copies.map(c => c.remote))].filter(r => r !== added.name);
-          const { rejects, missing, witnessed, agrees } = judgeRemote(
+          const { rejects, missing, witnessed, agrees } = oracleVerdict(
             added.name,
             copies,
             elected,

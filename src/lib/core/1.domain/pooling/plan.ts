@@ -1,6 +1,7 @@
 import type { ExternalName, SharedExternal, shareScope } from '../externals/external.contract';
 import { buildPools, type PoolMember, type PoolName } from './membership';
-import { hasPoolResults, scopeHasPoolState, withoutPoolResults } from './pool-state';
+import { hasPoolResults, scopeHasPoolState } from './pool-state';
+import { withoutPoolResults } from './records';
 import type { DeepReadonly } from 'lib/utils/deep-readonly';
 
 export type ElectionPlan = {

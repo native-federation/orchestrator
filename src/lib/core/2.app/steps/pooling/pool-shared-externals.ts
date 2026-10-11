@@ -4,12 +4,12 @@ import { NFError } from 'lib/core/native-federation.error';
 import type { DrivingContract } from '../../driving-ports/driving.contract';
 import type { LoggingConfig } from '../../config/log.contract';
 import type { ModeConfig } from '../../config/mode.contract';
-import { acceptsTag } from 'lib/core/1.domain/externals/compatibility';
+import { createAcceptsTag } from 'lib/core/1.domain/externals/compatibility';
 import { type Copy, copiesByRemote } from 'lib/core/1.domain/pooling/builds';
-import { elect, type PoolMiss } from 'lib/core/1.domain/pooling/election';
+import { elect, type PoolMiss, previousWinner } from 'lib/core/1.domain/pooling/election';
 import type { PoolMember, PoolName } from 'lib/core/1.domain/pooling/membership';
 import { type ElectionPlan, planElection } from 'lib/core/1.domain/pooling/plan';
-import { memberRecord, type PlacedPool, previousWinner } from 'lib/core/1.domain/pooling/placement';
+import { memberRecord, type PlacedPool } from 'lib/core/1.domain/pooling/records';
 
 export function createPoolSharedExternals(
   config: LoggingConfig & ModeConfig,
@@ -70,14 +70,17 @@ export function createPoolSharedExternals(
   ): [ExternalName, SharedExternal][] {
     const election = elect({
       members,
-      acceptsTag: acceptsTag(ports.versionCheck.isCompatible, compare),
+      acceptsTag: createAcceptsTag(ports.versionCheck.isCompatible, compare),
       compare,
       previousWinner: previousWinner(members),
       latestFirst: config.profile.latestSharedExternal,
     });
-    const placed: PlacedPool = { ...election, poolName, compare };
+    const placed: PlacedPool = { ...election, poolName };
     report(poolName, members, placed, scope);
-    return members.map(m => [m.name, { ...memberRecord(m, placed), poolWinner: placed.winner }]);
+    return members.map(m => [
+      m.name,
+      { ...memberRecord(m, placed, compare), poolWinner: placed.winner },
+    ]);
   }
 
   function report(

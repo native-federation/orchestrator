@@ -3,7 +3,7 @@ import { GLOBAL_SCOPE, type SharedExternal, type SharedVersion } from 'lib/core/
 import { countUncoveredEntrypoints, versionEntries } from 'lib/core/1.domain/externals/basis';
 import {
   type AcceptsTag,
-  acceptsTag as createAcceptsTag,
+  createAcceptsTag,
   versionAcceptance,
 } from 'lib/core/1.domain/externals/compatibility';
 import { NFError } from 'lib/core/native-federation.error';
