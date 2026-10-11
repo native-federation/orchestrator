@@ -97,11 +97,12 @@ export function createDetermineSharedExternals(
     external: SharedExternal,
     acceptsTag: AcceptsTag
   ) {
+    const acceptance = versionAcceptance(external, acceptsTag);
+
     if (external.versions.length === 1) {
-      return applyWinner(externalName, external, external.versions[0]!, acceptsTag);
+      return applyWinner(externalName, external, external.versions[0]!, acceptsTag, acceptance);
     }
 
-    const acceptance = versionAcceptance(external, acceptsTag);
     const { accepts } = acceptance;
 
     let sharedVersion = external.versions.find(v => v.host);

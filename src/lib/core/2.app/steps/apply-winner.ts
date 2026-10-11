@@ -20,11 +20,11 @@ export function createApplyWinner(config: LoggingConfig & ModeConfig) {
     external: SharedExternal,
     winner: SharedVersion,
     acceptsTag: AcceptsTag,
-    acceptance?: VersionAcceptance
+    acceptance: VersionAcceptance
   ): SharedExternal {
     // Every copy accepts its own tag, so a lone version, like the winner, is never redirected or split.
     if (external.versions.length > 1) {
-      const { accepts, objector } = acceptance!;
+      const { accepts, objector } = acceptance;
 
       const rebuilt: SharedVersion[] = [];
 
