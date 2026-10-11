@@ -26,13 +26,16 @@ type CommittedView = {
   builds: Map<RemoteName, Build>;
   // What the committed `imports` serves, per specifier.
   global: Map<Specifier, { tag: VersionName; remote: RemoteName; file: string }>;
+  // Per build, the specifiers it runs from its own or a subpool's files, at the tag it runs.
+  runsOffMap: Map<RemoteName, Map<Specifier, VersionName>>;
 };
 
 // Why the loaded remote cannot resolve through the committed map; the step words it.
 export type GateMiss =
   | { cause: 'incompatible'; specifier: Specifier; tag: VersionName }
   | { cause: 'uncovered'; specifier: Specifier }
-  | { cause: 'uncovered'; unshipped: true };
+  | { cause: 'uncovered'; unshipped: true }
+  | { cause: 'uncovered'; build: RemoteName; specifier: Specifier; tag: VersionName };
 
 // A member whose action the map now serves: `toSkip` moves its copy out of a share row (opened or joined) or a
 // resolver scope into a skip row.
@@ -73,7 +76,23 @@ export function committedView(
   for (const [owner, copies] of shipped)
     if (owner !== without) builds.set(owner, buildOf(owner, copies));
 
-  return { builds, global };
+  const runsOffMap: CommittedView['runsOffMap'] = new Map();
+  for (const member of members)
+    for (const version of member.external.versions)
+      for (const meta of version.remotes) {
+        if (version.action !== 'scope' && !meta.servedBy) continue;
+        let runs = runsOffMap.get(meta.name);
+        if (!runs) runsOffMap.set(meta.name, (runs = new Map()));
+        // A subpool member's copy keeps its own tag in the record but runs its build's files.
+        for (const specifier in meta.entries)
+          runs.set(
+            specifier,
+            (meta.servedBy ? builds.get(meta.servedBy)?.tags.tagOf(specifier) : undefined) ??
+              version.tag
+          );
+      }
+
+  return { builds, global, runsOffMap };
 }
 
 // The init rules against a map that can no longer change (§"Scope and dynamic init", step 1). A resolver
@@ -86,6 +105,8 @@ export function judgeRemote(
   const { rejected, missing } = scan(copies, view, accepts);
   if (rejected) return { cause: 'incompatible', ...rejected };
   const globalTags = new SpecifierTags([...view.global].map(([s, { tag }]) => [s, tag] as const));
+  const binding = offMapBinding(copies, view, globalTags);
+  if (binding) return { cause: 'uncovered', ...binding };
   // The map's tags must be a combination one build shipped: agreeing is its own witness, otherwise one
   // committed build must be.
   if (agrees(copies, globalTags)) return 'global';
@@ -202,6 +223,29 @@ function scan(copies: readonly Copy[], view: CommittedView, accepts: AcceptsTag)
         rejected ??= { specifier: s, tag: global.tag };
     }
   return { rejected, missing };
+}
+
+// A committed file binds its pool-mates where its build runs them, so a build serving the remote that runs one
+// off the map at another tag than the remote reaches elsewhere would split it. That tag is the map's, else the
+// remote's own, else the first serving build's.
+function offMapBinding(copies: readonly Copy[], view: CommittedView, globalTags: SpecifierTags) {
+  const own = new SpecifierTags(copies.flatMap(c => c.specifiers.map(s => [s, c.tag] as const)));
+  const servers = new Set<RemoteName>();
+  for (const copy of copies)
+    for (const specifier of copy.specifiers) {
+      const build = view.global.get(specifier)?.remote;
+      if (build !== undefined) servers.add(build);
+    }
+
+  const firstRun = new SpecifierTags();
+  for (const build of servers)
+    for (const [specifier, tag] of view.runsOffMap.get(build) ?? []) {
+      const reached =
+        globalTags.tagOf(specifier) ?? own.tagOf(specifier) ?? firstRun.tagOf(specifier);
+      if (reached === undefined) firstRun.set(specifier, tag);
+      else if (reached !== tag) return { build, specifier, tag };
+    }
+  return undefined;
 }
 
 // A copy that now runs the map's files moves into a skip row at its tag: it publishes nothing. A tag keeps one

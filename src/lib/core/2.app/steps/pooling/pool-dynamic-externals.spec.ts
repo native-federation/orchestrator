@@ -347,6 +347,248 @@ describe('createPoolDynamicExternals', () => {
     expect(result.actions['@framework/cdk']).toEqual({ action: 'scope' });
   });
 
+  it('scopes the family when a build serving it runs an entrypoint of a mapped package at another tag', async () => {
+    // mfe ships router only, and team/b's router file binds core/testing where team/b runs it: from its own
+    // scope, at 17.0.1. The map lists no core/testing; its package core is at 17.0.0, and one package is one
+    // version, so mfe would reach core's family at two tags.
+    givenCommitted({
+      '@framework/core': committed('@framework/core', { tag: '17.0.0', remotes: ['team/a'] }),
+      '@framework/router': committed('@framework/router', {
+        tag: '17.0.0',
+        remotes: ['team/b', 'mfe'],
+      }),
+      '@framework/core/testing': committed('@framework/core/testing', {
+        tag: '17.0.1',
+        remotes: ['team/b'],
+        action: 'scope',
+      }),
+    });
+    const entry = entryWith(shared('@framework/router'));
+
+    const result = await poolDynamicExternals({
+      entry,
+      actions: { '@framework/router': { action: 'skip' } },
+    });
+
+    expect(result.actions['@framework/router']).toEqual({ action: 'scope' });
+    expect(verdictsWritten()).toEqual(['mfe@@framework/router: uncovered']);
+  });
+
+  it('scopes the family when a build serving it runs a pool-mate from a subpool at another tag', async () => {
+    // team/b publishes router, yet runs core from team/c's subpool at 17.0.1, so its router file binds that
+    // core, while the map serves team/a's 17.0.0. Init never pairs the two (only global remotes publish), but
+    // a load that merges two pools can.
+    const core = committed(
+      '@framework/core',
+      { tag: '17.0.1', remotes: ['team/c'], action: 'scope' },
+      { tag: '17.0.1', remotes: ['team/b'], action: 'skip' },
+      { tag: '17.0.0', remotes: ['team/a', 'mfe'], action: 'share' }
+    );
+    core.versions[1]!.remotes[0]!.servedBy = 'team/c';
+    givenCommitted({
+      '@framework/core': core,
+      '@framework/router': committed('@framework/router', {
+        tag: '17.0.0',
+        remotes: ['team/b', 'mfe'],
+      }),
+    });
+    const entry = entryWith(shared('@framework/core'), shared('@framework/router'));
+    const actions: SharedInfoActions = {
+      '@framework/core': { action: 'skip' },
+      '@framework/router': { action: 'skip' },
+    };
+
+    const result = await poolDynamicExternals({ entry, actions });
+
+    expect(result.actions['@framework/core']).toEqual({ action: 'scope' });
+    expect(result.actions['@framework/router']).toEqual({ action: 'scope' });
+  });
+
+  it("scopes the family when a build serving it runs its subpool build's tag, though its own copy is the map's", async () => {
+    // team/b's core copy sits at the map's 17.0.0, but it is served by team/c's subpool and runs team/c's
+    // 17.0.1 files, so team/b's router binds core at 17.0.1.
+    const core = committed(
+      '@framework/core',
+      { tag: '17.0.1', remotes: ['team/c'], action: 'scope' },
+      { tag: '17.0.0', remotes: ['team/a', 'mfe'], action: 'share' },
+      { tag: '17.0.0', remotes: ['team/b'], action: 'skip' }
+    );
+    core.versions[2]!.remotes[0]!.servedBy = 'team/c';
+    givenCommitted({
+      '@framework/core': core,
+      '@framework/router': committed('@framework/router', {
+        tag: '17.0.0',
+        remotes: ['team/b', 'mfe'],
+      }),
+    });
+    const entry = entryWith(shared('@framework/core'), shared('@framework/router'));
+    const actions: SharedInfoActions = {
+      '@framework/core': { action: 'skip' },
+      '@framework/router': { action: 'skip' },
+    };
+
+    const result = await poolDynamicExternals({ entry, actions });
+
+    expect(result.actions['@framework/core']).toEqual({ action: 'scope' });
+    expect(result.actions['@framework/router']).toEqual({ action: 'scope' });
+  });
+
+  it('scopes the family when a build serving it runs its own tag of a pool-mate the map serves at another', async () => {
+    // mfe ships core 17.0.1, its range accepts the map's 17.0.0, and team/a witnesses the map's pair. But
+    // team/b serves router and runs core at 17.0.1 from its scope: mfe reaches core at the map's 17.0.0
+    // through team/a's file and at 17.0.1 through team/b's. Where the map has a tag, the load's own is no
+    // reference.
+    givenCommitted({
+      '@framework/core': committed(
+        '@framework/core',
+        { tag: '17.0.1', remotes: ['team/b'], action: 'scope' },
+        { tag: '17.0.1', remotes: ['mfe'], action: 'skip' },
+        { tag: '17.0.0', remotes: ['team/a'], action: 'share' }
+      ),
+      '@framework/router': committed('@framework/router', {
+        tag: '17.0.0',
+        remotes: ['team/b', 'team/a', 'mfe'],
+      }),
+    });
+    const entry = entryWith(shared('@framework/core'), shared('@framework/router'));
+    const actions: SharedInfoActions = {
+      '@framework/core': { action: 'skip' },
+      '@framework/router': { action: 'skip' },
+    };
+
+    const result = await poolDynamicExternals({ entry, actions });
+
+    expect(result.actions['@framework/core']).toEqual({ action: 'scope' });
+    expect(result.actions['@framework/router']).toEqual({ action: 'scope' });
+  });
+
+  describe('a pool-mate the map does not serve, run off the map by a build serving the load', () => {
+    // team/b serves router and runs its own cdk; the map serves no cdk.
+    const cdkOf = (
+      ...versions: { tag: string; remotes: string[]; action: SharedVersion['action'] }[]
+    ) => committed('@framework/cdk', ...versions);
+    const routerFrom = (remote: string) =>
+      committed('@framework/router', { tag: '17.0.0', remotes: [remote, 'mfe'] });
+    const actionsOf = (...names: string[]): SharedInfoActions =>
+      Object.fromEntries(names.map(n => [n, { action: 'skip' as const }]));
+
+    it('scopes the family when the load ships it at another tag', async () => {
+      // mfe agrees with the map and publishes its own cdk 17.0.0, yet team/b's router binds cdk 17.0.1.
+      givenCommitted({
+        '@framework/router': routerFrom('team/b'),
+        '@framework/cdk': cdkOf(
+          { tag: '17.0.1', remotes: ['team/b'], action: 'scope' },
+          { tag: '17.0.0', remotes: ['mfe'], action: 'share' }
+        ),
+      });
+      const entry = entryWith(shared('@framework/router'), shared('@framework/cdk'));
+      const actions = {
+        ...actionsOf('@framework/router'),
+        '@framework/cdk': { action: 'share' as const },
+      };
+
+      const result = await poolDynamicExternals({ entry, actions });
+
+      expect(result.actions['@framework/router']).toEqual({ action: 'scope' });
+      expect(result.actions['@framework/cdk']).toEqual({ action: 'scope' });
+    });
+
+    it('scopes the family when two builds serving it run it at two tags', async () => {
+      // team/b's router binds cdk 17.0.1 and team/c's forms binds cdk 17.0.2; mfe ships no cdk.
+      givenCommitted({
+        '@framework/router': routerFrom('team/b'),
+        '@framework/forms': committed('@framework/forms', {
+          tag: '17.0.0',
+          remotes: ['team/c', 'mfe'],
+        }),
+        '@framework/cdk': cdkOf(
+          { tag: '17.0.2', remotes: ['team/c'], action: 'scope' },
+          { tag: '17.0.1', remotes: ['team/b'], action: 'scope' }
+        ),
+      });
+      const entry = entryWith(shared('@framework/router'), shared('@framework/forms'));
+
+      const result = await poolDynamicExternals({
+        entry,
+        actions: actionsOf('@framework/router', '@framework/forms'),
+      });
+
+      expect(result.actions['@framework/router']).toEqual({ action: 'scope' });
+      expect(result.actions['@framework/forms']).toEqual({ action: 'scope' });
+    });
+
+    it('scopes the family when two builds serving it run two entrypoints of it at two tags', async () => {
+      // team/b runs cdk/a at 17.0.1 and team/c runs cdk/b at 17.0.2: two specifiers, one package, so two
+      // versions of cdk.
+      givenCommitted({
+        '@framework/router': routerFrom('team/b'),
+        '@framework/forms': committed('@framework/forms', {
+          tag: '17.0.0',
+          remotes: ['team/c', 'mfe'],
+        }),
+        '@framework/cdk/a': committed('@framework/cdk/a', {
+          tag: '17.0.1',
+          remotes: ['team/b'],
+          action: 'scope',
+        }),
+        '@framework/cdk/b': committed('@framework/cdk/b', {
+          tag: '17.0.2',
+          remotes: ['team/c'],
+          action: 'scope',
+        }),
+      });
+      const entry = entryWith(shared('@framework/router'), shared('@framework/forms'));
+
+      const result = await poolDynamicExternals({
+        entry,
+        actions: actionsOf('@framework/router', '@framework/forms'),
+      });
+
+      expect(result.actions['@framework/router']).toEqual({ action: 'scope' });
+      expect(result.actions['@framework/forms']).toEqual({ action: 'scope' });
+    });
+
+    it('takes the map when one build runs it and the load ships none', async () => {
+      // mfe reaches cdk only through team/b's router, so only at 17.0.1.
+      givenCommitted({
+        '@framework/router': routerFrom('team/b'),
+        '@framework/cdk': cdkOf({ tag: '17.0.1', remotes: ['team/b'], action: 'scope' }),
+      });
+      const entry = entryWith(shared('@framework/router'));
+
+      const result = await poolDynamicExternals({ entry, actions: actionsOf('@framework/router') });
+
+      expect(result.actions['@framework/router']!.action).toBe('skip');
+      expect(verdictsWritten()).toEqual([]);
+    });
+  });
+
+  it('takes the map when the build serving it runs a pool-mate from its own scope at the tag the map serves', async () => {
+    // team/b runs core from its own scope row, but at the map's 17.0.0: its router binds the same core.
+    givenCommitted({
+      '@framework/core': committed(
+        '@framework/core',
+        { tag: '17.0.0', remotes: ['team/a', 'mfe'], action: 'share' },
+        { tag: '17.0.0', remotes: ['team/b'], action: 'scope' }
+      ),
+      '@framework/router': committed('@framework/router', {
+        tag: '17.0.0',
+        remotes: ['team/b', 'mfe'],
+      }),
+    });
+    const entry = entryWith(shared('@framework/core'), shared('@framework/router'));
+    const actions: SharedInfoActions = {
+      '@framework/core': { action: 'skip' },
+      '@framework/router': { action: 'skip' },
+    };
+
+    const result = await poolDynamicExternals({ entry, actions });
+
+    expect(result.actions['@framework/core']!.action).toBe('skip');
+    expect(result.actions['@framework/router']!.action).toBe('skip');
+    expect(verdictsWritten()).toEqual([]);
+  });
+
   it("never touches another remote's copy, whatever it decides", async () => {
     const externals = {
       '@framework/forms': committed(

@@ -480,6 +480,66 @@ describe('island warnings (contract)', () => {
       ]);
     });
 
+    it('off the map: a committed build serving the remote runs a pool-mate off the map', async () => {
+      // A committed state init never writes, as only global remotes publish there: mfe-b's router is on the
+      // map, but mfe-b runs its own forms 22.0.1 where the map serves mfe-a's 22.0.0. mfe-c agrees with the
+      // map on both tags it ships, yet mfe-b's router would bind it to the other forms.
+      p.seed(
+        '@framework/core',
+        [
+          p.version(
+            '22.0.0',
+            '@framework/core',
+            [{ remote: 'team/mfe-a', req: '^22.0.0' }],
+            'share'
+          ),
+        ],
+        false
+      );
+      p.seed(
+        '@framework/forms',
+        [
+          p.version(
+            '22.0.0',
+            '@framework/forms',
+            [{ remote: 'team/mfe-a', req: '^22.0.0' }],
+            'share'
+          ),
+          p.version(
+            '22.0.1',
+            '@framework/forms',
+            [{ remote: 'team/mfe-b', req: '~22.0.1' }],
+            'scope'
+          ),
+        ],
+        false
+      );
+      p.seed(
+        '@framework/router',
+        [
+          p.version(
+            '22.1.0',
+            '@framework/router',
+            [{ remote: 'team/mfe-b', req: '^22.0.0' }],
+            'share'
+          ),
+        ],
+        false
+      );
+
+      await p.runDynamic(
+        entry('team/mfe-c', [
+          ['@framework/core', '22.0.0', '^22.0.0'],
+          ['@framework/router', '22.1.0', '^22.0.0'],
+        ])
+      );
+
+      expect(p.islands()).toEqual({ 'team/mfe-c': 'uncovered' });
+      expect(warnings()).toEqual([
+        "[__GLOBAL__] 'team/mfe-c' serves its own family: committed build 'team/mfe-b' serves it but runs '@framework/forms@22.0.1' off the map. All 2 of its members are scoped for it.",
+      ]);
+    });
+
     it('unmapped: the build serving a named scope is not in the cache', async () => {
       p = portfolio(SCOPE, {
         hosts: ['team/host'],

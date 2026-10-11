@@ -169,6 +169,8 @@ function selfServeWarning(remote: RemoteName, miss: GateMiss, members: number): 
   const where = `All ${members} of its members are scoped for it.`;
   if (miss.cause === 'incompatible')
     return `'${remote}' is islanded: its range rejects '${miss.specifier}@${miss.tag}' of the committed map. ${where}`;
+  if ('build' in miss)
+    return `'${remote}' serves its own family: committed build '${miss.build}' serves it but runs '${miss.specifier}@${miss.tag}' off the map. ${where}`;
   if ('unshipped' in miss)
     return `'${remote}' serves its own family: no committed build shipped the map's combination for it. ${where}`;
   return `'${remote}' serves its own family: no committed build offers every entrypoint it imports at a version it accepts (gap '${miss.specifier}'). ${where}`;

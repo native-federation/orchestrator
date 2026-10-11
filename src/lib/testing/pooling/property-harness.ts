@@ -2,6 +2,7 @@ import fc from 'fast-check';
 import { GLOBAL_SCOPE, type ImportMap, type RemoteEntry, type shareScope } from 'lib/core/1.domain';
 import { NFError } from 'lib/core/native-federation.error';
 import { acceptsTag } from 'lib/core/1.domain/externals/compatibility';
+import { owningPackage } from 'lib/core/1.domain/externals/specifier';
 import { buildPools } from 'lib/core/1.domain/pooling/membership';
 import { createVersionCheck } from 'lib/core/3.adapters/checks/version.check';
 import * as _path from 'lib/utils/path';
@@ -276,6 +277,7 @@ type PoolCopy = {
   specifiers: string[];
   poolCause?: string;
   servedBy?: string;
+  action: string;
 };
 
 export function copiesOf(members: shareScope): PoolCopy[] {
@@ -290,6 +292,7 @@ export function copiesOf(members: shareScope): PoolCopy[] {
         specifiers: Object.keys(meta.entries),
         poolCause: meta.poolCause,
         servedBy: meta.servedBy,
+        action: version.action,
       }))
     )
   );
@@ -352,6 +355,60 @@ export function judgeRemote(
       );
     }),
   };
+}
+
+/**
+ * The dynamic gate's rule on the builds behind the map (docs/version-resolver.md §"Scope and dynamic init",
+ * step 1), restated independently of `gate.ts`. A committed file binds its pool-mates where its build runs
+ * them: a copy in a `scope` row runs its own files, a copy served by a subpool runs that build's. So this is
+ * whether the builds whose files `importMap` serves for `remote`'s specifiers run a pool specifier off the map
+ * at a tag other than the one `remote` reaches it at elsewhere: the map's (its package's where the map lacks
+ * it), else its own; with neither, whether two of those builds run it at two tags.
+ */
+export function servedOffMap(
+  remote: string,
+  copies: PoolCopy[],
+  importMap: ImportMap,
+  elected: Map<string, string>
+): boolean {
+  const builder = new Map<string, string>();
+  for (const copy of copies)
+    for (const file of Object.values(copy.entries))
+      builder.set(_path.join(scopeUrlOf(copy.remote), file), copy.remote);
+  const own = copies.filter(c => c.remote === remote);
+  const packageOf = (specifier: string) => owningPackage(specifier) ?? specifier;
+  const reachedTag = (specifier: string) =>
+    elected.get(specifier) ??
+    elected.get(packageOf(specifier)) ??
+    [...elected].find(([s]) => packageOf(s) === packageOf(specifier))?.[1] ??
+    own.find(c => c.specifiers.includes(specifier))?.tag ??
+    own.find(c => c.specifiers.some(s => packageOf(s) === packageOf(specifier)))?.tag;
+  const runTag = (copy: PoolCopy) =>
+    copy.servedBy === undefined
+      ? copy.tag
+      : (copies.find(c => c.remote === copy.servedBy && c.member === copy.member)?.tag ?? copy.tag);
+
+  const servers = new Set(
+    own.flatMap(c => c.specifiers).map(s => builder.get(importMap.imports[s] ?? ''))
+  );
+  const runs = new Map<string, Set<string>>();
+  for (const copy of copies) {
+    if (copy.remote === remote || !servers.has(copy.remote)) continue;
+    if (copy.action !== 'scope' && copy.servedBy === undefined) continue;
+    for (const specifier of copy.specifiers)
+      runs.set(specifier, (runs.get(specifier) ?? new Set()).add(runTag(copy)));
+  }
+  // With no tag to reach it at, a package is one version: its entrypoints' run tags must agree.
+  const unreached = new Map<string, Set<string>>();
+  for (const [specifier, tags] of runs) {
+    const reached = reachedTag(specifier);
+    if (reached !== undefined && [...tags].some(t => t !== reached)) return true;
+    if (reached === undefined) {
+      const pkg = packageOf(specifier);
+      unreached.set(pkg, new Set([...(unreached.get(pkg) ?? []), ...tags]));
+    }
+  }
+  return [...unreached.values()].some(tags => tags.size > 1);
 }
 
 // Range soundness: every pooled copy runs, per specifier it ships, a tag its own range accepts (its own tag

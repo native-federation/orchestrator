@@ -24,6 +24,7 @@ import {
   rangeViolations,
   run,
   scopeUrlsOf,
+  servedOffMap,
   torn,
   unmapped,
 } from 'lib/testing/pooling/property-harness';
@@ -215,8 +216,9 @@ describe('pooling properties: dynamic loads (generated portfolios)', { timeout: 
       ));
 
   // The gate's rules against a committed map (docs/version-resolver.md §"Scope and dynamic init"): a range
-  // rejecting a committed tag is `incompatible`; otherwise the remote resolves globally when it agrees with the
-  // map, or when the map serves all of it and a committed build shipped that combination.
+  // rejecting a committed tag is `incompatible`; otherwise the remote resolves globally when no build serving it
+  // runs a pool-mate off the map, and it agrees with the map, or the map serves all of it and a committed build
+  // shipped that combination.
   it('dynamic verdicts: a load is placed off the committed map only for a reason, and the right one', () =>
     run(
       103,
@@ -244,7 +246,8 @@ describe('pooling properties: dynamic loads (generated portfolios)', { timeout: 
           );
           const { causes, servedBy } = placementOf(added.name, copies);
           const at = { pool, causes, servedBy };
-          const global = !rejects && (agrees || (!missing && witnessed));
+          const offMap = servedOffMap(added.name, copies, committed, elected);
+          const global = !rejects && !offMap && (agrees || (!missing && witnessed));
           // Off the map, it serves its whole family itself: never a committed build.
           const cause = rejects ? 'incompatible' : 'uncovered';
           expect(at).toEqual({ ...at, causes: global ? [] : [cause], servedBy: [] });

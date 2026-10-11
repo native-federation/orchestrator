@@ -895,6 +895,7 @@ where its copies come from:
 | `warn` | `[<scope>]` | `'<remote>' is islanded: its range rejects '<specifier>@<tag>' of the committed map. All N of its members are scoped for it.` | Dynamic init only — a range rejects a tag the committed map serves (see [Scope and dynamic init](#scope-and-dynamic-init)). |
 | `warn` | `[<scope>]` | `'<remote>' serves its own family: no committed build offers every entrypoint it imports at a version it accepts (gap '<gap>'). All N of its members are scoped for it.` | Dynamic init only — the coverage finding read off the committed record. |
 | `warn` | `[<scope>]` | `'<remote>' serves its own family: no committed build shipped the map's combination for it. All N of its members are scoped for it.` | Dynamic init only — the witness finding: the committed map serves everything this remote imports at versions it accepts, but no committed build shipped those versions together. |
+| `warn` | `[<scope>]` | `'<remote>' serves its own family: committed build '<build>' serves it but runs '<specifier>@<tag>' off the map. All N of its members are scoped for it.` | Dynamic init only. A committed file binds its pool-mates where its build runs them: this build published before its pool formed (or runs a member from a scope row), so this remote would reach that member at two versions. Aligning that build's version recovers the dedup. |
 | `warn` | `[<scope>][pool:<name>]` | `'<build>' keeps subpool '<build>': the elected build would serve it, but K other remote(s) in it need its build.` | A subpool's build the global map would serve, kept for the members that need it. Nothing to fix on that remote; aligning the other members moves the whole subpool onto the global map. |
 | `warn` | `[<scope>][<remote>]` | `'<build>' is not in the cache, so its files cannot be mapped.` | Dynamic init in a named scope only: the committed map serves the loaded remote's family from `<build>`, whose scope URL is gone, so the remote serves itself (`uncovered`). |
 | `error` | `[<scope>][pool:<name>]` | `version-incompatible remotes cannot be pooled: {…}.` | Logged before the `strictExternalCompatibility` throw, naming every remote whose `strictVersion` range rejects the elected build. |
@@ -963,7 +964,9 @@ it. In order:
    publish — or the map serves every specifier it imports and some committed build shipped that exact
    combination. That second check matters because the global map can combine tags from several builds
    (same-tag loans and extended global tags), so a remote that does not agree must run a combination one
-   committed build shipped. A range rejecting a global tag moves it on with cause `incompatible`. A member the
+   committed build shipped. It also needs no committed build serving it to run a pool-mate off the map. A build
+   can publish before its pool forms, so the map can serve one remote's specifiers from builds that bind a
+   pool-mate differently. A range rejecting a global tag moves it on with cause `incompatible`. A member the
    resolver scoped is judged the same way: a strict range that rejects the map's tag islands the family as
    `incompatible`, while a copy `scopeUncoveredEntrypoints` scoped for an entrypoint the shared version lacks
    becomes a skip when the map serves every entrypoint it ships, as at init.

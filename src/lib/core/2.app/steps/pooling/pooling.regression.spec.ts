@@ -834,6 +834,23 @@ describe('pooling regressions', () => {
     });
   });
 
+  const labelled = (
+    packageName: string,
+    version: string,
+    requiredVersion: string,
+    pool: string,
+    specifiers = [packageName]
+  ): DenseSharedInfo =>
+    ({
+      packageName,
+      version,
+      requiredVersion,
+      singleton: true,
+      strictVersion: false,
+      pool,
+      entries: Object.fromEntries(specifiers.map(s => [s, `${s.slice(1).replace('/', '_')}.js`])),
+    }) as DenseSharedInfo;
+
   /**
    * A flat and a dense build of one entrypoint, on reload. mfe-a ships `@ui/kit` and `@ui/kit/sub` as two
    * packages (flat); mfe-d, loaded at runtime, ships both as entries of `@ui/kit` (dense), at the same tag.
@@ -849,23 +866,6 @@ describe('pooling regressions', () => {
    * `skip` row.
    */
   describe('a dynamically loaded copy that joined a share row claims nothing the map serves elsewhere', () => {
-    const labelled = (
-      packageName: string,
-      version: string,
-      requiredVersion: string,
-      pool: string,
-      specifiers = [packageName]
-    ): DenseSharedInfo =>
-      ({
-        packageName,
-        version,
-        requiredVersion,
-        singleton: true,
-        strictVersion: false,
-        pool,
-        entries: Object.fromEntries(specifiers.map(s => [s, `${s.slice(1).replace('/', '_')}.js`])),
-      }) as DenseSharedInfo;
-
     const remotes = [
       entry(
         'team/mfe-a',
@@ -915,6 +915,66 @@ describe('pooling regressions', () => {
       const warm = await p.runInit([...remotes, loaded]);
       expect(warm.imports['@ui/kit/sub']).toBe(file('team/mfe-a', '@ui/kit/sub'));
       expect(warm).toEqual(merged);
+    });
+  });
+
+  /**
+   * A committed build that predates its pool. mfe-a ships `@ui/base` and `@fw/core` 17.0.0, both labelled
+   * `fw`, so the map serves both from mfe-a. mfe-b, loaded next, ships `@ui/kit` under a label of its own,
+   * `ui`, which no other external carries yet: the map serves `@ui/kit` from mfe-b's file, unpooled. Its
+   * `~17.0.1` rejects the map's `@fw/core` 17.0.0, so mfe-b runs its own 17.0.1 from its scope.
+   *
+   * mfe-c then ships `@ui/base` and `@ui/kit` labelled `ui`, which pools all three externals. Both of its tags
+   * are the map's, but the map serves them from two builds: mfe-a's `@ui/base` binds the map's `@fw/core`
+   * 17.0.0, mfe-b's `@ui/kit` binds its own 17.0.1. Run from the map, mfe-c would reach `@fw/core` at two
+   * tags. A build serving it runs a pool-mate off the map, so the gate cannot place it there
+   * (docs/version-resolver.md §"Scope and dynamic init", step 1): mfe-c serves its whole family itself.
+   */
+  describe('a dynamic load is not served by a build that runs a pool-mate off the map', () => {
+    it('serves the family itself when a serving build binds a pool-mate at another tag', async () => {
+      const p = portfolio({}, { storage: 'nf-regression-off-map-build', realRepositories: true });
+      await p.runInit([
+        entry(
+          'team/mfe-a',
+          labelled('@ui/base', '18.2.0', '^18.0.0', 'fw'),
+          labelled('@fw/core', '17.0.0', '~17.0.0', 'fw')
+        ),
+      ]);
+
+      p.reload();
+      const first = await p.runDynamic(
+        entry(
+          'team/mfe-b',
+          labelled('@ui/kit', '18.2.0', '^18.2.0', 'ui'),
+          labelled('@fw/core', '17.0.1', '~17.0.1', 'fw')
+        )
+      );
+      expect(resolves(first.merged, 'team/mfe-b', '@ui/kit')).toBe(file('team/mfe-b', '@ui/kit'));
+      expect(rows(p, '@fw/core')).toEqual([
+        '17.0.1:scope:[team/mfe-b]',
+        '17.0.0:share:[team/mfe-a]',
+      ]);
+
+      p.reload();
+      const { merged } = await p.runDynamic(
+        entry(
+          'team/mfe-c',
+          labelled('@ui/base', '18.2.0', '^18.2.0', 'ui'),
+          labelled('@ui/kit', '18.2.0', '^18.2.0', 'ui')
+        )
+      );
+
+      expect(p.islands()).toEqual({ 'team/mfe-b': 'incompatible', 'team/mfe-c': 'uncovered' });
+      expect(rows(p, '@ui/base')).toEqual([
+        '18.2.0:share:[team/mfe-a]',
+        '18.2.0:scope:[team/mfe-c]',
+      ]);
+      expect(rows(p, '@ui/kit')).toEqual([
+        '18.2.0:share:[team/mfe-b]',
+        '18.2.0:scope:[team/mfe-c]',
+      ]);
+      expect(resolves(merged, 'team/mfe-c', '@ui/base')).toBe(file('team/mfe-c', '@ui/base'));
+      expect(resolves(merged, 'team/mfe-c', '@ui/kit')).toBe(file('team/mfe-c', '@ui/kit'));
     });
   });
 
