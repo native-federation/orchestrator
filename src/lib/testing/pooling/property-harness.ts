@@ -186,8 +186,8 @@ export function openPortfolio(
     },
     async load(entry: RemoteEntry) {
       next();
-      const { importMap: delta, merged } = await p.runDynamic(structuredClone(entry));
-      return { delta, merged, record: structuredClone(p.stored()) };
+      const { committed, importMap: delta, merged } = await p.runDynamic(structuredClone(entry));
+      return { committed, delta, merged, record: structuredClone(p.stored()) };
     },
   };
 }

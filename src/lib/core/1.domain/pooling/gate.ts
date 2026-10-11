@@ -34,7 +34,8 @@ export type GateMiss =
   | { cause: 'uncovered'; specifier: Specifier }
   | { cause: 'uncovered'; unshipped: true };
 
-// A member whose action the map now serves: `toSkip` turns its share or resolver scope into a skip.
+// A member whose action the map now serves: `toSkip` moves its copy out of a share row (opened or joined) or a
+// resolver scope into a skip row.
 type MapCover = {
   name: ExternalName;
   toSkip: boolean;
@@ -117,9 +118,14 @@ export function coverFromMap(
     if ('unmapped' in files) return files;
     const { covered, override } = files;
 
-    const toSkip = action.action !== 'skip';
+    const opened = action.action !== 'skip';
     const partial = covered.size < Object.keys(copy.entries).length;
-    if (toSkip && (covered.size === 0 || (partial && !policy.selfFill))) continue;
+    if (opened && (covered.size === 0 || (partial && !policy.selfFill))) continue;
+    // A copy that joined a share row would claim, on the next page, what the map serves from another member.
+    const toSkip =
+      opened ||
+      (covered.size > action.covered!.length &&
+        member.external.versions.some(v => v.action === 'share' && v.remotes.includes(copy)));
     covers.push({ name: member.name, toSkip, covered: [...covered], override });
   }
 
@@ -198,11 +204,11 @@ function scan(copies: readonly Copy[], view: CommittedView, accepts: AcceptsTag)
   return { rejected, missing };
 }
 
-// The share row `update-cache` opened for a copy that now runs the map's files becomes a skip: it
-// publishes nothing. A tag keeps one row per action, so the copy joins a skip row already there.
+// A copy that now runs the map's files moves into a skip row at its tag: it publishes nothing. A tag keeps one
+// row per action, so it joins a skip row already there.
 function recordFromMap(external: SharedExternal, remote: RemoteName): SharedExternal {
-  // Only a member whose action was `share` or `scope` gets this move: its copy sits alone in the share row
-  // it opened, or among other islands in a scope row.
+  // The copy sits alone in the share row it opened, among other islands in a scope row, or in a share row it
+  // joined at the same tag, whose other copies stay.
   const opened = external.versions.find(
     v => v.action !== 'skip' && v.remotes.some(r => r.name === remote)
   )!;

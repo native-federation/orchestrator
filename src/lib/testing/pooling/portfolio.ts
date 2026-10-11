@@ -72,6 +72,8 @@ export type PortfolioOptions = {
 
 export type DynamicLoad = {
   actions: SharedInfoActions;
+  /** The map this page committed before the load, generated from the record. */
+  committed: ImportMap;
   /** The delta the load hands the browser. */
   importMap: ImportMap;
   /** The committed map with the delta added the way a browser adds it: existing keys win. */
@@ -290,7 +292,7 @@ export const portfolio = (
     const merged = addToImportMap(committed, importMap);
     assertNoTear(merged);
     assertResolves(merged);
-    return { actions, importMap, merged };
+    return { actions, committed, importMap, merged };
   };
 
   // Commits this page and opens the next one over the same storage: a warm page that has refetched nothing.

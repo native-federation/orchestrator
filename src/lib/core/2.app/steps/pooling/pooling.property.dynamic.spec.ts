@@ -53,13 +53,13 @@ describe('pooling properties: dynamic loads (generated portfolios)', { timeout: 
           host,
           scopeUncoveredEntrypoints: spec.scopeUncoveredEntrypoints,
         });
-        let committed = (await rig.init(entries)).importMap;
+        await rig.init(entries);
         const loaded = [...entries];
 
-        // One page per load: each load's committed map is what the previous one left merged.
+        // One page per load: each page commits the map it rebuilds from the record the previous load left.
         for (const extra of extras) {
           const added = toRemoteEntry(extra, loaded.length);
-          const { delta, merged, record } = await rig.load(added);
+          const { committed, delta, merged, record } = await rig.load(added);
 
           for (const key of Object.keys(delta.imports))
             expect({ key, committed: key in committed.imports }).toEqual({ key, committed: false });
@@ -82,7 +82,6 @@ describe('pooling properties: dynamic loads (generated portfolios)', { timeout: 
                 k.startsWith(`${added.name}|`)
               )
             ).toEqual([]);
-          committed = merged;
         }
       }
     ));
@@ -108,12 +107,14 @@ describe('pooling properties: dynamic loads (generated portfolios)', { timeout: 
           const entries = toRemoteEntries(spec);
           const host = hostOf(spec);
           const rig = openPortfolio({ host, ...(shareScope && { scope: shareScope }) });
-          let committed = (await rig.init(entries)).importMap;
+          await rig.init(entries);
           const loaded = [...entries];
 
           for (const extra of extras) {
             const added = toRemoteEntry(extra, loaded.length, 0, shareScope);
-            const { delta, merged, record } = await rig.load(added);
+            // Each page rebuilds its committed map from the record: a tear that rebuild adds is the reload's
+            // (109/110), not this load's.
+            const { committed, delta, merged, record } = await rig.load(added);
 
             for (const key of Object.keys(delta.imports))
               expect({ key, committed: key in committed.imports }).toEqual({
@@ -132,7 +133,6 @@ describe('pooling properties: dynamic loads (generated portfolios)', { timeout: 
             loaded.push(added);
             const after = torn(merged, record, scopeUrlsOf(loaded), host, shareScope);
             expect(after.filter(t => !before.includes(t))).toEqual([]);
-            committed = merged;
           }
         }
       ));
@@ -199,15 +199,18 @@ describe('pooling properties: dynamic loads (generated portfolios)', { timeout: 
         150,
         async ([spec, extra]) => {
           const entries = toRemoteEntries(spec);
-          const rig = openPortfolio({
-            host: hostOf(spec),
-            ...(shareScope && { scope: shareScope }),
-          });
+          const host = hostOf(spec);
+          const rig = openPortfolio({ host, ...(shareScope && { scope: shareScope }) });
           await rig.init(entries);
           const added = toRemoteEntry(extra, entries.length, 0, shareScope);
           const { merged, record } = await rig.load(added);
-          const warm = await rig.init([...entries, added]);
+          const all = [...entries, added];
+          const warm = await rig.init(all);
           expect(outcome(warm.importMap, warm.record).runs).toEqual(outcome(merged, record).runs);
+          // Two builds of one tag look alike to `runs`; which file serves a specifier shows in the walk.
+          const before = torn(merged, record, scopeUrlsOf(all), host, shareScope);
+          const after = torn(warm.importMap, warm.record, scopeUrlsOf(all), host, shareScope);
+          expect(after.filter(t => !before.includes(t))).toEqual([]);
         }
       ));
 
@@ -285,7 +288,6 @@ describe('pooling properties: dynamic loads (generated portfolios)', { timeout: 
         if (!init.ok) return;
         const host = init.host;
         const loaded = [...init.entries];
-        let committed = init.result.importMap;
         let before = init.result.record;
 
         for (const extra of extras) {
@@ -309,14 +311,13 @@ describe('pooling properties: dynamic loads (generated portfolios)', { timeout: 
             return;
           }
 
-          const { delta, merged, record } = load;
+          const { committed, delta, merged, record } = load;
           for (const key of Object.keys(delta.imports))
             expect({ key, committed: key in committed.imports }).toEqual({ key, committed: false });
           const tornBefore = torn(committed, record, scopeUrlsOf(loaded), host);
           loaded.push(added);
           const tornAfter = torn(merged, record, scopeUrlsOf(loaded), host);
           expect(tornAfter.filter(t => !tornBefore.includes(t))).toEqual([]);
-          committed = merged;
           before = record;
         }
       }

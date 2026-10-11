@@ -937,7 +937,8 @@ from another build, so counting bases can name the wrong one.
 The dynamic path writes `poolCause` only, for the loaded remote's copies: a copy it scopes moves into a `scope`
 version at its own tag with its `poolCause`, dropping any stale `servedBy` (a `share` version only that copy
 held leaves with it); a copy that runs the map's files moves from the row `update-cache` put it in into a
-`skip` row at its tag, so it publishes nothing. Without that, the record would keep `update-cache`'s
+`skip` row at its tag, so it publishes nothing (a copy that joined the `share` row stays there unless the map
+serves it more than that row covers). Without that, the record would keep `update-cache`'s
 verdicts, and a reload — which rebuilds the map from the record without re-electing anything — would publish
 the combination the delta had refused.
 

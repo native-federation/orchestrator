@@ -835,6 +835,90 @@ describe('pooling regressions', () => {
   });
 
   /**
+   * A flat and a dense build of one entrypoint, on reload. mfe-a ships `@ui/kit` and `@ui/kit/sub` as two
+   * packages (flat); mfe-d, loaded at runtime, ships both as entries of `@ui/kit` (dense), at the same tag.
+   * mfe-b's `@ui/base` is labelled `fw`, so every member below is one pool. mfe-b and mfe-c disagree on
+   * `@fw/core`, so both serve it themselves and the committed map binds no `fw` file. mfe-b runs mfe-a's
+   * `@ui/base`, which imports mfe-a's `@ui/kit/sub`.
+   *
+   * mfe-d resolves through the committed map (global-or-self), so it runs mfe-a's `@ui/kit/sub` and shares a
+   * new `@fw/core` 17.0.1. `update-cache` had joined its `@ui/kit` copy to mfe-a's share row, and the gate left
+   * it there. The next page's map, which claims `@ui/kit`'s row before the `@ui/kit/sub` package, then took
+   * the sub entrypoint from mfe-d's file, which binds the shared 17.0.1: mfe-b reached it through `@ui/base`
+   * beside its own 17.0.0. A reload must rebuild the map the load published, so the joined copy moves to a
+   * `skip` row.
+   */
+  describe('a dynamically loaded copy that joined a share row claims nothing the map serves elsewhere', () => {
+    const labelled = (
+      packageName: string,
+      version: string,
+      requiredVersion: string,
+      pool: string,
+      specifiers = [packageName]
+    ): DenseSharedInfo =>
+      ({
+        packageName,
+        version,
+        requiredVersion,
+        singleton: true,
+        strictVersion: false,
+        pool,
+        entries: Object.fromEntries(specifiers.map(s => [s, `${s.slice(1).replace('/', '_')}.js`])),
+      }) as DenseSharedInfo;
+
+    const remotes = [
+      entry(
+        'team/mfe-a',
+        labelled('@ui/base', '18.2.0', '18.2.0', 'ui'),
+        labelled('@ui/kit', '18.2.0', '18.2.0', 'ui'),
+        labelled('@ui/kit/sub', '18.2.0', '18.2.0', 'ui')
+      ),
+      entry(
+        'team/mfe-b',
+        labelled('@ui/base', '18.2.0', '^18.0.0', 'fw'),
+        labelled('@fw/core', '17.0.0', '~17.0.0', 'fw')
+      ),
+      entry(
+        'team/mfe-c',
+        labelled('@fw/core', '17.0.0-rc.0', '^17.0.0-rc.0', 'fw'),
+        labelled('@fw/common', '17.0.0-rc.0', '^17.0.0-rc.0', 'fw')
+      ),
+    ];
+    const loaded = entry(
+      'team/mfe-d',
+      labelled('@ui/kit', '18.2.0', '^18.2.0', 'ui', ['@ui/kit', '@ui/kit/sub']),
+      labelled('@fw/core', '17.0.1', '~17.0.1', 'fw')
+    );
+
+    it('keeps the flat build on the sub entrypoint after a reload and a warm init', async () => {
+      const p = portfolio(
+        {},
+        { storage: 'nf-regression-joined-share-row', realRepositories: true }
+      );
+      const committed = await p.runInit(remotes);
+      expect(committed.imports['@fw/core']).toBeUndefined();
+      expect(resolves(committed, 'team/mfe-b', '@fw/core')).toBe(file('team/mfe-b', '@fw/core'));
+      expect(rows(p, '@ui/kit')).toEqual(['18.2.0:share:[team/mfe-a]']);
+
+      p.reload();
+      const { actions, merged } = await p.runDynamic(loaded);
+      expect(actions['@ui/kit']).toEqual({
+        action: 'skip',
+        covered: ['@ui/kit', '@ui/kit/sub'],
+        sameVersion: true,
+      });
+      expect(resolves(merged, 'team/mfe-d', '@ui/kit/sub')).toBe(file('team/mfe-a', '@ui/kit/sub'));
+      // The share row keeps mfe-a's copy; mfe-d's runs its files from a skip row at the same tag.
+      expect(rows(p, '@ui/kit')).toEqual(['18.2.0:share:[team/mfe-a]', '18.2.0:skip:[team/mfe-d]']);
+
+      p.reload();
+      const warm = await p.runInit([...remotes, loaded]);
+      expect(warm.imports['@ui/kit/sub']).toBe(file('team/mfe-a', '@ui/kit/sub'));
+      expect(warm).toEqual(merged);
+    });
+  });
+
+  /**
    * D28. A record the orchestrator never writes itself: a remote lists `@fw/core` twice, at 1.0.1 and at
    * 1.0.0 with another file. A build ships one copy per member, so the election, the dynamic gate and the
    * no-tear oracle all read its first row, whole: the build is core 1.0.1 beside common 1.0.0. The gate's own
