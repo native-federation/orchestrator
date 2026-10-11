@@ -134,7 +134,8 @@ const REFUSALS = [
 ];
 
 // One page sequence on `portfolio()`: every `init` after the first opens a warm page that skips what it has
-// cached, as get-remote-entries does; `load` adds a remote at runtime on a new page.
+// cached, as get-remote-entries does; `load` adds a remote at runtime to the page as it stands, over every
+// earlier load's delta, and `reload` opens a new page for the next load.
 export function openPortfolio(
   o: {
     host?: string;
@@ -157,10 +158,10 @@ export function openPortfolio(
       assertNoTear: false,
     }
   );
-  let opened = false;
+  let fresh = true;
   const next = () => {
-    if (opened) p.reload();
-    opened = true;
+    if (!fresh) p.reload();
+    fresh = false;
   };
   const result = (importMap: ImportMap) => ({
     importMap,
@@ -185,8 +186,13 @@ export function openPortfolio(
       next();
       return result(await p.touch(name));
     },
-    async load(entry: RemoteEntry) {
+    // A new page that runs no init of its own: a `load` on it runs over the map the record rebuilds.
+    reload() {
       next();
+      fresh = true;
+    },
+    async load(entry: RemoteEntry) {
+      fresh = false;
       const { committed, importMap: delta, merged } = await p.runDynamic(structuredClone(entry));
       return { committed, delta, merged, record: structuredClone(p.stored()) };
     },

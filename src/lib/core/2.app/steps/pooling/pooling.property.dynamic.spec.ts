@@ -7,6 +7,7 @@ import {
   portfolioArbitrary,
   toRemoteEntries,
   toRemoteEntry,
+  twoLoadsArbitrary,
 } from 'lib/testing/pooling/generate-portfolio';
 import {
   TIMEOUT,
@@ -33,68 +34,89 @@ import {
  * Pooling invariants of the dynamic path (`initRemoteEntry`) over generated portfolios: an init, then one or
  * two loads, each a clone of a remote, a clone with one change or a fresh remote. See
  * `pooling.property.init.spec.ts` for the generator and the seeds.
+ *
+ * Additivity and range soundness run twice: one page per load, each committing the map it rebuilds from the
+ * record the previous load left, and two loads on one page, the second over the first's delta. A load's own
+ * copies reach the record at once but `imports` never, which only the second shape exercises. The single-load
+ * properties load on the init's page.
  */
+
+// `page`: both loads on the init's page. `reload`: a new page before each load. Same-page cases always load
+// twice, and run fewer cases to keep the budget.
+const pageModes = [
+  { mode: 'reload', loads: extraRemotesArbitrary, runs: 150 },
+  { mode: 'page', loads: twoLoadsArbitrary, runs: 100 },
+] as const;
 
 describe('pooling properties: dynamic loads (generated portfolios)', { timeout: TIMEOUT }, () => {
   // Whether the committed map tears is the init property's question; this one asks that the delta adds no tear
   // of its own, so an init tear cannot mask a dynamic one.
-  it('dynamic additivity: the delta never re-declares a committed key and adds no tear', () =>
-    run(
-      101,
-      portfolioArbitrary({
-        maxRemotes: 12,
-        labelNoise: true,
-        scopeUncoveredEntrypoints: true,
-      }).chain(spec => fc.tuple(fc.constant(lenient(spec)), extraRemotesArbitrary(spec))),
-      150,
-      async ([spec, extras]) => {
-        const entries = toRemoteEntries(spec);
-        const host = hostOf(spec);
-        const rig = openPortfolio({
-          host,
-          scopeUncoveredEntrypoints: spec.scopeUncoveredEntrypoints,
-        });
-        await rig.init(entries);
-        const loaded = [...entries];
+  for (const [offset, { mode, loads, runs }] of [
+    [101, pageModes[0]],
+    [111, pageModes[1]],
+  ] as const)
+    it(`dynamic additivity: the delta never re-declares a committed key and adds no tear (${mode})`, () =>
+      run(
+        offset,
+        portfolioArbitrary({
+          maxRemotes: 12,
+          labelNoise: true,
+          scopeUncoveredEntrypoints: true,
+        }).chain(spec => fc.tuple(fc.constant(lenient(spec)), loads(spec))),
+        runs,
+        async ([spec, extras]) => {
+          const entries = toRemoteEntries(spec);
+          const host = hostOf(spec);
+          const rig = openPortfolio({
+            host,
+            scopeUncoveredEntrypoints: spec.scopeUncoveredEntrypoints,
+          });
+          await rig.init(entries);
+          const loaded = [...entries];
 
-        // One page per load: each page commits the map it rebuilds from the record the previous load left.
-        for (const extra of extras) {
-          const added = toRemoteEntry(extra, loaded.length);
-          const { committed, delta, merged, record } = await rig.load(added);
+          for (const extra of extras) {
+            const added = toRemoteEntry(extra, loaded.length);
+            if (mode === 'reload') rig.reload();
+            const { committed, delta, merged, record } = await rig.load(added);
 
-          for (const key of Object.keys(delta.imports))
-            expect({ key, committed: key in committed.imports }).toEqual({ key, committed: false });
-          for (const key of Object.keys(delta.scopes ?? {}))
-            expect({ key, committed: key in (committed.scopes ?? {}) }).toEqual({
-              key,
-              committed: false,
-            });
+            for (const key of Object.keys(delta.imports))
+              expect({ key, committed: key in committed.imports }).toEqual({
+                key,
+                committed: false,
+              });
+            for (const key of Object.keys(delta.scopes ?? {}))
+              expect({ key, committed: key in (committed.scopes ?? {}) }).toEqual({
+                key,
+                committed: false,
+              });
 
-          // Both sides judged under the pools as they stand after the load: a remote can join a pool that did
-          // not exist at init (a lone labelled external gains its sibling), and the committed map it then
-          // exposes is immutable, so a tear already in it is not the delta's.
-          const before = torn(committed, record, scopeUrlsOf(loaded), host);
-          loaded.push(added);
-          const after = torn(merged, record, scopeUrlsOf(loaded), host);
-          expect(after.filter(t => !before.includes(t))).toEqual([]);
-          if (spec.scopeUncoveredEntrypoints)
-            expect(
-              unmapped(outcome(merged, record, scopeUrlsOf(loaded)).runs).filter(k =>
-                k.startsWith(`${added.name}|`)
-              )
-            ).toEqual([]);
+            // Both sides judged under the pools as they stand after the load: a remote can join a pool that did
+            // not exist at init (a lone labelled external gains its sibling), and the committed map it then
+            // exposes is immutable, so a tear already in it is not the delta's.
+            const before = torn(committed, record, scopeUrlsOf(loaded), host);
+            loaded.push(added);
+            const after = torn(merged, record, scopeUrlsOf(loaded), host);
+            expect(after.filter(t => !before.includes(t))).toEqual([]);
+            if (spec.scopeUncoveredEntrypoints)
+              expect(
+                unmapped(outcome(merged, record, scopeUrlsOf(loaded)).runs).filter(k =>
+                  k.startsWith(`${added.name}|`)
+                )
+              ).toEqual([]);
+          }
         }
-      }
-    ));
+      ));
 
   // 101 with flat and dense builds in one pool: a specifier can be an entry of the loaded remote's package
   // and a package of its own in the committed map, so what serves the load is read per specifier, not per
   // external. In a named share scope the load maps in its own scope, with no `imports` to inherit.
-  for (const [offset, shareScope] of [
-    [107, undefined],
-    [108, 'team'],
+  for (const [offset, shareScope, { mode, loads, runs }] of [
+    [107, undefined, pageModes[0]],
+    [108, 'team', pageModes[0]],
+    [112, undefined, pageModes[1]],
+    [113, 'team', pageModes[1]],
   ] as const)
-    it(`dynamic additivity with flat and dense builds in one pool, ${shareScope ?? 'global'} share scope`, () =>
+    it(`dynamic additivity with flat and dense builds in one pool, ${shareScope ?? 'global'} share scope (${mode})`, () =>
       run(
         offset,
         portfolioArbitrary({
@@ -102,8 +124,8 @@ describe('pooling properties: dynamic loads (generated portfolios)', { timeout: 
           labelNoise: true,
           flat: true,
           ...(shareScope && { shareScope }),
-        }).chain(spec => fc.tuple(fc.constant(lenient(spec)), extraRemotesArbitrary(spec))),
-        150,
+        }).chain(spec => fc.tuple(fc.constant(lenient(spec)), loads(spec))),
+        runs,
         async ([spec, extras]) => {
           const entries = toRemoteEntries(spec);
           const host = hostOf(spec);
@@ -113,8 +135,9 @@ describe('pooling properties: dynamic loads (generated portfolios)', { timeout: 
 
           for (const extra of extras) {
             const added = toRemoteEntry(extra, loaded.length, 0, shareScope);
-            // Each page rebuilds its committed map from the record: a tear that rebuild adds is the reload's
+            // A new page rebuilds its committed map from the record: a tear that rebuild adds is the reload's
             // (109/110), not this load's.
+            if (mode === 'reload') rig.reload();
             const { committed, delta, merged, record } = await rig.load(added);
 
             for (const key of Object.keys(delta.imports))
@@ -257,25 +280,30 @@ describe('pooling properties: dynamic loads (generated portfolios)', { timeout: 
 
   // A load lands globally or in its own scope; either way each specifier it ships must run a tag its own range
   // accepts.
-  it('dynamic range soundness: every loaded copy runs a tag its own range accepts', () =>
-    run(
-      105,
-      portfolioArbitrary({ maxRemotes: 12 }).chain(spec =>
-        fc.tuple(fc.constant(lenient(spec)), extraRemotesArbitrary(spec))
-      ),
-      150,
-      async ([spec, extras]) => {
-        const entries = toRemoteEntries(spec);
-        const rig = openPortfolio({ host: hostOf(spec) });
-        await rig.init(entries);
-        let index = entries.length;
-        for (const extra of extras) {
-          const added = toRemoteEntry(extra, index++);
-          const { merged, record } = await rig.load(added);
-          expect(rangeViolations(merged, record, added.name)).toEqual([]);
+  for (const [offset, { mode, loads, runs }] of [
+    [105, pageModes[0]],
+    [114, pageModes[1]],
+  ] as const)
+    it(`dynamic range soundness: every loaded copy runs a tag its own range accepts (${mode})`, () =>
+      run(
+        offset,
+        portfolioArbitrary({ maxRemotes: 12 }).chain(spec =>
+          fc.tuple(fc.constant(lenient(spec)), loads(spec))
+        ),
+        runs,
+        async ([spec, extras]) => {
+          const entries = toRemoteEntries(spec);
+          const rig = openPortfolio({ host: hostOf(spec) });
+          await rig.init(entries);
+          let index = entries.length;
+          for (const extra of extras) {
+            const added = toRemoteEntry(extra, index++);
+            if (mode === 'reload') rig.reload();
+            const { merged, record } = await rig.load(added);
+            expect(rangeViolations(merged, record, added.name)).toEqual([]);
+          }
         }
-      }
-    ));
+      ));
 
   // Under strict a load can be refused by the resolver: only for a strict range that rejects the tag the
   // committed record shares, never its own. A load that goes through is as additive as a lenient one.
@@ -296,6 +324,7 @@ describe('pooling properties: dynamic loads (generated portfolios)', { timeout: 
         for (const extra of extras) {
           const added = toRemoteEntry(extra, loaded.length);
           let load: Awaited<ReturnType<typeof init.rig.load>>;
+          init.rig.reload();
           try {
             load = await init.rig.load(added);
           } catch (error) {

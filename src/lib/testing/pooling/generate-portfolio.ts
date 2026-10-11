@@ -290,21 +290,26 @@ export const extraRemoteArbitrary = (spec: PortfolioSpec): fc.Arbitrary<RemoteSp
         { arbitrary: freshRemoteArbitrary(spec.poolSizes), weight: 1 }
       );
 
-/**
- * One or two remotes loaded one after the other. The second is often derived from the first, so it can join
- * a subpool the first load created.
- */
+// A remote loaded after `first`: often derived from it, so it can join a subpool or a row the first load
+// created, or need an entrypoint only the first load ships.
+const secondLoadArbitrary = (spec: PortfolioSpec, first: RemoteSpec): fc.Arbitrary<RemoteSpec> =>
+  fc.oneof(
+    derivedRemoteArbitrary([first]),
+    extraRemoteArbitrary({ ...spec, remotes: [...spec.remotes, first] })
+  );
+
+/** One or two remotes loaded one after the other. */
 export const extraRemotesArbitrary = (spec: PortfolioSpec): fc.Arbitrary<RemoteSpec[]> =>
   extraRemoteArbitrary(spec).chain(first =>
     fc
-      .option(
-        fc.oneof(
-          derivedRemoteArbitrary([first]),
-          extraRemoteArbitrary({ ...spec, remotes: [...spec.remotes, first] })
-        ),
-        { freq: 2 }
-      )
+      .option(secondLoadArbitrary(spec, first), { freq: 2 })
       .map(second => (second === null ? [first] : [first, second]))
+  );
+
+/** Two remotes loaded one after the other, for a page that holds both. */
+export const twoLoadsArbitrary = (spec: PortfolioSpec): fc.Arbitrary<RemoteSpec[]> =>
+  extraRemoteArbitrary(spec).chain(first =>
+    secondLoadArbitrary(spec, first).map(second => [first, second])
   );
 
 /**
