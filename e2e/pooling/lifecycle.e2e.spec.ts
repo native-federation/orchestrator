@@ -39,6 +39,7 @@ test.describe('lifecycle: the warm start', () => {
   });
 
   test('reproduces a healthy map on reload', async ({ nf }) => {
+    // A control: this passes with pooling off too, and guards that pooling keeps it so.
     // The other half of the claim: when pooling islands nobody it must also leave nothing behind that a
     // second pass would decide differently.
     const healthy = () => [
@@ -278,6 +279,7 @@ test.describe('lifecycle: the dynamic path', () => {
     // The committed map is untouched — that is the additive-only guarantee.
     expect(committed!.imports['@angular/core']).toBe('http://mfe1/@angular/core.js');
     expect(committed!.scopes).toBeUndefined();
+    expect(await nf.islands()).toEqual(['team/mfe3 incompatible']);
 
     // And the browser honours both maps at once: the late remote runs its own 18 family while the
     // original keeps the shared 17 one.
@@ -317,6 +319,7 @@ test.describe('lifecycle: the dynamic path', () => {
   });
 
   test('lets a remote dedup a family it agrees with', async ({ nf }) => {
+    // A control: this passes with pooling off too, and guards that pooling keeps it so.
     // Same shape, but mfe4's build sits on the committed minor line, so both gates pass and it dedups
     // the whole family — the delta carries no framework entry of its own at all.
     const late = remote('team/mfe4', SCOPE.mfe4, [

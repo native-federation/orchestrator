@@ -44,6 +44,7 @@ test.describe('incremental: a pool is re-elected as a unit', () => {
   });
 
   test('costs what the same portfolio costs cold', async ({ nf }) => {
+    // A control: this passes with pooling off too, and guards that pooling keeps it so.
     // The cost claim, measured rather than inferred: one copy of `router`, and two of `core` because
     // mfe2's pin genuinely cannot take the shared one.
     await nf.init([whole, pinned]);
@@ -61,6 +62,7 @@ test.describe('incremental: a pool is re-elected as a unit', () => {
   });
 
   test('keeps a pool resolvable when the joiner lands on the pinned tag', async ({ nf }) => {
+    // A control: this passes with pooling off too, and guards that pooling keeps it so.
     // The case that used to collapse the pool completely: no member kept a shared version at all, so
     // the import map carried no framework entry and three remotes each downloaded their own copy.
     const joinsPinned = remote('team/mfe3', SCOPE.mfe3, [
@@ -80,6 +82,7 @@ test.describe('incremental: a pool is re-elected as a unit', () => {
   });
 
   test('reaches a fixed point: a third load re-decides nothing', async ({ nf }) => {
+    // A control: this passes with pooling off too, and guards that pooling keeps it so.
     await nf.init([whole, pinned]);
     await nf.init([whole, pinned, coreOnly]);
     const settled = await nf.map();
@@ -92,6 +95,7 @@ test.describe('incremental: a pool is re-elected as a unit', () => {
   });
 
   test('serves a dynamically loaded remote the family it would get cold', async ({ nf }) => {
+    // A control: this passes with pooling off too, and guards that pooling keeps it so.
     // The dynamic path does no election, so it can only read whatever the init path last wrote. A stale
     // island used to leave it drawing `core` from one build and `router` from its own — a split across a
     // minor line, with nothing logged.

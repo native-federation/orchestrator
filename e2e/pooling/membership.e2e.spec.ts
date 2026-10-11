@@ -319,17 +319,20 @@ test.describe('membership: multi-entrypoint packages', () => {
 
   test('moves every entrypoint into the island together', async ({ nf }) => {
     // The same all-or-nothing rule at entrypoint granularity: an islanded remote serves each declared
-    // entrypoint from its own build, never a mix.
+    // entrypoint from its own build, never a mix. mfe2's router accepts 18, so the resolver alone would
+    // share mfe1's router with it; only its core keeps it off mfe1's build.
     await nf.init([
       remote('team/mfe1', SCOPE.mfe1, [
-        dep('@angular/core', '18.0.0', { entrypoints: ['/testing'] }),
+        dep('@angular/core', '18.0.0'),
         dep('@angular/router', '18.0.0'),
       ]),
       remote('team/mfe2', SCOPE.mfe2, [
         dep('@angular/core', '17.0.0', { entrypoints: ['/testing'] }),
-        dep('@angular/router', '17.0.0'),
+        dep('@angular/router', '17.0.0', { req: '>=17.0.0 <19.0.0' }),
       ]),
     ]);
+
+    expect(await nf.islands()).toEqual(['team/mfe2 incompatible']);
 
     expect((await nf.map()).scopes?.[SCOPE.mfe2]).toEqual({
       '@angular/core': 'http://mfe2/@angular/core.js',

@@ -44,6 +44,7 @@ test.describe('symmetric: one minor line, or two', () => {
   });
 
   test('absorbs patch drift into one build when the member sets match', async ({ nf }) => {
+    // A control: this passes with pooling off too, and guards that pooling keeps it so.
     // Both remotes declare `~21.2.0` and sit one patch apart. Because they ship the same two members,
     // one build covers both remotes and the drift disappears into the election — the losing patch tag is
     // simply never downloaded.
@@ -71,6 +72,7 @@ test.describe('symmetric: one minor line, or two', () => {
   });
 
   test('dedups a pin that actually fits', async ({ nf }) => {
+    // A control: this passes with pooling off too, and guards that pooling keeps it so.
     // Not every pin splits a family. `~22.0.5` accepts every 22.0.x from 22.0.5 up, so the other
     // remote's 22.0.8 satisfies it: the pinning remote dedups and nothing is scoped. Reproducing a split
     // needs a *minor* gap, which the next case uses.
@@ -359,69 +361,104 @@ test.describe('symmetric: host precedence', () => {
 });
 
 /**
- * Which version the election picks, measured as files the browser actually fetched. The islanding
- * cascade (a previous-major minority islanding the majority) and the split family are guarded in
- * `src/lib/core/2.app/steps/pooling/pooling.regression.spec.ts`, under the no-tear oracle.
+ * Which version the election picks, measured as files the browser actually fetched. In each portfolio one
+ * member alone would resolve differently from the family, so the pool election, not the resolver, decides.
+ * The islanding cascade (a previous-major minority islanding the majority) and the split family are guarded
+ * in `src/lib/core/2.app/steps/pooling/pooling.regression.spec.ts`, under the no-tear oracle.
  */
 test.describe('symmetric: which version the election picks', () => {
-  test('elects the older tag when it saves copies, and islands the lone modern remote', async ({
+  // mfe1 is alone on 22.0.8; mfe2..mfe4 share 21.2.18, which mfe1 rejects. mfe2's router also accepts 22,
+  // so the resolver alone would share mfe1's router and run it beside mfe2's own core 21.
+  const modernAndThree = () => [
+    remote('team/mfe1', SCOPE.mfe1, [
+      dep('@angular/core', '22.0.8', { req: '~22.0.3' }),
+      dep('@angular/router', '22.0.8', { req: '~22.0.3' }),
+    ]),
+    remote('team/mfe2', SCOPE.mfe2, [
+      dep('@angular/core', '21.2.18', { req: '~21.2.0' }),
+      dep('@angular/router', '21.2.18', { req: '>=21.2.0 <23.0.0' }),
+    ]),
+    remote('team/mfe3', SCOPE.mfe3, [dep('@angular/core', '21.2.18', { req: '~21.2.0' })]),
+    remote('team/mfe4', SCOPE.mfe4, [dep('@angular/core', '21.2.18', { req: '~21.2.0' })]),
+  ];
+
+  test('elects the older build when it serves more remotes, and islands the lone modern remote', async ({
     nf,
   }) => {
-    // The user-visible behaviour change. Three remotes share one 21.2.18 copy, one remote is on 22.0.8,
-    // and the two are mutually incompatible. Counting versions, both candidates cost 1 and the newest
-    // won; counting copies, 22.0.8 costs 3 against 21.2.18's 1, so the larger group wins — which is what
-    // "fewest extra downloads" always claimed to mean.
-    await nf.init([
-      remote('team/mfe1', SCOPE.mfe1, [dep('@angular/core', '22.0.8', { req: '~22.0.3' })]),
-      remote('team/mfe2', SCOPE.mfe2, [dep('@angular/core', '21.2.18', { req: '~21.2.0' })]),
-      remote('team/mfe3', SCOPE.mfe3, [dep('@angular/core', '21.2.18', { req: '~21.2.0' })]),
-      remote('team/mfe4', SCOPE.mfe4, [dep('@angular/core', '21.2.18', { req: '~21.2.0' })]),
-    ]);
+    // mfe2's build serves three remotes, mfe1's only itself, so the older build wins the whole family and
+    // mfe1 serves its own.
+    await nf.init(modernAndThree());
 
     const map = await nf.map();
     expect(map.imports['@angular/core']).toBe('http://mfe2/@angular/core.js');
+    expect(map.imports['@angular/router']).toBe('http://mfe2/@angular/router.js');
     expect(map.scopes).toEqual({
-      [SCOPE.mfe1]: { '@angular/core': 'http://mfe1/@angular/core.js' },
+      [SCOPE.mfe1]: {
+        '@angular/core': 'http://mfe1/@angular/core.js',
+        '@angular/router': 'http://mfe1/@angular/router.js',
+      },
     });
+    expect(await nf.islands()).toEqual(['team/mfe1 incompatible']);
 
     await nf.loadAll();
     expect(nf.downloads().sort()).toEqual([
       'http://mfe1/@angular/core.js',
+      'http://mfe1/@angular/router.js',
       'http://mfe2/@angular/core.js',
+      'http://mfe2/@angular/router.js',
     ]);
   });
 
   test('lets `profile.latestSharedExternal` opt out of the cost model entirely', async ({ nf }) => {
-    // Same portfolio, opted out: the newest tag wins regardless of how many copies that costs, so the
-    // three-remote majority pays for it instead. 4 downloads against 2.
-    await nf.init(
-      [
-        remote('team/mfe1', SCOPE.mfe1, [dep('@angular/core', '22.0.8', { req: '~22.0.3' })]),
-        remote('team/mfe2', SCOPE.mfe2, [dep('@angular/core', '21.2.18', { req: '~21.2.0' })]),
-        remote('team/mfe3', SCOPE.mfe3, [dep('@angular/core', '21.2.18', { req: '~21.2.0' })]),
-        remote('team/mfe4', SCOPE.mfe4, [dep('@angular/core', '21.2.18', { req: '~21.2.0' })]),
-      ],
-      { profile: { latestSharedExternal: true } }
-    );
+    // Same portfolio, opted out: the newest build wins regardless of how many remotes it serves, so the
+    // three-remote majority runs mfe2's build in a subpool instead, its router included.
+    await nf.init(modernAndThree(), { profile: { latestSharedExternal: true } });
 
     const map = await nf.map();
     expect(map.imports['@angular/core']).toBe('http://mfe1/@angular/core.js');
+    expect(map.scopes?.[SCOPE.mfe2]).toEqual({
+      '@angular/core': 'http://mfe2/@angular/core.js',
+      '@angular/router': 'http://mfe2/@angular/router.js',
+    });
     expect(Object.keys(map.scopes ?? {}).sort()).toEqual([SCOPE.mfe2, SCOPE.mfe3, SCOPE.mfe4]);
+    expect(await nf.islands()).toEqual([
+      'team/mfe2 subpool team/mfe2',
+      'team/mfe3 subpool team/mfe2',
+      'team/mfe4 subpool team/mfe2',
+    ]);
 
     await nf.loadAll();
     expect(nf.downloads()).toHaveLength(4);
   });
 
-  test('breaks a genuine tie toward the newest tag', async ({ nf }) => {
-    // Equal copies on both sides, so the objective cannot separate them and the tiebreak decides.
+  test('breaks a genuine tie toward the newest build', async ({ nf }) => {
+    // Each build serves two remotes, so the count cannot separate them and the tiebreak decides; the older
+    // remotes register first, so registration order cannot. mfe3's router accepts 22, so the resolver
+    // alone would share mfe1's router with it.
     await nf.init([
-      remote('team/mfe1', SCOPE.mfe1, [dep('@angular/core', '22.0.8', { req: '~22.0.3' })]),
-      remote('team/mfe2', SCOPE.mfe2, [dep('@angular/core', '22.0.8', { req: '~22.0.3' })]),
-      remote('team/mfe3', SCOPE.mfe3, [dep('@angular/core', '21.2.18', { req: '~21.2.0' })]),
+      remote('team/mfe3', SCOPE.mfe3, [
+        dep('@angular/core', '21.2.18', { req: '~21.2.0' }),
+        dep('@angular/router', '21.2.18', { req: '>=21.2.0 <23.0.0' }),
+      ]),
       remote('team/mfe4', SCOPE.mfe4, [dep('@angular/core', '21.2.18', { req: '~21.2.0' })]),
+      remote('team/mfe1', SCOPE.mfe1, [
+        dep('@angular/core', '22.0.8', { req: '~22.0.3' }),
+        dep('@angular/router', '22.0.8', { req: '~22.0.3' }),
+      ]),
+      remote('team/mfe2', SCOPE.mfe2, [
+        dep('@angular/core', '22.0.8', { req: '~22.0.3' }),
+        dep('@angular/router', '22.0.8', { req: '~22.0.3' }),
+      ]),
     ]);
 
     expect((await nf.map()).imports['@angular/core']).toBe('http://mfe1/@angular/core.js');
+    expect(await nf.islands()).toEqual([
+      'team/mfe3 subpool team/mfe3',
+      'team/mfe4 subpool team/mfe3',
+    ]);
+    expect((await nf.load('team/mfe3')).seen['@angular/router']).toBe(
+      'mfe3|@angular/router@21.2.18'
+    );
   });
 
   test('never downloads a shared external twice, however many remotes import it', async ({
@@ -435,6 +472,7 @@ test.describe('symmetric: which version the election picks', () => {
         dep('@angular/router', '22.0.8', { req: '^22.0.0' }),
       ])
     );
+    // A control: identical builds leave pooling nothing to decide, so this passes with pooling off too.
     await nf.init(consumers);
     await nf.loadAll();
 
