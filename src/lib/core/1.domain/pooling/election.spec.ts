@@ -143,6 +143,24 @@ describe('missOf', () => {
   });
 });
 
+describe('round 1', () => {
+  // Neither build serves or agrees with the other, so they tie on every key; a comes first in input order,
+  // so only the newer-build tiebreak elects b.
+  it('breaks a tie on every key toward the newer build, whatever the input order', () => {
+    const family = (tag: string, req: string) => ({
+      '@fw/core': { tag, req, specifiers: ['@fw/core'] },
+      '@fw/common': { tag, req, specifiers: ['@fw/common'] },
+    });
+    const election = electFrom([
+      { name: 'a', copies: family('17.0.0', '~17.0.0') },
+      { name: 'b', copies: family('18.0.0', '~18.0.0') },
+    ]);
+
+    expect(election.winner).toBe('b');
+    expect(inGlobal(election)).toEqual(['b']);
+  });
+});
+
 describe('subpool rounds', () => {
   const ship = (name: string, tag: string, req: string): Build => ({
     name,
