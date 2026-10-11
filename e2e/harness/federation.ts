@@ -1,6 +1,6 @@
-import { test as base, type Browser, type Page } from '@playwright/test';
+import { test as base, expect, type Browser, type Page } from '@playwright/test';
 import { build } from 'esbuild';
-import { resolve } from 'node:path';
+import { join, resolve } from 'node:path';
 import type { ImportMap, RemoteEntry, RemoteInfo, SharedExternals } from 'lib/core/1.domain';
 import { compile, startServer, MANIFEST_URL, PAGE_HOST, type Harness } from './server';
 import type { BootOptions, Session } from './boot';
@@ -152,7 +152,7 @@ export const test = base.extend<{ nf: Federation }, Worker>({
     { scope: 'worker' },
   ],
 
-  nf: async ({ page, harness }, use) => {
+  nf: async ({ page, harness }, use, testInfo) => {
     harness.requests.length = 0;
     let shim = false;
     let listed: RemoteEntry[] = [];
@@ -160,6 +160,7 @@ export const test = base.extend<{ nf: Federation }, Worker>({
     let hosts: string[] = [];
     // Network accounting is per init, so a warm init can assert it fetched nothing.
     let mark = 0;
+    let booted = false;
 
     const boot = async (remotes: RemoteEntry[], opts: InitOptions) => {
       const { hostEntry, unlisted, manifestFromUrl, pooling = true, ...bootOptions } = opts;
@@ -172,6 +173,7 @@ export const test = base.extend<{ nf: Federation }, Worker>({
       storedIn = opts.namespace ?? 'e2e';
       hosts = hostEntry ? [hostEntry.name] : [];
       mark = harness.requests.length;
+      booted = true;
       harness.serve(compile([...remotes, ...(hostEntry ? [hostEntry] : [])].map(built)));
       if (unlisted?.length) harness.add(unlisted.map(built));
 
@@ -281,10 +283,14 @@ export const test = base.extend<{ nf: Federation }, Worker>({
     };
 
     await use(nf);
+
+    // Every pooling spec holds its last page to the no-tear oracle, whatever it asserts itself.
+    if (booted && testInfo.status === 'passed' && testInfo.file.includes(join('e2e', 'pooling')))
+      expect(await nf.tears()).toEqual([]);
   },
 });
 
-export { expect } from '@playwright/test';
+export { expect };
 
 // The maps a document carries, as the browser combines them: a key an earlier map set is never replaced.
 const merge = (maps: ImportMap[]): ImportMap => {

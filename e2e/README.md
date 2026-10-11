@@ -48,6 +48,7 @@ declared, the static import throws and the test fails.
   **classic** script on purpose: a `type="module"` boot would itself be a module load, and a native
   import map has to be installed before the first one.
 - **`federation.ts`** — the Playwright fixture. Server and browser are worker-scoped, `nf` is per test.
+  After every passing test under `pooling/` it also asserts `nf.tears()` is empty on the last page.
 - **`coherence.ts`** — the measures taken off a whole portfolio rather than one external: which tag each
   external is still shared at, which packages ended up split across two tags, which Angular minor lines
   each remote's code actually holds.

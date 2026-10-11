@@ -101,6 +101,8 @@ test.describe('provenance: the init path keeps a family on one build', () => {
     for (const [label, portfolio] of orderings) {
       // A namespace per ordering: each init is a fresh election rather than a warm start off the last.
       await nf.init(portfolio, { namespace: label });
+      // The fixture's no-tear check sees only the last namespace.
+      expect(await nf.tears()).toEqual([]);
       verdicts[label] = await nf.islands();
       reports[label] = await nf.warns();
     }

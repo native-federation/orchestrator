@@ -303,7 +303,10 @@ test.describe('shapes: dense chunking maps a chunk per serving remote', () => {
 
     // And it works: loading mfe2's module pulls mfe1's core, which pulls mfe1's chunks.
     expect((await nf.load('team/mfe2')).seen['@angular/core']).toBe('mfe1|@angular/core@18.0.0');
-    expect(nf.chunkLoads()).toEqual(['http://mfe1/chunk-NG1.js', 'http://mfe1/chunk-NG2.js']);
+    expect(nf.chunkLoads().sort()).toEqual([
+      'http://mfe1/chunk-NG1.js',
+      'http://mfe1/chunk-NG2.js',
+    ]);
   });
 
   test('gives an islanded remote its own chunk graph', async ({ nf }) => {

@@ -36,7 +36,7 @@ test.describe('symmetric: one minor line, or two', () => {
     // Nothing is scoped at all, so the map carries no `scopes` key.
     expect((await nf.map()).scopes).toBeUndefined();
     await nf.loadAll();
-    expect(nf.downloads()).toEqual([
+    expect(nf.downloads().sort()).toEqual([
       'http://mfe1/@angular/core.js',
       'http://mfe1/@angular/router.js',
     ]);
@@ -347,7 +347,7 @@ test.describe('symmetric: host precedence', () => {
         '@angular/core': 'mfe1|@angular/core@22.1.0',
         '@angular/router': 'mfe1|@angular/router@22.1.0',
       });
-    expect(nf.downloads()).toEqual([
+    expect(nf.downloads().sort()).toEqual([
       'http://mfe1/@angular/core.js',
       'http://mfe1/@angular/router.js',
     ]);
@@ -438,7 +438,7 @@ test.describe('symmetric: which version the election picks', () => {
     await nf.init(consumers);
     await nf.loadAll();
 
-    expect(nf.downloads()).toEqual([
+    expect(nf.downloads().sort()).toEqual([
       'http://mfe1/@angular/core.js',
       'http://mfe1/@angular/router.js',
     ]);

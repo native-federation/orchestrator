@@ -28,7 +28,7 @@ test.describe('asymmetric: containment and ragged coverage', () => {
     expect((await nf.map()).scopes).toBeUndefined();
     await nf.loadAll();
     expect(await nf.buildsOf('@angular/core')).toEqual(['mfe1|@angular/core@22.1.0']);
-    expect(nf.downloads()).toEqual([
+    expect(nf.downloads().sort()).toEqual([
       'http://mfe1/@angular/core.js',
       'http://mfe1/@angular/router.js',
     ]);

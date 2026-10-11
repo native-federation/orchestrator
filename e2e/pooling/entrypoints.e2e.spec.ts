@@ -57,10 +57,10 @@ test.describe('entrypoint coverage: electing the basis', () => {
       [`${M}/table`]: build(3),
     });
     expect(await nf.buildsOf(M)).toEqual([build(3)]);
-    expect(nf.downloads()).toEqual([
+    expect(nf.downloads().sort()).toEqual([
       `${SCOPE.mfe3}${M}.js`,
-      `${SCOPE.mfe3}${M}/table.js`,
       `${SCOPE.mfe3}${M}/sort.js`,
+      `${SCOPE.mfe3}${M}/table.js`,
     ]);
   });
 
