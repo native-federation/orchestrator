@@ -209,6 +209,29 @@ test.describe('lifecycle: the warm start', () => {
     expect(await nf.map()).toEqual(cold);
   });
 
+  test('keeps the stored winner of a tie when the winner redeploys unchanged', async ({ nf }) => {
+    // mfe1 and mfe2 ship one family build, so they tie and registration order elects mfe1. Redeployed at a
+    // new URL, mfe1's copies are evicted and stored again after mfe2's: registration order would now
+    // elect mfe2, and only the stored winner keeps mfe1.
+    const twin = (name: string, scopeUrl: string) =>
+      remote(name, scopeUrl, [
+        dep('@angular/core', '22.1.0', { req: '^22.0.0' }),
+        dep('@angular/router', '22.1.0', { req: '^22.0.0' }),
+      ]);
+    await nf.init([twin('team/mfe1', SCOPE.mfe1), twin('team/mfe2', SCOPE.mfe2)]);
+    expect((await nf.map()).imports['@angular/core']).toBe('http://mfe1/@angular/core.js');
+
+    const redeployed = `${SCOPE.mfe1}v2/`;
+    await nf.init([twin('team/mfe1', redeployed), twin('team/mfe2', SCOPE.mfe2)]);
+
+    expect(nf.fetches()).toEqual([`${redeployed}remoteEntry.json`]);
+    const map = await nf.map();
+    expect(map.imports['@angular/core']).toBe(`${redeployed}@angular/core.js`);
+    expect(map.imports['@angular/router']).toBe(`${redeployed}@angular/router.js`);
+    const winners = Object.values((await nf.store())['__GLOBAL__'] ?? {}).map(e => e.poolWinner);
+    expect(winners).toEqual(['team/mfe1', 'team/mfe1']);
+  });
+
   test('rebuilds the same map from a manifest URL as from a manifest object', async ({ nf }) => {
     // The manifest can arrive either way; both must produce the same import map. The URL form is one
     // more real fetch, which is the only difference the browser sees.

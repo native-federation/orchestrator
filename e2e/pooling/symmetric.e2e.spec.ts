@@ -483,3 +483,28 @@ test.describe('symmetric: which version the election picks', () => {
     expect(await nf.buildsOf('@angular/core')).toEqual(['mfe1|@angular/core@22.0.8']);
   });
 });
+
+test.describe('symmetric: strictExternalCompatibility', () => {
+  test('rejects the init when a strict range rejects the elected build, and commits nothing', async ({
+    nf,
+  }) => {
+    // mfe2's strict `~21.2.0` router rejects the 22.1.0 family mfe1 and mfe3 elect. Without the flag mfe2
+    // is islanded; with it, pooling refuses the init before determine runs.
+    const family = (version: string, req: string) => [
+      dep('@angular/core', version, { req }),
+      dep('@angular/router', version, { req }),
+    ];
+    const init = nf.init(
+      [
+        remote('team/mfe1', SCOPE.mfe1, family('22.1.0', '^22.0.0')),
+        remote('team/mfe2', SCOPE.mfe2, family('21.2.18', '~21.2.0')),
+        remote('team/mfe3', SCOPE.mfe3, family('22.1.0', '^22.0.0')),
+      ],
+      { strict: { strictExternalCompatibility: true } }
+    );
+
+    await expect(init).rejects.toThrow(/Could not pool 'angular' in scope __GLOBAL__/);
+    expect(await nf.maps()).toEqual([]);
+    expect(await nf.store()).toEqual({});
+  });
+});
