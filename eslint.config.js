@@ -41,12 +41,16 @@ const NO_STEPS = {
 // specifiers always use `/`, whatever the OS. A step never imports another; templates such as
 // store-remote-entry and apply-winner are not steps.
 const DI_DIR = path.join(__dirname, 'src', 'lib', 'core', '5.di');
-const STEPS = [...new Set(
-    fs.readdirSync(DI_DIR)
-        .filter(file => file.endsWith('.factory.ts'))
-        .flatMap(file => [...fs.readFileSync(path.join(DI_DIR, file), 'utf8').matchAll(/from '[^']*2\.app\/steps\/([^']+)'/g)])
-        .map(match => path.posix.basename(match[1]))
-)];
+const FACTORIES = fs.readdirSync(DI_DIR)
+    .filter(file => file.endsWith('.factory.ts'))
+    .map(file => fs.readFileSync(path.join(DI_DIR, file), 'utf8'));
+const STEP_IMPORTS = FACTORIES.flatMap(source => [...source.matchAll(/from '[^']*2\.app\/steps\/([^']+)'/g)]);
+// A step import the scrape misses (another quote style, a new import form) would silently drop its rule.
+const STEP_MENTIONS = FACTORIES.reduce((count, source) => count + source.split('2.app/steps/').length - 1, 0);
+if (STEP_IMPORTS.length === 0 || STEP_IMPORTS.length !== STEP_MENTIONS) {
+    throw new Error(`eslint.config.js: scraped ${STEP_IMPORTS.length} step imports from 5.di/*.factory.ts, but they mention 2.app/steps/ ${STEP_MENTIONS} times. Fix the scrape.`);
+}
+const STEPS = [...new Set(STEP_IMPORTS.map(match => path.posix.basename(match[1])))];
 const NO_OTHER_STEP = {
     group: STEPS.map(step => `**/${step}`),
     message: 'A step never imports another step. Share through 1.domain or a template instead.',
