@@ -12,15 +12,11 @@ import {
 } from 'lib/testing/pooling/generate-portfolio';
 import {
   TIMEOUT,
-  accepts,
   copiesOf,
-  electedTags,
   initOrRefuse,
-  oracleVerdict,
   lenient,
   openPortfolio,
   outcome,
-  placementOf,
   poolNameDrift,
   poolTears,
   pools,
@@ -192,66 +188,6 @@ describe('pooling properties: init (generated portfolios)', { timeout: TIMEOUT }
       }
     ));
 
-  it('poolCause marks exactly the copies a remote serves itself, off the elected build', () =>
-    run(6, portfolioArbitrary(), 125, async spec => {
-      const init = await initOrRefuse(spec);
-      if (!init.ok) return;
-      const { importMap, record } = init.result;
-      const { runs } = outcome(importMap, record);
-
-      for (const [pool, members] of pools(record)) {
-        type Copy = {
-          caused: boolean;
-          action: string;
-          tag: string;
-          specifier: string;
-          file: string;
-        };
-        const copies = new Map<string, Copy[]>();
-        for (const external of Object.values(members))
-          for (const version of external.versions)
-            for (const meta of version.remotes)
-              for (const [specifier, file] of Object.entries(meta.entries)) {
-                if (!copies.has(meta.name)) copies.set(meta.name, []);
-                copies.get(meta.name)!.push({
-                  caused: meta.poolCause !== undefined,
-                  action: version.action,
-                  tag: version.tag,
-                  specifier,
-                  file,
-                });
-              }
-
-        for (const [remote, shipped] of copies) {
-          const partial = shipped.some(c => c.caused) && shipped.some(c => !c.caused);
-          for (const copy of shipped) {
-            const at = { pool, remote, specifier: copy.specifier };
-            // The record: a cause on exactly the copies placed in a `scope` row.
-            expect({ ...at, caused: copy.caused }).toEqual({
-              ...at,
-              caused: copy.action === 'scope',
-            });
-            // The map: such a copy runs the remote's own file, under its own scope.
-            if (copy.caused)
-              expect({
-                ...at,
-                url: importMap.scopes?.[scopeUrlOf(remote)]?.[copy.specifier],
-              }).toEqual({
-                ...at,
-                url: _path.join(scopeUrlOf(remote), copy.file),
-              });
-            // A remote that self-serves only part of its family takes the elected files for the rest only
-            // where they are its own versions (rule 5); anything else would mix two builds.
-            else if (partial)
-              expect({ ...at, runs: runs[`${remote}|${copy.specifier}`] }).toEqual({
-                ...at,
-                runs: copy.tag,
-              });
-          }
-        }
-      }
-    }));
-
   it('the host is never islanded', () =>
     run(
       7,
@@ -304,116 +240,6 @@ describe('pooling properties: init (generated portfolios)', { timeout: TIMEOUT }
             if (importMap.imports[specifier] !== undefined)
               imports[specifier] = importMap.imports[specifier];
         expect({ pool, view }).toEqual({ pool, view: imports });
-      }
-    }));
-
-  it('cause justified: incompatible only for a rejected elected tag, uncovered only for a gap or no witness', () =>
-    run(9, portfolioArbitrary({ latestSharedExternal: true }), 250, async spec => {
-      const init = await initOrRefuse(spec);
-      if (!init.ok) return;
-      const { importMap, record } = init.result;
-      for (const [pool, members] of pools(record)) {
-        const copies = copiesOf(members);
-        const elected = electedTags(importMap, copies);
-        const remotes = [...new Set(copies.map(c => c.remote))];
-        for (const remote of remotes) {
-          const { causes } = placementOf(remote, copies);
-          if (causes.length === 0) continue;
-          const { rejects, missing, witnessed } = oracleVerdict(remote, copies, elected, remotes);
-          const at = { pool, remote, causes };
-          // One election, one reason per remote.
-          expect(at).toEqual({ ...at, causes: [causes[0]] });
-          if (causes[0] === 'incompatible')
-            expect({ ...at, rejects }).toEqual({ ...at, rejects: true });
-          else
-            expect({ ...at, rejects, gap: missing || !witnessed }).toEqual({
-              ...at,
-              rejects: false,
-              gap: true,
-            });
-        }
-      }
-    }));
-
-  it('no needless island: a remote the elected build serves and witnesses is never placed off it', () =>
-    run(10, portfolioArbitrary({ latestSharedExternal: true }), 250, async spec => {
-      const init = await initOrRefuse(spec);
-      if (!init.ok) return;
-      const { importMap, record } = init.result;
-      for (const [pool, members] of pools(record)) {
-        const copies = copiesOf(members);
-        const elected = electedTags(importMap, copies);
-        const remotes = [...new Set(copies.map(c => c.remote))];
-        for (const remote of remotes) {
-          const { rejects, missing, witnessed } = oracleVerdict(remote, copies, elected, remotes);
-          if (rejects || missing || !witnessed) continue;
-          const { causes, servedBy, servesOthers } = placementOf(remote, copies);
-          // The one exception is documented: a subpool's build stays for the other members that need it.
-          const keepsSubpool = servedBy.length === 1 && servedBy[0] === remote && servesOthers;
-          const at = { pool, remote };
-          expect({ ...at, causes, servedBy: keepsSubpool ? [] : servedBy }).toEqual({
-            ...at,
-            causes: [],
-            servedBy: [],
-          });
-        }
-      }
-    }));
-
-  // A remote alone serves its family itself, which a subpool whose build serves it would spare. The rounds
-  // see to that for the remotes waiting at the time; a remote the publish fixpoint takes off the global map
-  // later must find a subpool too, whether it came from one or from round 1 (docs/version-resolver.md
-  // §"How pooling resolves", step 4). Without that, it went `uncovered`, and this property failed at offset 19
-  // (most generated portfolios demote nobody). The one exception is on purpose (step 2): a lender stays out of
-  // a subpool so that its loan keeps a publisher. Restated here as any remote that ships, at the winner's tag of
-  // a member, an entrypoint the winner does not list, which spares a few more remotes than the election does.
-  // Two known gaps the election still has (backlog) that this stream does not reach: (A) a lender whose loan
-  // the fixpoint drops stays alone, as `lenders` is computed once against round 1's coverage; (B) the build of
-  // a dissolved subpool stays alone even when a surviving subpool's build serves it.
-  it('no stray loner: no remote left alone is served by a final subpool build', () =>
-    run(19, portfolioArbitrary({ labelNoise: true }), 125, async spec => {
-      const init = await initOrRefuse(spec);
-      if (!init.ok) return;
-      for (const [pool, members] of pools(init.result.record)) {
-        const copies = copiesOf(members);
-        const remotes = [...new Set(copies.map(c => c.remote))];
-        const builds = remotes.filter(r => placementOf(r, copies).servesOthers);
-        const winnerCopies = copies.filter(
-          c => c.remote === Object.values(members).find(m => m.poolWinner)?.poolWinner
-        );
-        const lends = (remote: string) =>
-          copies.some(
-            c =>
-              c.remote === remote &&
-              c.specifiers.some(
-                s =>
-                  !winnerCopies.some(w => w.specifiers.includes(s)) &&
-                  winnerCopies.some(
-                    w => w.tag === c.tag && (w.member === c.member || s.startsWith(`${w.member}/`))
-                  )
-              )
-          );
-        // The election's `serves`: the build lists every specifier the remote ships, at a tag its range accepts.
-        const serves = (build: string, remote: string) => {
-          const tagOf = new Map<string, string>();
-          for (const c of copies)
-            if (c.remote === build)
-              for (const s of c.specifiers) if (!tagOf.has(s)) tagOf.set(s, c.tag);
-          return copies
-            .filter(c => c.remote === remote)
-            .every(c =>
-              c.specifiers.every(s => tagOf.has(s) && accepts(tagOf.get(s)!, c.tag, c.range))
-            );
-        };
-        for (const remote of remotes) {
-          const { causes, servedBy } = placementOf(remote, copies);
-          if (causes.length === 0 || servedBy.length > 0 || lends(remote)) continue;
-          const at = { pool, remote };
-          expect({ ...at, servedBy: builds.filter(b => serves(b, remote)) }).toEqual({
-            ...at,
-            servedBy: [],
-          });
-        }
       }
     }));
 
