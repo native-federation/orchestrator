@@ -31,24 +31,16 @@ const versionCheck = createVersionCheck();
 // A deeper search runs proportionally longer.
 export const TIMEOUT = 20_000 * SCALE;
 
-// Every property passes its own `seedOffset`, so no two replay one stream of portfolios. fast-check stops
-// short of the test timeout so that a failure still reports its counterexample, shrunk as far as it got, and
-// fails a property it stopped short of its cases, so a slow machine cannot pass on fewer of them.
-// `fixed` replays the CI stream whatever the deeper search asks and stops at the first failure unshrunk: for an
-// `it.fails` property, which must keep failing and has nothing to report.
+// Every property passes its own `seedOffset`, so no two replay one stream of portfolios.
 export const run = <T>(
   seedOffset: number,
   arbitrary: fc.Arbitrary<T>,
   numRuns: number,
-  predicate: (v: T) => Promise<void>,
-  { fixed = false }: { fixed?: boolean } = {}
+  predicate: (v: T) => Promise<void>
 ) =>
   fc.assert(fc.asyncProperty(arbitrary, predicate), {
-    seed: (fixed ? CI_SEED : SEED) + seedOffset,
-    numRuns: fixed ? numRuns : Math.ceil(numRuns * SCALE),
-    interruptAfterTimeLimit: TIMEOUT * 0.7,
-    markInterruptAsFailure: true,
-    endOnFailure: fixed,
+    seed: SEED + seedOffset,
+    numRuns: Math.ceil(numRuns * SCALE),
   });
 
 export const scopeUrlsOf = (entries: RemoteEntry[]) =>

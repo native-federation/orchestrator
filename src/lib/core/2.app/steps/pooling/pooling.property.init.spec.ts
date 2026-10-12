@@ -502,8 +502,7 @@ describe('pooling properties: redeploys (generated portfolios)', { timeout: TIME
     ));
 });
 
-// Shrunk counterexamples the properties found. Each is `it.fails` until fixed, so vitest reports the fix, then
-// stays here as a plain `it`; the bug's explicit guard goes in `pooling.regression.spec.ts`.
+// Shrunk counterexamples the properties found; the bug's explicit guard goes in `pooling.regression.spec.ts`.
 describe('pooling properties: shrunk counterexamples', () => {
   // No-tear (binding) with label noise, found by turning `labelNoise`
   // on for the init properties (CI seed).
