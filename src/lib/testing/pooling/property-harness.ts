@@ -1,0 +1,505 @@
+import fc from 'fast-check';
+import {
+  GLOBAL_SCOPE,
+  STRICT_SCOPE,
+  type ImportMap,
+  type RemoteEntry,
+  type shareScope,
+} from 'lib/core/1.domain';
+import { NFError } from 'lib/core/native-federation.error';
+import { createAcceptsTag } from 'lib/core/1.domain/externals/compatibility';
+import { owningPackage } from 'lib/core/1.domain/externals/specifier';
+import { buildPools } from 'lib/core/1.domain/pooling/membership';
+import { createVersionCheck } from 'lib/core/3.adapters/checks/version.check';
+import * as _path from 'lib/utils/path';
+import { type GroupTear, tearsByPool, withLabelledPools } from './no-tear';
+import { hostOf, scopeUrlOf, toRemoteEntries, type PortfolioSpec } from './generate-portfolio';
+import { portfolio } from './portfolio';
+
+/**
+ * What the pooling property specs (`pooling.property.init.spec.ts`, `pooling.property.dynamic.spec.ts`)
+ * share: the seeded `run`, a page sequence on `portfolio()` (`openPortfolio`, `initOrRefuse`), the per-pool
+ * oracles, and the election rules restated for the quality properties.
+ */
+
+// A deeper local search: POOLING_PROPERTY_SEED=<n> POOLING_PROPERTY_SCALE=<factor> (CI uses the defaults).
+const CI_SEED = 20261007;
+const SEED = Number(process.env['POOLING_PROPERTY_SEED'] ?? CI_SEED);
+const SCALE = Number(process.env['POOLING_PROPERTY_SCALE'] ?? 1);
+const versionCheck = createVersionCheck();
+
+// A deeper search runs proportionally longer.
+export const TIMEOUT = 20_000 * SCALE;
+
+// Every property passes its own `seedOffset`, so no two replay one stream of portfolios.
+export const run = <T>(
+  seedOffset: number,
+  arbitrary: fc.Arbitrary<T>,
+  numRuns: number,
+  predicate: (v: T) => Promise<void>
+) =>
+  fc.assert(fc.asyncProperty(arbitrary, predicate), {
+    seed: SEED + seedOffset,
+    numRuns: Math.ceil(numRuns * SCALE),
+  });
+
+export const scopeUrlsOf = (entries: RemoteEntry[]) =>
+  Object.fromEntries(entries.map(e => [e.name, scopeUrlOf(e.name)]));
+
+// Per pool as the record names it, for the checks that read verdicts rather than run the oracle.
+export function pools(record: shareScope): Map<string, shareScope> {
+  const byPool = new Map<string, shareScope>();
+  for (const [name, external] of Object.entries(record)) {
+    if (external.poolName === undefined) continue;
+    let members = byPool.get(external.poolName);
+    if (!members) byPool.set(external.poolName, (members = {}));
+    members[name] = external;
+  }
+  return byPool;
+}
+
+// The oracle per pool, as the labels make it rather than as the record names it; the strict scope, never
+// pooled, is read as stored. Unpooled packages are left out on purpose: outside a pool the import-map builders
+// self-fill an entrypoint the shared version lacks from the consumer's own build, a documented between-versions
+// tear that pooling makes no promise about.
+export function poolTears(
+  importMap: ImportMap,
+  record: shareScope,
+  scopeUrls: Record<string, string>,
+  host?: string,
+  scope = GLOBAL_SCOPE
+): GroupTear[] {
+  return tearsByPool({
+    importMap,
+    externals: { [scope]: scope === STRICT_SCOPE ? record : withLabelledPools(record) },
+    scopeUrls,
+    hosts: host === undefined ? [] : [host],
+  }).filter(tear => !tear.pool.startsWith(`${scope}|package:`));
+}
+
+// Every `pool|remote|oracle` that tears, for comparing two maps rather than asserting on one.
+export function torn(
+  importMap: ImportMap,
+  record: shareScope,
+  scopeUrls: Record<string, string>,
+  host?: string,
+  scope = GLOBAL_SCOPE
+): string[] {
+  return poolTears(importMap, record, scopeUrls, host, scope)
+    .flatMap(({ pool, incoherent, split, chunks }) => [
+      ...incoherent.map(({ remote }) => `${pool}|${remote}|incoherent`),
+      ...split.map(({ remote }) => `${pool}|${remote}|split`),
+      ...chunks.map(({ remote }) => `${pool}|${remote}|chunks`),
+    ])
+    .sort();
+}
+
+// `strictExternalCompatibility` may only refuse a portfolio in which some strict copy's range rejects a tag
+// shipped by another copy of its package or of a specifier it ships (a copy never rejects its own version).
+// Both keys: the resolver compares copies of one package, and a flat build ships an entrypoint as a package
+// of its own that pooling still judges by specifier.
+function hasForeignRejection(entries: RemoteEntry[]): boolean {
+  const keys = (s: RemoteEntry['shared'][number]) => [s.packageName, ...Object.keys(s.entries)];
+  const tags = new Map<string, Set<string>>();
+  for (const entry of entries)
+    for (const s of entry.shared)
+      if (s.singleton && s.version)
+        for (const key of keys(s)) {
+          if (!tags.has(key)) tags.set(key, new Set());
+          tags.get(key)!.add(s.version);
+        }
+
+  return entries.some(entry =>
+    entry.shared.some(
+      s =>
+        s.singleton &&
+        s.strictVersion &&
+        keys(s).some(key =>
+          [...(tags.get(key) ?? [])].some(
+            tag =>
+              versionCheck.compare(tag, s.version!) !== 0 &&
+              !versionCheck.isCompatible(tag, s.requiredVersion)
+          )
+        )
+    )
+  );
+}
+
+let namespaces = 0;
+
+// The refusals of the two strict steps, pooling and the resolver; anything else under strict is a crash.
+const REFUSALS = [
+  /^Could not pool '[^']+' in scope /,
+  /^Could not determine shared externals in scope /,
+];
+
+// One page sequence on `portfolio()`: every `init` after the first opens a warm page that skips what it has
+// cached, as get-remote-entries does; `load` adds a remote at runtime to the page as it stands, over every
+// earlier load's delta, and `reload` opens a new page for the next load.
+export function openPortfolio(
+  o: {
+    host?: string;
+    strict?: boolean;
+    scope?: string;
+    latestSharedExternal?: boolean;
+    scopeUncoveredEntrypoints?: boolean;
+  } = {}
+) {
+  const p = portfolio(
+    {},
+    {
+      hosts: o.host === undefined ? [] : [o.host],
+      strict: o.strict,
+      latestSharedExternal: o.latestSharedExternal,
+      scopeUncoveredEntrypoints: o.scopeUncoveredEntrypoints,
+      ...(o.scope === undefined ? {} : { scope: o.scope }),
+      storage: `nf-pooling-property-${namespaces++}`,
+      realRepositories: true,
+      assertNoTear: false,
+    }
+  );
+  // True while nothing has run on the page yet: it is new already, so the next step (a `reload` included)
+  // opens no other page.
+  let fresh = true;
+  const next = () => {
+    if (!fresh) p.reload();
+    fresh = false;
+  };
+  const result = (importMap: ImportMap) => ({
+    importMap,
+    record: structuredClone(p.stored()),
+    writes: p.writes(),
+  });
+
+  return {
+    // Where each remote is served from, as the flows stored it: a redeployed remote moves.
+    scopeUrls: p.scopeUrls,
+    async init(entries: RemoteEntry[]) {
+      next();
+      return result(await p.runInit(entries));
+    },
+    // A warm page that re-elects every pool.
+    async reelect() {
+      next();
+      return result(await p.reelect());
+    },
+    // A warm page after `name` changed.
+    async touch(name: string) {
+      next();
+      return result(await p.touch(name));
+    },
+    // A new page that runs no init of its own: a `load` on it runs over the map the record rebuilds.
+    reload() {
+      next();
+      fresh = true;
+    },
+    async load(entry: RemoteEntry) {
+      fresh = false;
+      const { committed, importMap: delta, merged } = await p.runDynamic(structuredClone(entry));
+      return { committed, delta, merged, record: structuredClone(p.stored()) };
+    },
+  };
+}
+
+// Inits the spec. Under `strictExternalCompatibility` a refusal is legal only when it is sound (some strict
+// copy rejects a foreign tag) and is the refusal itself: an `NFError` from pooling or the resolver. The
+// caller's checks are skipped for it.
+export async function initOrRefuse(spec: PortfolioSpec) {
+  const entries = toRemoteEntries(spec);
+  const host = hostOf(spec);
+  const rig = openPortfolio({
+    strict: spec.strict,
+    host,
+    scope: spec.shareScope,
+    latestSharedExternal: spec.latestSharedExternal,
+    scopeUncoveredEntrypoints: spec.scopeUncoveredEntrypoints,
+  });
+  try {
+    const result = await rig.init(entries);
+    return { ok: true as const, result, rig, entries, host };
+  } catch (error) {
+    if (!spec.strict) throw error;
+    expect(error).toBeInstanceOf(NFError);
+    const message = (error as Error).message;
+    expect({ message, refusal: REFUSALS.some(r => r.test(message)) }).toEqual({
+      message,
+      refusal: true,
+    });
+    expect(hasForeignRejection(entries)).toBe(true);
+    return { ok: false as const, entries, host };
+  }
+}
+
+// The map and record up to interchangeable providers: which tag each remote runs per specifier it ships, and
+// each copy's verdict. Which of two copies of one tag publishes a file is basis precedence, i.e. record order.
+// `scopeUrls` is needed only once a remote was redeployed to another URL.
+export function outcome(
+  importMap: ImportMap,
+  record: shareScope,
+  scopeUrls: Record<string, string> = {}
+) {
+  const scopeUrl = (remote: string) => scopeUrls[remote] ?? scopeUrlOf(remote);
+  const tagOfUrl = new Map<string, string>();
+  for (const external of Object.values(record))
+    for (const version of external.versions)
+      for (const meta of version.remotes)
+        for (const file of Object.values(meta.entries))
+          tagOfUrl.set(_path.join(scopeUrl(meta.name), file), version.tag);
+
+  const runs: Record<string, string | null> = {};
+  const verdicts: Record<string, unknown> = {};
+  for (const [name, external] of Object.entries(record))
+    for (const version of external.versions)
+      for (const meta of version.remotes) {
+        verdicts[`${name}|${meta.name}`] = {
+          tag: version.tag,
+          action: version.action,
+          poolName: external.poolName,
+          poolCause: meta.poolCause,
+          servedBy: meta.servedBy !== undefined,
+        };
+        for (const specifier of Object.keys(meta.entries)) {
+          const url =
+            importMap.scopes?.[scopeUrl(meta.name)]?.[specifier] ?? importMap.imports[specifier];
+          runs[`${meta.name}|${specifier}`] = url === undefined ? null : (tagOfUrl.get(url) ?? url);
+        }
+      }
+  return { runs, verdicts };
+}
+
+// Every `remote|specifier` a remote ships that the map leaves unresolved.
+export const unmapped = (runs: Record<string, string | null>): string[] =>
+  Object.keys(runs).filter(key => runs[key] === null);
+
+// `runs` split into the `remote|specifier` keys of the externals `record` names a pool for and the rest.
+export function byPooling(runs: Record<string, string | null>, record: shareScope) {
+  const keys = new Set<string>();
+  for (const external of Object.values(record))
+    if (external.poolName !== undefined)
+      for (const version of external.versions)
+        for (const meta of version.remotes)
+          for (const specifier of Object.keys(meta.entries)) keys.add(`${meta.name}|${specifier}`);
+
+  const pooled: typeof runs = {};
+  const unpooled: typeof runs = {};
+  for (const [key, tag] of Object.entries(runs)) (keys.has(key) ? pooled : unpooled)[key] = tag;
+  return { pooled, unpooled };
+}
+
+export const lenient = (spec: PortfolioSpec): PortfolioSpec => ({ ...spec, strict: false });
+
+export const accepts = createAcceptsTag(versionCheck.isCompatible, versionCheck.compare);
+
+// One copy of a pool member, as the quality properties read it.
+type PoolCopy = {
+  remote: string;
+  member: string;
+  tag: string;
+  range: string;
+  entries: Record<string, string>;
+  specifiers: string[];
+  poolCause?: string;
+  servedBy?: string;
+  action: string;
+};
+
+export function copiesOf(members: shareScope): PoolCopy[] {
+  return Object.entries(members).flatMap(([member, external]) =>
+    external.versions.flatMap(version =>
+      version.remotes.map(meta => ({
+        remote: meta.name,
+        member,
+        tag: version.tag,
+        range: meta.requiredVersion,
+        entries: meta.entries,
+        specifiers: Object.keys(meta.entries),
+        poolCause: meta.poolCause,
+        servedBy: meta.servedBy,
+        action: version.action,
+      }))
+    )
+  );
+}
+
+// The tag `imports` serves each of the pool's specifiers at, read off the map: a URL names the copy whose file it
+// is, and so its tag.
+export function electedTags(importMap: ImportMap, copies: PoolCopy[]): Map<string, string> {
+  const tagOfUrl = new Map<string, string>();
+  for (const copy of copies)
+    for (const file of Object.values(copy.entries))
+      tagOfUrl.set(_path.join(scopeUrlOf(copy.remote), file), copy.tag);
+  const elected = new Map<string, string>();
+  for (const copy of copies)
+    for (const specifier of copy.specifiers) {
+      const url = importMap.imports[specifier];
+      if (url !== undefined) elected.set(specifier, tagOfUrl.get(url) ?? url);
+    }
+  return elected;
+}
+
+/**
+ * What the election rules (docs/version-resolver.md §"How pooling resolves") read about one remote against the
+ * elected tags, restated independently of `election.ts`:
+ * - `rejects`: a copy's range rejects the elected tag of a specifier it ships (its own tag never);
+ * - `missing`: the global map serves no tag for one of its specifiers;
+ * - `witnessed`: one build of `builds` shipped every one of its specifiers at the elected tag, a build's package
+ *   tag standing in for an entrypoint it does not list (the witness rule the extension applies);
+ * - `agrees`: every tag it ships is the elected one, compared through the package where the map lacks the
+ *   specifier (the dynamic gate's shortcut to the global map).
+ */
+export function oracleVerdict(
+  remote: string,
+  copies: PoolCopy[],
+  elected: Map<string, string>,
+  builds: string[]
+) {
+  const own = copies.filter(c => c.remote === remote);
+  const memberTag = (copy: PoolCopy) =>
+    copies
+      .filter(c => c.member === copy.member)
+      .flatMap(c => c.specifiers)
+      .map(s => elected.get(s))
+      .find(tag => tag !== undefined);
+  const buildTag = (build: string, member: string) =>
+    copies.find(c => c.remote === build && c.member === member)?.tag;
+
+  return {
+    rejects: own.some(c =>
+      c.specifiers.some(s => elected.has(s) && !accepts(elected.get(s)!, c.tag, c.range))
+    ),
+    missing: own.some(c => c.specifiers.some(s => !elected.has(s))),
+    witnessed: builds.some(build =>
+      own.every(c => c.specifiers.every(s => buildTag(build, c.member) === elected.get(s)))
+    ),
+    agrees: own.every(c => {
+      const tag = memberTag(c);
+      return c.specifiers.every(
+        s => (elected.get(s) ?? tag) === undefined || (elected.get(s) ?? tag) === c.tag
+      );
+    }),
+  };
+}
+
+/**
+ * The dynamic gate's rule on the builds behind the map (docs/version-resolver.md §"Scope and dynamic init",
+ * step 1), restated independently of `gate.ts`. A committed file binds its pool-mates where its build runs
+ * them: a copy in a `scope` row runs its own files, a copy served by a subpool runs that build's. So this is
+ * whether the builds whose files `importMap` serves for `remote`'s specifiers run a pool specifier off the map
+ * at a tag other than the one `remote` reaches it at elsewhere: the map's (its package's where the map lacks
+ * it), else its own; with neither, whether two of those builds run it at two tags.
+ */
+export function servedOffMap(
+  remote: string,
+  copies: PoolCopy[],
+  importMap: ImportMap,
+  elected: Map<string, string>
+): boolean {
+  const builder = new Map<string, string>();
+  for (const copy of copies)
+    for (const file of Object.values(copy.entries))
+      builder.set(_path.join(scopeUrlOf(copy.remote), file), copy.remote);
+  const own = copies.filter(c => c.remote === remote);
+  const packageOf = (specifier: string) => owningPackage(specifier) ?? specifier;
+  const reachedTag = (specifier: string) =>
+    elected.get(specifier) ??
+    elected.get(packageOf(specifier)) ??
+    [...elected].find(([s]) => packageOf(s) === packageOf(specifier))?.[1] ??
+    own.find(c => c.specifiers.includes(specifier))?.tag ??
+    own.find(c => c.specifiers.some(s => packageOf(s) === packageOf(specifier)))?.tag;
+  const runTag = (copy: PoolCopy) =>
+    copy.servedBy === undefined
+      ? copy.tag
+      : (copies.find(c => c.remote === copy.servedBy && c.member === copy.member)?.tag ?? copy.tag);
+
+  const servers = new Set(
+    own.flatMap(c => c.specifiers).map(s => builder.get(importMap.imports[s] ?? ''))
+  );
+  const runs = new Map<string, Set<string>>();
+  for (const copy of copies) {
+    if (copy.remote === remote || !servers.has(copy.remote)) continue;
+    if (copy.action !== 'scope' && copy.servedBy === undefined) continue;
+    for (const specifier of copy.specifiers)
+      runs.set(specifier, (runs.get(specifier) ?? new Set()).add(runTag(copy)));
+  }
+  // With no tag to reach it at, a package is one version: its entrypoints' run tags must agree.
+  const unreached = new Map<string, Set<string>>();
+  for (const [specifier, tags] of runs) {
+    const reached = reachedTag(specifier);
+    if (reached !== undefined && [...tags].some(t => t !== reached)) return true;
+    if (reached === undefined) {
+      const pkg = packageOf(specifier);
+      unreached.set(pkg, new Set([...(unreached.get(pkg) ?? []), ...tags]));
+    }
+  }
+  return [...unreached.values()].some(tags => tags.size > 1);
+}
+
+// Range soundness: every pooled copy runs, per specifier it ships, a tag its own range accepts (its own tag
+// always counts), read off the map the way the browser resolves it. `only` narrows it to one remote.
+export function rangeViolations(importMap: ImportMap, record: shareScope, only?: string): string[] {
+  const out: string[] = [];
+  for (const [pool, members] of pools(record)) {
+    const copies = copiesOf(members);
+    const tagOfUrl = new Map<string, string>();
+    for (const copy of copies)
+      for (const file of Object.values(copy.entries))
+        tagOfUrl.set(_path.join(scopeUrlOf(copy.remote), file), copy.tag);
+    for (const copy of copies) {
+      if (only !== undefined && copy.remote !== only) continue;
+      for (const specifier of copy.specifiers) {
+        const url =
+          importMap.scopes?.[scopeUrlOf(copy.remote)]?.[specifier] ?? importMap.imports[specifier];
+        // No tag means the URL is no file of this pool: an unmapped specifier is `assertResolves`' failure
+        // (portfolio.ts, every init and load); a URL from outside the pool is not judged here.
+        const tag = url === undefined ? undefined : tagOfUrl.get(url);
+        if (tag !== undefined && !accepts(tag, copy.tag, copy.range))
+          out.push(`${pool}|${copy.remote}|${specifier}: runs ${tag}, range ${copy.range}`);
+      }
+    }
+  }
+  return out;
+}
+
+// Pool state that names a remote must name one that ships the pool: each member's `poolWinner`, and the
+// `servedBy` of each copy.
+export function strayNames(record: shareScope): string[] {
+  const out: string[] = [];
+  for (const [pool, members] of pools(record)) {
+    const shippers = new Set(copiesOf(members).map(c => c.remote));
+    for (const [name, external] of Object.entries(members)) {
+      if (external.poolWinner !== undefined && !shippers.has(external.poolWinner))
+        out.push(`${pool}|${name}: poolWinner ${external.poolWinner}`);
+      for (const version of external.versions)
+        for (const meta of version.remotes)
+          if (meta.servedBy !== undefined && !shippers.has(meta.servedBy))
+            out.push(`${pool}|${name}|${meta.name}: servedBy ${meta.servedBy}`);
+    }
+  }
+  return out;
+}
+
+// Every stored `poolName` that differs from the pool the record computes now (undefined in no pool). An
+// election writes every member under its pool's name, so a name out of sync is a record no election wrote.
+// `pooledOnly` skips externals in no pool: a dynamic load leaves their stale names for the next init.
+export function poolNameDrift(record: shareScope, { pooledOnly = false } = {}): string[] {
+  const computed = new Map<string, string>();
+  for (const [pool, members] of buildPools(record).pools)
+    for (const { name } of members) computed.set(name, pool);
+  return Object.entries(record)
+    .filter(([name]) => !pooledOnly || computed.has(name))
+    .filter(([name, external]) => external.poolName !== computed.get(name))
+    .map(
+      ([name, external]) => `${name}: stored ${external.poolName}, computed ${computed.get(name)}`
+    );
+}
+
+// Where pooling placed one remote: the causes on its copies and the builds they run.
+export function placementOf(remote: string, copies: PoolCopy[]) {
+  const own = copies.filter(c => c.remote === remote);
+  return {
+    causes: [...new Set(own.flatMap(c => c.poolCause ?? []))],
+    servedBy: [...new Set(own.flatMap(c => c.servedBy ?? []))],
+    // A subpool's build serves itself too (`servedBy: <itself>`); that is a subpool only with other members.
+    servesOthers: copies.some(c => c.remote !== remote && c.servedBy === remote),
+  };
+}

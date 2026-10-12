@@ -106,6 +106,14 @@ export function createStoreRemoteEntry(
       if (tag === null) return;
 
       if (external.singleton) {
+        if (
+          external.requiredVersion &&
+          !ports.versionCheck.isCompatible(tag, external.requiredVersion)
+        )
+          config.log.warn(
+            logStep,
+            `[${remoteEntry.name}][${external.packageName}] requiredVersion '${external.requiredVersion}' excludes its own version '${tag}'; '${tag}' is still accepted for it.`
+          );
         onSharedExternal(remoteEntry, external, sharedExternalContext(remoteEntry, external, tag));
       } else {
         addScopedExternal(remoteEntry, external, tag);
@@ -200,8 +208,7 @@ export function createStoreRemoteEntry(
         ports.sharedExternalsRepo.addOrUpdate(
           sharedInfo.packageName,
           {
-            dirty: cached.dirty,
-            ...(cached.poolName !== undefined && { poolName: cached.poolName }),
+            ...cached,
             versions: cached.versions.sort((a, b) => ports.versionCheck.compare(b.tag, a.tag)),
           },
           sharedInfo.shareScope

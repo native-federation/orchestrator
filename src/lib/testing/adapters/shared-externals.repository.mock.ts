@@ -10,7 +10,4 @@ export const mockSharedExternalsRepository = (): Mocked<ForSharedExternalsStorag
   scopeType: vi.fn(),
   getScopes: vi.fn((o = { includeGlobal: true }) => (o.includeGlobal ? [GLOBAL_SCOPE] : [])),
   tryGet: vi.fn(),
-  // Default to "a tag is present" so behaviour specs that seed pooled externals directly (bypassing
-  // store-remote-entry) exercise the full pooling logic; the early-out is asserted by opting out.
-  hasPoolState: vi.fn(() => true),
 });

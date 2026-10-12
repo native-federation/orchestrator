@@ -33,107 +33,6 @@ describe('createSharedExternalsRepository', () => {
     return { mockStorage, externalsRepo, entry };
   };
 
-  /**
-   * `hasPoolState()` reads the cache, not a flag set while this init's entries were merged. That is the
-   * whole point: a warm init whose tagged remotes are all cached merges nothing, and pooling still has to
-   * coordinate their pool — see docs/version-resolver.md §"How pooling resolves". A stored pool name counts
-   * as state too, so a scope whose last tag left is still visited to clear it.
-   *
-   * It answers per share scope, defaulting to the global one like every other read on this repository. A
-   * pool never spans share scopes, so a tag elsewhere is no reason to pool here — that is what keeps one
-   * tag from putting every scope through a pool-graph build.
-   */
-  describe('pool tags', () => {
-    const taggedExternal = (pool?: string): SharedExternal => ({
-      dirty: false,
-      versions: [
-        {
-          tag: v2_1_1,
-          host: false,
-          action: 'share',
-          remotes: [
-            {
-              name: 'team/mfe1',
-              requiredVersion: '~2.1.0',
-              strictVersion: true,
-              cached: false,
-              entries: { 'dep-a': 'dep-a.js' },
-              ...(pool ? { pool: pool } : {}),
-            },
-          ],
-        },
-      ],
-    });
-
-    it('reports none on a fresh repository', () => {
-      const { externalsRepo } = setupWithCache();
-      expect(externalsRepo.hasPoolState()).toBe(false);
-    });
-
-    it('reports none when no stored remote carries a tag', () => {
-      const { externalsRepo } = setupWithCache({ [GLOBAL_SCOPE]: { 'dep-a': taggedExternal() } });
-      expect(externalsRepo.hasPoolState()).toBe(false);
-    });
-
-    // The regression: nothing was merged this init, the tag exists only in storage.
-    it('reports a tag read from a warm cache, with nothing merged this init', () => {
-      const { externalsRepo } = setupWithCache({
-        [GLOBAL_SCOPE]: { 'dep-a': taggedExternal('grp') },
-      });
-      expect(externalsRepo.hasPoolState()).toBe(true);
-    });
-
-    it('finds a tag in a non-global share scope too', () => {
-      const { externalsRepo } = setupWithCache({
-        [GLOBAL_SCOPE]: { 'dep-a': taggedExternal() },
-        'team-a': { 'dep-b': taggedExternal('grp') },
-      });
-      expect(externalsRepo.hasPoolState('team-a')).toBe(true);
-    });
-
-    // The narrowing itself: `team-a`'s tag cannot form a pool in the global scope, so it must not report
-    // one there — otherwise every scope pays for a pool graph because one of them was tagged.
-    it('does not report another scope tag for the scope asked about', () => {
-      const { externalsRepo } = setupWithCache({
-        [GLOBAL_SCOPE]: { 'dep-a': taggedExternal() },
-        'team-a': { 'dep-b': taggedExternal('grp') },
-      });
-      expect(externalsRepo.hasPoolState(GLOBAL_SCOPE)).toBe(false);
-      expect(externalsRepo.hasPoolState()).toBe(false);
-    });
-
-    it('reports none for a scope that does not exist', () => {
-      const { externalsRepo } = setupWithCache({
-        [GLOBAL_SCOPE]: { 'dep-a': taggedExternal('grp') },
-      });
-      expect(externalsRepo.hasPoolState('team-unknown')).toBe(false);
-    });
-
-    // The tags are gone but the record still names a pool: pooling has to visit the scope to clear it.
-    it('reports a stored pool name with no tag left', () => {
-      const { externalsRepo } = setupWithCache({
-        [GLOBAL_SCOPE]: { 'dep-a': { ...taggedExternal(), poolName: 'grp' } },
-      });
-      expect(externalsRepo.hasPoolState()).toBe(true);
-    });
-
-    // Records written before `poolName` existed, or whose names were already cleared, can still carry an
-    // anchor; only pooling sets one, so the scope must be visited to drop it.
-    it('reports a stored anchor with no tag or name left', () => {
-      const external = taggedExternal();
-      external.versions[0]!.remotes[0]!.servedBy = 'team/mfe2';
-      const { externalsRepo } = setupWithCache({ [GLOBAL_SCOPE]: { 'dep-a': external } });
-      expect(externalsRepo.hasPoolState()).toBe(true);
-    });
-
-    it('ignores a blank tag', () => {
-      const { externalsRepo } = setupWithCache({
-        [GLOBAL_SCOPE]: { 'dep-a': taggedExternal('  ') },
-      });
-      expect(externalsRepo.hasPoolState()).toBe(false);
-    });
-  });
-
   describe('initialization', () => {
     it('should not write to storage before a mutation is committed', () => {
       const mockStorage = { 'shared-externals': undefined };
@@ -535,7 +434,7 @@ describe('createSharedExternalsRepository', () => {
     });
 
     // `determine` grants a version with `host: true` precedence over every other version of the external,
-    // and `hostRemotes` reads it to decide who pooling may never repoint. Both then take `remotes[0]` for
+    // and pooling's `copiesByRemote` reads it to decide who pooling may never repoint. Both then take `remotes[0]` for
     // the host — so leaving the flag on a version the host just left hands both to whoever moved up, and a
     // host that moved to another tag loses to the tag it abandoned.
     it('should clear the host flag when the leading copy is evicted', () => {
@@ -675,6 +574,52 @@ describe('createSharedExternalsRepository', () => {
           'dep-d': { dirty: false, versions: [versionD1] },
         },
       });
+    });
+    // A pool's stored name is the only trace of its membership once a member is gone, and a deleted
+    // external is no member any more: marking its same-named survivors dirty makes the next init re-elect
+    // every pool of that scope. Only survivors in the same scope are marked; a lost copy alone already
+    // dirties its own external.
+    it('should mark the same-pool survivors of a deleted external dirty, in that scope only', () => {
+      const only = (name: string, remote: string, poolName?: string): SharedExternal => ({
+        dirty: false,
+        ...(poolName === undefined ? {} : { poolName }),
+        versions: [mockVersion.shared(v2_1_2, name, { remotes: [remote] })],
+      });
+      const shared = (name: string, poolName: string): SharedExternal => ({
+        dirty: false,
+        poolName,
+        versions: [mockVersion.shared(v2_1_2, name, { remotes: ['team/mfe1', 'team/mfe2'] })],
+      });
+
+      const { externalsRepo } = setupWithCache({
+        [GLOBAL_SCOPE]: {
+          gone: only('gone', 'team/mfe1', 'P'),
+          sibling: only('sibling', 'team/mfe2', 'P'),
+          other: only('other', 'team/mfe2', 'Q'),
+          unnamed: only('unnamed', 'team/mfe2'),
+          // Loses a copy but survives: dirty itself, yet its own pool `R` is not dragged in here.
+          trimmed: shared('trimmed', 'R'),
+          'trimmed-sibling': only('trimmed-sibling', 'team/mfe2', 'R'),
+        },
+        team: {
+          'elsewhere-sibling': only('elsewhere-sibling', 'team/mfe2', 'P'),
+        },
+      });
+
+      externalsRepo.removeFromAllScopes(new Set(['team/mfe1']));
+
+      const dirty = (scope: string) =>
+        Object.fromEntries(
+          Object.entries(externalsRepo.getFromScope(scope)).map(([name, e]) => [name, e.dirty])
+        );
+      expect(dirty(GLOBAL_SCOPE)).toEqual({
+        sibling: true,
+        other: false,
+        unnamed: false,
+        trimmed: true,
+        'trimmed-sibling': false,
+      });
+      expect(dirty('team')).toEqual({ 'elsewhere-sibling': false });
     });
   });
 

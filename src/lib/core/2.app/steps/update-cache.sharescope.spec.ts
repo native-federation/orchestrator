@@ -1,3 +1,4 @@
+import { createVersionCheck } from 'lib/core/3.adapters/checks/version.check';
 import { DrivingContract } from '../driving-ports/driving.contract';
 import { LoggingConfig } from '../config/log.contract';
 import { Optional } from 'lib/utils/optional';
@@ -128,12 +129,12 @@ describe('createProcessDynamicRemoteEntry - scoped', () => {
     });
   });
 
-  // `mfe3` is a copy of the shared version that pooling anchored on `team/mfe9`, so the committed map
-  // already points mfe3's own scope at mfe9's files. Listing `dep-a/sub` as covered would hand the joiner
+  // `mfe3` is a copy of the shared version that pooling placed in `team/mfe9`'s subpool, so the committed
+  // map already points mfe3's own scope at mfe9's files. Listing `dep-a/sub` as covered would hand the joiner
   // a URL under mfe3's scope — mfe3's own build, the one pooling took out of service — putting a second
   // build of the package in front of it. Uncovered is the honest answer; `poolDynamicExternals` is what
-  // redirects it to the anchor when the joiner is pooled too.
-  it('should not serve an entrypoint only a pooling-anchored copy declares', async () => {
+  // redirects it to that subpool's build when the joiner is pooled too.
+  it('should not serve an entrypoint only a subpool copy declares', async () => {
     adapters.versionCheck.isCompatible = vi.fn(() => true);
 
     adapters.sharedExternalsRepo.tryGet = vi.fn(
@@ -360,6 +361,8 @@ describe('createProcessDynamicRemoteEntry - scoped', () => {
 
   it('should add an scoped external if shared incompatible external exists', async () => {
     adapters.versionCheck.isCompatible = vi.fn(() => false);
+    // Tags differ, so the range decides: a copy only accepts its own version regardless of range.
+    adapters.versionCheck.compare = vi.fn(createVersionCheck().compare);
 
     adapters.sharedExternalsRepo.tryGet = vi.fn(
       (): Optional<SharedExternal> =>

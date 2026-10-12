@@ -25,26 +25,6 @@ const createSharedExternalsRepository = (config: StorageConfig): ForSharedExtern
   let _dirty = false;
 
   return {
-    // Read from the cache rather than remembered from this init's entries: a warm init may not refetch
-    // the tagged remote at all, and pooling has to coordinate its pool anyway. Exits on the first hit.
-    // Per share scope, because a pool never spans one: a tag in another scope is no reason to pool here.
-    // Stored pool results count too, since a scope whose last tag left still has pool state to clear.
-    hasPoolState: function (shareScope?: string) {
-      const scope = _cache[shareScope ?? GLOBAL_SCOPE];
-      if (!scope) return false;
-      for (const external of Object.values(scope)) {
-        if (external.poolName !== undefined) return true;
-        for (const version of external.versions)
-          for (const remote of version.remotes)
-            if (
-              remote.pool?.trim() ||
-              remote.servedBy !== undefined ||
-              remote.poolCause !== undefined
-            )
-              return true;
-      }
-      return false;
-    },
     getFromScope: function (shareScope?: string) {
       return { ..._cache[shareScope ?? GLOBAL_SCOPE] };
     },
@@ -102,7 +82,18 @@ const createSharedExternalsRepository = (config: StorageConfig): ForSharedExtern
             if (external.versions.length === 0) removeExternals.push(name);
           }
         });
-        removeExternals.forEach(name => delete scope[name]);
+
+        const lostPools = new Set<string>();
+        for (const name of removeExternals) {
+          const poolName = scope[name]!.poolName;
+          if (poolName !== undefined) lostPools.add(poolName);
+          delete scope[name];
+        }
+        // Nothing dirty is left behind, so mark its pool's siblings dirty or the next init skips the scope.
+        if (lostPools.size > 0)
+          for (const external of Object.values(scope))
+            if (external.poolName !== undefined && lostPools.has(external.poolName))
+              external.dirty = true;
       });
     },
     scopeType: function (shareScope?: string) {

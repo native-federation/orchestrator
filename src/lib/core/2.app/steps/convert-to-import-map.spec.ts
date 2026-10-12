@@ -168,7 +168,7 @@ describe('createConvertToImportMap', () => {
 
     it('should honour an override on a global skip, which pooling writes', async () => {
       // A global skip normally inherits the one global mapping and needs no entry of its own. Pooling
-      // writes an override when it anchors the loaded remote on a build the map does not already serve
+      // writes an override when the loaded remote joins the subpool of a build the map does not already serve
       // from — a committed island, whose files live nowhere but its own scope. Without this the remote
       // resolves through the global winner and runs a combination nothing shipped.
       const remoteEntry: RemoteEntry = mockRemoteEntry_MFE2({

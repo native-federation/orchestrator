@@ -22,7 +22,7 @@ test.describe('lifecycle: the warm start', () => {
     // init safe (#63): `determine` hands pooling only the externals it re-elected.
     await nf.init(splitFamily());
     const cold = await nf.map();
-    expect(cold.scopes?.[SCOPE.mfe1]).toBeDefined();
+    expect(cold.scopes?.[SCOPE.mfe2]).toBeDefined();
 
     await nf.init(splitFamily());
 
@@ -39,6 +39,7 @@ test.describe('lifecycle: the warm start', () => {
   });
 
   test('reproduces a healthy map on reload', async ({ nf }) => {
+    // A control: this passes with pooling off too, and guards that pooling keeps it so.
     // The other half of the claim: when pooling islands nobody it must also leave nothing behind that a
     // second pass would decide differently.
     const healthy = () => [
@@ -61,14 +62,12 @@ test.describe('lifecycle: the warm start', () => {
 
   test('re-pools when a new remote joins a cached portfolio', async ({ nf }) => {
     // The incremental case: the first init is coherent and islands nobody. Adding a cross-major remote
-    // makes its members dirty, so determine re-elects them and pooling runs again — the cached remote
+    // makes its members dirty, so pooling re-elects the pool — the cached remote
     // is re-read from storage, not refetched.
     //
-    // Note WHICH side islands. `generate-import-map` marked mfe1's copies `cached` when it served
-    // them, and the objective only counts *uncached* copies, so scoping mfe1 is free while scoping the
-    // newcomer costs a download. The shared build therefore flips to the newcomer's 21.2.18 and mfe1
-    // self-serves its already-cached family. That is the resolver's cache term, not the copy weighting
-    // — and pooling's guarantee is unaffected: whoever islands, islands whole.
+    // Note WHICH side islands. Neither build serves the other remote and nobody agrees with either, so
+    // round 1 is a tie — and a tie goes to the build the stored record already elected. mfe1 keeps the
+    // global map and the newcomer runs its own family; the gate pipeline flipped to the newcomer instead.
     const first = [
       remote('team/mfe1', SCOPE.mfe1, [
         dep('@angular/core', '22.0.8', { req: '^22.0.0' }),
@@ -86,13 +85,13 @@ test.describe('lifecycle: the warm start', () => {
 
     expect(nf.fetches()).toEqual([late.url]);
     const map = await nf.map();
-    expect(map.imports['@angular/core']).toBe('http://mfe2/@angular/core.js');
-    expect(map.imports['@angular/router']).toBe('http://mfe2/@angular/router.js');
-    expect(map.scopes?.[SCOPE.mfe1]).toEqual({
-      '@angular/core': 'http://mfe1/@angular/core.js',
-      '@angular/router': 'http://mfe1/@angular/router.js',
+    expect(map.imports['@angular/core']).toBe('http://mfe1/@angular/core.js');
+    expect(map.imports['@angular/router']).toBe('http://mfe1/@angular/router.js');
+    expect(map.scopes?.[SCOPE.mfe2]).toEqual({
+      '@angular/core': 'http://mfe2/@angular/core.js',
+      '@angular/router': 'http://mfe2/@angular/router.js',
     });
-    expect(await nf.islands()).toEqual(['team/mfe1 on @angular/core@22.0.8']);
+    expect(await nf.islands()).toEqual(['team/mfe2 incompatible']);
 
     // Four URLs in the map, and on a cold browser cache all four are fetched — "cached" in the
     // objective means "already in the import map", not "already in the browser".
@@ -100,47 +99,50 @@ test.describe('lifecycle: the warm start', () => {
     expect(nf.downloads()).toHaveLength(4);
   });
 
-  test('drops a stale anchor when the pool that granted it dissolves', async ({ nf }) => {
-    // Only mfe1 tags the family, so its tag alone forms the pool (explicit tags only, no scope tags).
-    // mfe3 cannot take the global core@22.0.9 beside the shared router@22.0.6 — nothing built that pair —
-    // so pooling anchors it on mfe1's build and records `servedBy: team/mfe1` on its copies.
+  test('drops a stale subpool when the pool that formed it dissolves', async ({ nf }) => {
+    // Only mfe1 labels the family, so its label alone forms the pool (explicit labels only, no scope labels).
+    // mfe2 and mfe4 pin core to ~22.0.9, so mfe1's 22.0.6 build cannot serve them; the 22.0.9 build cannot
+    // serve mfe1 or mfe3 (no router). Two each, so the newer build wins round 1, and a later round places
+    // mfe3 in mfe1's subpool, recording `servedBy: team/mfe1` on its copies.
     const mfe1 = (at: string, pool?: string) =>
       remote('team/mfe1', at, [
         dep('@angular/core', '22.0.6', { req: '^22.0.0', ...(pool && { pool }) }),
         dep('@angular/router', '22.0.6', { req: '^22.0.0', ...(pool && { pool }) }),
       ]);
     const others = () => [
-      remote('team/mfe2', SCOPE.mfe2, [dep('@angular/core', '22.0.9', { req: '^22.0.0' })]),
-      remote('team/mfe4', SCOPE.mfe4, [dep('@angular/core', '22.0.9', { req: '^22.0.0' })]),
+      remote('team/mfe2', SCOPE.mfe2, [dep('@angular/core', '22.0.9', { req: '~22.0.9' })]),
+      remote('team/mfe4', SCOPE.mfe4, [dep('@angular/core', '22.0.9', { req: '~22.0.9' })]),
       remote('team/mfe3', SCOPE.mfe3, [
         dep('@angular/core', '22.0.6', { req: '^22.0.0' }),
         dep('@angular/router', '22.0.6', { req: '^22.0.0' }),
       ]),
     ];
-    const anchorsOf = async (name: string) =>
+    const subpoolsOf = async (name: string) =>
       (await nf.store())['__GLOBAL__']![name]!.versions.flatMap(v =>
         v.remotes.filter(r => r.servedBy).map(r => `${r.name}>${r.servedBy}`)
       );
 
     await nf.init([mfe1(SCOPE.mfe1, 'ng'), ...others()], { pooling: false });
-    expect(await anchorsOf('@angular/core')).toContain('team/mfe3>team/mfe1');
+    expect(await subpoolsOf('@angular/core')).toContain('team/mfe3>team/mfe1');
 
-    // mfe1 redeploys at a new URL without its tag. Only mfe1 is refetched; mfe3 stays cached, and the
-    // pool is gone. Its anchor used to survive, pointing mfe3's core at mfe1's *new* build beside mfe3's
+    // mfe1 redeploys at a new URL without its label. Only mfe1 is refetched; mfe3 stays cached, and the
+    // pool is gone. Its subpool used to survive, pointing mfe3's core at mfe1's *new* build beside mfe3's
     // own router — a pair neither pooling nor plain resolution would hand it.
     await nf.init([mfe1(SCOPE.mfe5), ...others()], { pooling: false });
 
-    expect(await anchorsOf('@angular/core')).toEqual([]);
-    expect(await anchorsOf('@angular/router')).toEqual([]);
+    expect(await subpoolsOf('@angular/core')).toEqual([]);
+    expect(await subpoolsOf('@angular/router')).toEqual([]);
     expect((await nf.map()).scopes?.[SCOPE.mfe3]).toBeUndefined();
     expect((await nf.load('team/mfe3')).seen['@angular/core']).toBe('mfe2|@angular/core@22.0.9');
   });
 
-  test('drops a stale anchor when every other remote leaves a pool that survives', async ({ nf }) => {
-    // As above, but mfe3 tags the family too, so the pool outlives mfe1's departure with mfe3 as its
-    // only remote. A one-remote pool used to return before rebuilding its members, so mfe3 stayed
-    // anchored on a build that no longer ships the family.
-    const anchorsOf = async (name: string) =>
+  test('drops a stale subpool when every other remote leaves a pool that survives', async ({
+    nf,
+  }) => {
+    // As above, but mfe3 labels the family too, so the pool outlives mfe1's departure with mfe3 as its
+    // only remote. A one-remote pool used to return before rebuilding its members, so mfe3 stayed in the
+    // subpool of a build that no longer ships the family.
+    const subpoolsOf = async (name: string) =>
       (await nf.store())['__GLOBAL__']![name]!.versions.flatMap(v =>
         v.remotes.filter(r => r.servedBy).map(r => `${r.name}>${r.servedBy}`)
       );
@@ -155,25 +157,28 @@ test.describe('lifecycle: the warm start', () => {
           dep('@angular/core', '22.0.6', { req: '^22.0.0', pool: 'ng' }),
           dep('@angular/router', '22.0.6', { req: '^22.0.0', pool: 'ng' }),
         ]),
-        remote('team/mfe2', SCOPE.mfe2, [dep('@angular/core', '22.0.9', { req: '^22.0.0' })]),
+        // Pinned, two of them: the 22.0.9 build wins round 1 and mfe3 joins mfe1's subpool (see above).
+        remote('team/mfe2', SCOPE.mfe2, [dep('@angular/core', '22.0.9', { req: '~22.0.9' })]),
+        remote('team/mfe4', SCOPE.mfe4, [dep('@angular/core', '22.0.9', { req: '~22.0.9' })]),
         mfe3,
       ],
       { pooling: false }
     );
-    expect(await anchorsOf('@angular/core')).toContain('team/mfe3>team/mfe1');
+    expect(await subpoolsOf('@angular/core')).toContain('team/mfe3>team/mfe1');
 
-    // mfe1 and mfe2 redeploy at new URLs without the family; only mfe3's copies remain, still tagged.
+    // mfe1 and mfe2 redeploy at new URLs without the family; only mfe3's copies remain, still labelled.
     await nf.init(
       [
         remote('team/mfe1', SCOPE.mfe5, [dep('rxjs', '7.8.1')]),
         remote('team/mfe2', SCOPE.mfe4, [dep('rxjs', '7.8.1')]),
+        remote('team/mfe4', SCOPE.mfe2, [dep('rxjs', '7.8.1')]),
         mfe3,
       ],
       { pooling: false }
     );
 
-    expect(await anchorsOf('@angular/core')).toEqual([]);
-    expect(await anchorsOf('@angular/router')).toEqual([]);
+    expect(await subpoolsOf('@angular/core')).toEqual([]);
+    expect(await subpoolsOf('@angular/router')).toEqual([]);
     expect((await nf.load('team/mfe3')).seen).toEqual({
       '@angular/core': 'mfe3|@angular/core@22.0.6',
       '@angular/router': 'mfe3|@angular/router@22.0.6',
@@ -202,6 +207,29 @@ test.describe('lifecycle: the warm start', () => {
     const cold = await nf.map();
     await nf.init([]);
     expect(await nf.map()).toEqual(cold);
+  });
+
+  test('keeps the stored winner of a tie when the winner redeploys unchanged', async ({ nf }) => {
+    // mfe1 and mfe2 ship one family build, so they tie and registration order elects mfe1. Redeployed at a
+    // new URL, mfe1's copies are evicted and stored again after mfe2's: registration order would now
+    // elect mfe2, and only the stored winner keeps mfe1.
+    const twin = (name: string, scopeUrl: string) =>
+      remote(name, scopeUrl, [
+        dep('@angular/core', '22.1.0', { req: '^22.0.0' }),
+        dep('@angular/router', '22.1.0', { req: '^22.0.0' }),
+      ]);
+    await nf.init([twin('team/mfe1', SCOPE.mfe1), twin('team/mfe2', SCOPE.mfe2)]);
+    expect((await nf.map()).imports['@angular/core']).toBe('http://mfe1/@angular/core.js');
+
+    const redeployed = `${SCOPE.mfe1}v2/`;
+    await nf.init([twin('team/mfe1', redeployed), twin('team/mfe2', SCOPE.mfe2)]);
+
+    expect(nf.fetches()).toEqual([`${redeployed}remoteEntry.json`]);
+    const map = await nf.map();
+    expect(map.imports['@angular/core']).toBe(`${redeployed}@angular/core.js`);
+    expect(map.imports['@angular/router']).toBe(`${redeployed}@angular/router.js`);
+    const winners = Object.values((await nf.store())['__GLOBAL__'] ?? {}).map(e => e.poolWinner);
+    expect(winners).toEqual(['team/mfe1', 'team/mfe1']);
   });
 
   test('rebuilds the same map from a manifest URL as from a manifest object', async ({ nf }) => {
@@ -238,7 +266,7 @@ test.describe('lifecycle: the warm start', () => {
  * halves of that, and the es-module-shims configuration alongside it.
  */
 test.describe('lifecycle: the dynamic path', () => {
-  const anchor = () =>
+  const base = () =>
     remote('team/mfe1', SCOPE.mfe1, [
       dep('@angular/core', '22.1.0', { req: '^22.0.0' }),
       dep('@angular/router', '22.1.0', { req: '^22.0.0' }),
@@ -274,6 +302,7 @@ test.describe('lifecycle: the dynamic path', () => {
     // The committed map is untouched — that is the additive-only guarantee.
     expect(committed!.imports['@angular/core']).toBe('http://mfe1/@angular/core.js');
     expect(committed!.scopes).toBeUndefined();
+    expect(await nf.islands()).toEqual(['team/mfe3 incompatible']);
 
     // And the browser honours both maps at once: the late remote runs its own 18 family while the
     // original keeps the shared 17 one.
@@ -292,7 +321,7 @@ test.describe('lifecycle: the dynamic path', () => {
       dep('@angular/router', '22.0.5', { req: '^22.0.0' }),
       dep('@angular/forms', '22.0.5', { req: '^22.0.0' }),
     ]);
-    await nf.init([anchor()], { unlisted: [late] });
+    await nf.init([base()], { unlisted: [late] });
 
     await nf.initRemoteEntry(late.url);
 
@@ -304,11 +333,8 @@ test.describe('lifecycle: the dynamic path', () => {
     // forms is sole-provided by mfe4, but it is not published globally off a build that disagrees
     // with the committed one.
     expect(delta.imports['@angular/forms']).toBeUndefined();
-    expect(await nf.warns()).toContainEqual(
-      expect.stringContaining(
-        "'team/mfe4' serves its own family: no committed build offers every entrypoint it imports at a version it accepts — '@angular/forms' is the gap, closest is 'team/mfe1'. All 2 members it imports are scoped for it."
-      )
-    );
+    // The dynamic verdict lands in the record exactly as an init one does.
+    expect(await nf.islands()).toEqual(['team/mfe4 uncovered']);
     expect((await nf.load('team/mfe4')).seen).toEqual({
       '@angular/router': 'mfe4|@angular/router@22.0.5',
       '@angular/forms': 'mfe4|@angular/forms@22.0.5',
@@ -316,13 +342,14 @@ test.describe('lifecycle: the dynamic path', () => {
   });
 
   test('lets a remote dedup a family it agrees with', async ({ nf }) => {
+    // A control: this passes with pooling off too, and guards that pooling keeps it so.
     // Same shape, but mfe4's build sits on the committed minor line, so both gates pass and it dedups
     // the whole family — the delta carries no framework entry of its own at all.
     const late = remote('team/mfe4', SCOPE.mfe4, [
       dep('@angular/core', '22.1.0', { req: '^22.0.0' }),
       dep('@angular/router', '22.1.0', { req: '^22.0.0' }),
     ]);
-    await nf.init([anchor()], { unlisted: [late] });
+    await nf.init([base()], { unlisted: [late] });
 
     await nf.initRemoteEntry(late.url);
 
@@ -393,7 +420,7 @@ test.describe('lifecycle: the dynamic path', () => {
       ]);
 
     test('records the sole-provided member and the refused dedup as scoped', async ({ nf }) => {
-      await nf.init([anchor()], { unlisted: [late()] });
+      await nf.init([base()], { unlisted: [late()] });
       await nf.initRemoteEntry(late().url);
 
       const store = await nf.store();
@@ -409,11 +436,11 @@ test.describe('lifecycle: the dynamic path', () => {
     });
 
     test('reproduces the delta on the next reload', async ({ nf }) => {
-      await nf.init([anchor()], { unlisted: [late()] });
+      await nf.init([base()], { unlisted: [late()] });
       await nf.initRemoteEntry(late().url);
 
       // A reload: same manifest, everything cached, so nothing is dirty and pooling is skipped.
-      await nf.init([anchor()], { unlisted: [late()] });
+      await nf.init([base()], { unlisted: [late()] });
 
       // mfe4 keeps its own family under its own scope, and nothing leaks into the global `imports`.
       const map = await nf.map();
@@ -438,7 +465,7 @@ test.describe('lifecycle: the dynamic path', () => {
  * loaded remote is the only thing a dynamic init can move.
  */
 test.describe('lifecycle: how the browser treats a second import map', () => {
-  const anchor = () =>
+  const base = () =>
     remote('team/mfe1', SCOPE.mfe1, [
       dep('@angular/core', '22.1.0', { req: '^22.0.0' }),
       dep('@angular/router', '22.1.0', { req: '^22.0.0' }),
@@ -450,7 +477,7 @@ test.describe('lifecycle: how the browser treats a second import map', () => {
     ]);
 
   test('merges the delta into the committed map', async ({ nf }) => {
-    await nf.init([anchor()], { unlisted: [late()] });
+    await nf.init([base()], { unlisted: [late()] });
     await nf.initRemoteEntry(late().url);
 
     // Two separate maps in the document, the second carrying only the delta...
@@ -482,7 +509,7 @@ test.describe('lifecycle: how the browser treats a second import map', () => {
       dep('@angular/core', '22.1.0', { req: '^22.0.0' }),
       dep('@angular/forms', '22.1.0', { req: '^22.0.0' }),
     ]);
-    await nf.init([anchor()], { unlisted: [dedupable] });
+    await nf.init([base()], { unlisted: [dedupable] });
     await nf.initRemoteEntry(dedupable.url);
 
     const [committed, delta] = await nf.maps();
@@ -497,7 +524,7 @@ test.describe('lifecycle: how the browser treats a second import map', () => {
   test('works the same way through the es-module-shims configuration', async ({ nf }) => {
     // `useShimImportMap({ shimMode: true })` writes `importmap-shim` scripts and resolves through
     // `importShim` instead of the browser's own resolver. Same verdicts, different machinery.
-    await nf.init([anchor()], { shim: true, unlisted: [late()] });
+    await nf.init([base()], { shim: true, unlisted: [late()] });
     await nf.initRemoteEntry(late().url);
 
     expect(await nf.maps()).toHaveLength(2);

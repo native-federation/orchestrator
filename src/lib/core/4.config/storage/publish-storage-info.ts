@@ -9,11 +9,7 @@ import {
   type StorageType,
 } from 'lib/core/2.app/config/storage.contract';
 import { cloneEntry } from 'lib/utils/clone-entry';
-
-// Injected by build.js; bundles built without that define (e.g. the e2e harness) report 'dev'.
-declare const __NF_ORCHESTRATOR_VERSION__: string | undefined;
-const VERSION =
-  typeof __NF_ORCHESTRATOR_VERSION__ === 'string' ? __NF_ORCHESTRATOR_VERSION__ : 'dev';
+import { ORCHESTRATOR_VERSION } from 'lib/core/4.config/orchestrator-version';
 
 const KEYS: readonly StorageKey[] = Object.freeze(Object.values(STORAGE_KEYS));
 
@@ -32,7 +28,12 @@ const createStorageInfo = ({
   storage,
   exposeGetter,
 }: StorageInfoOptions): NFOrchestratorStorageInfo => {
-  const info: NFOrchestratorStorageInfo = { version: VERSION, type, namespace, keys: KEYS };
+  const info: NFOrchestratorStorageInfo = {
+    version: ORCHESTRATOR_VERSION,
+    type,
+    namespace,
+    keys: KEYS,
+  };
   if (!exposeGetter) return Object.freeze(info);
 
   return Object.freeze({

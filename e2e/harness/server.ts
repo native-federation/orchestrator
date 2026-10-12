@@ -48,7 +48,7 @@ const js = (body: string): File => ({ type: 'text/javascript', body });
  * provider's scope rather than the consumer's.
  *
  * `peers` are the specifiers this external's own code imports, and they are the reason a leaf fixture
- * cannot see a torn anchor: the importer is *this* file's origin, so the peer resolves in the
+ * cannot see a torn subpool: the importer is *this* file's origin, so the peer resolves in the
  * provider's scope and can land on a build the consumer never asked for. What each one bound to is
  * recorded as `boundTo`, beside `__id`.
  */

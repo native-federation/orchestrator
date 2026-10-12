@@ -4,7 +4,6 @@ import { createGetRemoteEntries } from '../2.app/steps/get-remote-entries';
 import { createProcessRemoteEntries } from '../2.app/steps/process-remote-entries';
 import { createDetermineSharedExternals } from '../2.app/steps/determine-shared-externals';
 import { createPoolSharedExternals } from '../2.app/steps/pooling/pool-shared-externals';
-import { createMarkPoolsForReelection } from '../2.app/steps/pooling/mark-pools-for-reelection';
 import { createGenerateImportMap } from '../2.app/steps/generate-import-map';
 import { createCommitChanges } from '../2.app/steps/commit-changes';
 import { createExposeModuleLoader } from '../2.app/steps/expose-module-loader';
@@ -24,7 +23,6 @@ export const createInitDrivers = ({
 }): InitDriversContract => ({
   getRemoteEntries: createGetRemoteEntries(config, adapters),
   processRemoteEntries: createProcessRemoteEntries(config, adapters),
-  markPoolsForReelection: createMarkPoolsForReelection(config, adapters),
   determineSharedExternals: createDetermineSharedExternals(config, adapters),
   poolSharedExternals: createPoolSharedExternals(config, adapters),
   generateImportMap: createGenerateImportMap(config, adapters),

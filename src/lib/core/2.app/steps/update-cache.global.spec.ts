@@ -1,3 +1,4 @@
+import { createVersionCheck } from 'lib/core/3.adapters/checks/version.check';
 import { DrivingContract } from '../driving-ports/driving.contract';
 import { LoggingConfig } from '../config/log.contract';
 import { Optional } from 'lib/utils/optional';
@@ -167,6 +168,8 @@ describe('createProcessDynamicRemoteEntry - scoped', () => {
 
   it('should add and scope shared external to list with incompatible version and strictVersion', async () => {
     adapters.versionCheck.isCompatible = vi.fn(() => false);
+    // Tags differ, so the range decides: a copy only accepts its own version regardless of range.
+    adapters.versionCheck.compare = vi.fn(createVersionCheck().compare);
     config.strict.strictExternalCompatibility = false;
     adapters.sharedExternalsRepo.tryGet = vi.fn(
       (): Optional<SharedExternal> =>
@@ -212,6 +215,8 @@ describe('createProcessDynamicRemoteEntry - scoped', () => {
 
   it('should throw an error when shared external with incompatible version and strictVersion and strict', async () => {
     adapters.versionCheck.isCompatible = vi.fn(() => false);
+    // Tags differ, so the range decides: a copy only accepts its own version regardless of range.
+    adapters.versionCheck.compare = vi.fn(createVersionCheck().compare);
     config.strict.strictExternalCompatibility = true;
     adapters.sharedExternalsRepo.tryGet = vi.fn(
       (): Optional<SharedExternal> =>
@@ -542,6 +547,92 @@ describe('createProcessDynamicRemoteEntry - scoped', () => {
 
     expect(actual.actions).toEqual({
       'dep-a': { action: 'skip', covered: ['dep-a'] },
+    });
+  });
+
+  // A coverage island leaves a `scope` row as the only row at a tag. A copy that resolves through the
+  // shared version must not be filed into it: on reload the import map built from the record would scope
+  // it to its own files, while the page it loaded on mapped it onto `imports`.
+  it('should give a skip copy its own row rather than joining a scope row at its tag', async () => {
+    adapters.versionCheck.isCompatible = vi.fn(() => true);
+    adapters.sharedExternalsRepo.tryGet = vi.fn((): Optional<SharedExternal> =>
+      Optional.of(
+        mockExternal.shared(
+          [
+            mockVersion_A.v2_1_2({ remotes: { 'team/mfe2': { cached: true } }, action: 'share' }),
+            mockVersion_A.v2_1_1({ remotes: { 'team/mfe3': { cached: true } }, action: 'scope' }),
+          ],
+          { dirty: false }
+        )
+      )
+    );
+
+    const actual = await updateCache(
+      mockRemoteEntry_MFE1({ shared: [mockSharedInfoA.v2_1_1()], exposes: [] })
+    );
+
+    expect(adapters.sharedExternalsRepo.addOrUpdate).toHaveBeenCalledWith(
+      'dep-a',
+      mockExternal.shared(
+        [
+          mockVersion_A.v2_1_2({ remotes: { 'team/mfe2': { cached: true } }, action: 'share' }),
+          mockVersion_A.v2_1_1({ remotes: { 'team/mfe3': { cached: true } }, action: 'scope' }),
+          mockVersion_A.v2_1_1({ remotes: { 'team/mfe1': { cached: false } }, action: 'skip' }),
+        ],
+        { dirty: false }
+      ),
+      undefined
+    );
+    expect(actual.actions).toEqual({
+      'dep-a': { action: 'skip', covered: ['dep-a'] },
+    });
+  });
+
+  // Pooling can leave an external with no `share` row: a subpool's copies all `skip` onto its build through
+  // per-consumer overrides, and `imports` never names the external. Joining that row would hand the copy a
+  // `skip` with nothing `covered`, so nothing maps its bare specifier. It has to share its own copy instead.
+  it('should share a copy whose tag has only a skip row when no version is shared', async () => {
+    adapters.versionCheck.isCompatible = vi.fn(() => true);
+    adapters.sharedExternalsRepo.tryGet = vi.fn((): Optional<SharedExternal> =>
+      Optional.of(
+        mockExternal.shared(
+          [
+            mockVersion_A.v2_1_1({
+              remotes: {
+                'team/mfe2': { servedBy: 'team/mfe2' },
+                'team/mfe3': { servedBy: 'team/mfe2' },
+              },
+              action: 'skip',
+            }),
+          ],
+          { dirty: false }
+        )
+      )
+    );
+
+    const actual = await updateCache(
+      mockRemoteEntry_MFE1({ shared: [mockSharedInfoA.v2_1_1()], exposes: [] })
+    );
+
+    expect(adapters.sharedExternalsRepo.addOrUpdate).toHaveBeenCalledWith(
+      'dep-a',
+      mockExternal.shared(
+        [
+          mockVersion_A.v2_1_1({
+            remotes: {
+              'team/mfe2': { servedBy: 'team/mfe2' },
+              'team/mfe3': { servedBy: 'team/mfe2' },
+            },
+            action: 'skip',
+          }),
+          mockVersion_A.v2_1_1({ remotes: { 'team/mfe1': { cached: true } }, action: 'share' }),
+        ],
+        { dirty: false }
+      ),
+      undefined
+    );
+    expect(actual.actions).toEqual({
+      'dep-a': { action: 'share', override: undefined },
     });
   });
 

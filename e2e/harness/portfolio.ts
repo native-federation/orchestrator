@@ -51,7 +51,7 @@ export type DepOptions = {
   strict?: boolean;
   /** `singleton`, default true — false means the external is scoped per remote, never shared. */
   singleton?: boolean;
-  /** Explicit `pool` tag; joins this external to a family without the harness scope tags. */
+  /** Explicit `pool` label; joins this external to a family without the harness scope labels. */
   pool?: string;
   shareScope?: string;
   /** Extra entrypoints of the same package, e.g. `['/http']` for `@angular/common/http`. */
@@ -61,7 +61,7 @@ export type DepOptions = {
   /**
    * Specifiers this external's own code imports, e.g. `router` declaring `['@angular/core']`. The
    * compiled file really imports them, so what they bind to is decided by the *provider's* scope, not
-   * the consumer's — the second hop a torn anchor breaks. See `peersOf`.
+   * the consumer's — the second hop a torn subpool breaks. See `peersOf`.
    */
   peers?: string[];
 };
@@ -104,7 +104,7 @@ export const remote = (name: string, scopeUrl: string, shared: DenseSharedInfo[]
       if (!declared.has(peer))
         throw new Error(
           `${name} declares no '${peer}', so '${entry.packageName}' cannot import it as a peer. ` +
-            `See docs/version-resolver.md §"The provenance promise", the "Done when" bullet on peer edges.`
+            `See docs/version-resolver.md §"How pooling resolves".`
         );
 
   return {
@@ -239,7 +239,7 @@ export const fixture = (name: FixtureName): RemoteEntry =>
 const POOLED = [pooled1, pooled2, pooled3] as const;
 
 /**
- * A recorded-style entry from `e2e/fixtures/pooling`: flat externals, flat chunking, `pool` tags — the
+ * A recorded-style entry from `e2e/fixtures/pooling`: flat externals, flat chunking, `pool` labels — the
  * combination none of the eleven captured entries has. See that folder's README.
  */
 export const poolFixture = (n: 1 | 2 | 3): RemoteEntry =>
