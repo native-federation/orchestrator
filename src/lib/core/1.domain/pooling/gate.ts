@@ -75,12 +75,7 @@ export function committedView(
   const publishes = (meta: SharedVersionMeta) =>
     meta.name !== without && (shareScope !== GLOBAL_SCOPE || meta.cached);
   // Mirrors what `generate-import-map` emitted, so `global` is what the committed map really serves.
-  const rank = new Map(recordOrder.map((name, i) => [name, i]));
-  const walk = [...members].sort((a, b) => rank.get(a.name)! - rank.get(b.name)!);
-  const { claims } = claimTable(
-    walk.map(m => [m.name, m.external] as const),
-    publishes
-  );
+  const { claims } = claimTable(inRecordOrder(members, recordOrder), publishes);
   for (const [specifier, { tag, copy }] of claims)
     global.set(specifier, { tag, remote: copy.name, file: copy.entries[specifier]! });
 
@@ -322,4 +317,11 @@ function offMapBinding(copies: readonly Copy[], view: CommittedView, globalTags:
       else if (reached !== tag) return { owner: build, specifier, tag };
     }
   return undefined;
+}
+
+function inRecordOrder(members: PoolMember[], recordOrder: ExternalName[]) {
+  const rank = new Map(recordOrder.map((name, i) => [name, i]));
+  return [...members]
+    .sort((a, b) => rank.get(a.name)! - rank.get(b.name)!)
+    .map(m => [m.name, m.external] as const);
 }
