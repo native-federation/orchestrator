@@ -122,7 +122,7 @@ function rank<C extends { build: Build }>(pool: Pool, candidates: C[], keys: ((c
   return scored[0]?.c;
 }
 
-// Same tag, same artefact: round 1 also serves entrypoints other copies of its tags ship — but only from
+// Same tag, same code: round 1 also serves entrypoints other copies of its tags ship — but only from
 // builds that agree with it, since a borrowed file binds its own imports where it lives, and never a chunked
 // copy's, whose file would bind its build's internals beside the winner's.
 function withLoans(pool: Pool, build: Build) {

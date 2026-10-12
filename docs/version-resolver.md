@@ -698,10 +698,10 @@ pool. Two notions are read off it for every other remote R:
 **2. Round 1 elects the global map.** Every build is a candidate — only the host's when a host ships the pool,
 since the host cannot be repointed. A candidate's coverage is its own specifiers plus the **same-tag**
 entrypoints of the builds that agree with it, except chunked copies': at one tag, an unchunked
-`core/testing@22.0.8` from another remote is the same published artefact (see
-[Merging within a version](#merging-within-a-version)), but a chunked one imports its own build's internals and
-would run a second copy of the package beside the winner's. Candidates rank by, in
-order:
+`core/testing@22.0.8` from another remote is the same published code (see
+[Merging within a version](#merging-within-a-version)), though its imports resolve through the lender's scope;
+a chunked one imports its own build's internals and would run a second copy of the package beside the winner's.
+Candidates rank by, in order:
 
 1. the newer build first, under [`profile.latestSharedExternal`](./config.md#modeConfig);
 2. **most remotes served**;
