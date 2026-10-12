@@ -23,7 +23,7 @@ const external = (...versions: SharedVersion[]): SharedExternal => ({ dirty: fal
 // Specifier -> "external@tag:remote", the readable form of a claim.
 const readable = (claims: Map<string, Claim>) =>
   Object.fromEntries(
-    [...claims].map(([s, c]) => [s, `${c.external}@${c.tag}:${c.copy.name}:${c.from}`])
+    [...claims].map(([s, c]) => [s, `${c.external}@${c.tag}:${c.copy.name}:${c.action}`])
   );
 
 describe('claimTable', () => {
@@ -65,7 +65,7 @@ describe('claimTable', () => {
     expect(table.duplicates).toEqual(new Set([late]));
     expect(table.claims.has('fw/testing/extra')).toBe(false);
     // A named scope has no such guard: every share row claims what is still free.
-    expect(readable(table.shareRows)).toEqual({
+    expect(readable(table.shareClaims)).toEqual({
       fw: 'fw@1.0.0:r1:share',
       'fw/testing': 'fw@1.0.0:r1:share',
       'fw/testing/extra': 'fw/testing@2.0.0:r2:share',
@@ -106,6 +106,6 @@ describe('claimTable', () => {
     const table = claimTable([['dep', external(version('scope', [copy('r1', ['dep'])]))]]);
 
     expect(table.claims.size).toBe(0);
-    expect(table.shareRows.size).toBe(0);
+    expect(table.shareClaims.size).toBe(0);
   });
 });

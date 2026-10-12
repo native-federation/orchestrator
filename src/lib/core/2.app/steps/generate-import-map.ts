@@ -337,7 +337,8 @@ export function createGenerateImportMap(
     shareScope: string
   ): Map<Specifier, Mapping & { external: string }> {
     const mappings = new Map<Specifier, Mapping & { external: string }>();
-    for (const [specifier, { external, copy }] of claimTable(Object.entries(externals)).shareRows) {
+    for (const [specifier, { external, copy }] of claimTable(Object.entries(externals))
+      .shareClaims) {
       const file = copy.entries[specifier]!;
       mappings.set(specifier, {
         url: _path.join(getScope(shareScope, copy.name, external), file),
@@ -466,7 +467,7 @@ export function createGenerateImportMap(
       // Another external claimed this specifier as one of its own entries — reachable when
       // `feature.convertFlatSharedInfo` is off and one remote emits a secondary entrypoint as a
       // package of its own. First writer wins; whoever loses would otherwise be repointed silently.
-      if (claims.get(packageName)!.copy !== remote) {
+      if (claims.get(packageName)?.copy !== remote) {
         config.log.debug(
           4,
           `[${GLOBAL_SCOPE}][${externalName}][${remote.name}] Entrypoint '${packageName}' is already mapped by another external, keeping '${importMap.imports[packageName]}'.`
@@ -500,7 +501,7 @@ export function createGenerateImportMap(
       if (remote.servedBy) continue;
       for (const [packageName, file] of Object.entries(remote.entries)) {
         const claim = claims.get(packageName)!;
-        if (claim.from === 'share') continue;
+        if (claim.action === 'share') continue;
         if (config.strict.strictEntryPointCoverage || config.profile.scopeUncoveredEntrypoints) {
           warnUncoveredEntrypoint(GLOBAL_SCOPE, externalName, remote.name, packageName);
           continue;
