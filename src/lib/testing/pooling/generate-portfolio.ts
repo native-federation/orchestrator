@@ -1,5 +1,6 @@
 import fc from 'fast-check';
 import type { DenseSharedInfo, RemoteEntry } from 'lib/core/1.domain';
+import type { ImportsOf } from './page-graph';
 
 /**
  * Generated portfolios for the pooling property suite; `portfolio.ts` (`register` with `realRepositories`)
@@ -40,6 +41,9 @@ export type RemoteSpec = {
   // Ships each secondary entrypoint as a package of its own (flat), as a build without
   // `feature.convertFlatSharedInfo` emits it, rather than as an entry of its package (dense).
   flat?: boolean;
+  // Its build imports internal chunks: per bundle (`dense`, a `bundle` per shared info and `chunks`) or as
+  // `@nf-internal/` externals (`flat`, flat chunking).
+  chunks?: 'dense' | 'flat';
   strictVersion: boolean;
   // An unpooled singleton beside the pools, at one of two minors.
   extra: number | null;
@@ -133,6 +137,7 @@ export const portfolioArbitrary = (
     maxRemotes?: number;
     labelNoise?: boolean;
     flat?: boolean;
+    chunks?: boolean;
     shareScope?: string;
     latestSharedExternal?: boolean;
     scopeUncoveredEntrypoints?: boolean;
@@ -187,6 +192,9 @@ export const portfolioArbitrary = (
                   }
                 : {}),
               ...(o.flat ? { flat: fc.boolean() } : {}),
+              ...(o.chunks
+                ? { chunks: fc.constantFrom<RemoteSpec['chunks']>(undefined, 'dense', 'flat') }
+                : {}),
             }),
             { minLength: o.minRemotes ?? 1, maxLength: o.maxRemotes ?? 20 }
           ),
@@ -467,13 +475,56 @@ export function toRemoteEntry(
     } as DenseSharedInfo);
   }
 
+  // A chunk's name is its content's: one package at one tag builds the same chunk.
+  // A flat secondary entrypoint is bundled with its package, as a build bundles per package.
+  const slug = (info: DenseSharedInfo) =>
+    info.packageName
+      .replace(/\/sub$/, '')
+      .replace(/^@/, '')
+      .replace(/\//g, '_');
+  const chunkOf = (info: DenseSharedInfo) => `chunk-${slug(info)}-${info.version}`;
+  const chunks: Record<string, string[]> = {};
+  if (spec.chunks) for (const info of shared) info.bundle = `browser-${slug(info)}`;
+  if (spec.chunks === 'dense')
+    for (const info of shared) chunks[info.bundle!] = [`${chunkOf(info)}.js`];
+  if (spec.chunks === 'flat') {
+    const perPackage = new Map(shared.map(info => [slug(info), info]));
+    for (const info of perPackage.values())
+      shared.push({
+        packageName: `@nf-internal/${chunkOf(info)}`,
+        bundle: info.bundle,
+        version: info.version,
+        requiredVersion: info.version,
+        singleton: false,
+        strictVersion: false,
+        ...(shareScope === undefined ? {} : { shareScope }),
+        entries: { [`@nf-internal/${chunkOf(info)}`]: `${chunkOf(info)}.js` },
+      } as DenseSharedInfo);
+  }
+
   return {
     name,
     url: `${scopeUrlOf(name, deploy)}remoteEntry.json`,
     exposes: [],
     shared,
+    ...(spec.chunks === 'dense' ? { chunks } : {}),
   } as unknown as RemoteEntry;
 }
+
+// What a generated file imports beyond its own package: its pool's first member (the framework root) and the
+// unpooled `extra` (an rxjs), when its build ships them.
+export const generatedImports =
+  (entries: RemoteEntry[]): ImportsOf =>
+  (build, specifier) => {
+    const ships = new Set(
+      entries.find(e => e.name === build)?.shared.flatMap(s => Object.keys(s.entries)) ?? []
+    );
+    const pool = /^@p(\d+)\//.exec(specifier)?.[1];
+    if (pool === undefined) return [];
+    return [memberName(Number(pool), 0), 'extra'].filter(
+      s => ships.has(s) && !specifier.startsWith(`${s}/`) && s !== specifier
+    );
+  };
 
 export const toRemoteEntries = (spec: PortfolioSpec): RemoteEntry[] =>
   spec.remotes.map((remote, i) => toRemoteEntry(remote, i, 0, spec.shareScope));
