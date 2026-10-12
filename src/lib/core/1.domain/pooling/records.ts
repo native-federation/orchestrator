@@ -11,11 +11,78 @@ import type {
 } from 'lib/core/1.domain';
 import { addRemoteToVersion } from 'lib/core/1.domain/externals/basis';
 import { byTag, mergeRows, rowAt } from 'lib/core/1.domain/externals/rows';
-import type { Specifier } from 'lib/core/1.domain/externals/specifier';
+import { packageOf, type Specifier } from 'lib/core/1.domain/externals/specifier';
+import type { IsChunked } from './builds';
+import { tearsPackage } from './rules';
 import type { Election } from './election';
 import type { PoolMember, PoolName } from './membership';
 
-export type PlacedPool = Election & { poolName: PoolName };
+export type PlacedPool = Omit<Election, 'agreeing'> & {
+  poolName: PoolName;
+  // The builds, among those agreeing with round 1, whose remotes take its files where their versions match.
+  keepsGlobalFiles: ReadonlySet<RemoteName>;
+};
+
+// Rule 5 holds per group on one build (a subpool, or a self-serving remote), so its members bind each other
+// on one build. See docs/version-resolver.md §"How the verdicts land in the record and the map".
+export function placePool(
+  election: Election,
+  poolName: PoolName,
+  members: readonly PoolMember[],
+  isChunked: IsChunked
+): PlacedPool {
+  const { agreeing, globalTags, placements, ...placed } = election;
+  const servedPackages = new Set([...globalTags.keys()].map(packageOf));
+  // A copy off the map beside a specifier the map serves runs a second instance of it.
+  const tears = (meta: SharedVersionMeta) => {
+    const chunked = isChunked(meta.name, meta.bundle);
+    return Object.keys(meta.entries).some(
+      s => globalTags.has(s) || tearsPackage(chunked, s, servedPackages)
+    );
+  };
+  const keepsGlobalFiles = new Set(agreeing);
+  for (const member of members) {
+    const takesGlobalFiles = globalFilesTaker(member, { globalTags, placements }, agreeing);
+    for (const version of member.external.versions)
+      for (const meta of version.remotes) {
+        const runs = runsOn(placements, meta.name);
+        if (keepsGlobalFiles.has(runs) && !takesGlobalFiles(meta, version.tag) && tears(meta))
+          keepsGlobalFiles.delete(runs);
+      }
+  }
+  return { ...placed, globalTags, placements, poolName, keepsGlobalFiles };
+}
+
+const runsOn = (placements: Election['placements'], name: RemoteName) => {
+  const placement = placements.get(name)!;
+  return placement.kind === 'subpool' ? placement.owner : name;
+};
+
+// Rule 5: a build that keeps the global files takes them where a global copy at its tag lists every file it
+// takes.
+function globalFilesTaker(
+  member: PoolMember,
+  { globalTags, placements }: Pick<Election, 'globalTags' | 'placements'>,
+  keepsGlobalFiles: ReadonlySet<RemoteName>
+) {
+  // What the global copies of this member ship, per tag. The import map maps a specifier from whichever
+  // external reaches it first, so a global copy in another member's record cannot stop a copy of this one
+  // claiming it.
+  const claimableAt = new Map<VersionName, Set<Specifier>>();
+  for (const version of member.external.versions)
+    for (const { name, entries } of version.remotes)
+      if (placements.get(name)!.kind === 'global') {
+        let specifiers = claimableAt.get(version.tag);
+        if (!specifiers) claimableAt.set(version.tag, (specifiers = new Set()));
+        for (const s in entries) specifiers.add(s);
+      }
+
+  return (meta: SharedVersionMeta, tag: VersionName) =>
+    keepsGlobalFiles.has(runsOn(placements, meta.name)) &&
+    Object.keys(meta.entries).every(
+      s => globalTags.get(s) === tag && claimableAt.get(tag)?.has(s) === true
+    );
+}
 
 // One row per (tag, action); see docs/version-resolver.md §"How the verdicts land in the record and the map".
 export function memberRecord(
@@ -31,33 +98,8 @@ export function memberRecord(
     for (const meta of version.remotes)
       for (const s in meta.entries) sharedTag ??= globalTags.get(s);
 
-  const runsOn = (name: RemoteName) => {
-    const placement = placements.get(name)!;
-    return placement.kind === 'subpool' ? placement.owner : name;
-  };
   const claimsGlobally = (name: RemoteName) => placements.get(name)!.kind === 'global';
-  // What those copies of this member ship, per tag. The import map maps a specifier from whichever external
-  // reaches it first, so a global copy in another member's record cannot stop a copy of this one claiming it.
-  const claimableAt = new Map<VersionName, Set<Specifier>>();
-  for (const version of member.external.versions)
-    for (const { name, entries } of version.remotes)
-      if (claimsGlobally(name)) {
-        let specifiers = claimableAt.get(version.tag);
-        if (!specifiers) claimableAt.set(version.tag, (specifiers = new Set()));
-        for (const s in entries) specifiers.add(s);
-      }
-
-  // Rule 5: a build agreeing with round 1 takes its files where a global copy at its tag lists every
-  // file it takes.
-  const takesGlobalFiles = (meta: SharedVersionMeta, tag: VersionName) => {
-    const runs = runsOn(meta.name);
-    return (
-      pool.agreeing.has(runs) &&
-      Object.keys(meta.entries).every(
-        s => globalTags.get(s) === tag && claimableAt.get(tag)?.has(s) === true
-      )
-    );
-  };
+  const takesGlobalFiles = globalFilesTaker(member, pool, pool.keepsGlobalFiles);
 
   const placed: SharedVersion[] = [];
   let winnerRow: SharedVersion | undefined;

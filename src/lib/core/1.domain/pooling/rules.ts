@@ -1,5 +1,9 @@
 import type { AcceptsTag } from 'lib/core/1.domain/externals/compatibility';
-import type { Specifier, SpecifierTags } from 'lib/core/1.domain/externals/specifier';
+import {
+  packageOf,
+  type Specifier,
+  type SpecifierTags,
+} from 'lib/core/1.domain/externals/specifier';
 import type { Build, Copy } from './builds';
 
 // Plain loops: the election calls these per remote pair.
@@ -45,4 +49,14 @@ export function unwitnessedGap(
     gap = Math.max(gap, miss);
   }
   return specifiers[gap];
+}
+
+// A chunked copy's own file binds its build's internals, so beside the map's files of its package it runs a
+// second copy of the package.
+export function tearsPackage(
+  chunked: boolean,
+  specifier: Specifier,
+  mappedPackages: ReadonlySet<string>
+): boolean {
+  return chunked && mappedPackages.has(packageOf(specifier));
 }

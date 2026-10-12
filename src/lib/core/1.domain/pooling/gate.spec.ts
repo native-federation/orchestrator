@@ -75,7 +75,7 @@ const soleProviderIsland = (): PoolMember[] => [
 const viewOf = (members: PoolMember[], without?: string, shareScope = GLOBAL_SCOPE) =>
   committedView(
     members,
-    copiesByRemote(members),
+    copiesByRemote(members, () => false),
     members.map(m => m.name),
     {
       shareScope,
@@ -248,10 +248,15 @@ describe('committedView', () => {
       ];
 
       expect(
-        committedView(members, copiesByRemote(members), ['@ng/core/testing', '@ng/core'], {
-          shareScope: GLOBAL_SCOPE,
-          without: 'loaded',
-        }).global.get('@ng/core/testing')
+        committedView(
+          members,
+          copiesByRemote(members, () => false),
+          ['@ng/core/testing', '@ng/core'],
+          {
+            shareScope: GLOBAL_SCOPE,
+            without: 'loaded',
+          }
+        ).global.get('@ng/core/testing')
       ).toMatchObject({
         remote: 'flat',
       });
@@ -260,7 +265,12 @@ describe('committedView', () => {
 });
 
 describe('coverFromMap', () => {
-  const policy = { shareScope: '__GLOBAL__', selfFill: false, scopeUrlOf: () => undefined };
+  const policy = {
+    shareScope: '__GLOBAL__',
+    selfFill: false,
+    scopeUrlOf: () => undefined,
+    isChunked: () => false,
+  };
 
   // Defensive: unreachable under a coherent committed map, where a remote that agrees with the map never has
   // a resolver-scoped member (jsdev-b-5's probe). A scope the map serves only in part, or not at all, stays a
@@ -284,5 +294,66 @@ describe('coverFromMap', () => {
         coverFromMap('mfe', members, view, { '@ng/core': { action: 'scope' } }, policy)
       ).toEqual({ covers: [] });
     }
+  });
+
+  // mfe's copy of `@ng/core` ships rxjs-interop, which the map lacks; the map serves its root from F. With
+  // the coverage policies off, mfe would self-fill rxjs-interop from its own build. A flat file binds its
+  // imports through the map, so that is a cover. A chunked one imports mfe's own core internals beside F's
+  // core: the package is torn, and no member is covered.
+  it("reports a package torn when a chunked copy's own entrypoint would run beside the map's files", () => {
+    const withMfe = (entries?: Record<string, string>) => [
+      member('@ng/core', [
+        {
+          tag: '22.0.0',
+          action: 'share',
+          copies: [{ remote: 'F' }, { remote: 'mfe', cached: false, entries }],
+        },
+      ]),
+    ];
+    const actions = { '@ng/core': { action: 'skip' as const, covered: ['@ng/core'] } };
+    const selfFill = { ...policy, selfFill: true };
+    const cover = (members: PoolMember[], isChunked: (remote: string) => boolean) =>
+      coverFromMap('mfe', members, viewOf(members, 'mfe'), actions, { ...selfFill, isChunked });
+    const rootCovered = {
+      covers: [{ name: '@ng/core', toSkip: false, covered: ['@ng/core'], override: {} }],
+    };
+
+    const interop = withMfe({ '@ng/core': 'c.js', '@ng/core/rxjs-interop': 'r.js' });
+    expect(cover(interop, () => false)).toEqual(rootCovered);
+    expect(cover(interop, r => r === 'mfe')).toEqual({ torn: '@ng/core' });
+    // Only an entrypoint mfe runs from its own build counts: F's chunked files are the map's, and a copy the
+    // map serves whole runs on them alone.
+    expect(cover(withMfe(), () => true)).toEqual(rootCovered);
+  });
+
+  // mfe's flat core inherits the map's file whole (a skip with nothing to cover); its rxjs-interop, a package
+  // of its own the map lacks, it serves itself. From a chunked build that file binds mfe's core internals
+  // beside F's core, though the two are separate externals.
+  it('counts a package a copy inherits from the map whole as mapped', () => {
+    const members = [
+      member('@ng/core', [
+        {
+          tag: '22.0.0',
+          action: 'share',
+          copies: [{ remote: 'F' }, { remote: 'mfe', cached: false }],
+        },
+      ]),
+      member('@ng/core/rxjs-interop', [
+        { tag: '22.0.0', action: 'share', copies: [{ remote: 'mfe', cached: false }] },
+      ]),
+    ];
+    const actions = {
+      '@ng/core': { action: 'skip' as const },
+      '@ng/core/rxjs-interop': { action: 'share' as const },
+    };
+    const cover = (isChunked: (remote: string) => boolean) =>
+      coverFromMap('mfe', members, viewOf(members, 'mfe'), actions, {
+        ...policy,
+        selfFill: true,
+        isChunked,
+      });
+
+    expect(cover(() => false)).toEqual({ covers: [] });
+    expect(cover(r => r === 'mfe')).toEqual({ torn: '@ng/core' });
   });
 });

@@ -567,8 +567,9 @@ describe('createPoolDynamicExternals', () => {
     });
   });
 
-  it('takes the map when the build serving it runs a pool-mate from its own scope at the tag the map serves', async () => {
-    // team/b runs core from its own scope row, but at the map's 17.0.0: its router binds the same core.
+  it('scopes the family when the build serving it runs a pool-mate from its own scope, even at the tag the map serves', async () => {
+    // team/b runs core from its own scope row at the map's 17.0.0, but its own file: its router binds team/b's
+    // core, a second instance beside team/a's core the map hands mfe.
     givenCommitted({
       '@framework/core': committed(
         '@framework/core',
@@ -588,9 +589,13 @@ describe('createPoolDynamicExternals', () => {
 
     const result = await poolDynamicExternals({ entry, actions });
 
-    expect(result.actions['@framework/core']!.action).toBe('skip');
-    expect(result.actions['@framework/router']!.action).toBe('skip');
-    expect(verdictsWritten()).toEqual([]);
+    expect(result.actions['@framework/core']).toEqual({ action: 'scope' });
+    expect(result.actions['@framework/router']).toEqual({ action: 'scope' });
+    expect(config.log.warn).toHaveBeenCalledWith(
+      8,
+      // Wording is pinned in island-warnings.contract.spec.ts alone.
+      expect.stringContaining("'team/b'")
+    );
   });
 
   it("never touches another remote's copy, whatever it decides", async () => {
@@ -1113,9 +1118,38 @@ describe('createPoolDynamicExternals', () => {
       expect(actions['@fw/http']).toEqual({ action: 'skip', covered: ['@fw/http/testing'] });
     });
 
+    // The same load from a chunked build: mfe's own `@fw/http` root imports mfe's http internals, and F's
+    // testing entrypoint F's. Self-filling the root beside the map's testing file would run both, so the
+    // whole family serves itself, as for any family the map can serve only in part.
+    it('scopes the family when a chunked copy would self-fill beside the map', async () => {
+      givenCommitted({
+        '@fw/core': external(
+          row('17.0.0', 'share', copy('F', ['@fw/core'], true), copy('mfe', ['@fw/core']))
+        ),
+        '@fw/http/testing': external(row('17.0.0', 'share', copy('F', ['@fw/http/testing'], true))),
+        '@fw/http': external(
+          row('17.0.0', 'share', {
+            ...copy('mfe', ['@fw/http', '@fw/http/testing'], true),
+            bundle: 'browser-shared',
+          })
+        ),
+      });
+      adapters.sharedChunksRepo.tryGet = vi.fn((remote: string, bundle: string) =>
+        remote === 'mfe' && bundle === 'browser-shared'
+          ? Optional.of(['_nf-internal_chunk-a.js'])
+          : Optional.empty<string[]>()
+      );
+
+      const { actions } = await poolDynamicExternals(load());
+
+      expect(actions).toEqual({ '@fw/core': { action: 'scope' }, '@fw/http': { action: 'scope' } });
+      expect(verdictsWritten()).toEqual(['mfe@@fw/core: uncovered', 'mfe@@fw/http: uncovered']);
+    });
+
     // Under a coverage policy a skip refuses what it does not cover, and a named scope under `strictImportMap`
-    // refuses a skip-only package with an entrypoint no shared version serves on the next page. A partial
-    // share keeps publishing its own files instead: it agrees with the map, so they are the map's tags.
+    // refuses a skip-only package with an entrypoint no shared version serves on the next page, so the partial
+    // share would publish its own testing. But mfe takes F's core, whose file resolves testing to F's: two
+    // files of one specifier, so mfe serves its whole family itself.
     it.each([
       [
         'strictEntryPointCoverage',
@@ -1138,26 +1172,34 @@ describe('createPoolDynamicExternals', () => {
           c.strict.strictImportMap = true;
         },
       ],
-    ] as const)('keeps a partly served share under %s (%s)', async (_policy, shareScope, set) => {
-      set(config);
-      scopeUrls('F');
-      givenCommitted({
-        '@fw/core': external(
-          row('17.0.0', 'share', copy('F', ['@fw/core'], true), copy('mfe', ['@fw/core']))
-        ),
-        '@fw/http/testing': external(row('17.0.0', 'share', copy('F', ['@fw/http/testing'], true))),
-        '@fw/http': external(
-          row('17.0.0', 'share', copy('mfe', ['@fw/http', '@fw/http/testing'], true))
-        ),
-      });
+    ] as const)(
+      'scopes the family of a partly served share under %s (%s)',
+      async (_policy, shareScope, set) => {
+        set(config);
+        scopeUrls('F');
+        givenCommitted({
+          '@fw/core': external(
+            row('17.0.0', 'share', copy('F', ['@fw/core'], true), copy('mfe', ['@fw/core']))
+          ),
+          '@fw/http/testing': external(
+            row('17.0.0', 'share', copy('F', ['@fw/http/testing'], true))
+          ),
+          '@fw/http': external(
+            row('17.0.0', 'share', copy('mfe', ['@fw/http', '@fw/http/testing'], true))
+          ),
+        });
 
-      const { actions } = await poolDynamicExternals(load(shareScope));
+        const { actions } = await poolDynamicExternals(load(shareScope));
 
-      expect(actions['@fw/http']).toEqual({ action: 'share' });
-      expect(writtenFor('@fw/http')?.versions.map(v => `${v.tag}:${v.action}`) ?? []).not.toContain(
-        '17.0.0:skip'
-      );
-    });
+        expect(actions).toEqual({
+          '@fw/core': { action: 'scope' },
+          '@fw/http': { action: 'scope' },
+        });
+        expect(verdictsWritten()).toEqual(['mfe@@fw/core: uncovered', 'mfe@@fw/http: uncovered']);
+        // F runs testing on the map, so the U-27 line, which says otherwise, is not logged.
+        expect(config.log.warn).not.toHaveBeenCalled();
+      }
+    );
 
     describe('a skip whose entrypoint another package serves', () => {
       // G ships `@fw/core` 17.0.1 and, flat, `@fw/core/testing`. The shared version of `@fw/core` lacks

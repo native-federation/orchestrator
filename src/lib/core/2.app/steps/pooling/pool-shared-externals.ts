@@ -9,13 +9,18 @@ import { type Copy, copiesByRemote } from 'lib/core/1.domain/pooling/builds';
 import { elect, type PoolMiss, previousWinner } from 'lib/core/1.domain/pooling/election';
 import type { PoolMember, PoolName } from 'lib/core/1.domain/pooling/membership';
 import { type ElectionPlan, planElection } from 'lib/core/1.domain/pooling/plan';
-import { memberRecord, type PlacedPool } from 'lib/core/1.domain/pooling/records';
+import { memberRecord, type PlacedPool, placePool } from 'lib/core/1.domain/pooling/records';
+import { createIsChunked } from './is-chunked';
 
 export function createPoolSharedExternals(
   config: LoggingConfig & ModeConfig,
-  ports: Pick<DrivingContract, 'sharedExternalsRepo' | 'versionCheck'>
+  ports: Pick<
+    DrivingContract,
+    'sharedExternalsRepo' | 'versionCheck' | 'sharedChunksRepo' | 'scopedExternalsRepo'
+  >
 ): ForPoolingSharedExternals {
   const { compare } = ports.versionCheck;
+  const isChunked = createIsChunked(ports);
 
   // See docs/version-resolver.md §"How pooling resolves".
   return () => {
@@ -71,11 +76,12 @@ export function createPoolSharedExternals(
     const election = elect({
       members,
       acceptsTag: createAcceptsTag(ports.versionCheck.isCompatible, compare),
+      isChunked,
       compare,
       previousWinner: previousWinner(members),
       latestFirst: config.profile.latestSharedExternal,
     });
-    const placed: PlacedPool = { ...election, poolName };
+    const placed = placePool(election, poolName, members, isChunked);
     report(poolName, members, placed, scope);
     return members.map(m => [
       m.name,
@@ -115,7 +121,7 @@ export function createPoolSharedExternals(
         );
         continue;
       }
-      shipped ??= copiesByRemote(members);
+      shipped ??= copiesByRemote(members, isChunked);
       const counts = {
         imports: shipped.get(remote)!.length,
         subpoolSize: subpoolSizes.get(remote) ?? 0,
@@ -142,7 +148,7 @@ function missWarning(
       ? `It runs in subpool '${placement.owner}' for all ${imports} of its members.`
       : subpoolSize > 1
         ? `Its build serves subpool '${remote}': its ${imports} members and ${subpoolSize - 1} other remote(s).`
-        : placed.agreeing.has(remote)
+        : placed.keepsGlobalFiles.has(remote)
           ? `It takes the elected files where its versions match; the rest of its ${imports} members are scoped for it.`
           : `All ${imports} of its members are scoped for it.`;
 

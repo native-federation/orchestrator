@@ -2,6 +2,7 @@ import type { SharedExternal } from 'lib/core/1.domain';
 import { mockVersionRemote } from '../domain/externals/version.mock';
 import {
   emittedUrls,
+  findChunkTornRemotes,
   findIncoherentRemotes,
   findSplitRemotes,
   tearsByPool,
@@ -340,7 +341,38 @@ describe('findSplitRemotes', () => {
 
     expect(findIncoherentRemotes({ importMap, members: members(), scopeUrls: SCOPE })).toEqual([]);
     expect(findSplitRemotes({ importMap, members: members(), scopeUrls: SCOPE })).toEqual([
-      { remote: 'team/mfe-a', specifiers: { '@angular/core': ['22.0.6', '22.0.8'] } },
+      {
+        remote: 'team/mfe-a',
+        specifiers: {
+          '@angular/core': ['22.0.6', '22.0.8'],
+          '@angular/core @urls': ['http://mfe-a/@angular/core.js', 'http://mfe-b/@angular/core.js'],
+        },
+      },
+    ]);
+  });
+
+  it('catches one specifier reached at two files of one tag', () => {
+    // As above, but mfe-a ships core at mfe-b's 22.0.8: the tags agree, the files do not.
+    const importMap = {
+      imports: {
+        '@angular/core': 'http://mfe-b/@angular/core.js',
+        '@angular/material': 'http://mfe-b/@angular/material.js',
+      },
+      scopes: { 'http://mfe-a/': { '@angular/core': 'http://mfe-a/@angular/core.js' } },
+    };
+    const sameTag = members();
+    sameTag['@angular/core']!.versions = [
+      copy('22.0.8', 'share', 'team/mfe-b', '@angular/core'),
+      copy('22.0.8', 'scope', 'team/mfe-a', '@angular/core'),
+    ];
+
+    expect(findSplitRemotes({ importMap, members: sameTag, scopeUrls: SCOPE })).toEqual([
+      {
+        remote: 'team/mfe-a',
+        specifiers: {
+          '@angular/core @urls': ['http://mfe-a/@angular/core.js', 'http://mfe-b/@angular/core.js'],
+        },
+      },
     ]);
   });
 
@@ -457,6 +489,115 @@ describe('findSplitRemotes', () => {
 
     expect(
       findSplitRemotes({ importMap, members: members(), scopeUrls: SCOPE, hosts: ['team/mfe-a'] })
+    ).toEqual([]);
+  });
+});
+
+describe('findChunkTornRemotes', () => {
+  const SCOPE = { host: 'http://host/', mfe: 'http://mfe/' };
+
+  // Both builds ship the fw pool at 17.0.0, so every tag agrees: only origins can tell a tear. The host's
+  // core lacks interop; mfe's ships it.
+  const copy = (remote: string, specifiers: string[]) => ({
+    ...mockVersionRemote(remote, specifiers[0]!, { requiredVersion: '^17.0.0' }),
+    bundle: `${remote}-bundle`,
+    entries: Object.fromEntries(specifiers.map(s => [s, `${s}.js`])),
+  });
+  const members = (): Record<string, SharedExternal> => ({
+    '@fw/core': {
+      dirty: false,
+      versions: [
+        {
+          tag: '17.0.0',
+          host: false,
+          action: 'share',
+          remotes: [copy('host', ['@fw/core']), copy('mfe', ['@fw/core', '@fw/core/interop'])],
+        },
+      ],
+    },
+    '@fw/forms': {
+      dirty: false,
+      versions: [
+        {
+          tag: '17.0.0',
+          host: false,
+          action: 'share',
+          remotes: [copy('host', ['@fw/forms']), copy('mfe', ['@fw/forms'])],
+        },
+      ],
+    },
+  });
+  const isChunked = () => true;
+  const globalMap = {
+    '@fw/core': 'http://host/@fw/core.js',
+    '@fw/forms': 'http://host/@fw/forms.js',
+  };
+
+  it('catches a package whose entrypoints a remote resolves from two builds, one of them chunked', () => {
+    // mfe takes the map's core but runs its own interop, which imports mfe's core internals.
+    const importMap = {
+      imports: globalMap,
+      scopes: { 'http://mfe/': { '@fw/core/interop': 'http://mfe/@fw/core/interop.js' } },
+    };
+    const input = { importMap, members: members(), scopeUrls: SCOPE };
+
+    expect(findChunkTornRemotes({ ...input, isChunked })).toEqual([
+      { remote: 'mfe', packages: { '@fw/core': ['host*', 'mfe*'] } },
+    ]);
+    // Flat files bind core through the map, and the tags agree: no tear.
+    expect(findChunkTornRemotes(input)).toEqual([]);
+    expect(findIncoherentRemotes(input)).toEqual([]);
+    expect(findSplitRemotes(input)).toEqual([]);
+  });
+
+  it("catches a second build one import in, where the remote's own resolution is whole", () => {
+    // mfe runs its own core, but takes the map's forms, whose file resolves core where it lives: the host's.
+    const importMap = {
+      imports: globalMap,
+      scopes: {
+        'http://mfe/': {
+          '@fw/core': 'http://mfe/@fw/core.js',
+          '@fw/core/interop': 'http://mfe/@fw/core/interop.js',
+        },
+      },
+    };
+
+    expect(
+      findChunkTornRemotes({ importMap, members: members(), scopeUrls: SCOPE, isChunked })
+    ).toEqual([{ remote: 'mfe', packages: { '@fw/core': ['host*', 'mfe*'] } }]);
+  });
+
+  it('accepts the remote once it runs its whole family on one build', () => {
+    const importMap = {
+      imports: globalMap,
+      scopes: {
+        'http://mfe/': {
+          '@fw/core': 'http://mfe/@fw/core.js',
+          '@fw/core/interop': 'http://mfe/@fw/core/interop.js',
+          '@fw/forms': 'http://mfe/@fw/forms.js',
+        },
+      },
+    };
+
+    expect(
+      findChunkTornRemotes({ importMap, members: members(), scopeUrls: SCOPE, isChunked })
+    ).toEqual([]);
+  });
+
+  it('exempts host remotes', () => {
+    const importMap = {
+      imports: globalMap,
+      scopes: { 'http://mfe/': { '@fw/core/interop': 'http://mfe/@fw/core/interop.js' } },
+    };
+
+    expect(
+      findChunkTornRemotes({
+        importMap,
+        members: members(),
+        scopeUrls: SCOPE,
+        isChunked,
+        hosts: ['mfe'],
+      })
     ).toEqual([]);
   });
 });

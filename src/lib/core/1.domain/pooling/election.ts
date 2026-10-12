@@ -1,11 +1,7 @@
 import type { ExternalName, PoolCause, RemoteName, VersionName } from 'lib/core/1.domain';
 import type { AcceptsTag } from 'lib/core/1.domain/externals/compatibility';
-import {
-  owningPackage,
-  type Specifier,
-  SpecifierTags,
-} from 'lib/core/1.domain/externals/specifier';
-import { type Build, buildOf, type Copy, copiesByRemote } from './builds';
+import { packageOf, type Specifier, SpecifierTags } from 'lib/core/1.domain/externals/specifier';
+import { type Build, buildOf, type Copy, copiesByRemote, type IsChunked } from './builds';
 import type { PoolMember } from './membership';
 import { agrees, serves, unwitnessedGap } from './rules';
 import { compareStrings } from 'lib/utils/compare-strings';
@@ -19,6 +15,7 @@ type ElectionInput = {
   // The stored record's winner, which breaks round-1 ties.
   previousWinner?: RemoteName;
   latestFirst: boolean;
+  isChunked: IsChunked;
 };
 
 // `unshipped`: the map serves every specifier, but no build shipped them together.
@@ -65,7 +62,7 @@ type State = {
 };
 
 export function elect(input: ElectionInput): Election {
-  const shipped = copiesByRemote(input.members);
+  const shipped = copiesByRemote(input.members, input.isChunked);
   const builds = new Map<RemoteName, Build>();
   for (const [owner, copies] of shipped) builds.set(owner, buildOf(owner, copies));
   const pool: Pool = {
@@ -126,18 +123,21 @@ function rank<C extends { build: Build }>(pool: Pool, candidates: C[], keys: ((c
 }
 
 // Same tag, same artefact: round 1 also serves entrypoints other copies of its tags ship — but only from
-// builds that agree with it, since a borrowed file binds its own imports where it lives.
+// builds that agree with it, since a borrowed file binds its own imports where it lives, and never a chunked
+// copy's, whose file would bind its build's internals beside the winner's.
 function withLoans(pool: Pool, build: Build) {
   const tags = new SpecifierTags(build.tags);
   const loans = new Map<Specifier, RemoteName[]>();
   for (const [remote, copies] of pool.shipped) {
     if (remote === build.owner || !agrees(copies, build.tags)) continue;
-    for (const copy of copies)
+    for (const copy of copies) {
+      if (copy.chunked) continue;
       for (const specifier of copy.specifiers)
         if (!build.tags.has(specifier) && build.tags.pinnedTag(specifier) === copy.tag) {
           tags.set(specifier, copy.tag);
           loans.set(specifier, [...(loans.get(specifier) ?? []), remote]);
         }
+    }
   }
   return { tags, loans };
 }
@@ -261,20 +261,70 @@ function addExtensions(pool: Pool, state: State): void {
     r =>
       !globalRemotes.has(r) && pool.agreesAt(r, globalTags) && pool.agreesAt(runsOn(r), globalTags)
   );
-  const extensions = new Map<string, { tag: VersionName; specifiers: Specifier[] } | null>();
+  for (const offer of offers(pool, globalTags, contributors).values())
+    if (offer) for (const s of offer.specifiers) globalTags.set(s, offer.tag);
+}
+
+type Offer = { tag: VersionName; specifiers: Specifier[] };
+
+// Per package the contributors ship and the global tags do not pin: its one tag, or null for two.
+function offers(pool: Pool, globalTags: SpecifierTags, contributors: RemoteName[]) {
+  const offered = new Map<string, Offer | null>();
   for (const remote of contributors)
     for (const copy of pool.shipped.get(remote)!)
       for (const s of copy.specifiers) {
         if (globalTags.pinnedTag(s) !== undefined) continue;
-        const pkg = owningPackage(s) ?? s;
-        const seen = extensions.get(pkg);
+        const pkg = packageOf(s);
+        const seen = offered.get(pkg);
         if (seen === null) continue;
-        if (seen === undefined) extensions.set(pkg, { tag: copy.tag, specifiers: [s] });
-        else if (seen.tag !== copy.tag) extensions.set(pkg, null);
+        if (seen === undefined) offered.set(pkg, { tag: copy.tag, specifiers: [s] });
+        else if (seen.tag !== copy.tag) offered.set(pkg, null);
         else seen.specifiers.push(s);
       }
-  for (const extension of extensions.values())
-    if (extension) for (const s of extension.specifiers) globalTags.set(s, extension.tag);
+  dropChunkedSplits(pool, contributors, offered);
+  return offered;
+}
+
+// A chunked copy's files run only beside its own build's, so two contributors' copies of a chunked package
+// may be published only when the map cannot mix them: each ships the same entrypoints in one member, whose
+// row the map claims whole. Flat members are claimed one row each, in record order, so they can mix.
+function dropChunkedSplits(
+  pool: Pool,
+  contributors: RemoteName[],
+  offered: Map<string, Offer | null>
+): void {
+  const shapes = new Map<string, Set<string>>();
+  const chunked = new Set<string>();
+  for (const remote of contributors) {
+    const packages = packagesOf(pool.shipped.get(remote)!, offered, chunked);
+    for (const [pkg, { specifiers, members }] of packages) {
+      let sets = shapes.get(pkg);
+      if (!sets) shapes.set(pkg, (sets = new Set()));
+      // A copy split over members gets a shape no other contributor matches.
+      sets.add(members.size > 1 ? `flat ${remote}` : specifiers.sort().join(' '));
+    }
+  }
+  for (const pkg of chunked) if (shapes.get(pkg)!.size > 1) offered.set(pkg, null);
+}
+
+// Also collects the chunked packages into `chunked`.
+function packagesOf(
+  copies: Copy[],
+  offered: Map<string, Offer | null>,
+  chunked: Set<string>
+): Map<string, { specifiers: Specifier[]; members: Set<string> }> {
+  const packages = new Map<string, { specifiers: Specifier[]; members: Set<string> }>();
+  for (const copy of copies)
+    for (const s of copy.specifiers) {
+      const pkg = packageOf(s);
+      if (!offered.get(pkg)) continue;
+      let own = packages.get(pkg);
+      if (!own) packages.set(pkg, (own = { specifiers: [], members: new Set() }));
+      own.specifiers.push(s);
+      own.members.add(copy.member);
+      if (copy.chunked) chunked.add(pkg);
+    }
+  return packages;
 }
 
 // The global map publishes only global remotes' copies, so drop each tag no global remote ships until

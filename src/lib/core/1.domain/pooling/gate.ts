@@ -10,20 +10,23 @@ import {
 } from 'lib/core/1.domain';
 import { forEachVersionEntry } from 'lib/core/1.domain/externals/basis';
 import type { AcceptsTag } from 'lib/core/1.domain/externals/compatibility';
-import { type Specifier, SpecifierTags } from 'lib/core/1.domain/externals/specifier';
+import { packageOf, type Specifier, SpecifierTags } from 'lib/core/1.domain/externals/specifier';
 import * as _path from 'lib/utils/path';
-import { type Build, buildOf, type Copy } from './builds';
+import { type Build, buildOf, type Copy, type IsChunked } from './builds';
 import type { PoolMember } from './membership';
-import { agrees, unwitnessedGap } from './rules';
+import { agrees, tearsPackage, unwitnessedGap } from './rules';
 
 // See docs/version-resolver.md §"Scope and dynamic init".
+
+// One file: the remote whose scope URL it lives under, and its name there.
+type Served = { tag: VersionName; remote: RemoteName; file: string };
 
 type CommittedView = {
   builds: Map<RemoteName, Build>;
   // What the committed global map serves per specifier: `imports`, or the shareScope's scopes.
-  global: Map<Specifier, { tag: VersionName; remote: RemoteName; file: string }>;
+  global: Map<Specifier, Served>;
   // Per build, the specifiers it runs from its own or a subpool's files, at the tag it runs.
-  runsOffMap: Map<RemoteName, Map<Specifier, VersionName>>;
+  runsOffMap: Map<RemoteName, Map<Specifier, Served>>;
 };
 
 export type GateMiss =
@@ -40,9 +43,22 @@ type MapCover = {
   override: Record<Specifier, string>;
 };
 
+type MappedFiles = { covered: Set<Specifier>; override: Record<Specifier, string> };
+
+// One of the remote's copies the map may cover, with its action and what the map would serve of it.
+type Coverable = MappedFiles & {
+  member: PoolMember;
+  action: SharedInfoActions[string];
+  copy: SharedVersionMeta;
+};
+
+// Where the remote resolves a specifier it ships: the map's file, or its own.
+type Reach = { remote: RemoteName; file: string; chunked: boolean };
+
 type MapPolicy = {
   shareScope: string;
   selfFill: boolean;
+  isChunked: IsChunked;
   scopeUrlOf: (remote: RemoteName) => string | undefined;
 };
 
@@ -70,20 +86,34 @@ export function committedView(
   for (const [owner, copies] of shipped)
     if (owner !== without) builds.set(owner, buildOf(owner, copies));
 
+  const fileOf = new Map<RemoteName, Record<Specifier, string>>();
+  for (const member of members)
+    for (const version of member.external.versions)
+      for (const { name, entries } of version.remotes)
+        // The first row wins, as in `copiesByRemote`.
+        fileOf.set(name, { ...entries, ...fileOf.get(name) });
+
   const runsOffMap: CommittedView['runsOffMap'] = new Map();
   for (const member of members)
     for (const version of member.external.versions)
       for (const meta of version.remotes) {
-        if (version.action !== 'scope' && !meta.servedBy) continue;
+        const { servedBy } = meta;
         let runs = runsOffMap.get(meta.name);
         if (!runs) runsOffMap.set(meta.name, (runs = new Map()));
-        // A subpool member's copy keeps its own tag in the record but runs its build's files.
-        for (const specifier in meta.entries)
+        for (const specifier in meta.entries) {
+          // A shared copy runs its own file only for an entrypoint the map lacks: it filled it itself.
+          if (version.action !== 'scope' && !servedBy && global.has(specifier)) continue;
+          // A subpool member's copy keeps its own tag in the record but runs its build's files.
+          const tag =
+            (servedBy ? builds.get(servedBy)?.tags.pinnedTag(specifier) : undefined) ?? version.tag;
+          const file = servedBy && fileOf.get(servedBy)?.[specifier];
           runs.set(
             specifier,
-            (meta.servedBy ? builds.get(meta.servedBy)?.tags.pinnedTag(specifier) : undefined) ??
-              version.tag
+            file
+              ? { tag, remote: servedBy, file }
+              : { tag, remote: meta.name, file: meta.entries[specifier]! }
           );
+        }
       }
 
   return { builds, global, runsOffMap };
@@ -109,42 +139,130 @@ export function judgeRemote(
   return { cause: 'uncovered', unshipped: true };
 }
 
+type Binding = { owner: RemoteName; specifier: Specifier; tag: VersionName; offMap: boolean };
+
+type CoverResult =
+  { covers: MapCover[] } | { unmapped: RemoteName } | { torn: string } | { bound: Binding };
+
 // `covered` is per external, but the map serves by specifier: an entrypoint another member ships as a package
 // of its own (flat vs dense) is served all the same. A named scope has no `imports` to inherit, so the remote's
 // own scope maps each such specifier to the file the committed map serves it from, replacing the resolver's
-// override.
+// override. Covering fails, and the remote serves the pool itself, when it would run a package partly on the
+// map's files and partly on its own chunked ones (`torn`), or reach one specifier at two files (`bound`).
 export function coverFromMap(
   remote: RemoteName,
   mine: readonly PoolMember[],
   view: CommittedView,
   actions: Readonly<SharedInfoActions>,
   policy: MapPolicy
-): { covers: MapCover[] } | { unmapped: RemoteName } {
-  const covers: MapCover[] = [];
-
+): CoverResult {
+  const inherited: SharedVersionMeta[] = [];
+  const files: Coverable[] = [];
   for (const member of mine) {
     const action = actions[member.name]!;
-    // Inherits every mapping already.
-    if (action.action === 'skip' && !action.covered) continue;
     const copy = member.external.versions.flatMap(v => v.remotes).find(r => r.name === remote);
     if (!copy) continue;
+    // Inherits every mapping already.
+    if (action.action === 'skip' && !action.covered) {
+      inherited.push(copy);
+      continue;
+    }
 
-    const files = mapFiles(copy, view, policy, action);
-    if ('unmapped' in files) return files;
-    const { covered, override } = files;
-
-    const opened = action.action !== 'skip';
-    const partial = covered.size < Object.keys(copy.entries).length;
-    if (opened && (covered.size === 0 || (partial && !policy.selfFill))) continue;
-    // A copy that joined a share row would claim, on the next page, what the map serves from another member.
-    const toSkip =
-      opened ||
-      (covered.size > action.covered!.length &&
-        member.external.versions.some(v => v.action === 'share' && v.remotes.includes(copy)));
-    covers.push({ name: member.name, toSkip, covered: [...covered], override });
+    const mapped = mapFiles(copy, view, policy, action);
+    if ('unmapped' in mapped) return mapped;
+    files.push({ member, action, copy, ...mapped });
   }
 
-  return { covers };
+  const reaches = reachesOf(remote, inherited, files, view, policy);
+  const torn = tornPackage(remote, reaches);
+  if (torn !== undefined) return { torn };
+  const bound = boundByFile(reaches, view);
+  if (bound !== undefined) return { bound };
+  return { covers: files.filter(file => covering(file, policy)).map(coverOf) };
+}
+
+function covering({ action, copy, covered }: Coverable, policy: MapPolicy): boolean {
+  const partial = covered.size < Object.keys(copy.entries).length;
+  return action.action === 'skip' || (covered.size > 0 && (!partial || policy.selfFill));
+}
+
+function coverOf({ member, action, copy, covered, override }: Coverable): MapCover {
+  // A copy that joined a share row would claim, on the next page, what the map serves from another member.
+  const toSkip =
+    action.action !== 'skip' ||
+    (covered.size > action.covered!.length &&
+      member.external.versions.some(v => v.action === 'share' && v.remotes.includes(copy)));
+  return { name: member.name, toSkip, covered: [...covered], override };
+}
+
+// Where the remote resolves each specifier it ships once the covers apply: the map's file, else its own.
+function reachesOf(
+  remote: RemoteName,
+  inherited: readonly SharedVersionMeta[],
+  files: readonly Coverable[],
+  view: CommittedView,
+  policy: MapPolicy
+): Map<Specifier, Reach> {
+  const reaches = new Map<Specifier, Reach>();
+  const fromMap = (specifier: Specifier): Reach | undefined => {
+    const served = view.global.get(specifier);
+    return served && { remote: served.remote, file: served.file, chunked: false };
+  };
+  for (const copy of inherited)
+    for (const specifier in copy.entries) {
+      const reach = fromMap(specifier);
+      if (reach) reaches.set(specifier, reach);
+    }
+  for (const file of files) {
+    const takesMap = covering(file, policy);
+    const chunked = policy.isChunked(remote, file.copy.bundle);
+    for (const [specifier, own] of Object.entries(file.copy.entries)) {
+      if (!takesMap || !file.covered.has(specifier))
+        reaches.set(specifier, { remote, file: own, chunked });
+      else {
+        const reach = fromMap(specifier);
+        if (reach) reaches.set(specifier, reach);
+      }
+    }
+  }
+  return reaches;
+}
+
+function tornPackage(remote: RemoteName, reaches: ReadonlyMap<Specifier, Reach>) {
+  const mapped = new Set<string>();
+  for (const [specifier, { remote: from }] of reaches)
+    if (from !== remote) mapped.add(packageOf(specifier));
+  for (const [specifier, { remote: from, chunked }] of reaches)
+    if (from === remote && tearsPackage(chunked, specifier, mapped)) return packageOf(specifier);
+  return undefined;
+}
+
+// U-27 by file: a committed file binds its pool-mates where its build resolves them (off the map where it runs
+// them so, else the map), so every build whose file the remote reaches, directly or through another such file,
+// must resolve each specifier it ships to the file the remote does, or the one the first such build does.
+// `offMap`: the build that disagrees runs its file off the map.
+function boundByFile(
+  reaches: ReadonlyMap<Specifier, Reach>,
+  view: CommittedView
+): Binding | undefined {
+  const servers = new Set<RemoteName>();
+  for (const { remote } of reaches.values()) if (view.builds.has(remote)) servers.add(remote);
+
+  const firstRun = new Map<Specifier, { remote: RemoteName; file: string }>();
+  // A Set iterates what is added during the loop, so a build first reached through another's file is judged too.
+  for (const build of servers)
+    for (const specifier of view.builds.get(build)!.tags.keys()) {
+      const offMap = view.runsOffMap.get(build)?.get(specifier);
+      const served = offMap ?? view.global.get(specifier);
+      if (served === undefined) continue;
+      const reached = reaches.get(specifier) ?? firstRun.get(specifier);
+      if (reached === undefined) {
+        firstRun.set(specifier, served);
+        if (view.builds.has(served.remote)) servers.add(served.remote);
+      } else if (reached.remote !== served.remote || reached.file !== served.file)
+        return { owner: build, specifier, tag: served.tag, offMap: offMap !== undefined };
+    }
+  return undefined;
 }
 
 function mapFiles(
@@ -152,7 +270,7 @@ function mapFiles(
   view: CommittedView,
   policy: MapPolicy,
   action: SharedInfoActions[string]
-): { covered: Set<Specifier>; override: Record<Specifier, string> } | { unmapped: RemoteName } {
+): MappedFiles | { unmapped: RemoteName } {
   const covered = new Set(action.covered);
   const override = { ...action.override };
   for (const specifier in copy.entries) {
@@ -195,7 +313,7 @@ function offMapBinding(copies: readonly Copy[], view: CommittedView, globalTags:
 
   const firstRun = new SpecifierTags();
   for (const build of servers)
-    for (const [specifier, tag] of view.runsOffMap.get(build) ?? []) {
+    for (const [specifier, { tag }] of view.runsOffMap.get(build) ?? []) {
       const reached =
         globalTags.pinnedTag(specifier) ??
         own.pinnedTag(specifier) ??

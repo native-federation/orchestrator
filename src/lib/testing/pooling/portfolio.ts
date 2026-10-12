@@ -95,6 +95,11 @@ export const portfolio = (
 ) => {
   // What the flows fetch: remote entries by URL, handed out as fresh copies the way a fetch parses them.
   const published = new Map<string, RemoteEntry>();
+  const latest = new Map<RemoteName, RemoteEntry>();
+  const publish = (entry: RemoteEntry) => {
+    published.set(entry.url, entry);
+    latest.set(entry.name, entry);
+  };
   let installed: ImportMap | undefined;
   // The map the browser holds: import maps only grow, so a later load runs over every earlier one.
   let page: ImportMap | undefined;
@@ -221,6 +226,17 @@ export const portfolio = (
       ? stored()
       : withLabelledPools(stored());
 
+  // Read off what the test published, never through the repositories pooling reads, so the oracle cannot share
+  // its blind spot: a bundle with chunks, or a remote with `@nf-internal/` externals (flat chunking).
+  const isChunked = (remote: RemoteName, bundle: string | undefined): boolean => {
+    const entry = latest.get(remote);
+    if (!entry) return false;
+    return (
+      (bundle !== undefined && (entry.chunks?.[bundle]?.length ?? 0) > 0) ||
+      entry.shared.some(s => s.packageName.startsWith('@nf-internal/'))
+    );
+  };
+
   const assertNoTear = (importMap: ImportMap) => {
     if (!checkTear) return;
     expect(
@@ -229,6 +245,7 @@ export const portfolio = (
         externals: { [scope]: labelled() },
         scopeUrls: knownScopeUrls(),
         hosts,
+        isChunked,
       })
     ).toEqual([]);
   };
@@ -261,7 +278,7 @@ export const portfolio = (
   const runInit = async (entries: RemoteEntry[] = []): Promise<ImportMap> => {
     if (entries.length > 0 && !realRepositories)
       throw new Error('runInit(entries) needs realRepositories.');
-    for (const entry of entries) published.set(entry.url, entry);
+    for (const entry of entries) publish(entry);
     const host = entries.find(e => hosts.includes(e.name));
     config.hostRemoteEntry = host ? { name: host.name, url: host.url } : false;
     const manifest = Object.fromEntries(entries.filter(e => e !== host).map(e => [e.name, e.url]));
@@ -293,7 +310,7 @@ export const portfolio = (
   // earlier load's delta. Regenerating it from the record would publish earlier loads' copies in `imports` and
   // mark them `cached`, which no real page does. A page that ran no init (seeded) generates it once.
   const runDynamic = async (entry: RemoteEntry): Promise<DynamicLoad> => {
-    published.set(entry.url, entry);
+    publish(entry);
     const committed = page ?? (await drivers.generateImportMap());
     installed = undefined;
     actions = undefined;

@@ -24,10 +24,18 @@ import {
 } from 'lib/core/1.domain/pooling/gate';
 import { type CopyMove, movedRecord, renamedRecords } from 'lib/core/1.domain/pooling/records';
 import { createAcceptsTag } from 'lib/core/1.domain/externals/compatibility';
+import { createIsChunked } from './is-chunked';
 
 export function createPoolDynamicExternals(
   config: LoggingConfig & ModeConfig,
-  ports: Pick<DrivingContract, 'sharedExternalsRepo' | 'remoteInfoRepo' | 'versionCheck'>
+  ports: Pick<
+    DrivingContract,
+    | 'sharedExternalsRepo'
+    | 'remoteInfoRepo'
+    | 'versionCheck'
+    | 'sharedChunksRepo'
+    | 'scopedExternalsRepo'
+  >
 ): ForPoolingDynamicExternals {
   // Read per call so a port swapped after wiring is honoured.
   const accepts = createAcceptsTag(
@@ -35,6 +43,7 @@ export function createPoolDynamicExternals(
     (a, b) => ports.versionCheck.compare(a, b)
   );
   const scopeUrlOf = (remote: RemoteName) => ports.remoteInfoRepo.tryGet(remote).get()?.scopeUrl;
+  const isChunked = createIsChunked(ports);
 
   // The committed map is immutable, so this only rewrites the loaded remote's own actions and copies, never
   // another remote's. See docs/version-resolver.md §"Scope and dynamic init".
@@ -61,7 +70,7 @@ export function createPoolDynamicExternals(
     recordOrder: ExternalName[],
     scope: string
   ): Map<ExternalName, CopyMove> {
-    const policy = { shareScope: scope, selfFill: maySelfFill(scope), scopeUrlOf };
+    const policy = { shareScope: scope, selfFill: maySelfFill(scope), scopeUrlOf, isChunked };
     const moves = new Map<ExternalName, CopyMove>();
     const selfServe = (members: PoolMember[], cause: PoolCause) => {
       for (const { name } of members) {
@@ -78,7 +87,7 @@ export function createPoolDynamicExternals(
       const mine = pool.filter(member => names.has(member.name));
       if (mine.length === 0) continue;
 
-      const shipped = copiesByRemote(pool);
+      const shipped = copiesByRemote(pool, isChunked);
       const view = committedView(pool, shipped, recordOrder, {
         shareScope: scope,
         without: remote,
@@ -91,9 +100,15 @@ export function createPoolDynamicExternals(
       }
 
       const cover = coverFromMap(remote, mine, view, actions, policy);
-      if ('unmapped' in cover) {
+      if (!('covers' in cover)) {
+        if ('unmapped' in cover) warnUnmapped(scope, remote, cover.unmapped);
+        // The U-27 line is true only where the committed build runs the file off the map.
+        if ('bound' in cover && cover.bound.offMap) {
+          const { owner, specifier, tag } = cover.bound;
+          const miss = { cause: 'uncovered' as const, owner, specifier, tag };
+          config.log.warn(8, `[${scope}] ${selfServeWarning(remote, miss, mine.length)}`);
+        }
         // Half its family on the map's files and half on its own build would tear it.
-        warnUnmapped(scope, remote, cover.unmapped);
         selfServe(mine, 'uncovered');
         continue;
       }

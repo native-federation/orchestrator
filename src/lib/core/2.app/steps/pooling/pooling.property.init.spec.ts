@@ -291,7 +291,7 @@ describe('pooling properties: init (generated portfolios)', { timeout: TIMEOUT }
         const poolMembers = Object.entries(members).map(([name, external]) => ({ name, external }));
         const { global } = committedView(
           poolMembers,
-          copiesByRemote(poolMembers),
+          copiesByRemote(poolMembers, () => false),
           Object.keys(record),
           { shareScope: GLOBAL_SCOPE }
         );

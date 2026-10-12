@@ -4,7 +4,7 @@ import { createAcceptsTag } from 'lib/core/1.domain/externals/compatibility';
 import { createVersionCheck } from 'lib/core/3.adapters/checks/version.check';
 import { elect } from './election';
 import type { PoolMember } from './membership';
-import { memberRecord, type PlacedPool, renamedRecords } from './records';
+import { memberRecord, placePool, renamedRecords } from './records';
 
 /**
  * The records the init step writes are computed here, before any write, and nothing here may change what it
@@ -56,8 +56,9 @@ describe('memberRecord', () => {
       acceptsTag: createAcceptsTag(isCompatible, compare),
       compare,
       latestFirst: false,
+      isChunked: () => false,
     });
-    const placed: PlacedPool = { ...election, poolName: 'x' };
+    const placed = placePool(election, 'x', members, () => false);
 
     const records = members.map(m => memberRecord(m, placed, compare));
 

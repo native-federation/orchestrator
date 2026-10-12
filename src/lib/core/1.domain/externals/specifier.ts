@@ -18,6 +18,8 @@ export function owningPackage(name: ExternalName): ExternalName | undefined {
   return name.slice(0, cut);
 }
 
+export const packageOf = (name: ExternalName): ExternalName => owningPackage(name) ?? name;
+
 // Tags per specifier that also pin an entrypoint nobody lists: a package is one version, so its tag is the
 // root's, else the first entrypoint's — a package can ship entrypoints only (`material/table`, no root).
 export class SpecifierTags extends Map<Specifier, VersionName> {

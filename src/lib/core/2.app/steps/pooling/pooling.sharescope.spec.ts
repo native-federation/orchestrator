@@ -325,10 +325,10 @@ describe('a load into a pool of flat and dense builds, and the page after it', (
 
   // L's `@fw/http` 17.0.0 ships its root, which nobody serves, beside `@fw/http/testing`, which F's flat
   // package serves. Under `strictImportMap` a named scope's next page refuses a skip-only package with an
-  // entrypoint no shared version serves, so the share stays. Stored after D's skip-only `@fw/http`, ahead of
-  // `@fw/http/testing`, it claims testing on the next page: harmless, since L reached the global verdict by
-  // agreeing with the map, so it claims F's tag.
-  it('a share served in part stays a share under strictImportMap, and the next page stays whole (team)', async () => {
+  // entrypoint no shared version serves, so L could only keep its own share, running its own testing. But L
+  // takes F's core, whose file resolves testing to F's: two instances in one remote. So L serves its whole
+  // family itself, and the next strict page neither refuses nor throws.
+  it('a load that would run its own entrypoint beside the one the map serves serves its family itself under strictImportMap, and the next page stays whole (team)', async () => {
     const shareScope = 'team';
     const p = portfolio({}, { realRepositories: true, assertNoTear: false, scope: shareScope });
     const strict = () => (p.config.strict.strictImportMap = true);
@@ -359,7 +359,9 @@ describe('a load into a pool of flat and dense builds, and the page after it', (
     const { actions, merged } = await p.runDynamic(load);
     const page = outcome(merged, p.stored()).runs;
 
-    expect(actions['@fw/http']!.action).toBe('share');
+    expect(actions['@fw/core']!.action).toBe('scope');
+    expect(actions['@fw/http']!.action).toBe('scope');
+    expect(p.islands()).toEqual({ L: 'uncovered' });
     expect(tears(merged)).toEqual([]);
     expect(Object.keys(p.stored()).indexOf('@fw/http')).toBeLessThan(
       Object.keys(p.stored()).indexOf('@fw/http/testing')

@@ -94,9 +94,10 @@ export function torn(
   scope = GLOBAL_SCOPE
 ): string[] {
   return poolTears(importMap, record, scopeUrls, host, scope)
-    .flatMap(({ pool, incoherent, split }) => [
+    .flatMap(({ pool, incoherent, split, chunks }) => [
       ...incoherent.map(({ remote }) => `${pool}|${remote}|incoherent`),
       ...split.map(({ remote }) => `${pool}|${remote}|split`),
+      ...chunks.map(({ remote }) => `${pool}|${remote}|chunks`),
     ])
     .sort();
 }

@@ -7,7 +7,7 @@ import type {
   VersionName,
 } from 'lib/core/1.domain';
 import * as _path from 'lib/utils/path';
-import { owningPackage } from 'lib/core/1.domain/externals/specifier';
+import { owningPackage, packageOf } from 'lib/core/1.domain/externals/specifier';
 import { buildPools } from 'lib/core/1.domain/pooling/membership';
 
 // Re-exported so harnesses outside `src` depend on `lib/testing` only, not on where the step code lives.
@@ -33,6 +33,8 @@ export type CoherenceInput = {
   scopeUrls: Record<RemoteName, string>;
   /** I3's only exemption: a host cannot be repointed onto another build, so it is never judged. */
   hosts?: RemoteName[];
+  /** Whether a copy's files import its build's internal chunks; none do when left out. */
+  isChunked?: (remote: RemoteName, bundle: string | undefined) => boolean;
 };
 
 /**
@@ -118,8 +120,7 @@ export function findIncoherentRemotes({
     for (const [build, ships] of builds) {
       const packages = packageTags.get(build)!;
       const matched = entries.filter(
-        ([specifier, tag]) =>
-          (ships.get(specifier) ?? packages.get(owningPackage(specifier) ?? specifier)) === tag
+        ([specifier, tag]) => (ships.get(specifier) ?? packages.get(packageOf(specifier))) === tag
       ).length;
       if (matched === entries.length) {
         witnessed = true;
@@ -147,7 +148,10 @@ export function emittedUrls(importMap: ImportMap): Set<string> {
 
 export type Split = {
   remote: RemoteName;
-  /** Specifiers the remote's import graph reaches at more than one tag, with every tag reached. */
+  /**
+   * Specifiers the remote's import graph reaches at more than one tag, with every tag reached; and, keyed
+   * `<specifier> @urls`, those it reaches at more than one file, with every file.
+   */
   specifiers: Record<Specifier, VersionName[]>;
 };
 
@@ -157,80 +161,32 @@ export type Split = {
  * a remote resolving a coherent set directly can still run a second build one import in: a global
  * `material@22.0.6` bound to the global `core@22.0.8` inside a remote that runs `core@22.0.6` itself.
  *
- * Walks every file a remote reaches and requires one tag per specifier, and per package, across the whole
- * walk. Which peers a file really imports is unknown, so every specifier its owner ships counts as an edge:
- * conservative, never blind. Tags, never origins, as in I3, and a host is exempt for the same reason.
+ * Walks every file a remote reaches and requires one tag per specifier, and per package, and one file per
+ * specifier, across the whole walk. Which peers a file really imports is unknown, so every specifier its owner
+ * ships counts as an edge: conservative, never blind. A host is exempt as in I3, though its files are walked.
  *
  * Pass **one pool's** members. Across pools the walk finds couplings no pool declares — e.g. a private
  * library in its own pool binding the global framework inside a remote that runs its own — which pooling
  * leaves to the portfolio by design (docs/version-resolver.md §"Declare the coupling you actually have").
  */
-export function findSplitRemotes({
-  importMap,
-  members,
-  scopeUrls,
-  hosts = [],
-}: CoherenceInput): Split[] {
-  const builds: Builds = new Map();
-  const ownerOfUrl = new Map<string, RemoteName>();
-  const tagOfUrl = new Map<string, VersionName>();
-
-  for (const external of Object.values(members)) {
-    for (const version of external.versions) {
-      for (const meta of version.remotes) {
-        const scopeUrl = scopeUrls[meta.name];
-        if (scopeUrl === undefined) continue;
-
-        let own = builds.get(meta.name);
-        if (!own) builds.set(meta.name, (own = new Map()));
-        for (const [specifier, file] of Object.entries(meta.entries)) {
-          if (!own.has(specifier)) own.set(specifier, version.tag);
-          const url = _path.join(scopeUrl, file);
-          ownerOfUrl.set(url, meta.name);
-          tagOfUrl.set(url, version.tag);
-        }
-      }
-    }
-  }
-
-  const scopes = Object.keys(importMap.scopes ?? {}).sort((a, b) => b.length - a.length);
-  const resolveFrom = (base: string, specifier: Specifier): string | undefined => {
-    for (const prefix of scopes) {
-      if (!base.startsWith(prefix)) continue;
-      const hit = importMap.scopes![prefix]![specifier];
-      if (hit !== undefined) return hit;
-    }
-    return importMap.imports[specifier];
-  };
-
-  const exempt = new Set(hosts);
+export function findSplitRemotes(input: CoherenceInput): Split[] {
+  const exempt = new Set(input.hosts ?? []);
+  const index = indexFiles(input);
   const split: Split[] = [];
 
-  for (const [remote, consumes] of builds) {
+  for (const remote of index.ships.keys()) {
     if (exempt.has(remote)) continue;
 
     const reached = new Map<Specifier, Set<VersionName>>();
-    const seen = new Set<string>();
-    const queue: [Specifier, string][] = [];
-    const visit = (specifier: Specifier, url: string | undefined) => {
-      const tag = url === undefined ? undefined : tagOfUrl.get(url);
-      if (url === undefined || tag === undefined) return;
+    const urlsOf = new Map<Specifier, Set<string>>();
+    walk(remote, input, index, (specifier, url, { tag }) => {
       let tags = reached.get(specifier);
       if (!tags) reached.set(specifier, (tags = new Set()));
       tags.add(tag);
-      if (!seen.has(url)) {
-        seen.add(url);
-        queue.push([specifier, url]);
-      }
-    };
-
-    for (const specifier of consumes.keys())
-      visit(specifier, resolveFrom(scopeUrls[remote]!, specifier));
-    while (queue.length > 0) {
-      const [, url] = queue.shift()!;
-      for (const specifier of builds.get(ownerOfUrl.get(url)!)!.keys())
-        visit(specifier, resolveFrom(url, specifier));
-    }
+      let urls = urlsOf.get(specifier);
+      if (!urls) urlsOf.set(specifier, (urls = new Set()));
+      urls.add(url);
+    });
 
     // A package is one version, so two of its entrypoints at different tags are two builds of it even
     // though each specifier alone reaches one tag (`material/sort@17.0.2` beside `material/table@17.0.0`).
@@ -244,7 +200,10 @@ export function findSplitRemotes({
       for (const tag of tags) all.add(tag);
     }
 
+    // One specifier at two files is two module instances, whatever their tags. Reported as `<specifier> @urls`.
     const torn = [...reached, ...packages].filter(([, tags]) => tags.size > 1);
+    for (const [specifier, urls] of urlsOf)
+      if (urls.size > 1) torn.push([`${specifier} @urls`, urls]);
     if (torn.length > 0)
       split.push({
         remote,
@@ -255,8 +214,130 @@ export function findSplitRemotes({
   return split;
 }
 
+export type ChunkTear = {
+  remote: RemoteName;
+  /** Per package its walk reaches from more than one build, those builds; a chunked copy's marked `*`. */
+  packages: Record<Specifier, RemoteName[]>;
+};
+
+/**
+ * The tear tags cannot show. A chunked copy's file imports its own build's internal chunks, so one package's
+ * files from two builds run two copies of its internals even at one tag. Walks every file a remote reaches,
+ * as `findSplitRemotes` does (a file resolves its imports from where it lives), and flags a package whose
+ * files come from more than one build when any of those copies is chunked: origins, not tags. A host is
+ * exempt for the same reason as in I3.
+ */
+export function findChunkTornRemotes(input: CoherenceInput): ChunkTear[] {
+  const exempt = new Set(input.hosts ?? []);
+  const index = indexFiles(input);
+  const torn: ChunkTear[] = [];
+
+  for (const remote of index.ships.keys()) {
+    if (exempt.has(remote)) continue;
+
+    // Per package, the builds whose files the walk reaches, each marked when its copy is chunked.
+    const owners = new Map<Specifier, Map<RemoteName, boolean>>();
+    walk(remote, input, index, (specifier, _url, { owner, chunked }) => {
+      const pkg = packageOf(specifier);
+      let builds = owners.get(pkg);
+      if (!builds) owners.set(pkg, (builds = new Map()));
+      builds.set(owner, (builds.get(owner) ?? false) || chunked);
+    });
+
+    const packages = [...owners].filter(
+      ([, builds]) => builds.size > 1 && [...builds.values()].some(Boolean)
+    );
+    if (packages.length > 0)
+      torn.push({
+        remote,
+        packages: Object.fromEntries(
+          packages.map(([pkg, builds]) => [
+            pkg,
+            [...builds].map(([build, chunked]) => (chunked ? `${build}*` : build)).sort(),
+          ])
+        ),
+      });
+  }
+  return torn;
+}
+
+type IndexedFile = { owner: RemoteName; tag: VersionName; chunked: boolean };
+
+// Every file a member copy emits, by URL, and per remote the specifiers it ships.
+function indexFiles({ members, scopeUrls, isChunked = () => false }: CoherenceInput) {
+  const ships = new Map<RemoteName, Set<Specifier>>();
+  const files = new Map<string, IndexedFile>();
+  for (const external of Object.values(members))
+    for (const version of external.versions)
+      for (const meta of version.remotes) {
+        const scopeUrl = scopeUrls[meta.name];
+        if (scopeUrl === undefined) continue;
+        let own = ships.get(meta.name);
+        if (!own) ships.set(meta.name, (own = new Set()));
+        const chunked = isChunked(meta.name, meta.bundle);
+        for (const [specifier, file] of Object.entries(meta.entries)) {
+          own.add(specifier);
+          files.set(_path.join(scopeUrl, file), { owner: meta.name, tag: version.tag, chunked });
+        }
+      }
+  return { ships, files };
+}
+
+/**
+ * Every file `remote` reaches, once per specifier that reaches it: its own resolution of each specifier it
+ * ships, then each reached file's imports. A file's imports resolve from where it lives (its owner's scope,
+ * else `imports`), and which peers it really imports is unknown, so every specifier its owner ships counts as
+ * an edge: conservative, never blind. A file no member copy emits is outside the pool and not followed.
+ */
+function walk(
+  remote: RemoteName,
+  { importMap, scopeUrls }: CoherenceInput,
+  { ships, files }: ReturnType<typeof indexFiles>,
+  visit: (specifier: Specifier, url: string, file: IndexedFile) => void
+): void {
+  const resolveFrom = resolver(importMap);
+  const seen = new Set<string>();
+  const queue: string[] = [];
+  const reach = (specifier: Specifier, url: string | undefined) => {
+    const file = url === undefined ? undefined : files.get(url);
+    if (url === undefined || file === undefined) return;
+    visit(specifier, url, file);
+    if (!seen.has(url)) {
+      seen.add(url);
+      queue.push(url);
+    }
+  };
+
+  for (const specifier of ships.get(remote)!)
+    reach(specifier, resolveFrom(scopeUrls[remote]!, specifier));
+  while (queue.length > 0) {
+    const url = queue.shift()!;
+    for (const specifier of ships.get(files.get(url)!.owner)!)
+      reach(specifier, resolveFrom(url, specifier));
+  }
+}
+
+// Resolves a specifier from where a file lives, as a browser does: the longest matching scope that maps it,
+// else `imports`.
+function resolver(importMap: ImportMap) {
+  const scopes = Object.keys(importMap.scopes ?? {}).sort((a, b) => b.length - a.length);
+  return (base: string, specifier: Specifier): string | undefined => {
+    for (const prefix of scopes) {
+      if (!base.startsWith(prefix)) continue;
+      const hit = importMap.scopes![prefix]![specifier];
+      if (hit !== undefined) return hit;
+    }
+    return importMap.imports[specifier];
+  };
+}
+
 /** One torn group: a stored pool (`<scope>|<poolName>`) or an unpooled npm package (`<scope>|package:<pkg>`). */
-export type GroupTear = { pool: string; incoherent: Incoherence[]; split: Split[] };
+export type GroupTear = {
+  pool: string;
+  incoherent: Incoherence[];
+  split: Split[];
+  chunks: ChunkTear[];
+};
 
 export type TearsInput = {
   importMap: ImportMap;
@@ -264,10 +345,11 @@ export type TearsInput = {
   externals: Record<string, shareScope>;
   scopeUrls: Record<RemoteName, string>;
   hosts?: RemoteName[];
+  isChunked?: CoherenceInput['isChunked'];
 };
 
 /**
- * Both oracles, run the way they must be: one group at a time. A group is a stored pool, by `poolName`;
+ * The oracles, run the way they must be: one group at a time. A group is a stored pool, by `poolName`;
  * outside any pool, an npm package is still one version, so its entrypoints (separate flat externals or
  * not) are judged together. Across groups the walk would find couplings no pool declares, which pooling
  * leaves to the portfolio by design. Only torn groups are listed: `[]` is a coherent page.
@@ -277,6 +359,7 @@ export function tearsByPool({
   externals,
   scopeUrls,
   hosts = [],
+  isChunked,
 }: TearsInput): GroupTear[] {
   const groups = new Map<string, Record<ExternalName, SharedExternal>>();
   for (const [scope, record] of Object.entries(externals))
@@ -284,15 +367,21 @@ export function tearsByPool({
       const group =
         external.poolName !== undefined
           ? `${scope}|${external.poolName}`
-          : `${scope}|package:${owningPackage(name) ?? name}`;
+          : `${scope}|package:${packageOf(name)}`;
       groups.set(group, { ...groups.get(group), [name]: external });
     }
 
   const tears: GroupTear[] = [];
   for (const [pool, members] of groups) {
-    const input = { importMap, members, scopeUrls, hosts };
-    const tear = { pool, incoherent: findIncoherentRemotes(input), split: findSplitRemotes(input) };
-    if (tear.incoherent.length > 0 || tear.split.length > 0) tears.push(tear);
+    const input = { importMap, members, scopeUrls, hosts, isChunked };
+    const tear = {
+      pool,
+      incoherent: findIncoherentRemotes(input),
+      split: findSplitRemotes(input),
+      chunks: findChunkTornRemotes(input),
+    };
+    if (tear.incoherent.length > 0 || tear.split.length > 0 || tear.chunks.length > 0)
+      tears.push(tear);
   }
   return tears;
 }

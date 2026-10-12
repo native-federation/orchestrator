@@ -1057,7 +1057,10 @@ describe('pooling regressions', () => {
         m2: 'subpool n',
         q: 'uncovered',
       });
+      // m1 runs n's router off the map, which the map also serves, so subpool n runs its whole family on n's
+      // build, core included: n's Y binds n's router and core, never the map's beside them.
       expect(importMap.scopes?.['http://m1/']).toEqual({
+        [CORE]: 'http://n/@ng/core.js',
         [ROUTER]: 'http://n/@ng/router.js',
         [Y]: 'http://n/@ng/y.js',
       });
@@ -1108,7 +1111,10 @@ describe('pooling regressions', () => {
         m3: 'subpool n',
         q: 'uncovered',
       });
+      // m1 runs n's router off the map, which the map also serves, so subpool n runs its whole family on n's
+      // build, core included: n's Y binds n's router and core, never the map's beside them.
       expect(importMap.scopes?.['http://m1/']).toEqual({
+        [CORE]: 'http://n/@ng/core.js',
         [ROUTER]: 'http://n/@ng/router.js',
         [Y]: 'http://n/@ng/y.js',
       });
@@ -1215,7 +1221,9 @@ describe('pooling regressions', () => {
           [OVERLAY]: 'http://p/@ng/cdk/overlay.js',
         });
         expect(p.islands()).toEqual({ n: 'uncovered', x: 'uncovered' });
+        // x runs its own overlay, which the map also serves, so it runs its whole family itself, core included.
         expect(importMap.scopes?.['http://x/']).toEqual({
+          [CORE]: 'http://x/@ng/core.js',
           [OVERLAY]: 'http://x/x-overlay.js',
           [FORMS]: 'http://x/@ng/forms.js',
         });
@@ -1266,5 +1274,342 @@ describe('pooling regressions', () => {
       });
       expect(importMap.scopes?.['http://x/']).toEqual({ [TESTING]: 'http://l/l-testing.js' });
     });
+  });
+
+  /**
+   * Two files of one specifier are two module instances, whatever their tags; and a chunked build's files
+   * import its own internal chunks, so its files of one package run only beside each other. The harness's
+   * oracle walks every file a remote reaches (a file resolves its imports where it lives) and fails on either,
+   * so each case below is also that check.
+   */
+  describe('a remote reaches each module once', () => {
+    // One package of the `fw` pool, at 17.0.0 (`~`) unless `version` (`^`) or `range` say otherwise;
+    // `entrypoints` are its secondary specifiers, all in one chunked bundle unless `flat`.
+    const shared = (
+      packageName: string,
+      o: { entrypoints?: string[]; flat?: boolean; version?: string; range?: string } = {}
+    ): DenseSharedInfo =>
+      ({
+        packageName,
+        version: o.version ?? '17.0.0',
+        requiredVersion: o.range ?? (o.version ? `^${o.version}` : '~17.0.0'),
+        singleton: true,
+        strictVersion: false,
+        pool: 'fw',
+        ...(o.flat ? {} : { bundle: `browser-${packageName.slice(1).replace(/\//g, '_')}` }),
+        entries: Object.fromEntries(
+          [packageName, ...(o.entrypoints ?? [])].map(s => [
+            s,
+            `${s.slice(1).replace(/\//g, '_')}.js`,
+          ])
+        ),
+      }) as DenseSharedInfo;
+
+    // Each bundle ships one internal chunk, as a dense-chunking build stores it.
+    const entry = (name: string, ...sharedInfo: DenseSharedInfo[]): RemoteEntry => {
+      const bundles = sharedInfo.flatMap(i => (i.bundle ? [i.bundle] : []));
+      return {
+        name,
+        url: `http://${name}/remoteEntry.json`,
+        exposes: [],
+        shared: sharedInfo,
+        ...(bundles.length > 0
+          ? { chunks: Object.fromEntries(bundles.map(b => [b, [`chunk-${b}.js`]])) }
+          : {}),
+      } as unknown as RemoteEntry;
+    };
+
+    const scopeOf = (importMap: ImportMap, remote: string) =>
+      Object.fromEntries(
+        Object.entries(importMap.scopes?.[`http://${remote}/`] ?? {}).filter(
+          ([s]) => !s.startsWith('@nf-internal/')
+        )
+      );
+
+    const CORE = '@fw/core';
+    const INTEROP = '@fw/core/interop';
+    const FORMS = '@fw/forms';
+
+    // The host ships core without interop; mfe1..3 ship it with interop. A chunked interop imports its own
+    // build's core internals, so no build lends it and mfe1's build serves the three as a subpool. Its core
+    // runs off the map beside the map's core, so the whole family runs on mfe1's build: the host's forms
+    // would bind the host's core inside the subpool.
+    it('runs a subpool whose build runs a package off the map wholly on that build', async () => {
+      const p = portfolio(
+        {},
+        { storage: 'nf-regression-chunked-subpool', realRepositories: true, hosts: ['host'] }
+      );
+      const mfe = (name: string) =>
+        entry(name, shared(CORE, { entrypoints: [INTEROP] }), shared(FORMS));
+
+      const importMap = await p.runInit([
+        mfe('mfe1'),
+        mfe('mfe2'),
+        mfe('mfe3'),
+        entry('host', shared(CORE), shared(FORMS)),
+      ]);
+
+      expect(importMap.imports).toEqual({
+        [CORE]: 'http://host/fw_core.js',
+        [FORMS]: 'http://host/fw_forms.js',
+      });
+      expect(p.islands()).toEqual({
+        mfe1: 'subpool mfe1',
+        mfe2: 'subpool mfe1',
+        mfe3: 'subpool mfe1',
+      });
+      for (const remote of ['mfe2', 'mfe3'])
+        expect(scopeOf(importMap, remote)).toEqual({
+          [CORE]: 'http://mfe1/fw_core.js',
+          [INTEROP]: 'http://mfe1/fw_core_interop.js',
+          [FORMS]: 'http://mfe1/fw_forms.js',
+        });
+    });
+
+    // As above with mfe alone: nothing serves it, so it serves itself, and so wholly.
+    it('runs a self-serving remote that runs a package off the map wholly on its own build', async () => {
+      const p = portfolio(
+        {},
+        { storage: 'nf-regression-chunked-self', realRepositories: true, hosts: ['host'] }
+      );
+
+      const importMap = await p.runInit([
+        entry('mfe', shared(CORE, { entrypoints: [INTEROP] }), shared(FORMS)),
+        entry('host', shared(CORE), shared(FORMS)),
+      ]);
+
+      expect(p.islands()).toEqual({ mfe: 'uncovered' });
+      expect(scopeOf(importMap, 'mfe')).toEqual({
+        [CORE]: 'http://mfe/fw_core.js',
+        [INTEROP]: 'http://mfe/fw_core_interop.js',
+        [FORMS]: 'http://mfe/fw_forms.js',
+      });
+    });
+
+    // mfe1 ships interop as a chunked package of its own beside a root core at the host's tag; mfe2 ships only
+    // the root. Both ship x, at two tags, so the map cannot add it, and mfe1's build serves both. Only mfe1's
+    // interop runs off the map, but mfe1's x binds mfe1's core, so mfe2 runs core on mfe1's build too.
+    it('decides per subpool, not per remote, that a chunked entrypoint moves the family', async () => {
+      const X = '@fw/x';
+      const p = portfolio(
+        {},
+        { storage: 'nf-regression-chunked-group', realRepositories: true, hosts: ['host'] }
+      );
+
+      const importMap = await p.runInit([
+        entry('mfe1', shared(CORE), shared(INTEROP), shared(X, { version: '1.0.1' })),
+        entry('mfe2', shared(CORE), shared(X, { version: '1.0.0' })),
+        entry('host', shared(CORE)),
+      ]);
+
+      expect(importMap.imports).toEqual({ [CORE]: 'http://host/fw_core.js' });
+      expect(p.islands()).toEqual({ mfe1: 'subpool mfe1', mfe2: 'subpool mfe1' });
+      expect(scopeOf(importMap, 'mfe2')).toEqual({
+        [CORE]: 'http://mfe1/fw_core.js',
+        [X]: 'http://mfe1/fw_x.js',
+      });
+    });
+
+    // As above from flat-chunking builds, as Angular emits them without dense chunking: no copy names a bundle,
+    // and each build ships its chunks as `@nf-internal/` externals it scopes.
+    it('serves the whole family of a load from a flat-chunking build it cannot fill from the map', async () => {
+      const p = portfolio(
+        {},
+        { storage: 'nf-regression-flat-chunking', realRepositories: true, hosts: ['host'] }
+      );
+      const chunk = (remote: string): DenseSharedInfo =>
+        ({
+          packageName: `@nf-internal/chunk-${remote}`,
+          version: '0.0.0',
+          requiredVersion: '0.0.0',
+          singleton: false,
+          strictVersion: false,
+          entries: { [`@nf-internal/chunk-${remote}`]: `chunk-${remote}.js` },
+        }) as DenseSharedInfo;
+      const build = (name: string, ...entrypoints: string[]) =>
+        entry(
+          name,
+          shared(CORE, { entrypoints, flat: true }),
+          shared(FORMS, { flat: true }),
+          chunk(name)
+        );
+      await p.runInit([build('mfe1'), build('host')]);
+
+      for (const remote of ['mfe3', 'mfe4']) {
+        const { merged } = await p.runDynamic(build(remote, INTEROP));
+
+        expect(scopeOf(merged, remote)).toEqual({
+          [CORE]: `http://${remote}/fw_core.js`,
+          [INTEROP]: `http://${remote}/fw_core_interop.js`,
+          [FORMS]: `http://${remote}/fw_forms.js`,
+        });
+      }
+      expect(p.islands()).toEqual({ mfe3: 'uncovered', mfe4: 'uncovered' });
+    });
+
+    // r's flat core is the host's tag, so it takes the map's core as it is; its interop, a chunked package of
+    // its own the map lacks, would come from r's build and bind r's core internals beside the host's core.
+    it('serves the whole family of a load that would fill a chunked entrypoint beside a package it takes whole', async () => {
+      const p = portfolio(
+        {},
+        { storage: 'nf-regression-chunked-inherited', realRepositories: true, hosts: ['host'] }
+      );
+      await p.runInit([entry('host', shared(CORE, { flat: true }), shared(FORMS, { flat: true }))]);
+
+      const { merged } = await p.runDynamic(
+        entry('r', shared(CORE, { flat: true }), shared(INTEROP), shared(FORMS, { flat: true }))
+      );
+
+      expect(scopeOf(merged, 'r')).toEqual({
+        [CORE]: 'http://r/fw_core.js',
+        [INTEROP]: 'http://r/fw_core_interop.js',
+        [FORMS]: 'http://r/fw_forms.js',
+      });
+      expect(p.islands()).toEqual({ r: 'uncovered' });
+    });
+
+    // A flat subpool. The host w ships core and router at 17.0.0; n, m1 and m2 agree on core and ship y at
+    // two tags, so the map cannot add it. n also ships z, which q ships at another exact tag, so nothing
+    // serves n but its own build, which serves all three. Only m1's router (17.0.1) runs off the map, on n's
+    // router, which binds n's y and core; so n and m2 run core on n's build too, though their own copies
+    // agree with the map.
+    it('moves the whole subpool when one member runs a specifier the map serves off it', async () => {
+      const ROUTER = '@fw/router';
+      const Y = '@fw/y';
+      const p = portfolio(
+        {},
+        { storage: 'nf-regression-flat-group', realRepositories: true, hosts: ['w'] }
+      );
+      const Z = '@fw/z';
+      const flat = (name: string, version?: string, range?: string) =>
+        shared(name, { flat: true, version, range });
+
+      const importMap = await p.runInit([
+        entry('n', flat(CORE), flat(ROUTER), flat(Y, '1.0.1'), flat(Z, '1.0.5', '1.0.5')),
+        entry('m1', flat(CORE), flat(ROUTER, '17.0.1', '^17.0.0'), flat(Y, '1.0.0')),
+        entry('m2', flat(CORE), flat(Y, '1.0.0')),
+        entry('q', flat(Z, '1.0.4', '1.0.4')),
+        entry('w', flat(CORE), flat(ROUTER)),
+      ]);
+
+      expect(importMap.imports).toEqual({
+        [CORE]: 'http://w/fw_core.js',
+        [ROUTER]: 'http://w/fw_router.js',
+      });
+      expect(p.islands()).toEqual({
+        n: 'subpool n',
+        m1: 'subpool n',
+        m2: 'subpool n',
+        q: 'uncovered',
+      });
+      expect(scopeOf(importMap, 'n')).toEqual({
+        [CORE]: 'http://n/fw_core.js',
+        [ROUTER]: 'http://n/fw_router.js',
+        [Y]: 'http://n/fw_y.js',
+        [Z]: 'http://n/fw_z.js',
+      });
+      for (const member of ['m1', 'm2'])
+        expect(scopeOf(importMap, member)).toEqual({
+          [CORE]: 'http://n/fw_core.js',
+          ...(member === 'm1' && { [ROUTER]: 'http://n/fw_router.js' }),
+          [Y]: 'http://n/fw_y.js',
+        });
+    });
+
+    // Flat throughout. l1, loaded first, takes the host's core, fills testing from its own build, as the map
+    // lacks it, and publishes forms, which nobody shared. l2, a copy of l1's build, would take l1's forms and
+    // fill testing itself, at l1's tag but from its own file, while l1's forms resolves testing to l1's: two
+    // instances of one specifier. So l2 serves its whole family itself.
+    it('serves the whole family of a load whose served file binds a pool-mate another file serves it', async () => {
+      const TESTING = '@fw/core/testing';
+      const p = portfolio(
+        {},
+        { storage: 'nf-regression-self-filled', realRepositories: true, hosts: ['host'] }
+      );
+      const build = (name: string) =>
+        entry(
+          name,
+          shared(CORE, { entrypoints: [TESTING], flat: true }),
+          shared(FORMS, { flat: true })
+        );
+      await p.runInit([entry('host', shared(CORE, { flat: true }))]);
+
+      const first = await p.runDynamic(build('l1'));
+      expect(scopeOf(first.merged, 'l1')).toEqual({ [TESTING]: 'http://l1/fw_core_testing.js' });
+      expect(first.merged.imports[FORMS]).toBe('http://l1/fw_forms.js');
+
+      const { merged } = await p.runDynamic(build('l2'));
+
+      expect(scopeOf(merged, 'l2')).toEqual({
+        [CORE]: 'http://l2/fw_core.js',
+        [TESTING]: 'http://l2/fw_core_testing.js',
+        [FORMS]: 'http://l2/fw_forms.js',
+      });
+      expect(p.islands()).toEqual({ l2: 'uncovered' });
+    });
+
+    // One hop further. c, loaded first, takes the host's core, fills testing itself and publishes forms; b
+    // takes c's forms and publishes router. l takes b's router and would fill testing itself, but b's router
+    // resolves forms to c's file, which resolves testing to c's own: two testings in l, though no build l
+    // takes a file from directly runs one off the map. So l serves its whole family itself.
+    it('serves the whole family of a load bound one build further in', async () => {
+      const TESTING = '@fw/core/testing';
+      const ROUTER = '@fw/router';
+      const p = portfolio(
+        {},
+        { storage: 'nf-regression-bound-transitive', realRepositories: true, hosts: ['h'] }
+      );
+      const flat = (name: string, ...entrypoints: string[]) =>
+        shared(name, { flat: true, entrypoints });
+      await p.runInit([entry('h', flat(CORE), flat('@fw/x'))]);
+      await p.runDynamic(entry('c', flat(CORE, TESTING), flat(FORMS)));
+      await p.runDynamic(entry('b', flat(CORE), flat(FORMS), flat(ROUTER)));
+
+      const { merged } = await p.runDynamic(entry('l', flat(CORE, TESTING), flat(ROUTER)));
+
+      expect(scopeOf(merged, 'l')).toEqual({
+        [CORE]: 'http://l/fw_core.js',
+        [TESTING]: 'http://l/fw_core_testing.js',
+        [ROUTER]: 'http://l/fw_router.js',
+      });
+      expect(p.islands()).toEqual({ l: 'uncovered' });
+      expect(p.config.log.warn).toHaveBeenCalledWith(
+        8,
+        expect.stringContaining("committed build 'c'")
+      );
+    });
+
+    // A remote loaded at runtime whose chunked core needs interop, which the committed map lacks. Self-filling
+    // interop beside the map's core would run two cores, and so would taking the map's forms beside its own
+    // core: the remote serves its whole family itself. From a flat build it binds the map's core and fills
+    // interop itself.
+    for (const flat of [false, true])
+      it(`serves the whole family of a remote it cannot fill from the map (${flat ? 'flat' : 'chunked'})`, async () => {
+        const p = portfolio(
+          {},
+          { storage: `nf-regression-chunked-torn-${flat}`, realRepositories: true, hosts: ['host'] }
+        );
+        await p.runInit([
+          entry('mfe1', shared(CORE, { flat }), shared(FORMS, { flat })),
+          entry('host', shared(CORE, { flat }), shared(FORMS, { flat })),
+        ]);
+
+        for (const remote of ['mfe3', 'mfe4']) {
+          const { merged } = await p.runDynamic(
+            entry(remote, shared(CORE, { entrypoints: [INTEROP], flat }), shared(FORMS, { flat }))
+          );
+
+          expect(scopeOf(merged, remote)).toEqual(
+            flat
+              ? { [INTEROP]: `http://${remote}/fw_core_interop.js` }
+              : {
+                  [CORE]: `http://${remote}/fw_core.js`,
+                  [INTEROP]: `http://${remote}/fw_core_interop.js`,
+                  [FORMS]: `http://${remote}/fw_forms.js`,
+                }
+          );
+        }
+        expect(p.islands()).toEqual(flat ? {} : { mfe3: 'uncovered', mfe4: 'uncovered' });
+      });
   });
 });
