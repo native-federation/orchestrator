@@ -1,4 +1,5 @@
 import fc from 'fast-check';
+import type { ImportMap, RemoteEntry, shareScope } from 'lib/core/1.domain';
 import { NFError } from 'lib/core/native-federation.error';
 import {
   extraRemoteArbitrary,
@@ -12,6 +13,7 @@ import {
 import {
   TIMEOUT,
   accepts,
+  byPooling,
   copiesOf,
   electedTags,
   initOrRefuse,
@@ -21,6 +23,7 @@ import {
   outcome,
   placementOf,
   poolNameDrift,
+  poolTears,
   pools,
   rangeViolations,
   run,
@@ -47,6 +50,42 @@ const pageModes = [
   { mode: 'reload', loads: extraRemotesArbitrary, runs: 150 },
   { mode: 'page', loads: twoLoadsArbitrary, runs: 100 },
 ] as const;
+
+type Page = { importMap: ImportMap; record: shareScope };
+
+// The page a static add builds: `added` in the manifest of a warm init after `entries`' page.
+async function staticAdd(
+  o: Parameters<typeof openPortfolio>[0],
+  entries: RemoteEntry[],
+  added: RemoteEntry
+): Promise<Page> {
+  const rig = openPortfolio(o);
+  await rig.init(entries);
+  return rig.init([...entries, added]);
+}
+
+// A load leaves the loaded remote's pools dirty, so the warm init after it re-elects them: a pooled specifier
+// runs what a static add runs, not a cold init, since a re-election keeps a tied incumbent. `dirty` re-runs
+// no resolution, so an unpooled one runs what the page ran.
+function expectWarmRuns(warm: Page, reference: Page, page: Page) {
+  const runs = ({ importMap, record }: Page) =>
+    byPooling(outcome(importMap, record).runs, reference.record);
+  expect(runs(warm).pooled).toEqual(runs(reference).pooled);
+  expect(runs(warm).unpooled).toEqual(runs(page).unpooled);
+}
+
+// The file oracles on the re-elected page itself: no remote reaches one specifier at two files, nor a chunked
+// package from two builds.
+function expectWarmUntorn(warm: Page, all: RemoteEntry[], host?: string, shareScope?: string) {
+  for (const { pool, split, chunks } of poolTears(
+    warm.importMap,
+    warm.record,
+    scopeUrlsOf(all),
+    host,
+    shareScope
+  ))
+    expect({ pool, split, chunks }).toEqual({ pool, split: [], chunks: [] });
+}
 
 describe('pooling properties: dynamic loads (generated portfolios)', { timeout: TIMEOUT }, () => {
   // Whether the committed map tears is the init property's question; this one asks that the delta adds no tear
@@ -161,10 +200,10 @@ describe('pooling properties: dynamic loads (generated portfolios)', { timeout: 
         }
       ));
 
-  // The record a load leaves is what the next page rebuilds its map from, so it must rebuild the page the
-  // load handed the browser. Compared as the tag each remote runs per specifier, since which of two copies of
-  // one tag publishes a file is record order.
-  it('dynamic reload: a warm init after a load runs the tags the page ran', () =>
+  // The record a load leaves is what the next page rebuilds its map from: the page had the loaded remote been
+  // in the manifest. Compared as the tag each remote runs per specifier, since which of two copies of one tag
+  // publishes a file is record order.
+  it('dynamic reload: a warm init after a load runs what a static add runs', () =>
     run(
       102,
       portfolioArbitrary({ maxRemotes: 12 }).chain(spec =>
@@ -173,19 +212,21 @@ describe('pooling properties: dynamic loads (generated portfolios)', { timeout: 
       150,
       async ([spec, extra]) => {
         const entries = toRemoteEntries(spec);
-        const rig = openPortfolio({ host: hostOf(spec) });
+        const o = { host: hostOf(spec) };
+        const rig = openPortfolio(o);
         await rig.init(entries);
         const added = toRemoteEntry(extra, entries.length);
         const { merged, record } = await rig.load(added);
         const warm = await rig.init([...entries, added]);
-        expect(outcome(warm.importMap, warm.record).runs).toEqual(outcome(merged, record).runs);
+        expectWarmRuns(warm, await staticAdd(o, entries, added), { importMap: merged, record });
+        expectWarmUntorn(warm, [...entries, added], o.host);
       }
     ));
 
   // 102 under label noise, the relabels that split and join pools, with the stored names checked on both
   // pages: a load writes the name of every pool as it now stands (a merge renames committed members), and
   // the next init leaves no stale name. Between the two, an external in no pool may keep its old name.
-  it('dynamic reload with label noise: pool names stay in sync and the warm init runs the page', () =>
+  it('dynamic reload with label noise: pool names stay in sync and the warm init runs a static add', () =>
     run(
       106,
       portfolioArbitrary({ maxRemotes: 12, labelNoise: true }).chain(spec =>
@@ -194,14 +235,16 @@ describe('pooling properties: dynamic loads (generated portfolios)', { timeout: 
       150,
       async ([spec, extra]) => {
         const entries = toRemoteEntries(spec);
-        const rig = openPortfolio({ host: hostOf(spec) });
+        const o = { host: hostOf(spec) };
+        const rig = openPortfolio(o);
         await rig.init(entries);
         const added = toRemoteEntry(extra, entries.length);
         const { merged, record } = await rig.load(added);
         expect(poolNameDrift(record, { pooledOnly: true })).toEqual([]);
         const warm = await rig.init([...entries, added]);
         expect(poolNameDrift(warm.record)).toEqual([]);
-        expect(outcome(warm.importMap, warm.record).runs).toEqual(outcome(merged, record).runs);
+        expectWarmRuns(warm, await staticAdd(o, entries, added), { importMap: merged, record });
+        expectWarmUntorn(warm, [...entries, added], o.host);
       }
     ));
 
@@ -224,13 +267,15 @@ describe('pooling properties: dynamic loads (generated portfolios)', { timeout: 
         async ([spec, extra]) => {
           const entries = toRemoteEntries(spec);
           const host = hostOf(spec);
-          const rig = openPortfolio({ host, ...(shareScope && { scope: shareScope }) });
+          const o = { host, ...(shareScope && { scope: shareScope }) };
+          const rig = openPortfolio(o);
           await rig.init(entries);
           const added = toRemoteEntry(extra, entries.length, 0, shareScope);
           const { merged, record } = await rig.load(added);
           const all = [...entries, added];
           const warm = await rig.init(all);
-          expect(outcome(warm.importMap, warm.record).runs).toEqual(outcome(merged, record).runs);
+          expectWarmRuns(warm, await staticAdd(o, entries, added), { importMap: merged, record });
+          expectWarmUntorn(warm, all, host, shareScope);
           // Two builds of one tag look alike to `runs`; which file serves a specifier shows in the walk.
           const before = torn(merged, record, scopeUrlsOf(all), host, shareScope);
           const after = torn(warm.importMap, warm.record, scopeUrlsOf(all), host, shareScope);

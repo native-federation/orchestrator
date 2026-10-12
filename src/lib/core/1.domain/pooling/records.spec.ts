@@ -69,6 +69,29 @@ describe('memberRecord', () => {
       '16.0.0:skip',
     ]);
   });
+
+  // A dynamic load stores its moved copy `cached`; the gate reads that flag as "on the global map", but the
+  // map after a re-election is rebuilt from scratch, and generate-import-map re-marks what it publishes.
+  it('writes every copy uncached, whatever the stored flag', () => {
+    const members = pool();
+    for (const { external } of members)
+      for (const version of external.versions)
+        for (const meta of version.remotes) meta.cached = true;
+    const election = elect({
+      members,
+      acceptsTag: createAcceptsTag(isCompatible, compare),
+      compare,
+      latestFirst: false,
+      isChunked: () => false,
+    });
+    const placed = placePool(election, 'x', members, () => false);
+
+    const flags = members.flatMap(m =>
+      memberRecord(m, placed, compare).versions.flatMap(v => v.remotes.map(r => r.cached))
+    );
+
+    expect(flags).toEqual(Array(8).fill(false));
+  });
 });
 
 describe('renamedRecords', () => {

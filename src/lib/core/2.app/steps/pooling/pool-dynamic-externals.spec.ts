@@ -1340,26 +1340,47 @@ describe('createPoolDynamicExternals', () => {
       expect(namesWritten()).toEqual({ r: 'x', s: 'x' });
     });
 
-    it('writes nothing for a member already carrying its name', async () => {
+    describe('a member already carrying its name', () => {
       const entry = entryWith(shared('@framework/core'), shared('@framework/common'));
-      givenCommitted({
-        '@framework/core': {
-          ...committed('@framework/core', { tag: '17.0.0', remotes: ['host', 'mfe'] }),
-          poolName: 'framework',
-        },
-        '@framework/common': {
-          ...committed('@framework/common', { tag: '17.0.0', remotes: ['host', 'mfe'] }),
-          poolName: 'framework',
-        },
-      });
-      const actions: SharedInfoActions = {
+      let externals: Record<string, SharedExternal>;
+      const actions = (): SharedInfoActions => ({
         '@framework/core': { action: 'skip' },
         '@framework/common': { action: 'skip' },
-      };
+      });
 
-      await poolDynamicExternals({ entry, actions });
+      beforeEach(() => {
+        externals = {
+          '@framework/core': {
+            ...committed('@framework/core', { tag: '17.0.0', remotes: ['host', 'mfe'] }),
+            poolName: 'framework',
+          },
+          '@framework/common': {
+            ...committed('@framework/common', { tag: '17.0.0', remotes: ['host', 'mfe'] }),
+            poolName: 'framework',
+          },
+        };
+        givenCommitted(externals);
+      });
 
-      expect(adapters.sharedExternalsRepo.addOrUpdate).not.toHaveBeenCalled();
+      // The gate judged mfe against a map it could not change; the dirty mark lets the next init re-elect
+      // the pool with mfe in it. The name and the versions stay as committed.
+      it('is marked dirty, not renamed', async () => {
+        await poolDynamicExternals({ entry, actions: actions() });
+
+        expect(Object.fromEntries(writes().map(([name, external]) => [name, external]))).toEqual({
+          '@framework/core': { ...externals['@framework/core'], dirty: true },
+          '@framework/common': { ...externals['@framework/common'], dirty: true },
+        });
+      });
+
+      // A strict re-election would refuse a pool the gate accepted, so a strict page keeps the gate's verdicts.
+      it('is not written under strictExternalCompatibility', async () => {
+        config.strict.strictExternalCompatibility = true;
+
+        await poolDynamicExternals({ entry, actions: actions() });
+
+        expect(adapters.sharedExternalsRepo.addOrUpdate).not.toHaveBeenCalled();
+      });
     });
 
     it('leaves a stale pool name on an external in no pool any more to the next init', async () => {

@@ -279,6 +279,21 @@ export function outcome(
 export const unmapped = (runs: Record<string, string | null>): string[] =>
   Object.keys(runs).filter(key => runs[key] === null);
 
+// `runs` split into the `remote|specifier` keys of the externals `record` names a pool for and the rest.
+export function byPooling(runs: Record<string, string | null>, record: shareScope) {
+  const keys = new Set<string>();
+  for (const external of Object.values(record))
+    if (external.poolName !== undefined)
+      for (const version of external.versions)
+        for (const meta of version.remotes)
+          for (const specifier of Object.keys(meta.entries)) keys.add(`${meta.name}|${specifier}`);
+
+  const pooled: typeof runs = {};
+  const unpooled: typeof runs = {};
+  for (const [key, tag] of Object.entries(runs)) (keys.has(key) ? pooled : unpooled)[key] = tag;
+  return { pooled, unpooled };
+}
+
 export const lenient = (spec: PortfolioSpec): PortfolioSpec => ({ ...spec, strict: false });
 
 export const accepts = createAcceptsTag(versionCheck.isCompatible, versionCheck.compare);

@@ -114,7 +114,9 @@ export function memberRecord(
 
   for (const version of member.external.versions)
     for (const stored of version.remotes) {
-      const { servedBy: _servedBy, poolCause: _poolCause, ...meta } = stored;
+      const { servedBy: _servedBy, poolCause: _poolCause, ...rest } = stored;
+      // The import map is rebuilt from scratch, so it re-marks what it publishes.
+      const meta = { ...rest, cached: false };
       const placement = placements.get(meta.name)!;
       if (placement.kind === 'global' || takesGlobalFiles(meta, version.tag))
         place(version.tag, version.tag === sharedTag ? 'share' : 'skip', meta);

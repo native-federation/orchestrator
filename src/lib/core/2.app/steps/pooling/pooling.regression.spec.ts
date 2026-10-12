@@ -704,7 +704,8 @@ describe('pooling regressions', () => {
    * mfe-c pin 19.1.0 exactly, so they run mfe-b's build as a subpool. anim then has no `share` row: both
    * copies `skip` onto mfe-b through per-consumer overrides, and `imports` never names it. mfe-d, loaded with
    * only anim@19.1.0, joined that `skip` row and got `skip` with nothing `covered`: an unmapped bare
-   * specifier. It now shares its own copy.
+   * specifier. It now shares its own copy. The next init re-elects the pool with it, as a cold init does, and
+   * mfe-d, agreeing with the host, fills the host's map with that copy.
    */
   describe('a dynamically loaded copy of a member nothing shares still resolves', () => {
     let p: ReturnType<typeof portfolio>;
@@ -763,10 +764,60 @@ describe('pooling regressions', () => {
       expect(actions['@fw/anim']!.action).toBe('share');
       expect(resolves(merged, 'team/mfe-d', '@fw/anim')).toBe(file('team/mfe-d', '@fw/anim'));
 
+      // The load left the pool dirty, so the warm init re-elects it with mfe-d, as a cold init does.
       p.reload();
       const warm = await p.runInit([...remotes, mfeD]);
       expect(resolves(warm, 'team/mfe-d', '@fw/anim')).toBe(file('team/mfe-d', '@fw/anim'));
-      expect(page(warm, [mfeD])).toEqual(page(merged, [mfeD]));
+      expect(warm.imports['@fw/anim']).toBe(file('team/mfe-d', '@fw/anim'));
+      const cold = portfolio(
+        {},
+        {
+          hosts: ['team/mfe-a'],
+          storage: 'nf-regression-d16-unshared-cold',
+          realRepositories: true,
+        }
+      );
+      expect(page(warm, [mfeD])).toEqual(page(await cold.runInit([...remotes, mfeD]), [mfeD]));
+    });
+  });
+
+  /**
+   * Under `strictExternalCompatibility` a load leaves no dirty mark, so the next page keeps the gate's
+   * verdicts rather than re-electing into a refusal. mfe-a ships `@fw/core` 18.0.0 under a strict `^18.0.0`,
+   * mfe-b 17.0.0 under `^17.0.0`: each build serves one remote, the newer wins, and mfe-b runs its own.
+   * mfe-c, loaded with `@fw/core` and `@fw/common` 17.0.0, rejects the map's 18.0.0 and serves itself.
+   * Re-elected with mfe-c, 17.0.0 serves two remotes to one and mfe-a's strict range refuses it, as a cold
+   * init of the same portfolio does.
+   */
+  describe('a strict page keeps the verdicts of a load', () => {
+    const remotes = [
+      entry('team/mfe-a', shared('@fw/core', '18.0.0', '^18.0.0')),
+      entry('team/mfe-b', shared('@fw/core', '17.0.0', '^17.0.0', false)),
+    ];
+    const mfeC = entry(
+      'team/mfe-c',
+      shared('@fw/core', '17.0.0', '^17.0.0', false),
+      shared('@fw/common', '17.0.0', '^17.0.0', false)
+    );
+    const strictPortfolio = (storage: string) =>
+      portfolio({}, { strict: true, storage, realRepositories: true });
+
+    it('marks nothing dirty, and the warm init after a reload refuses nothing', async () => {
+      const p = strictPortfolio('nf-regression-strict-reload');
+      const committed = await p.runInit(remotes);
+      expect(committed.imports['@fw/core']).toBe(file('team/mfe-a', '@fw/core'));
+
+      p.reload();
+      const { merged } = await p.runDynamic(mfeC);
+      expect(resolves(merged, 'team/mfe-c', '@fw/core')).toBe(file('team/mfe-c', '@fw/core'));
+      expect(Object.values(p.stored()).map(external => external.dirty)).toEqual([false, false]);
+
+      p.reload();
+      const warm = await p.runInit([...remotes, mfeC]);
+      expect(warm.imports['@fw/core']).toBe(file('team/mfe-a', '@fw/core'));
+      await expect(
+        strictPortfolio('nf-regression-strict-reload-cold').runInit([...remotes, mfeC])
+      ).rejects.toThrow("Could not pool 'fw' in scope __GLOBAL__.");
     });
   });
 
@@ -798,8 +849,8 @@ describe('pooling regressions', () => {
    * new `@fw/core` 17.0.1. `update-cache` had joined its `@ui/kit` copy to mfe-a's share row, and the gate left
    * it there. The next page's map, which claims `@ui/kit`'s row before the `@ui/kit/sub` package, then took
    * the sub entrypoint from mfe-d's file, which binds the shared 17.0.1: mfe-b reached it through `@ui/base`
-   * beside its own 17.0.0. A reload must rebuild the map the load published, so the joined copy moves to a
-   * `skip` row.
+   * beside its own 17.0.0. The joined copy now moves to a `skip` row, and the next init, which re-elects the
+   * pool with mfe-d, keeps mfe-a's sub entrypoint.
    */
   describe('a dynamically loaded copy that joined a share row claims nothing the map serves elsewhere', () => {
     const remotes = [
@@ -847,10 +898,15 @@ describe('pooling regressions', () => {
       // The share row keeps mfe-a's copy; mfe-d's runs its files from a skip row at the same tag.
       expect(rows(p, '@ui/kit')).toEqual(['18.2.0:share:[team/mfe-a]', '18.2.0:skip:[team/mfe-d]']);
 
+      // The load left the pool dirty, so the warm init re-elects it with mfe-d, as a cold init does.
       p.reload();
       const warm = await p.runInit([...remotes, loaded]);
       expect(warm.imports['@ui/kit/sub']).toBe(file('team/mfe-a', '@ui/kit/sub'));
-      expect(warm).toEqual(merged);
+      const cold = portfolio(
+        {},
+        { storage: 'nf-regression-joined-share-row-cold', realRepositories: true }
+      );
+      expect(warm).toEqual(await cold.runInit([...remotes, loaded]));
     });
   });
 

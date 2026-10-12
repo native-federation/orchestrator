@@ -56,7 +56,7 @@ export function createPoolDynamicExternals(
 
       const { pools } = buildPools(committed);
       const moves = judgeScope(entry.name, names, actions, pools, Object.keys(committed), scope);
-      writeMoves(entry.name, moves, committed, pools, scope);
+      writeMoves(entry.name, names, moves, committed, pools, scope);
     }
 
     return Promise.resolve({ entry, actions });
@@ -127,21 +127,26 @@ export function createPoolDynamicExternals(
   }
 
   // Writes the moves back so a reload rebuilds the map this delta publishes, not the one `update-cache`
-  // recorded.
+  // recorded. The loaded remote's members are left dirty: the gate judged it against a map it could not
+  // change, so the next init re-elects the scope with it, as a cold init of this record would.
   function writeMoves(
     remote: RemoteName,
+    names: ReadonlySet<ExternalName>,
     moves: ReadonlyMap<ExternalName, CopyMove>,
     committed: shareScope,
     pools: ReadonlyMap<PoolName, PoolMember[]>,
     scope: string
   ): void {
     const written: Record<string, SharedExternal> = {};
-    for (const [name, move] of moves) {
+    for (const [name, move] of moves)
       written[name] = movedRecord(committed[name]!, remote, move, ports.versionCheck.compare);
-      ports.sharedExternalsRepo.addOrUpdate(name, written[name], scope);
-    }
-    const merged = { ...committed, ...written };
-    for (const [name, record] of renamedRecords(merged, pools))
+    for (const [name, record] of renamedRecords({ ...committed, ...written }, pools))
+      written[name] = record;
+    // A strict re-election throws on a pool the config refuses, so a strict page keeps the gate's verdicts.
+    if (!config.strict.strictExternalCompatibility)
+      for (const { name } of [...pools.values()].flat().filter(m => names.has(m.name)))
+        written[name] = { ...(written[name] ?? committed[name]!), dirty: true };
+    for (const [name, record] of Object.entries(written))
       ports.sharedExternalsRepo.addOrUpdate(name, record, scope);
   }
 
