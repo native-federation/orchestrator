@@ -1,14 +1,12 @@
-import type { DeepReadonly } from 'lib/utils/deep-readonly';
 import {
   type ExternalName,
   GLOBAL_SCOPE,
   type RemoteName,
   type SharedInfoActions,
-  type SharedVersion,
   type SharedVersionMeta,
   type VersionName,
 } from 'lib/core/1.domain';
-import { forEachVersionEntry } from 'lib/core/1.domain/externals/basis';
+import { claimTable } from 'lib/core/1.domain/externals/claims';
 import type { AcceptsTag } from 'lib/core/1.domain/externals/compatibility';
 import { packageOf, type Specifier, SpecifierTags } from 'lib/core/1.domain/externals/specifier';
 import * as _path from 'lib/utils/path';
@@ -77,10 +75,14 @@ export function committedView(
   const publishes = (meta: SharedVersionMeta) =>
     meta.name !== without && (shareScope !== GLOBAL_SCOPE || meta.cached);
   // Mirrors what `generate-import-map` emitted, so `global` is what the committed map really serves.
-  forEachGlobalClaim(members, recordOrder, without, publishes, (specifier, tag, meta) => {
-    if (!global.has(specifier))
-      global.set(specifier, { tag, remote: meta.name, file: meta.entries[specifier]! });
-  });
+  const rank = new Map(recordOrder.map((name, i) => [name, i]));
+  const walk = [...members].sort((a, b) => rank.get(a.name)! - rank.get(b.name)!);
+  const { claims } = claimTable(
+    walk.map(m => [m.name, m.external] as const),
+    publishes
+  );
+  for (const [specifier, { tag, copy }] of claims)
+    global.set(specifier, { tag, remote: copy.name, file: copy.entries[specifier]! });
 
   const builds = new Map<RemoteName, Build>();
   for (const [owner, copies] of shipped)
@@ -320,36 +322,4 @@ function offMapBinding(copies: readonly Copy[], view: CommittedView, globalTags:
       else if (reached !== tag) return { owner: build, specifier, tag };
     }
   return undefined;
-}
-
-// The order `generate-import-map` fills `imports` in: every `share` version, then every `skip` copy; the
-// caller keeps the first claim per specifier. Only a copy `publishes` accepts may claim, and
-// `forEachVersionEntry` keeps out a copy served by another build.
-function forEachGlobalClaim(
-  members: PoolMember[],
-  recordOrder: ExternalName[],
-  without: RemoteName | undefined,
-  publishes: (meta: SharedVersionMeta) => boolean,
-  visit: (specifier: Specifier, tag: VersionName, meta: SharedVersionMeta) => void
-): void {
-  // The record's order: generate-import-map claims `imports` and named scopes (`claimsOf`) in it.
-  const rank = new Map(recordOrder.map((name, i) => [name, i]));
-  const walk = [...members].sort((a, b) => rank.get(a.name)! - rank.get(b.name)!);
-
-  const claim = (version: DeepReadonly<SharedVersion>) =>
-    forEachVersionEntry(version, publishes, (specifier, meta) =>
-      visit(specifier, version.tag, meta)
-    );
-
-  for (const member of walk) {
-    // A share row only `without` holds publishes nothing yet.
-    const shareRow = member.external.versions.find(
-      v => v.action === 'share' && v.remotes.some(r => r.name !== without)
-    );
-    if (shareRow) claim(shareRow);
-  }
-  // A pooled skip copy's specifiers are claimed first by a share row at the global tag (one tag per
-  // package), so a stale `cached` only repeats a claim.
-  for (const member of walk)
-    for (const version of member.external.versions) if (version.action === 'skip') claim(version);
 }
