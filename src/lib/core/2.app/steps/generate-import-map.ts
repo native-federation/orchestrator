@@ -37,8 +37,8 @@ export function createGenerateImportMap(
     const chunkBundles: Record<string, Set<string>> = {};
     try {
       addScopedExternals(importMap, chunkBundles);
-      addShareScopeExternals(importMap, chunkBundles);
-      addGlobalSharedExternals(importMap, chunkBundles);
+      addNamedShareScopes(importMap, chunkBundles);
+      addGlobalShareScope(importMap, chunkBundles);
       addRemoteInfos(importMap, chunkBundles);
 
       addChunkImports(importMap, chunkBundles);
@@ -94,20 +94,20 @@ export function createGenerateImportMap(
   }
 
   // Runs after the scoped externals, so a remote's shared mappings overwrite its scoped ones in its scope.
-  function addShareScopeExternals(
+  function addNamedShareScopes(
     importMap: ImportMap,
     chunkBundles: Record<string, Set<string>>
   ): ImportMap {
     const shareScopes = ports.sharedExternalsRepo.getScopes({ includeGlobal: false });
 
     for (const shareScope of shareScopes) {
-      processShareScope(importMap, shareScope, chunkBundles);
+      addShareScope(importMap, shareScope, chunkBundles);
     }
 
     return importMap;
   }
 
-  function processShareScope(
+  function addShareScope(
     importMap: ImportMap,
     shareScope: string,
     chunkBundles: Record<string, Set<string>>
@@ -127,16 +127,7 @@ export function createGenerateImportMap(
 
       for (const version of external.versions) {
         if (version.action === 'scope') {
-          for (const remote of version.remotes) {
-            const remoteScope = getScope(shareScope, remote.name, externalName);
-            for (const [packageName, file] of Object.entries(remote.entries)) {
-              const url = _path.join(remoteScope, file);
-              addToScope(importMap, remoteScope, { [packageName]: url });
-              addIntegrity(importMap, url, remote.name, file);
-            }
-            registerBundleChunks(chunkBundles, remote.name, remote.bundle);
-            remote.cached = true;
-          }
+          addScopeRow(importMap, chunkBundles, shareScope, externalName, version);
           continue;
         }
 
@@ -181,46 +172,46 @@ export function createGenerateImportMap(
           }
         }
 
-        version.remotes.forEach(r => {
-          const rScope = getScope(shareScope, r.name, externalName);
+        version.remotes.forEach(consumer => {
+          const consumerScope = getScope(shareScope, consumer.name, externalName);
           // Pooling placed this remote in a subpool, so its scope names that subpool's build's files for
           // everything it imports rather than the shared source's.
-          if (index && r.servedBy) {
-            const files = index.get(r.servedBy);
-            const servedScope = getScope(shareScope, r.servedBy, externalName);
-            for (const specifier of Object.keys(r.entries)) {
+          if (index && consumer.servedBy) {
+            const files = index.get(consumer.servedBy);
+            const servedScope = getScope(shareScope, consumer.servedBy, externalName);
+            for (const specifier of Object.keys(consumer.entries)) {
               const source = files?.get(specifier);
               if (!source) continue;
               const url = _path.join(servedScope, source.file);
-              addToScope(importMap, rScope, { [specifier]: url });
-              addIntegrity(importMap, url, r.servedBy, source.file);
-              registerBundleChunks(chunkBundles, r.servedBy, source.bundle);
+              addToScope(importMap, consumerScope, { [specifier]: url });
+              addIntegrity(importMap, url, consumer.servedBy, source.file);
+              registerBundleChunks(chunkBundles, consumer.servedBy, source.bundle);
               source.meta.cached = true;
             }
             return;
           }
           for (const m of mappings) {
-            addToScope(importMap, rScope, { [m.packageName]: m.url });
+            addToScope(importMap, consumerScope, { [m.packageName]: m.url });
           }
           // Entrypoints no copy of the serving version has are served from this remote's own build.
-          for (const [packageName, file] of Object.entries(r.entries)) {
+          for (const [packageName, file] of Object.entries(consumer.entries)) {
             if (provided.has(packageName)) continue;
             const claim = claimedElsewhere(externalName, packageName);
             if (claim) {
-              addToScope(importMap, rScope, { [packageName]: claim.url });
+              addToScope(importMap, consumerScope, { [packageName]: claim.url });
               continue;
             }
             if (
               config.strict.strictEntryPointCoverage ||
               config.profile.scopeUncoveredEntrypoints
             ) {
-              warnUncoveredEntrypoint(shareScope, externalName, r.name, packageName);
+              warnUncoveredEntrypoint(shareScope, externalName, consumer.name, packageName);
               continue;
             }
-            const url = _path.join(rScope, file);
-            addToScope(importMap, rScope, { [packageName]: url });
-            addIntegrity(importMap, url, r.name, file);
-            r.cached = true;
+            const url = _path.join(consumerScope, file);
+            addToScope(importMap, consumerScope, { [packageName]: url });
+            addIntegrity(importMap, url, consumer.name, file);
+            consumer.cached = true;
           }
         });
         for (const m of mappings) {
@@ -230,6 +221,25 @@ export function createGenerateImportMap(
       if (cachedFingerprint(external) !== cachedBefore) {
         ports.sharedExternalsRepo.addOrUpdate(externalName, external, shareScope);
       }
+    }
+  }
+
+  function addScopeRow(
+    importMap: ImportMap,
+    chunkBundles: Record<string, Set<string>>,
+    shareScope: string,
+    externalName: string,
+    version: SharedVersion
+  ): void {
+    for (const remote of version.remotes) {
+      const remoteScope = getScope(shareScope, remote.name, externalName);
+      for (const [packageName, file] of Object.entries(remote.entries)) {
+        const url = _path.join(remoteScope, file);
+        addToScope(importMap, remoteScope, { [packageName]: url });
+        addIntegrity(importMap, url, remote.name, file);
+      }
+      registerBundleChunks(chunkBundles, remote.name, remote.bundle);
+      remote.cached = true;
     }
   }
 
@@ -346,20 +356,20 @@ export function createGenerateImportMap(
   function collectServed(
     into: ServedScope[],
     index: Map<RemoteName, Map<string, ServedSource>>,
-    ctx: string,
+    shareScope: string,
     externalName: string,
     version: SharedVersion
   ): void {
     for (const consumer of version.remotes) {
       if (!consumer.servedBy) continue;
       const files = index.get(consumer.servedBy);
-      const scope = getScope(ctx, consumer.name, externalName);
+      const scope = getScope(shareScope, consumer.name, externalName);
       for (const specifier of Object.keys(consumer.entries)) {
         const source = files?.get(specifier);
         if (!source) {
           config.log.warn(
             4,
-            `[${ctx}][${externalName}][${consumer.name}] '${consumer.servedBy}' does not serve '${specifier}'.`
+            `[${shareScope}][${externalName}][${consumer.name}] '${consumer.servedBy}' does not serve '${specifier}'.`
           );
           continue;
         }
@@ -383,12 +393,7 @@ export function createGenerateImportMap(
     }
   }
 
-  /**
-   * Step 4.3: Added the globally shared externals.
-   * @param importMap
-   * @returns
-   */
-  function addGlobalSharedExternals(
+  function addGlobalShareScope(
     importMap: ImportMap,
     chunkBundles: Record<string, Set<string>>
   ): ImportMap {
@@ -407,16 +412,7 @@ export function createGenerateImportMap(
         }
         if (version.action === 'skip') continue;
         if (version.action === 'scope') {
-          for (const remote of version.remotes) {
-            const remoteScope = getScope(GLOBAL_SCOPE, remote.name, externalName);
-            for (const [packageName, file] of Object.entries(remote.entries)) {
-              const url = _path.join(remoteScope, file);
-              addToScope(importMap, remoteScope, { [packageName]: url });
-              addIntegrity(importMap, url, remote.name, file);
-            }
-            remote.cached = true;
-            registerBundleChunks(chunkBundles, remote.name, remote.bundle);
-          }
+          addScopeRow(importMap, chunkBundles, GLOBAL_SCOPE, externalName, version);
           continue;
         }
 
