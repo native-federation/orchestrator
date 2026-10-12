@@ -145,12 +145,12 @@ function missWarning(
   const placement = placed.placements.get(remote)!;
   const where =
     placement.kind === 'subpool' && placement.owner !== remote
-      ? `It runs in subpool '${placement.owner}' for all ${imports} of its members.`
+      ? `It runs in subpool '${placement.owner}' for all ${imports} of its entrypoints.`
       : subpoolSize > 1
-        ? `Its build serves subpool '${remote}': its ${imports} members and ${subpoolSize - 1} other remote(s).`
+        ? `Its build serves subpool '${remote}': its ${imports} entrypoints and ${subpoolSize - 1} other remote(s).`
         : placed.keepsGlobalFiles.has(remote)
-          ? `It takes the elected files where its versions match; the rest of its ${imports} members are scoped for it.`
-          : `All ${imports} of its members are scoped for it.`;
+          ? `It takes the elected files where its versions match; the rest of its ${imports} entrypoints are scoped for it.`
+          : `All ${imports} of its entrypoints are scoped for it.`;
 
   if (miss.cause === 'incompatible')
     return `'${remote}' is islanded: its range rejects '${miss.member}@${miss.tag}' of the elected build '${placed.winner}'. ${where}`;

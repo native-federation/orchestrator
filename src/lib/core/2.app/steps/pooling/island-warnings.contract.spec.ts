@@ -73,7 +73,7 @@ describe('island warnings (contract)', () => {
 
       expect(p.islands()).toEqual({ 'team/mfe-b': 'incompatible' });
       expect(warnings()).toEqual([
-        "[__GLOBAL__][pool:framework] 'team/mfe-b' is islanded: its range rejects '@framework/core@22.1.0' of the elected build 'team/mfe-a'. All 1 of its members are scoped for it.",
+        "[__GLOBAL__][pool:framework] 'team/mfe-b' is islanded: its range rejects '@framework/core@22.1.0' of the elected build 'team/mfe-a'. All 1 of its entrypoints are scoped for it.",
       ]);
     });
 
@@ -100,7 +100,7 @@ describe('island warnings (contract)', () => {
 
       expect(p.islands()).toEqual({ 'team/mfe-b': 'incompatible' });
       expect(warnings()).toEqual([
-        "[__GLOBAL__][pool:framework] 'team/mfe-b' is islanded: its range rejects '@framework/core@22.1.0' of the elected build 'team/mfe-a'. All 2 of its members are scoped for it.",
+        "[__GLOBAL__][pool:framework] 'team/mfe-b' is islanded: its range rejects '@framework/core@22.1.0' of the elected build 'team/mfe-a'. All 2 of its entrypoints are scoped for it.",
       ]);
     });
 
@@ -120,7 +120,7 @@ describe('island warnings (contract)', () => {
 
       expect(p.islands()).toEqual({ 'team/mfe-a': 'uncovered' });
       expect(warnings()).toEqual([
-        "[__GLOBAL__][pool:framework] 'team/mfe-a' serves its own family: no elected build offers every entrypoint it imports at a version it accepts (gap '@framework/router', closest 'team/host'). All 2 of its members are scoped for it.",
+        "[__GLOBAL__][pool:framework] 'team/mfe-a' serves its own family: no elected build offers every entrypoint it imports at a version it accepts (gap '@framework/router', closest 'team/host'). All 2 of its entrypoints are scoped for it.",
       ]);
     });
 
@@ -150,8 +150,8 @@ describe('island warnings (contract)', () => {
         'team/legacy-b': 'subpool team/legacy-a',
       });
       expect(warnings()).toEqual([
-        "[__GLOBAL__][pool:framework] 'team/legacy-a' is islanded: its range rejects '@framework/core@22.0.8' of the elected build 'team/mfe-a'. Its build serves subpool 'team/legacy-a': its 2 members and 1 other remote(s).",
-        "[__GLOBAL__][pool:framework] 'team/legacy-b' is islanded: its range rejects '@framework/core@22.0.8' of the elected build 'team/mfe-a'. It runs in subpool 'team/legacy-a' for all 2 of its members.",
+        "[__GLOBAL__][pool:framework] 'team/legacy-a' is islanded: its range rejects '@framework/core@22.0.8' of the elected build 'team/mfe-a'. Its build serves subpool 'team/legacy-a': its 2 entrypoints and 1 other remote(s).",
+        "[__GLOBAL__][pool:framework] 'team/legacy-b' is islanded: its range rejects '@framework/core@22.0.8' of the elected build 'team/mfe-a'. It runs in subpool 'team/legacy-a' for all 2 of its entrypoints.",
       ]);
     });
 
@@ -182,8 +182,8 @@ describe('island warnings (contract)', () => {
         'team/mfe-c': 'subpool team/mfe-b',
       });
       expect(warnings()).toEqual([
-        "[__GLOBAL__][pool:framework] 'team/mfe-b' serves its own family: no elected build offers every entrypoint it imports at a version it accepts (gap '@framework/cdk', closest 'team/host'). Its build serves subpool 'team/mfe-b': its 2 members and 1 other remote(s).",
-        "[__GLOBAL__][pool:framework] 'team/mfe-c' serves its own family: no elected build offers every entrypoint it imports at a version it accepts (gap '@framework/cdk', closest 'team/host'). It runs in subpool 'team/mfe-b' for all 2 of its members.",
+        "[__GLOBAL__][pool:framework] 'team/mfe-b' serves its own family: no elected build offers every entrypoint it imports at a version it accepts (gap '@framework/cdk', closest 'team/host'). Its build serves subpool 'team/mfe-b': its 2 entrypoints and 1 other remote(s).",
+        "[__GLOBAL__][pool:framework] 'team/mfe-c' serves its own family: no elected build offers every entrypoint it imports at a version it accepts (gap '@framework/cdk', closest 'team/host'). It runs in subpool 'team/mfe-b' for all 2 of its entrypoints.",
       ]);
     });
 
@@ -208,8 +208,8 @@ describe('island warnings (contract)', () => {
 
       expect(p.islands()).toEqual({ 'team/mfe-b': 'uncovered', 'team/mfe-c': 'uncovered' });
       expect(warnings()).toEqual([
-        "[__GLOBAL__][pool:framework] 'team/mfe-b' serves its own family: no elected build offers every entrypoint it imports at a version it accepts (gap '@framework/cdk', closest 'team/mfe-a'). It takes the elected files where its versions match; the rest of its 2 members are scoped for it.",
-        "[__GLOBAL__][pool:framework] 'team/mfe-c' serves its own family: no elected build offers every entrypoint it imports at a version it accepts (gap '@framework/cdk', closest 'team/mfe-a'). It takes the elected files where its versions match; the rest of its 2 members are scoped for it.",
+        "[__GLOBAL__][pool:framework] 'team/mfe-b' serves its own family: no elected build offers every entrypoint it imports at a version it accepts (gap '@framework/cdk', closest 'team/mfe-a'). It takes the elected files where its versions match; the rest of its 2 entrypoints are scoped for it.",
+        "[__GLOBAL__][pool:framework] 'team/mfe-c' serves its own family: no elected build offers every entrypoint it imports at a version it accepts (gap '@framework/cdk', closest 'team/mfe-a'). It takes the elected files where its versions match; the rest of its 2 entrypoints are scoped for it.",
       ]);
     });
 
@@ -252,7 +252,7 @@ describe('island warnings (contract)', () => {
       });
       expect(warnings()).toEqual([
         "[__GLOBAL__][pool:framework] 'team/mfe-e' keeps subpool 'team/mfe-e': the elected build would serve it, but 1 other remote(s) in it need its build.",
-        "[__GLOBAL__][pool:framework] 'team/mfe-f' is islanded: its range rejects '@framework/core@17.0.0' of the elected build 'team/mfe-a'. It runs in subpool 'team/mfe-e' for all 2 of its members.",
+        "[__GLOBAL__][pool:framework] 'team/mfe-f' is islanded: its range rejects '@framework/core@17.0.0' of the elected build 'team/mfe-a'. It runs in subpool 'team/mfe-e' for all 2 of its entrypoints.",
       ]);
     });
 
@@ -274,7 +274,7 @@ describe('island warnings (contract)', () => {
 
       expect(p.islands()).toEqual({ 'team/r0': 'uncovered' });
       expect(warnings()).toEqual([
-        "[__GLOBAL__][pool:lib] 'team/r0' serves its own family: no build shipped its entrypoints together at the elected versions (gap '@lib/m1', closest 'team/r1'). All 2 of its members are scoped for it.",
+        "[__GLOBAL__][pool:lib] 'team/r0' serves its own family: no build shipped its entrypoints together at the elected versions (gap '@lib/m1', closest 'team/r1'). All 2 of its entrypoints are scoped for it.",
       ]);
     });
   });
@@ -299,7 +299,7 @@ describe('island warnings (contract)', () => {
 
       expect(p.islands()).toEqual({ 'team/mfe-b': 'incompatible' });
       expect(warnings()).toEqual([
-        "[__GLOBAL__][pool:angular] 'team/mfe-b' is islanded: its range rejects '@angular/router@22.0.5' of the elected build 'team/mfe-c'. All 1 of its members are scoped for it.",
+        "[__GLOBAL__][pool:angular] 'team/mfe-b' is islanded: its range rejects '@angular/router@22.0.5' of the elected build 'team/mfe-c'. All 1 of its entrypoints are scoped for it.",
       ]);
     });
 
@@ -320,8 +320,8 @@ describe('island warnings (contract)', () => {
 
       expect(p.islands()).toEqual({ 'team/mfe-a': 'uncovered', 'team/mfe-b': 'uncovered' });
       expect(warnings()).toEqual([
-        "[__GLOBAL__][pool:angular] 'team/mfe-b' serves its own family: no elected build offers every entrypoint it imports at a version it accepts (gap '@angular/router', closest 'team/host'). It takes the elected files where its versions match; the rest of its 2 members are scoped for it.",
-        "[__GLOBAL__][pool:angular] 'team/mfe-a' serves its own family: no elected build offers every entrypoint it imports at a version it accepts (gap '@angular/router', closest 'team/host'). It takes the elected files where its versions match; the rest of its 1 members are scoped for it.",
+        "[__GLOBAL__][pool:angular] 'team/mfe-b' serves its own family: no elected build offers every entrypoint it imports at a version it accepts (gap '@angular/router', closest 'team/host'). It takes the elected files where its versions match; the rest of its 2 entrypoints are scoped for it.",
+        "[__GLOBAL__][pool:angular] 'team/mfe-a' serves its own family: no elected build offers every entrypoint it imports at a version it accepts (gap '@angular/router', closest 'team/host'). It takes the elected files where its versions match; the rest of its 1 entrypoints are scoped for it.",
       ]);
     });
 
@@ -348,8 +348,8 @@ describe('island warnings (contract)', () => {
 
       expect(p.islands()).toEqual({ 'team/mfe-b': 'uncovered', 'team/mfe-c': 'uncovered' });
       expect(warnings()).toEqual([
-        "[__GLOBAL__][pool:angular] 'team/mfe-b' serves its own family: no elected build offers every entrypoint it imports at a version it accepts (gap '@angular/cdk', closest 'team/mfe-a'). It takes the elected files where its versions match; the rest of its 2 members are scoped for it.",
-        "[__GLOBAL__][pool:angular] 'team/mfe-c' serves its own family: no elected build offers every entrypoint it imports at a version it accepts (gap '@angular/cdk', closest 'team/mfe-a'). It takes the elected files where its versions match; the rest of its 2 members are scoped for it.",
+        "[__GLOBAL__][pool:angular] 'team/mfe-b' serves its own family: no elected build offers every entrypoint it imports at a version it accepts (gap '@angular/cdk', closest 'team/mfe-a'). It takes the elected files where its versions match; the rest of its 2 entrypoints are scoped for it.",
+        "[__GLOBAL__][pool:angular] 'team/mfe-c' serves its own family: no elected build offers every entrypoint it imports at a version it accepts (gap '@angular/cdk', closest 'team/mfe-a'). It takes the elected files where its versions match; the rest of its 2 entrypoints are scoped for it.",
       ]);
     });
 
@@ -370,7 +370,7 @@ describe('island warnings (contract)', () => {
 
       expect(p.islands()).toEqual({ 'team/mfe-b': 'uncovered' });
       expect(warnings()).toEqual([
-        "[__GLOBAL__][pool:angular] 'team/mfe-b' serves its own family: no elected build offers every entrypoint it imports at a version it accepts (gap '@angular/forms', closest 'team/mfe-a'). All 2 of its members are scoped for it.",
+        "[__GLOBAL__][pool:angular] 'team/mfe-b' serves its own family: no elected build offers every entrypoint it imports at a version it accepts (gap '@angular/forms', closest 'team/mfe-a'). All 2 of its entrypoints are scoped for it.",
       ]);
     });
 
@@ -394,7 +394,7 @@ describe('island warnings (contract)', () => {
       await p.runInit();
 
       expect(warnings()).toEqual([
-        "[widgets][pool:angular] 'team/mfe-b' is islanded: its range rejects '@angular/core@18.0.0' of the elected build 'team/mfe-a'. All 2 of its members are scoped for it.",
+        "[widgets][pool:angular] 'team/mfe-b' is islanded: its range rejects '@angular/core@18.0.0' of the elected build 'team/mfe-a'. All 2 of its entrypoints are scoped for it.",
       ]);
     });
   });
@@ -462,7 +462,7 @@ describe('island warnings (contract)', () => {
       expect(p.islands()).toEqual({ 'team/mfe-b': 'incompatible' });
       // update-cache warns per rejected member first; those lines are not island sentences.
       expect(warnings()).toContainEqual(
-        "[__GLOBAL__] 'team/mfe-b' is islanded: its range rejects '@framework/core@22.1.0' of the committed map. All 2 of its members are scoped for it."
+        "[__GLOBAL__] 'team/mfe-b' is islanded: its range rejects '@framework/core@22.1.0' of the committed map. All 2 of its entrypoints are scoped for it."
       );
     });
 
@@ -482,7 +482,7 @@ describe('island warnings (contract)', () => {
 
       expect(p.islands()).toEqual({ 'team/mfe-b': 'incompatible' });
       expect(warnings()).toContainEqual(
-        "[__GLOBAL__] 'team/mfe-b' is islanded: its range rejects '@framework/core@22.1.0' of the committed map. All 3 of its members are scoped for it."
+        "[__GLOBAL__] 'team/mfe-b' is islanded: its range rejects '@framework/core@22.1.0' of the committed map. All 3 of its entrypoints are scoped for it."
       );
     });
 
@@ -498,7 +498,7 @@ describe('island warnings (contract)', () => {
 
       expect(p.islands()).toEqual({ 'team/mfe-b': 'uncovered' });
       expect(warnings()).toEqual([
-        "[__GLOBAL__] 'team/mfe-b' serves its own family: no committed build offers every entrypoint it imports at a version it accepts (gap '@framework/forms'). All 2 of its members are scoped for it.",
+        "[__GLOBAL__] 'team/mfe-b' serves its own family: no committed build offers every entrypoint it imports at a version it accepts (gap '@framework/forms'). All 2 of its entrypoints are scoped for it.",
       ]);
     });
 
@@ -523,7 +523,7 @@ describe('island warnings (contract)', () => {
 
       expect(p.islands()).toEqual({ 'team/mfe-b': 'uncovered' });
       expect(warnings()).toEqual([
-        "[__GLOBAL__] 'team/mfe-b' serves its own family: no committed build shipped the map's combination for it. All 2 of its members are scoped for it.",
+        "[__GLOBAL__] 'team/mfe-b' serves its own family: no committed build shipped the map's combination for it. All 2 of its entrypoints are scoped for it.",
       ]);
     });
 
@@ -583,8 +583,81 @@ describe('island warnings (contract)', () => {
 
       expect(p.islands()).toEqual({ 'team/mfe-c': 'uncovered' });
       expect(warnings()).toEqual([
-        "[__GLOBAL__] 'team/mfe-c' serves its own family: committed build 'team/mfe-b' serves it but runs '@framework/forms@22.0.1' off the map. All 2 of its members are scoped for it.",
+        "[__GLOBAL__] 'team/mfe-c' serves its own family: committed build 'team/mfe-b', whose files it would reach, resolves '@framework/forms' to another file than it would. All 2 of its entrypoints are scoped for it.",
       ]);
+    });
+
+    describe('by file', () => {
+      // Whole entries through the real repositories, so a bundle's chunks reach the gate. One `fw` pool at
+      // 17.0.0; a package is flat unless `chunked`, then its bundle ships one internal chunk.
+      const shared = (packageName: string, entrypoints: string[] = [], chunked = false) =>
+        ({
+          packageName,
+          version: '17.0.0',
+          requiredVersion: '~17.0.0',
+          singleton: true,
+          strictVersion: false,
+          pool: 'fw',
+          ...(chunked ? { bundle: `browser-${packageName.slice(1).replace(/\//g, '_')}` } : {}),
+          entries: Object.fromEntries(
+            [packageName, ...entrypoints].map(e => [e, `${e.slice(1).replace(/\//g, '_')}.js`])
+          ),
+        }) as RemoteEntry['shared'][number];
+      const whole = (name: string, ...sharedInfo: RemoteEntry['shared']): RemoteEntry => {
+        const bundles = sharedInfo.flatMap(i => (i.bundle ? [i.bundle] : []));
+        return {
+          name,
+          url: `http://${name}/remoteEntry.json`,
+          exposes: [],
+          shared: sharedInfo,
+          ...(bundles.length > 0
+            ? { chunks: Object.fromEntries(bundles.map(b => [b, [`chunk-${b}.js`]])) }
+            : {}),
+        } as RemoteEntry;
+      };
+
+      it('torn: a chunked package would run partly from the map', async () => {
+        // r takes the host's core and forms as they are; its interop, a chunked entrypoint of core the map
+        // lacks, would come from r's build beside the map's core.
+        p = portfolio(
+          {},
+          { storage: 'nf-island-warnings-torn', realRepositories: true, hosts: ['host'] }
+        );
+        await p.runInit([whole('host', shared('@fw/core'), shared('@fw/forms'))]);
+        vi.mocked(p.config.log.warn).mockClear();
+
+        await p.runDynamic(
+          whole('r', shared('@fw/core'), shared('@fw/core/interop', [], true), shared('@fw/forms'))
+        );
+
+        expect(p.islands()).toEqual({ r: 'uncovered' });
+        expect(warnings()).toEqual([
+          "[__GLOBAL__] 'r' serves its own family: its chunked '@fw/core' cannot run beside the map's files of it. All 3 of its entrypoints are scoped for it.",
+        ]);
+      });
+
+      it('bound: a committed file binds a specifier to the map, the load to its own', async () => {
+        // The host ships http's testing entrypoint as a package of its own; m ships it inside http, which
+        // nobody serves. Without a self-fill, m would run its own testing beside the host's, which the host's
+        // files bind.
+        p = portfolio(
+          {},
+          { storage: 'nf-island-warnings-bound', realRepositories: true, hosts: ['host'] }
+        );
+        p.config.strict.strictEntryPointCoverage = true;
+        await p.runInit([whole('host', shared('@fw/core'), shared('@fw/http/testing'))]);
+        vi.mocked(p.config.log.warn).mockClear();
+
+        await p.runDynamic(
+          whole('m', shared('@fw/core'), shared('@fw/http', ['@fw/http/testing']))
+        );
+
+        expect(p.islands()).toEqual({ m: 'uncovered' });
+        // The host runs testing on the map, so this is not the off-map case above; the line is the same.
+        expect(warnings()).toEqual([
+          "[__GLOBAL__] 'm' serves its own family: committed build 'host', whose files it would reach, resolves '@fw/http/testing' to another file than it would. All 3 of its entrypoints are scoped for it.",
+        ]);
+      });
     });
 
     it('unmapped: the build serving a named scope is not in the cache', async () => {

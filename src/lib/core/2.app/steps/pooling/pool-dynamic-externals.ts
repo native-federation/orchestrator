@@ -103,10 +103,11 @@ export function createPoolDynamicExternals(
       const cover = coverFromMap(remote, mine, view, actions, policy);
       if (!('covers' in cover)) {
         if ('unmapped' in cover) warnUnmapped(scope, remote, cover.unmapped);
-        // The U-27 line is true only where the committed build runs the file off the map.
-        if ('bound' in cover && cover.bound.offMap) {
-          const { owner, specifier, tag } = cover.bound;
-          const miss = { cause: 'uncovered' as const, owner, specifier, tag };
+        else {
+          const miss: SelfServeMiss =
+            'torn' in cover
+              ? { cause: 'uncovered', torn: cover.torn }
+              : { cause: 'uncovered', ...cover.bound };
           config.log.warn(8, `[${scope}] ${selfServeWarning(remote, miss, specifierCount(own))}`);
         }
         // Half its family on the map's files and half on its own build would tear it.
@@ -185,13 +186,17 @@ function poolableNames(
   return declared;
 }
 
+type SelfServeMiss = GateMiss | { cause: 'uncovered'; torn: string };
+
 // Wording is pinned in `island-warnings.contract.spec.ts` alone; tools read islands from the record.
-function selfServeWarning(remote: RemoteName, miss: GateMiss, imports: number): string {
-  const where = `All ${imports} of its members are scoped for it.`;
+function selfServeWarning(remote: RemoteName, miss: SelfServeMiss, imports: number): string {
+  const where = `All ${imports} of its entrypoints are scoped for it.`;
   if (miss.cause === 'incompatible')
     return `'${remote}' is islanded: its range rejects '${miss.specifier}@${miss.tag}' of the committed map. ${where}`;
+  if ('torn' in miss)
+    return `'${remote}' serves its own family: its chunked '${miss.torn}' cannot run beside the map's files of it. ${where}`;
   if ('owner' in miss)
-    return `'${remote}' serves its own family: committed build '${miss.owner}' serves it but runs '${miss.specifier}@${miss.tag}' off the map. ${where}`;
+    return `'${remote}' serves its own family: committed build '${miss.owner}', whose files it would reach, resolves '${miss.specifier}' to another file than it would. ${where}`;
   if ('unshipped' in miss)
     return `'${remote}' serves its own family: no committed build shipped the map's combination for it. ${where}`;
   return `'${remote}' serves its own family: no committed build offers every entrypoint it imports at a version it accepts (gap '${miss.specifier}'). ${where}`;

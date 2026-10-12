@@ -139,7 +139,7 @@ export function judgeRemote(
   return { cause: 'uncovered', unshipped: true };
 }
 
-type Binding = { owner: RemoteName; specifier: Specifier; tag: VersionName; offMap: boolean };
+type Binding = { owner: RemoteName; specifier: Specifier; tag: VersionName };
 
 type CoverResult =
   { covers: MapCover[] } | { unmapped: RemoteName } | { torn: string } | { bound: Binding };
@@ -240,7 +240,6 @@ function tornPackage(remote: RemoteName, reaches: ReadonlyMap<Specifier, Reach>)
 // U-27 by file: a committed file binds its pool-mates where its build resolves them (off the map where it runs
 // them so, else the map), so every build whose file the remote reaches, directly or through another such file,
 // must resolve each specifier it ships to the file the remote does, or the one the first such build does.
-// `offMap`: the build that disagrees runs its file off the map.
 function boundByFile(
   reaches: ReadonlyMap<Specifier, Reach>,
   view: CommittedView
@@ -252,15 +251,14 @@ function boundByFile(
   // A Set iterates what is added during the loop, so a build first reached through another's file is judged too.
   for (const build of servers)
     for (const specifier of view.builds.get(build)!.tags.keys()) {
-      const offMap = view.runsOffMap.get(build)?.get(specifier);
-      const served = offMap ?? view.global.get(specifier);
+      const served = view.runsOffMap.get(build)?.get(specifier) ?? view.global.get(specifier);
       if (served === undefined) continue;
       const reached = reaches.get(specifier) ?? firstRun.get(specifier);
       if (reached === undefined) {
         firstRun.set(specifier, served);
         if (view.builds.has(served.remote)) servers.add(served.remote);
       } else if (reached.remote !== served.remote || reached.file !== served.file)
-        return { owner: build, specifier, tag: served.tag, offMap: offMap !== undefined };
+        return { owner: build, specifier, tag: served.tag };
     }
   return undefined;
 }

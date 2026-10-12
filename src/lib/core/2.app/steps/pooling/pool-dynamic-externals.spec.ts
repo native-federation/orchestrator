@@ -1196,8 +1196,13 @@ describe('createPoolDynamicExternals', () => {
           '@fw/http': { action: 'scope' },
         });
         expect(verdictsWritten()).toEqual(['mfe@@fw/core: uncovered', 'mfe@@fw/http: uncovered']);
-        // F runs testing on the map, so the U-27 line, which says otherwise, is not logged.
-        expect(config.log.warn).not.toHaveBeenCalled();
+        // F runs testing on the map; the line names the build whose file binds it all the same.
+        expect(config.log.warn).toHaveBeenCalledOnce();
+        expect(config.log.warn).toHaveBeenCalledWith(
+          8,
+          // Wording is pinned in island-warnings.contract.spec.ts alone.
+          expect.stringContaining("committed build 'F'")
+        );
       }
     );
 
