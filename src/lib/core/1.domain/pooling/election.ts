@@ -252,16 +252,22 @@ function extend(pool: Pool, state: State): void {
 
 // A package round 1 does not ship at all is published from the builds that agree with it, when every one
 // of them ships it at one tag, as one tag cannot split it. A subpool copy resolves globally only when its
-// subpool's owner agrees.
+// subpool's owner agrees. Under a host, the agreeing members of subpools whose build disagrees with the
+// host then fill the packages still missing, so they can move onto the host's runtime.
 function addExtensions(pool: Pool, state: State): void {
   const { globalTags, globalRemotes } = state;
   const runsOn = (remote: RemoteName) =>
     state.subpools.find(p => p.remotes.includes(remote))?.owner ?? remote;
-  const contributors = pool.remotes.filter(
-    r =>
-      !globalRemotes.has(r) && pool.agreesAt(r, globalTags) && pool.agreesAt(runsOn(r), globalTags)
-  );
-  for (const offer of offers(pool, globalTags, contributors).values())
+  const agreeing = pool.remotes.filter(r => !globalRemotes.has(r) && pool.agreesAt(r, globalTags));
+  const runsGlobally = (remote: RemoteName) => pool.agreesAt(runsOn(remote), globalTags);
+  const contributors = agreeing.filter(runsGlobally);
+  const offered = offers(pool, globalTags, contributors);
+  const fill = pool.builds.get(state.winner)!.host ? agreeing.filter(r => !runsGlobally(r)) : [];
+  for (const [pkg, offer] of offers(pool, globalTags, fill))
+    if (!offered.has(pkg)) offered.set(pkg, offer);
+  // A fill remote that goes global publishes its copy too, so the guard covers it.
+  dropChunkedSplits(pool, [...contributors, ...fill], offered);
+  for (const offer of offered.values())
     if (offer) for (const s of offer.specifiers) globalTags.set(s, offer.tag);
 }
 
@@ -281,7 +287,6 @@ function offers(pool: Pool, globalTags: SpecifierTags, contributors: RemoteName[
         else if (seen.tag !== copy.tag) offered.set(pkg, null);
         else seen.specifiers.push(s);
       }
-  dropChunkedSplits(pool, contributors, offered);
   return offered;
 }
 
@@ -317,7 +322,8 @@ function packagesOf(
   for (const copy of copies)
     for (const s of copy.specifiers) {
       const pkg = packageOf(s);
-      if (!offered.get(pkg)) continue;
+      // A fill copy at another tag than the offer is never published.
+      if (offered.get(pkg)?.tag !== copy.tag) continue;
       let own = packages.get(pkg);
       if (!own) packages.set(pkg, (own = { specifiers: [], members: new Set() }));
       own.specifiers.push(s);

@@ -1612,4 +1612,98 @@ describe('pooling regressions', () => {
         expect(p.islands()).toEqual(flat ? {} : { mfe3: 'uncovered', mfe4: 'uncovered' });
       });
   });
+
+  /**
+   * The playground's shape, with neutral names: every build is strict and chunked. The host ships core,
+   * common and router at 17.2.0; m1 ships the same plus elements, which the host lacks. m2 pins router to
+   * exactly 17.2.2, so it rejects the host's build, and its build served m1 as a subpool: m1 ran a second
+   * core though it agrees with the host on everything both ship. Under a host the map now fills elements from
+   * m1, which then runs on the host's build.
+   *
+   * m3 is either a copy of m2's build (the patched playground: it rejects the host's router, so it stays with
+   * m2) or of m1's (it agrees with the host, and both fill elements at one tag).
+   */
+  describe('host precedence: a subpool member that agrees with the host runs on its build', () => {
+    const CORE = '@fw/core';
+    const INTEROP = '@fw/core/rxjs-interop';
+    const COMMON = '@fw/common';
+    const ROUTER = '@fw/router';
+    const ELEMENTS = '@fw/elements';
+
+    const file = (s: string) => `${s.slice(1).replace(/\//g, '_')}.js`;
+    const shared = (packageName: string, version = '17.2.0', range = '~17.2.0'): DenseSharedInfo =>
+      ({
+        packageName,
+        version,
+        requiredVersion: range,
+        singleton: true,
+        strictVersion: true,
+        pool: 'fw',
+        bundle: `browser-${packageName.slice(1).replace(/\//g, '_')}`,
+        entries: Object.fromEntries(
+          [packageName, ...(packageName === CORE ? [INTEROP] : [])].map(s => [s, file(s)])
+        ),
+      }) as DenseSharedInfo;
+    const entry = (name: string, ...sharedInfo: DenseSharedInfo[]): RemoteEntry =>
+      ({
+        name,
+        url: `http://${name}/remoteEntry.json`,
+        exposes: [],
+        shared: sharedInfo,
+        chunks: Object.fromEntries(sharedInfo.map(i => [i.bundle!, [`chunk-${i.bundle}.js`]])),
+      }) as unknown as RemoteEntry;
+
+    const host = () => entry('host', shared(CORE), shared(COMMON), shared(ROUTER));
+    const pooled = (name: string) =>
+      entry(name, shared(CORE), shared(COMMON), shared(ROUTER), shared(ELEMENTS));
+    const patched = (name: string) =>
+      entry(
+        name,
+        shared(CORE),
+        shared(COMMON),
+        shared(ROUTER, '17.2.2', '17.2.2'),
+        shared(ELEMENTS)
+      );
+
+    const coreOf = (importMap: ImportMap, remote: string) =>
+      importMap.scopes?.[`http://${remote}/`]?.[CORE] ?? importMap.imports[CORE];
+
+    for (const [m3, onHost, islands] of [
+      [patched, ['m1'], { m2: 'subpool m2', m3: 'subpool m2' }],
+      [pooled, ['m1', 'm3'], { m2: 'incompatible' }],
+    ] as const)
+      it(`runs ${onHost.join(' and ')} on the host's core when m3 is ${m3 === patched ? "m2's" : "m1's"} build`, async () => {
+        const p = portfolio(
+          {},
+          {
+            storage: `nf-regression-host-fill-${onHost.length}`,
+            realRepositories: true,
+            hosts: ['host'],
+          }
+        );
+
+        const importMap = await p.runInit([pooled('m1'), patched('m2'), m3('m3'), host()]);
+
+        expect(importMap.imports[ELEMENTS]).toBe(`http://m1/${file(ELEMENTS)}`);
+        expect(p.islands()).toEqual(islands);
+        for (const remote of ['m1', 'm2', 'm3'])
+          expect(coreOf(importMap, remote)).toBe(
+            (onHost as readonly string[]).includes(remote)
+              ? `http://host/${file(CORE)}`
+              : `http://m2/${file(CORE)}`
+          );
+      });
+
+    // Without a host nothing fills and nothing needs to: m2's build wins round 1, as every `~17.2.0` accepts its
+    // router, and serves all four.
+    it('runs every remote on one build when no build is the host', async () => {
+      const p = portfolio({}, { storage: 'nf-regression-host-fill-none', realRepositories: true });
+
+      const importMap = await p.runInit([pooled('m1'), patched('m2'), patched('m3'), host()]);
+
+      expect(p.islands()).toEqual({});
+      for (const s of [CORE, INTEROP, COMMON, ROUTER, ELEMENTS])
+        expect(importMap.imports[s]).toBe(`http://m2/${file(s)}`);
+    });
+  });
 });
