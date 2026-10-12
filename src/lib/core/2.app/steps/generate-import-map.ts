@@ -11,6 +11,8 @@ import {
   type SharedVersionMeta,
 } from 'lib/core/1.domain';
 import { versionEntries } from 'lib/core/1.domain/externals/basis';
+import { claimTable, type Claim } from 'lib/core/1.domain/externals/claims';
+import type { Specifier } from 'lib/core/1.domain/externals/specifier';
 import type { LoggingConfig } from '../config/log.contract';
 import type { ModeConfig } from '../config/mode.contract';
 import * as _path from 'lib/utils/path';
@@ -113,7 +115,7 @@ export function createGenerateImportMap(
     const sharedExternals = ports.sharedExternalsRepo.getFromScope(shareScope);
     const index = buildServedIndex(sharedExternals);
 
-    const claims = claimsOf(sharedExternals, shareScope);
+    const claims = shareRowMappings(sharedExternals, shareScope);
     const claimedElsewhere = (externalName: string, specifier: string): Mapping | undefined => {
       const claim = claims.get(specifier);
       return claim?.external === externalName ? undefined : claim;
@@ -318,27 +320,23 @@ export function createGenerateImportMap(
 
   type Mapping = { url: string; name: RemoteName; file: string };
 
-  // What `imports` holds on the global path: a specifier can be an entry of one external and a package of
-  // its own in another (flat vs dense), and the first shared version listing it serves every remote.
-  function claimsOf(
+  // A specifier can be an entry of one external and a package of its own in another (flat vs dense), and the
+  // first shared version listing it serves every remote of the scope.
+  function shareRowMappings(
     externals: Record<string, SharedExternal>,
     shareScope: string
-  ): Map<string, Mapping & { external: string }> {
-    const claims = new Map<string, Mapping & { external: string }>();
-    for (const [externalName, external] of Object.entries(externals))
-      for (const version of external.versions)
-        if (version.action === 'share')
-          for (const [specifier, provider] of versionEntries(version)) {
-            if (claims.has(specifier)) continue;
-            const file = provider.entries[specifier]!;
-            claims.set(specifier, {
-              url: _path.join(getScope(shareScope, provider.name, externalName), file),
-              name: provider.name,
-              file,
-              external: externalName,
-            });
-          }
-    return claims;
+  ): Map<Specifier, Mapping & { external: string }> {
+    const mappings = new Map<Specifier, Mapping & { external: string }>();
+    for (const [specifier, { external, copy }] of claimTable(Object.entries(externals)).shareRows) {
+      const file = copy.entries[specifier]!;
+      mappings.set(specifier, {
+        url: _path.join(getScope(shareScope, copy.name, external), file),
+        name: copy.name,
+        file,
+        external,
+      });
+    }
+    return mappings;
   }
 
   // A cross-build scope entry, held back until every global mapping is in place so that a scope which
@@ -396,6 +394,7 @@ export function createGenerateImportMap(
   ): ImportMap {
     const sharedExternals = ports.sharedExternalsRepo.getFromScope();
     const index = buildServedIndex(sharedExternals);
+    const { claims, duplicates } = claimTable(Object.entries(sharedExternals));
     const served: ServedScope[] = [];
     const cachedBefore = new Map<string, string>();
 
@@ -421,14 +420,14 @@ export function createGenerateImportMap(
           continue;
         }
 
-        if (importMap.imports[externalName]) {
+        if (duplicates.has(version)) {
           notifyDuplicateGlobalExternal(externalName);
           continue;
         }
 
         // Marks and registers the copies it maps, the basis included — so `cached` names the copies this
         // map really publishes, which the dynamic path reads as what it may call covered.
-        mergeVersionEntries(importMap, chunkBundles, externalName, version);
+        mergeVersionEntries(importMap, chunkBundles, externalName, version, claims);
       }
     }
 
@@ -438,7 +437,7 @@ export function createGenerateImportMap(
     for (const [externalName, external] of Object.entries(sharedExternals)) {
       for (const version of external.versions) {
         if (version.action !== 'skip') continue;
-        selfFillUncovered(importMap, chunkBundles, externalName, version.remotes);
+        selfFillUncovered(importMap, chunkBundles, externalName, version.remotes, claims);
       }
     }
 
@@ -459,7 +458,8 @@ export function createGenerateImportMap(
     importMap: ImportMap,
     chunkBundles: Record<string, Set<string>>,
     externalName: string,
-    version: SharedVersion
+    version: SharedVersion,
+    claims: Map<Specifier, Claim>
   ): void {
     // Scope lookup and chunk registration belong to the copy, not to each of its specifiers. A copy none
     // of whose specifiers survive the check below never enters it: nothing points at its build, so its
@@ -470,7 +470,7 @@ export function createGenerateImportMap(
       // Another external claimed this specifier as one of its own entries — reachable when
       // `feature.convertFlatSharedInfo` is off and one remote emits a secondary entrypoint as a
       // package of its own. First writer wins; whoever loses would otherwise be repointed silently.
-      if (importMap.imports[packageName]) {
+      if (claims.get(packageName)!.copy !== remote) {
         config.log.debug(
           4,
           `[${GLOBAL_SCOPE}][${externalName}][${remote.name}] Entrypoint '${packageName}' is already mapped by another external, keeping '${importMap.imports[packageName]}'.`
@@ -495,18 +495,21 @@ export function createGenerateImportMap(
     importMap: ImportMap,
     chunkBundles: Record<string, Set<string>>,
     externalName: string,
-    remotes: SharedVersionMeta[]
+    remotes: SharedVersionMeta[],
+    claims: Map<Specifier, Claim>
   ): void {
     for (const remote of remotes) {
       // A remote pooling placed in a subpool takes every entrypoint from that subpool's build, so filling
       // from its own would put a second build into the global mapping.
       if (remote.servedBy) continue;
       for (const [packageName, file] of Object.entries(remote.entries)) {
-        if (importMap.imports[packageName]) continue;
+        const claim = claims.get(packageName)!;
+        if (claim.from === 'share') continue;
         if (config.strict.strictEntryPointCoverage || config.profile.scopeUncoveredEntrypoints) {
           warnUncoveredEntrypoint(GLOBAL_SCOPE, externalName, remote.name, packageName);
           continue;
         }
+        if (claim.copy !== remote) continue;
         const scope = getScope(GLOBAL_SCOPE, remote.name, externalName);
         const url = _path.join(scope, file);
         addToGlobal(importMap, { [packageName]: url });
