@@ -9,6 +9,7 @@ import type {
 import * as _path from 'lib/utils/path';
 import { owningPackage, packageOf } from 'lib/core/1.domain/externals/specifier';
 import { buildPools } from 'lib/core/1.domain/pooling/membership';
+import { resolverOf } from './page-graph';
 
 // Re-exported so harnesses outside `src` depend on `lib/testing` only, not on where the step code lives.
 export { owningPackage };
@@ -295,7 +296,7 @@ function walk(
   { ships, files }: ReturnType<typeof indexFiles>,
   visit: (specifier: Specifier, url: string, file: IndexedFile) => void
 ): void {
-  const resolveFrom = resolver(importMap);
+  const resolveFrom = resolverOf(importMap);
   const seen = new Set<string>();
   const queue: string[] = [];
   const reach = (specifier: Specifier, url: string | undefined) => {
@@ -309,26 +310,12 @@ function walk(
   };
 
   for (const specifier of ships.get(remote)!)
-    reach(specifier, resolveFrom(scopeUrls[remote]!, specifier));
+    reach(specifier, resolveFrom(specifier, scopeUrls[remote]!)?.url);
   while (queue.length > 0) {
     const url = queue.shift()!;
     for (const specifier of ships.get(files.get(url)!.owner)!)
-      reach(specifier, resolveFrom(url, specifier));
+      reach(specifier, resolveFrom(specifier, url)?.url);
   }
-}
-
-// Resolves a specifier from where a file lives, as a browser does: the longest matching scope that maps it,
-// else `imports`.
-function resolver(importMap: ImportMap) {
-  const scopes = Object.keys(importMap.scopes ?? {}).sort((a, b) => b.length - a.length);
-  return (base: string, specifier: Specifier): string | undefined => {
-    for (const prefix of scopes) {
-      if (!base.startsWith(prefix)) continue;
-      const hit = importMap.scopes![prefix]![specifier];
-      if (hit !== undefined) return hit;
-    }
-    return importMap.imports[specifier];
-  };
 }
 
 /** One torn group: a stored pool (`<scope>|<poolName>`) or an unpooled npm package (`<scope>|package:<pkg>`). */
