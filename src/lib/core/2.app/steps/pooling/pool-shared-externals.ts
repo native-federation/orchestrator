@@ -5,7 +5,7 @@ import type { DrivingContract } from '../../driving-ports/driving.contract';
 import type { LoggingConfig } from '../../config/log.contract';
 import type { ModeConfig } from '../../config/mode.contract';
 import { createAcceptsTag } from 'lib/core/1.domain/externals/compatibility';
-import { type Copy, copiesByRemote } from 'lib/core/1.domain/pooling/builds';
+import { type Copy, copiesByRemote, specifierCount } from 'lib/core/1.domain/pooling/builds';
 import { elect, type PoolMiss, previousWinner } from 'lib/core/1.domain/pooling/election';
 import type { PoolMember, PoolName } from 'lib/core/1.domain/pooling/membership';
 import { type ElectionPlan, planElection } from 'lib/core/1.domain/pooling/plan';
@@ -123,7 +123,7 @@ export function createPoolSharedExternals(
       }
       shipped ??= copiesByRemote(members, isChunked);
       const counts = {
-        imports: shipped.get(remote)!.length,
+        imports: specifierCount(shipped.get(remote)!),
         subpoolSize: subpoolSizes.get(remote) ?? 0,
       };
       config.log.warn(

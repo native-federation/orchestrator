@@ -51,6 +51,9 @@ export function copiesByRemote(
   return shipped;
 }
 
+export const specifierCount = (copies: readonly Copy[]): number =>
+  copies.reduce((n, copy) => n + copy.specifiers.length, 0);
+
 export function buildOf(owner: RemoteName, copies: readonly Copy[]): Build {
   const tags = new SpecifierTags();
   const tagByMember = new Map<ExternalName, VersionName>();

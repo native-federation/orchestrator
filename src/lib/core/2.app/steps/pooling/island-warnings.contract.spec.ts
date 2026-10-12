@@ -77,6 +77,33 @@ describe('island warnings (contract)', () => {
       ]);
     });
 
+    it('counts the specifiers a remote imports, not its externals', async () => {
+      // As above, with mfe-b's core shipping a secondary entrypoint: one external, two specifiers.
+      p.seed('@framework/core', [
+        p.version('22.1.0', '@framework/core', [{ remote: 'team/mfe-a', req: '^22.0.0' }]),
+        p.version('22.0.5', '@framework/core', [
+          {
+            remote: 'team/mfe-b',
+            req: '~22.0.5',
+            entries: {
+              '@framework/core': 'core.js',
+              '@framework/core/rxjs-interop': 'core-rxjs-interop.js',
+            },
+          },
+        ]),
+      ]);
+      p.seed('@framework/router', [
+        p.version('22.1.0', '@framework/router', [{ remote: 'team/mfe-a', req: '^22.0.0' }]),
+      ]);
+
+      await p.runInit();
+
+      expect(p.islands()).toEqual({ 'team/mfe-b': 'incompatible' });
+      expect(warnings()).toEqual([
+        "[__GLOBAL__][pool:framework] 'team/mfe-b' is islanded: its range rejects '@framework/core@22.1.0' of the elected build 'team/mfe-a'. All 2 of its members are scoped for it.",
+      ]);
+    });
+
     it('uncovered: the elected build lacks an entrypoint the remote imports', async () => {
       // The host's pin elects its build, which ships no router.
       p.seed('@framework/core', [
@@ -436,6 +463,26 @@ describe('island warnings (contract)', () => {
       // update-cache warns per rejected member first; those lines are not island sentences.
       expect(warnings()).toContainEqual(
         "[__GLOBAL__] 'team/mfe-b' is islanded: its range rejects '@framework/core@22.1.0' of the committed map. All 2 of its members are scoped for it."
+      );
+    });
+
+    it('counts the specifiers a loaded remote imports, not its externals', async () => {
+      await commit();
+      // As above, with mfe-b's core shipping a secondary entrypoint: two externals, three specifiers.
+      const mfeB = entry('team/mfe-b', [
+        ['@framework/core', '21.2.0', '~21.2.0'],
+        ['@framework/router', '21.2.0', '~21.2.0'],
+      ]);
+      mfeB.shared[0]!.entries = {
+        '@framework/core': 'core.js',
+        '@framework/core/rxjs-interop': 'core-rxjs-interop.js',
+      };
+
+      await p.runDynamic(mfeB);
+
+      expect(p.islands()).toEqual({ 'team/mfe-b': 'incompatible' });
+      expect(warnings()).toContainEqual(
+        "[__GLOBAL__] 'team/mfe-b' is islanded: its range rejects '@framework/core@22.1.0' of the committed map. All 3 of its members are scoped for it."
       );
     });
 

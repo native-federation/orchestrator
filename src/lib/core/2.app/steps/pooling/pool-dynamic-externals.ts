@@ -13,7 +13,7 @@ import {
   type SharedInfoActions,
   type shareScope,
 } from 'lib/core/1.domain';
-import { copiesByRemote } from 'lib/core/1.domain/pooling/builds';
+import { copiesByRemote, specifierCount } from 'lib/core/1.domain/pooling/builds';
 import { buildPools, type PoolMember, type PoolName } from 'lib/core/1.domain/pooling/membership';
 import { scopeHasPoolState } from 'lib/core/1.domain/pooling/pool-state';
 import {
@@ -92,9 +92,10 @@ export function createPoolDynamicExternals(
         shareScope: scope,
         without: remote,
       });
-      const verdict = judgeRemote(shipped.get(remote) ?? [], view, accepts);
+      const own = shipped.get(remote) ?? [];
+      const verdict = judgeRemote(own, view, accepts);
       if (verdict !== 'global') {
-        config.log.warn(8, `[${scope}] ${selfServeWarning(remote, verdict, mine.length)}`);
+        config.log.warn(8, `[${scope}] ${selfServeWarning(remote, verdict, specifierCount(own))}`);
         selfServe(mine, verdict.cause);
         continue;
       }
@@ -106,7 +107,7 @@ export function createPoolDynamicExternals(
         if ('bound' in cover && cover.bound.offMap) {
           const { owner, specifier, tag } = cover.bound;
           const miss = { cause: 'uncovered' as const, owner, specifier, tag };
-          config.log.warn(8, `[${scope}] ${selfServeWarning(remote, miss, mine.length)}`);
+          config.log.warn(8, `[${scope}] ${selfServeWarning(remote, miss, specifierCount(own))}`);
         }
         // Half its family on the map's files and half on its own build would tear it.
         selfServe(mine, 'uncovered');
@@ -185,8 +186,8 @@ function poolableNames(
 }
 
 // Wording is pinned in `island-warnings.contract.spec.ts` alone; tools read islands from the record.
-function selfServeWarning(remote: RemoteName, miss: GateMiss, members: number): string {
-  const where = `All ${members} of its members are scoped for it.`;
+function selfServeWarning(remote: RemoteName, miss: GateMiss, imports: number): string {
+  const where = `All ${imports} of its members are scoped for it.`;
   if (miss.cause === 'incompatible')
     return `'${remote}' is islanded: its range rejects '${miss.specifier}@${miss.tag}' of the committed map. ${where}`;
   if ('owner' in miss)
