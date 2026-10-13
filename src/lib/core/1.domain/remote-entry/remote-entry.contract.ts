@@ -21,7 +21,6 @@ type SharedInfoActions = Record<
   {
     action: SharedVersionAction;
     override?: Record<string, string>;
-    covered?: string[];
   }
 >;
 

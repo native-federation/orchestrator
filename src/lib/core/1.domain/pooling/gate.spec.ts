@@ -318,15 +318,15 @@ describe('coverFromMap', () => {
     expect(cover(interop, () => false)).toEqual({ gap: '@ng/core/rxjs-interop' });
     expect(cover(interop, r => r === 'mfe')).toEqual({ gap: '@ng/core/rxjs-interop' });
     expect(cover(withMfe(), () => true)).toEqual({
-      covers: [{ name: '@ng/core', toSkip: true, covered: ['@ng/core'], override: {} }],
+      covers: [{ name: '@ng/core', toSkip: true, override: {} }],
     });
   });
 
-  // mfe's flat core inherits the map's file whole (a skip with nothing to cover); its rxjs-interop, an external
-  // of its own the map lacks, would open beside F's core: the package is served in part, so the gap fails
-  // covering. From a chunked build that file binds mfe's core internals beside F's core, though the two are
-  // separate externals, which is reported first.
-  it('counts a package a copy inherits from the map whole as mapped', () => {
+  // mfe's flat core is a skip the map covers whole; its rxjs-interop, an external of its own the map lacks,
+  // would open beside F's core: the package is served in part, so the gap fails covering. From a chunked build
+  // that file binds mfe's core internals beside F's core, though the two are separate externals, which is
+  // reported first.
+  it('counts a package a skip takes from the map whole as mapped', () => {
     const members = [
       member('@ng/core', [
         {
@@ -340,7 +340,7 @@ describe('coverFromMap', () => {
       ]),
     ];
     const actions = {
-      '@ng/core': { action: 'skip' as const },
+      '@ng/core': { action: 'skip' as const, covered: ['@ng/core'] },
       '@ng/core/rxjs-interop': { action: 'share' as const },
     };
     const cover = (isChunked: (remote: string) => boolean) =>

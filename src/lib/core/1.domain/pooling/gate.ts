@@ -2,10 +2,10 @@ import {
   type ExternalName,
   GLOBAL_SCOPE,
   type RemoteName,
-  type SharedInfoActions,
   type SharedVersionMeta,
   type VersionName,
 } from 'lib/core/1.domain';
+import type { LoadActions } from 'lib/core/1.domain/remote-entry/load-actions.contract';
 import { committedClaims } from 'lib/core/1.domain/externals/claims';
 import type { AcceptsTag } from 'lib/core/1.domain/externals/compatibility';
 import { packageOf, type Specifier, SpecifierTags } from 'lib/core/1.domain/externals/specifier';
@@ -37,7 +37,6 @@ export type GateMiss =
 type MapCover = {
   name: ExternalName;
   toSkip: boolean;
-  covered: Specifier[];
   override: Record<Specifier, string>;
 };
 
@@ -46,7 +45,7 @@ type MappedFiles = { covered: Set<Specifier>; override: Record<Specifier, string
 // One of the remote's copies the map may cover, with its action and what the map would serve of it.
 type Coverable = MappedFiles & {
   member: PoolMember;
-  action: SharedInfoActions[string];
+  action: LoadActions[string];
   copy: SharedVersionMeta;
 };
 
@@ -152,27 +151,21 @@ export function coverFromMap(
   remote: RemoteName,
   mine: readonly PoolMember[],
   view: CommittedView,
-  actions: Readonly<SharedInfoActions>,
+  actions: Readonly<LoadActions>,
   policy: MapPolicy
 ): CoverResult {
-  const inherited: SharedVersionMeta[] = [];
   const files: Coverable[] = [];
   for (const member of mine) {
     const action = actions[member.name]!;
     const copy = member.external.versions.flatMap(v => v.remotes).find(r => r.name === remote);
     if (!copy) continue;
-    // Inherits every mapping already.
-    if (action.action === 'skip' && !action.covered) {
-      inherited.push(copy);
-      continue;
-    }
 
     const mapped = mapFiles(copy, view, policy, action);
     if ('unmapped' in mapped) return mapped;
     files.push({ member, action, copy, ...mapped });
   }
 
-  const reaches = reachesOf(remote, inherited, files, view, policy);
+  const reaches = reachesOf(remote, files, view, policy);
   const torn = tornPackage(remote, reaches);
   if (torn !== undefined) return { torn };
   const bound = boundByFile(reaches, view);
@@ -208,13 +201,12 @@ function coverOf({ member, action, copy, covered, override }: Coverable): MapCov
     action.action !== 'skip' ||
     (covered.size > action.covered!.length &&
       member.external.versions.some(v => v.action === 'share' && v.remotes.includes(copy)));
-  return { name: member.name, toSkip, covered: [...covered], override };
+  return { name: member.name, toSkip, override };
 }
 
 // Where the remote resolves each specifier it ships once the covers apply: the map's file, else its own.
 function reachesOf(
   remote: RemoteName,
-  inherited: readonly SharedVersionMeta[],
   files: readonly Coverable[],
   view: CommittedView,
   policy: MapPolicy
@@ -224,11 +216,6 @@ function reachesOf(
     const served = view.global.get(specifier);
     return served && { remote: served.remote, file: served.file, chunked: false };
   };
-  for (const copy of inherited)
-    for (const specifier in copy.entries) {
-      const reach = fromMap(specifier);
-      if (reach) reaches.set(specifier, reach);
-    }
   for (const file of files) {
     const takesMap = covering(file);
     const chunked = policy.isChunked(remote, file.copy.bundle);
@@ -284,7 +271,7 @@ function mapFiles(
   copy: SharedVersionMeta,
   view: CommittedView,
   policy: MapPolicy,
-  action: SharedInfoActions[string]
+  action: LoadActions[string]
 ): MappedFiles | { unmapped: RemoteName } {
   const covered = new Set(action.covered);
   const override = { ...action.override };

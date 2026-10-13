@@ -682,7 +682,7 @@ describe('pooling regressions', () => {
 
       p.reload();
       const { actions, merged } = await p.runDynamic(loaded);
-      expect(actions['@fw/core']).toEqual({ action: 'skip', covered: ['@fw/core'] });
+      expect(actions['@fw/core']).toEqual({ action: 'skip' });
       expect(resolves(merged, 'team/mfe-c', '@fw/core')).toBe(file('team/mfe-a', '@fw/core'));
 
       // Its own `skip` row beside the island, so the record rebuilds what the page ran.
@@ -889,11 +889,9 @@ describe('pooling regressions', () => {
 
       p.reload();
       const { actions, merged } = await p.runDynamic(loaded);
-      expect(actions['@ui/kit']).toEqual({
-        action: 'skip',
-        covered: ['@ui/kit', '@ui/kit/sub'],
-      });
-      expect(resolves(merged, 'team/mfe-d', '@ui/kit/sub')).toBe(file('team/mfe-a', '@ui/kit/sub'));
+      expect(actions['@ui/kit']).toEqual({ action: 'skip' });
+      for (const specifier of ['@ui/kit', '@ui/kit/sub'])
+        expect(resolves(merged, 'team/mfe-d', specifier)).toBe(file('team/mfe-a', specifier));
       // The share row keeps mfe-a's copy; mfe-d's runs its files from a skip row at the same tag.
       expect(rows(p, '@ui/kit')).toEqual(['18.2.0:share:[team/mfe-a]', '18.2.0:skip:[team/mfe-d]']);
 

@@ -13,6 +13,7 @@ import {
   type SharedInfoActions,
   type shareScope,
 } from 'lib/core/1.domain';
+import type { LoadActions } from 'lib/core/1.domain/remote-entry/load-actions.contract';
 import { copiesByRemote, specifierCount } from 'lib/core/1.domain/pooling/builds';
 import { buildPools, type PoolMember, type PoolName } from 'lib/core/1.domain/pooling/membership';
 import { scopeHasPoolState } from 'lib/core/1.domain/pooling/pool-state';
@@ -60,13 +61,13 @@ export function createPoolDynamicExternals(
       writeMoves(entry.name, names, moves, committed, pools, scope);
     }
 
-    return Promise.resolve({ entry, actions });
+    return Promise.resolve({ entry, actions: publicActions(actions) });
   };
 
   function judgeScope(
     remote: RemoteName,
     names: ReadonlySet<ExternalName>,
-    actions: SharedInfoActions,
+    actions: LoadActions,
     pools: ReadonlyMap<PoolName, PoolMember[]>,
     recordOrder: ExternalName[],
     scope: string
@@ -77,7 +78,6 @@ export function createPoolDynamicExternals(
       for (const { name } of members) {
         actions[name]!.action = 'scope';
         delete actions[name]!.override;
-        delete actions[name]!.covered;
         moves.set(name, { cause });
       }
     };
@@ -113,13 +113,12 @@ export function createPoolDynamicExternals(
         selfServe(mine, 'uncovered');
         continue;
       }
-      for (const { name, toSkip, covered, override } of cover.covers) {
+      for (const { name, toSkip, override } of cover.covers) {
         const action = actions[name]!;
         if (toSkip) {
           action.action = 'skip';
           moves.set(name, { fromMap: true });
         }
-        action.covered = covered;
         if (Object.keys(override).length > 0) action.override = override;
       }
     }
@@ -159,10 +158,13 @@ export function createPoolDynamicExternals(
   }
 }
 
-function poolableNames(
-  entry: RemoteEntry,
-  actions: SharedInfoActions
-): Map<string, Set<ExternalName>> {
+// `covered` only carries a skip from the cache update into the gate.
+function publicActions(actions: LoadActions): SharedInfoActions {
+  for (const action of Object.values(actions)) delete action.covered;
+  return actions;
+}
+
+function poolableNames(entry: RemoteEntry, actions: LoadActions): Map<string, Set<ExternalName>> {
   const declared = new Map<string, Set<ExternalName>>();
   for (const external of entry.shared ?? []) {
     const name = external.packageName;

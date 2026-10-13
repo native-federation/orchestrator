@@ -3,11 +3,11 @@ import {
   type RemoteEntry,
   type DenseSharedInfo,
   type RemoteName,
-  type SharedInfoActions,
   type SharedVersionAction,
   type SharedVersionMeta,
   GLOBAL_SCOPE,
 } from 'lib/core/1.domain';
+import type { LoadActions } from 'lib/core/1.domain/remote-entry/load-actions.contract';
 import { createAcceptsTag } from 'lib/core/1.domain/externals/compatibility';
 import { addRemoteToVersion } from 'lib/core/1.domain/externals/basis';
 import { type Claim, committedClaims } from 'lib/core/1.domain/externals/claims';
@@ -57,7 +57,7 @@ export function createUpdateCache(
       storeRemoteEntry(remoteEntry, (_, external, ctx) => pending.push({ external, ctx }));
       const decisions = decidePackages(remoteEntry, pending);
 
-      const actions: SharedInfoActions = {};
+      const actions: LoadActions = {};
       for (const item of pending)
         actions[item.external.packageName] = applyDecision(remoteEntry, item, decisions.get(item)!);
 
@@ -180,7 +180,7 @@ export function createUpdateCache(
     remoteEntry: RemoteEntry,
     { external, ctx }: Pending,
     decision: Decision
-  ): SharedInfoActions[string] {
+  ): LoadActions[string] {
     storeCopy(ctx, decision.action);
     if (decision.action !== 'skip') return { action: decision.action };
 
