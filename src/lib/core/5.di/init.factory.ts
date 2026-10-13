@@ -4,6 +4,7 @@ import { createGetRemoteEntries } from '../2.app/steps/get-remote-entries';
 import { createProcessRemoteEntries } from '../2.app/steps/process-remote-entries';
 import { createDetermineSharedExternals } from '../2.app/steps/determine-shared-externals';
 import { createPoolSharedExternals } from '../2.app/steps/pooling/pool-shared-externals';
+import { createDecideServingBuilds } from '../2.app/steps/decide-serving-builds';
 import { createGenerateImportMap } from '../2.app/steps/generate-import-map';
 import { createCommitChanges } from '../2.app/steps/commit-changes';
 import { createRollbackChanges } from '../2.app/steps/rollback-changes';
@@ -26,6 +27,7 @@ export const createInitDrivers = ({
   processRemoteEntries: createProcessRemoteEntries(config, adapters),
   determineSharedExternals: createDetermineSharedExternals(config, adapters),
   poolSharedExternals: createPoolSharedExternals(config, adapters),
+  decideServingBuilds: createDecideServingBuilds(config, adapters),
   generateImportMap: createGenerateImportMap(config, adapters),
   commitChanges: createCommitChanges(config, adapters),
   rollbackChanges: createRollbackChanges(config, adapters),

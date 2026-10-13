@@ -6,6 +6,20 @@ import { NFError } from 'lib/core/native-federation.error';
 import type { LoggingConfig } from '../config/log.contract';
 import type { ModeConfig } from '../config/mode.contract';
 
+// Fails init for a strict copy whose range rejects what is shared at `servedAt`; both are `name@tag`.
+export function rejectIncompatible(
+  config: LoggingConfig,
+  copy: SharedVersionMeta,
+  rejected: string,
+  servedAt: string
+): never {
+  config.log.error(
+    3,
+    `[${copy.name}][${rejected}] Is not compatible with requiredRange '${copy.requiredVersion}' of shared ${servedAt}.`
+  );
+  throw new NFError(`External ${rejected} could not be shared.`);
+}
+
 /**
  * The tail of winner election: derive every other version's verdict from the chosen one, apply the
  * entrypoint coverage policy, clear `dirty`. `determine` is the only caller, and passes its
@@ -30,14 +44,13 @@ export function createApplyWinner(config: LoggingConfig & ModeConfig) {
         const objector =
           config.strict.strictExternalCompatibility && acceptance.objector(v, winner.tag);
 
-        if (objector) {
-          config.log.error(
-            3,
-            `[${objector.name}][${externalName}@${v.tag}] Is not compatible with requiredRange '${objector.requiredVersion}' of shared ${externalName}@${winner.tag}.`
+        if (objector)
+          rejectIncompatible(
+            config,
+            objector,
+            `${externalName}@${v.tag}`,
+            `${externalName}@${winner.tag}`
           );
-
-          throw new NFError(`External ${externalName}@${v.tag} could not be shared.`);
-        }
 
         rebuilt.push(...redirectRow(v, winner.tag, acceptsTag));
       }

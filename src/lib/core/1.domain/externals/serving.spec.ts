@@ -1,10 +1,12 @@
 import fc from 'fast-check';
+import { claimTable } from './claims';
 import type { AcceptsTag } from './compatibility';
 import type { ExternalName, SharedExternal } from './external.contract';
 import {
   byServingRank,
   followServingBuild,
   packagesOf,
+  resolvesAtServingTag,
   servingBuildOf,
   type ServingBuild,
   type ServingCandidate,
@@ -156,6 +158,20 @@ describe('servingBuildOf', () => {
     expect(result).toEqual<ServingBuild>({ remote: 'host', tag: '1.0.0' });
   });
 
+  it("takes the package from the root's build for a host shipping only a flat secondary beside a remote's dense root", () => {
+    const externals: [ExternalName, SharedExternal][] = [
+      ['fw', external(version('share', [copy('remote', ['fw', 'fw/testing'])], '2.0.0'))],
+      ['fw/testing', external(version('share', [copy('host', ['fw/testing'])], '1.0.0', true))],
+    ];
+    const build = serving(...externals)!;
+    for (const [, e] of externals) e.servingBuild = build.remote;
+
+    expect(build).toEqual<ServingBuild>({ remote: 'remote', tag: '2.0.0' });
+    // The host's own row follows the root's build, so the host runs the whole package from it.
+    expect(resolvesAtServingTag(externals, build, 'fw/testing')).toBe(true);
+    expect(claimTable(externals).claims.get('fw/testing')?.copy.name).toBe('remote');
+  });
+
   it('serves a cached build over an uncached one, the root basis included', () => {
     const result = serving([
       'fw',
@@ -272,6 +288,48 @@ describe('servingBuildOf', () => {
       }),
       { seed: 20261013, numRuns: 500 }
     );
+  });
+});
+
+describe('resolvesAtServingTag', () => {
+  const toServing: ServingBuild = { remote: 'serving', tag: '2.0.0' };
+  const root: [ExternalName, SharedExternal] = [
+    'fw',
+    external(version('share', [copy('serving', ['fw', 'fw/shipped'])], '2.0.0')),
+  ];
+
+  it('holds for an external with a share row at the serving tag, whoever ships it', () => {
+    const testing: [ExternalName, SharedExternal] = [
+      'fw/testing',
+      external(
+        version('share', [copy('other', ['fw/testing'])], '2.0.0'),
+        version('share', [copy('old', ['fw/testing'])], '1.0.0')
+      ),
+    ];
+
+    expect(resolvesAtServingTag([root, testing], toServing, 'fw/testing')).toBe(true);
+  });
+
+  it("holds for an external the serving build ships in another external's share row", () => {
+    const shipped: [ExternalName, SharedExternal] = [
+      'fw/shipped',
+      external(version('share', [copy('old', ['fw/shipped'])], '1.0.0')),
+    ];
+
+    expect(resolvesAtServingTag([root, shipped], toServing, 'fw/shipped')).toBe(true);
+  });
+
+  it('fails for an external with neither', () => {
+    const testing: [ExternalName, SharedExternal] = [
+      'fw/testing',
+      external(
+        version('share', [copy('old', ['fw/testing'])], '1.0.0'),
+        // Only a share row counts: a skip row at the serving tag publishes nothing.
+        version('skip', [copy('serving', ['fw/testing'])], '2.0.0')
+      ),
+    ];
+
+    expect(resolvesAtServingTag([root, testing], toServing, 'fw/testing')).toBe(false);
   });
 });
 

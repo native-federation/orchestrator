@@ -54,8 +54,25 @@ export function servingBuildOf(
   // The election already chose the global build; ranking again per package could split a pool.
   if (isPooled(externals)) return electedBuild(rows);
 
-  const best = candidatesOf(rows, rootRows, consumersOf(externals), accepts).sort(byServingRank)[0];
+  const ranked = candidatesOf(rows, rootRows, consumersOf(externals), accepts).sort(byServingRank);
+  const best = ranked[0];
   return best && { remote: best.remote, tag: best.tag };
+}
+
+// Whether `name` still resolves at the serving tag once its other share rows follow the serving build: it has a
+// share row there, or the serving build ships it.
+export function resolvesAtServingTag(
+  externals: PackageExternals,
+  serving: ServingBuild,
+  name: ExternalName
+): boolean {
+  const own = externals.find(([n]) => n === name)?.[1];
+  if (shareRows(own).some(row => row.tag === serving.tag)) return true;
+  return externals.some(([, e]) =>
+    shareRows(e).some(row =>
+      row.remotes.some(copy => copy.name === serving.remote && name in copy.entries)
+    )
+  );
 }
 
 export type ServingObjector = { copy: SharedVersionMeta; tag: VersionName };

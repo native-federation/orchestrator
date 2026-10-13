@@ -403,6 +403,24 @@ describe('a remote runs every specifier of a package from one build', () => {
         },
       },
     })),
+    // The host ships only a flat testing@1.0.0; r ships a dense core@2.0.0 that lists testing. The root's
+    // share row decides who serves the package: unpooled, both run core and testing from r's build; pooled,
+    // the election scopes r's family and the host keeps its own testing. Clean in either registration order.
+    ...pools.flatMap(pool =>
+      [true, false].map((hostFirst): Case => {
+        const host = entry('host', shared(TESTING, { pool, ...at('1.0.0') }));
+        const r = entry('r', shared(CORE, { pool, ...at('2.0.0'), entrypoints: [TESTING] }));
+        return {
+          name: `takes a package from its root's build when the host ships only a flat secondary (pool=${pool}, host first=${hostFirst})`,
+          hosts: ['host'],
+          entries: hostFirst ? [host, r] : [r, host],
+          expectMap: map =>
+            expect(map.imports[TESTING]).toBe(
+              pool ? 'http://host/fw_core_testing.js' : 'http://r/fw_core_testing.js'
+            ),
+        };
+      })
+    ),
   ];
 
   for (const c of cases) register(c);
