@@ -270,4 +270,117 @@ describe('pooling (dynamic)', () => {
       }
     });
   });
+
+  /**
+   * The build a load opens a package with is the one the page then runs it from: the stored record names it
+   * as the package's serving build, so the next page's map publishes that build's files again. A load that
+   * follows the map, or runs a package from its own build, opens nothing and names nothing.
+   */
+  describe('a load that opens a package records its build as the serving build', () => {
+    const open = (storage: string, o: { scope?: string } = {}) =>
+      portfolio(
+        {},
+        { realRepositories: true, storage: `nf-pooling-dynamic-serving-${storage}`, ...o }
+      );
+    const servingBuilds = (p: ReturnType<typeof portfolio>, ...externals: string[]) =>
+      externals.map(name => p.stored()[name]?.servingBuild);
+    const common = () => shared('@fw/common', '17.0.0', '^17.0.0', { strict: false, pool: null });
+    const core = (o: { entrypoints?: string[]; version?: string } = {}) =>
+      shared('@fw/core', o.version ?? '17.0.0', `^${o.version ?? '17.0.0'}`, {
+        strict: false,
+        pool: null,
+        entrypoints: o.entrypoints,
+      });
+    const testing = () =>
+      shared('@fw/core/testing', '17.0.0', '^17.0.0', { strict: false, pool: null });
+
+    it.each([
+      ['dense', () => [core({ entrypoints: ['@fw/core/testing'] })], ['@fw/core']],
+      ['flat', () => [core(), testing()], ['@fw/core', '@fw/core/testing']],
+    ] as const)(
+      'names the loader on every external of the package (%s)',
+      async (_, ships, externals) => {
+        const p = open(`opens-${_}`);
+        await p.runInit([entry('host', common())]);
+
+        await p.runDynamic(entry('mfe', ...ships()));
+
+        expect(servingBuilds(p, ...externals)).toEqual(externals.map(() => 'mfe'));
+      }
+    );
+
+    it("keeps it through a warm init, which serves the loader's files", async () => {
+      const p = open('warm');
+      await p.runInit([entry('host', common())]);
+      await p.runDynamic(entry('mfe', core(), testing()));
+
+      p.reload();
+      const warm = await p.runInit([entry('host', common()), entry('mfe', core(), testing())]);
+
+      expect(servingBuilds(p, '@fw/core', '@fw/core/testing')).toEqual(['mfe', 'mfe']);
+      expect(warm.imports['@fw/core']).toBe(file('mfe', '@fw/core'));
+      expect(warm.imports['@fw/core/testing']).toBe(file('mfe', '@fw/core/testing'));
+    });
+
+    it('keeps the first loader when a second load of the same build follows it', async () => {
+      const p = open('second');
+      await p.runInit([entry('host', common())]);
+      await p.runDynamic(entry('l1', core()));
+
+      const { actions } = await p.runDynamic(entry('l2', core()));
+
+      expect(actions['@fw/core']).toMatchObject({ action: 'skip' });
+      expect(servingBuilds(p, '@fw/core')).toEqual(['l1']);
+    });
+
+    it.each([
+      ['follows the map', () => [core()], 'skip'],
+      ['runs it from its own build', () => [core({ entrypoints: ['@fw/core/testing'] })], 'scope'],
+    ] as const)('names nothing when the load %s', async (_, ships, action) => {
+      const p = open(`none-${action}`);
+      await p.runInit([entry('host', core())]);
+      const before = servingBuilds(p, '@fw/core');
+
+      const { actions } = await p.runDynamic(entry('mfe', ...ships()));
+
+      expect(actions['@fw/core']).toMatchObject({ action });
+      expect(servingBuilds(p, '@fw/core')).toEqual(before);
+    });
+
+    // mfe's strict core@18 rejects the host's 17, so its core runs from its own build while it opens forms, which
+    // nobody shares; the gate then islands its whole fw family, forms included. The record must not keep naming
+    // mfe as the serving build of a package it no longer shares.
+    it('names nothing once the gate islands the family of a load that opened a package', async () => {
+      const p = open('islanded');
+      await p.runInit([entry('host', shared('@fw/core', '17.0.0', '^17.0.0'))]);
+
+      await p.runDynamic(
+        entry(
+          'mfe',
+          shared('@fw/core', '18.0.0', '^18.0.0'),
+          shared('@fw/forms', '18.0.0', '^18.0.0')
+        )
+      );
+
+      expect(p.islands()).toEqual({ mfe: 'incompatible' });
+      expect(p.stored()['@fw/forms']!.versions.map(v => [v.tag, v.action])).toEqual([
+        ['18.0.0', 'scope'],
+      ]);
+      expect(servingBuilds(p, '@fw/forms')).toEqual([undefined]);
+    });
+
+    it('names nothing in the strict scope, which serves every version side by side', async () => {
+      const strict = (version: string) => ({ ...core({ version }), shareScope: 'strict' });
+      const p = open('strict', { scope: 'strict' });
+      await p.runInit([entry('host', strict('17.0.0'))]);
+
+      await p.runDynamic(entry('mfe', strict('18.0.0')));
+
+      expect(p.stored()['@fw/core']!.versions.map(v => [v.tag, v.action])).toEqual([
+        ['18.0.0', 'share'],
+        ['17.0.0', 'share'],
+      ]);
+      expect(servingBuilds(p, '@fw/core')).toEqual([undefined]);
+    });
+  });
 });

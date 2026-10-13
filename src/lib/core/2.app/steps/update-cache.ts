@@ -207,6 +207,9 @@ export function createUpdateCache(
     if (!row) cached.versions.push({ tag, action, host: false, remotes: [remote] });
     else if (action === 'share') addRemoteToVersion(row, remote);
     else row.remotes.push(remote);
+    // Only a package the map doesn't serve is shared, so the loader serves it; the strict scope serves every
+    // version side by side.
+    if (action === 'share' && ctx.scopeType !== 'strict') cached.servingBuild = remote.name;
     ctx.write();
   }
 

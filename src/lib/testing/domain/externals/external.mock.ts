@@ -1,15 +1,14 @@
-import {
-  ScopedExternal,
-  ScopedVersion,
-  SharedExternal,
-  SharedVersion,
-} from 'lib/core/1.domain';
+import { ScopedExternal, ScopedVersion, SharedExternal, SharedVersion } from 'lib/core/1.domain';
 import { mockVersion_A, mockVersion_B, mockVersion_E, mockVersion_F } from './version.mock';
 
 export const mockExternal = {
-  shared: (versions: SharedVersion[], opt: { dirty?: boolean } = {}): SharedExternal => ({
+  shared: (
+    versions: SharedVersion[],
+    opt: { dirty?: boolean; servingBuild?: string } = {}
+  ): SharedExternal => ({
     dirty: opt.dirty ?? false,
     versions,
+    ...(opt.servingBuild && { servingBuild: opt.servingBuild }),
   }),
   scoped: (versions: ScopedExternal): ScopedExternal => ({ ...versions }),
   globalScope: (externals: Record<string, SharedExternal>) => ({

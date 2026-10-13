@@ -77,6 +77,25 @@ export function movedRecord(
   move: CopyMove,
   compare: (a: VersionName, b: VersionName) => number
 ): SharedExternal {
+  return withoutStaleServingBuild(moveCopy(external, remote, move, compare));
+}
+
+// The claim table trusts `servingBuild`, so a move that takes the named copy out of every share row drops it.
+function withoutStaleServingBuild(record: SharedExternal): SharedExternal {
+  const { servingBuild, ...rest } = record;
+  if (servingBuild === undefined) return record;
+  const shares = record.versions.some(
+    v => v.action === 'share' && v.remotes.some(r => r.name === servingBuild)
+  );
+  return shares ? record : rest;
+}
+
+function moveCopy(
+  external: SharedExternal,
+  remote: RemoteName,
+  move: CopyMove,
+  compare: (a: VersionName, b: VersionName) => number
+): SharedExternal {
   if ('fromMap' in move) return recordFromMap(external, remote);
 
   const moved: { tag: string; meta: SharedVersionMeta }[] = [];

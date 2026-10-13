@@ -310,7 +310,7 @@ describe('createProcessDynamicRemoteEntry - scoped', () => {
       'dep-a',
       mockExternal.shared(
         [mockVersion_A.v2_1_2({ remotes: { 'team/mfe1': { cached: true } }, action: 'share' })],
-        { dirty: false }
+        { dirty: false, servingBuild: 'team/mfe1' }
       ),
       'custom-scope'
     );

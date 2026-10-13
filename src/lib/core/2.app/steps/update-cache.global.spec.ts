@@ -75,7 +75,7 @@ describe('createProcessDynamicRemoteEntry - scoped', () => {
       'dep-a',
       mockExternal.shared(
         [mockVersion_A.v2_1_1({ remotes: { 'team/mfe1': { cached: true } }, action: 'share' })],
-        { dirty: false }
+        { dirty: false, servingBuild: 'team/mfe1' }
       ),
       undefined
     );
@@ -433,7 +433,7 @@ describe('createProcessDynamicRemoteEntry - scoped', () => {
             action: 'share',
           }),
         ],
-        { dirty: false }
+        { dirty: false, servingBuild: 'team/mfe1' }
       ),
       undefined
     );
@@ -473,7 +473,7 @@ describe('createProcessDynamicRemoteEntry - scoped', () => {
             action: 'share',
           }),
         ],
-        { dirty: false }
+        { dirty: false, servingBuild: 'team/mfe1' }
       ),
       undefined
     );
@@ -610,7 +610,7 @@ describe('createProcessDynamicRemoteEntry - scoped', () => {
           }),
           mockVersion_A.v2_1_1({ remotes: { 'team/mfe1': { cached: true } }, action: 'share' }),
         ],
-        { dirty: false }
+        { dirty: false, servingBuild: 'team/mfe1' }
       ),
       undefined
     );
@@ -693,7 +693,7 @@ describe('createProcessDynamicRemoteEntry - scoped', () => {
               action: 'share',
             }),
           ],
-          { dirty: false }
+          { dirty: false, servingBuild: 'team/mfe1' }
         ),
         undefined
       );
