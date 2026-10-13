@@ -225,24 +225,60 @@ version as its primary. (Older/flat remote builds emit one `SharedInfo` per spec
 Several remotes can report the same version of a package, and they all land in one `SharedVersion` as its
 `remotes` list. They build the same tag, but each bundles only the entrypoints it actually imports, so the
 lists can differ. `remotes[0]` is the version's **basis** — the copy that serves every specifier it
-declares, and thus the primary — and the cache keeps it sorted on insert by this precedence:
+declares — and the cache keeps it sorted on insert by this precedence:
 
 1. **host** — the shell's build is already loaded in the browser and cannot be repointed.
 2. **cached** — an already-served copy; repointing it would invalidate a committed import map and force a
    redundant download.
 3. **widest coverage** — the copy declaring the most entrypoints, so fewest builds are needed.
-4. **record order** — ties keep the incumbent, so generated import maps stay byte-stable.
+4. **name** — an exact tie goes to the remote whose name sorts first (code-unit order), so the basis does not
+   depend on the order remotes register in. A tie never repoints a host or cached basis: a dynamic load keeps
+   the committed build, and the name decides only among copies none of which is the host or cached yet (a cold
+   init, or a version new to storage).
 
 Rule 3 is what makes a superset copy win: given `{table}`, `{table}` and `{sort, table}` of one version,
 the third becomes the basis and serves both specifiers from a single build. Rules 1 and 2 deliberately
 outrank it — stability beats optimality — so a host or already-served basis can leave gaps its siblings
 fill (see below).
 
+#### One build per package
+
+A package is its primary external plus any flat secondary externals (`@angular/core/testing` reported as an
+external of its own). Per share scope — global, each named shareScope, and `strict` — every package is served
+from **one build**, picked after the shared versions are determined and stored as `servingBuild` on every
+external of the package in that scope.
+
+- A **pooled** package takes its pool's winner, the build its election made global, when the winner has a copy
+  in the primary's share row (or in any share row of the package when the primary has none). It is not ranked
+  again: without such a copy the package has no serving build, and its specifiers are claimed in record order.
+- An **unpooled** package ranks the copies in its primary's share row, or in every share row of its externals
+  when the primary has none (a package can ship secondary entrypoints only):
+  1. **host** — the shell's build.
+  2. **fewest extra downloads** — one for the build itself unless its copies of the package are all cached,
+     plus one for every other remote that would run its own build of the package at that tag (a copy in a
+     `scope` row, or a `strictVersion` copy whose range rejects the tag) unless that remote's copies are all
+     cached.
+  3. **primary's basis** — the basis of the primary's share row.
+  4. **name** — code-unit order, so the choice never depends on the order remotes register in.
+
+Every specifier the serving build ships is served from it, also when another external of the package lists it:
+with a dense `@angular/core` and a flat `@angular/core/testing` at the same tag, `@angular/core/testing` comes
+from the serving build, not from whichever external the record lists first. A share row of an external whose
+name another external already serves at the same tag publishes nothing, and is not reported as a second
+shared version; only a share row at another tag is.
+
+The primary fixes the tag its secondaries follow. A secondary's share row at another tag follows the serving
+tag when the secondary still resolves at that tag, because the serving build ships it or the secondary has a
+share row there. Its copies then `skip`, and a `strictVersion` copy whose range rejects the tag is scoped, or
+fails init under [`strict.strictExternalCompatibility`](./config.md#modeConfig), as in
+[Determine Shared Versions](#determine-shared-versions). Otherwise the row keeps its own tag.
+
 #### Merging within a version
 
-Copies of one version build the same tag, so a specifier only some of them bundle is not a conflict: the
-version **exposes the union of its copies' entries**, each specifier served by the first copy that declares
-it in basis precedence. Given a cached basis `{table}` and a sibling `{table, sort}`, `table` resolves to
+Copies of one version build the same tag, so a specifier only some of them bundle is not a conflict. What the
+serving build ships comes from it (see [One build per package](#one-build-per-package)); for every other
+specifier the version **exposes the union of its copies' entries**, each served by the first copy that
+declares it in basis precedence. Given a cached basis `{table}` and a sibling `{table, sort}`, `table` resolves to
 the basis's build and `sort` to the sibling's — every entrypoint any copy declares stays importable, and
 no copy is pushed out of sharing because it bundles more than the basis. This is unconditional: the
 coverage settings below never apply within a version. For pooled externals, pooling keeps a chunked package on
