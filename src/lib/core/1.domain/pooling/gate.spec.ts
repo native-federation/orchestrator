@@ -229,38 +229,36 @@ describe('committedView', () => {
       ]);
     });
 
-    // A flat build ships `@ng/core/testing` as a package of its own, a dense one as an entry of `@ng/core`, and
-    // both share it. `generate-import-map` hands it to the package stored first, whatever the pool's name order.
-    it('names the package stored first for a specifier two shared packages claim', () => {
-      const members = [
-        member('@ng/core', [
-          {
-            tag: '22.0.8',
-            action: 'share',
-            copies: [
-              { remote: 'dense', entries: { '@ng/core': 'c.js', '@ng/core/testing': 't.js' } },
-            ],
-          },
-        ]),
-        member('@ng/core/testing', [
-          { tag: '22.0.8', action: 'share', copies: [{ remote: 'flat' }] },
-        ]),
-      ];
+    // A flat build ships `@ng/core/testing` as an external of its own, a dense one as an entry of `@ng/core`, and
+    // both share it. The package's stored serving build claims it, whichever external is stored first.
+    for (const recordOrder of [
+      ['@ng/core/testing', '@ng/core'],
+      ['@ng/core', '@ng/core/testing'],
+    ])
+      it(`names the serving build for a specifier two externals of one package claim (${recordOrder[0]} first)`, () => {
+        const members = [
+          member('@ng/core', [
+            {
+              tag: '22.0.8',
+              action: 'share',
+              copies: [
+                { remote: 'dense', entries: { '@ng/core': 'c.js', '@ng/core/testing': 't.js' } },
+              ],
+            },
+          ]),
+          member('@ng/core/testing', [
+            { tag: '22.0.8', action: 'share', copies: [{ remote: 'flat' }] },
+          ]),
+        ];
+        for (const { external } of members) external.servingBuild = 'dense';
 
-      expect(
-        committedView(
-          members,
-          copiesByRemote(members, () => false),
-          ['@ng/core/testing', '@ng/core'],
-          {
+        expect(
+          committedView(members, copiesByRemote(members, () => false), recordOrder, {
             shareScope: GLOBAL_SCOPE,
             without: 'loaded',
-          }
-        ).global.get('@ng/core/testing')
-      ).toMatchObject({
-        remote: 'flat',
+          }).global.get('@ng/core/testing')
+        ).toEqual({ tag: '22.0.8', remote: 'dense', file: 't.js' });
       });
-    });
   });
 });
 

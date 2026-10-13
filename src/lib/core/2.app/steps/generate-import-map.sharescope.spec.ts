@@ -377,35 +377,37 @@ describe('createGenerateImportMap (shareScope-externals)', () => {
       expect(skipOnly.versions[0]!.remotes[0]!.cached).toBe(false);
     });
 
-    // Two shared versions list `dep-a/sub`: mfe1's dense `dep-a` (as an entry) and mfe2's flat `dep-a/sub` (as
-    // its package), in either record order. The first claims it for every remote; with the dense one first,
-    // the flat copy maps nothing and is not published (`cached`).
-    const dense = () =>
-      mockExternal_A({
+    // mfe1's dense `dep-a` lists `dep-a/sub` as an entry and mfe2's flat `dep-a/sub` ships it as its package,
+    // at the same tag. The package's serving build, mfe1, claims it for every remote in either record order, so
+    // the flat copy maps nothing and is not published (`cached`). The tags agree because a flat share row at
+    // another tag than the serving build's is moved off the share row before the import map is built.
+    const dense = () => ({
+      ...mockExternal_A({
         versions: [
           mockVersion_A.v2_1_2({ action: 'share', remotes: { 'team/mfe1': { entries: sub } } }),
         ],
-      });
-    const flat = () =>
-      mockExternal.shared([
-        mockVersion.shared('2.1.1', 'dep-a/sub', {
+      }),
+      servingBuild: 'team/mfe1',
+    });
+    const flat = () => ({
+      ...mockExternal.shared([
+        mockVersion.shared('2.1.2', 'dep-a/sub', {
           action: 'share',
           remotes: { 'team/mfe2': { file: 'dep-a-sub-flat.js' } },
         }),
-      ]);
+      ]),
+      servingBuild: 'team/mfe1',
+    });
     const twoClaims = (flatFirst: boolean): shareScope =>
       flatFirst
         ? { 'dep-a/sub': flat(), 'dep-a': dense() }
         : { 'dep-a': dense(), 'dep-a/sub': flat() };
-    const firstClaim = (flatFirst: boolean) =>
-      flatFirst
-        ? mockScopeUrl_MFE2({ file: 'dep-a-sub-flat.js' })
-        : mockScopeUrl_MFE1({ file: 'dep-a-sub.js' });
+    const served = mockScopeUrl_MFE1({ file: 'dep-a-sub.js' });
 
     for (const flatFirst of [false, true]) {
       const order = flatFirst ? 'flat first' : 'dense first';
 
-      it(`should serve a specifier two shared versions list from the first in record order (${order})`, async () => {
+      it(`should serve a specifier two externals of one package list from the serving build (${order})`, async () => {
         const record = twoClaims(flatFirst);
         adapters.sharedExternalsRepo.getFromScope = vi.fn((scope?: string): shareScope =>
           !scope || scope === GLOBAL_SCOPE ? {} : record
@@ -416,16 +418,16 @@ describe('createGenerateImportMap (shareScope-externals)', () => {
         expect(actual.scopes).toEqual({
           [mockScopeUrl_MFE1()]: {
             'dep-a': mockScopeUrl_MFE1({ file: 'dep-a.js' }),
-            'dep-a/sub': firstClaim(flatFirst),
+            'dep-a/sub': served,
           },
-          [mockScopeUrl_MFE2()]: { 'dep-a/sub': firstClaim(flatFirst) },
+          [mockScopeUrl_MFE2()]: { 'dep-a/sub': served },
         });
-        if (!flatFirst) expect(record['dep-a/sub']!.versions[0]!.remotes[0]!.cached).toBe(false);
+        expect(record['dep-a/sub']!.versions[0]!.remotes[0]!.cached).toBe(false);
+        expect(config.log.warn).not.toHaveBeenCalled();
+        expect(config.log.error).not.toHaveBeenCalled();
       });
 
-      // The global twin. Dense first, the flat external is a duplicate of a package already in `imports`;
-      // flat first, the dense external finds its entry already mapped and keeps the first writer.
-      it(`should serve a specifier two shared versions list from the first in record order (global, ${order})`, async () => {
+      it(`should serve a specifier two externals of one package list from the serving build (global, ${order})`, async () => {
         const record = twoClaims(flatFirst);
         adapters.sharedExternalsRepo.getScopes = vi.fn(
           ({ includeGlobal } = { includeGlobal: true }) => (includeGlobal ? [GLOBAL_SCOPE] : [])
@@ -438,9 +440,11 @@ describe('createGenerateImportMap (shareScope-externals)', () => {
 
         expect(actual.imports).toEqual({
           'dep-a': mockScopeUrl_MFE1({ file: 'dep-a.js' }),
-          'dep-a/sub': firstClaim(flatFirst),
+          'dep-a/sub': served,
         });
-        if (!flatFirst) expect(record['dep-a/sub']!.versions[0]!.remotes[0]!.cached).toBe(false);
+        expect(record['dep-a/sub']!.versions[0]!.remotes[0]!.cached).toBe(false);
+        expect(config.log.warn).not.toHaveBeenCalled();
+        expect(config.log.error).not.toHaveBeenCalled();
       });
     }
   });
