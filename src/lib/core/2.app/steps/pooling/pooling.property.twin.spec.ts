@@ -63,7 +63,7 @@ describe('pooling properties: twin counterexamples', () => {
     extraRange: 'caret' | 'tilde' = 'tilde'
   ) => ({ pools: [pool], strictVersion: false, extra: null, extraRange, relabel: null, flat });
 
-  // Reduced from 'subpool' reds at seeds 1–4 (tester-9). r0 and r1 ship @p0/m0/sub at 17.0.1 under ^17
+  // Reduced from 'subpool' reds at seeds 1–4. r0 and r1 ship @p0/m0/sub at 17.0.1 under ^17
   // ranges; the host r2 publishes 18.0.1 for the whole pool. Init keeps r0's build as a subpool for r0 and r1
   // (servedBy r0). A clone of r0 loaded at runtime fits that subpool, but it rejects the map's 18.0.1, so
   // global-or-self has it serve its own family.
@@ -83,7 +83,7 @@ describe('pooling properties: twin counterexamples', () => {
     expect((await twinGate(spec, 0)).reds).toEqual([]);
   });
 
-  // fx-sf-global (tester-9). r0 is a flat 18.0.0 build (@p0/m1 and @p0/m1/sub each a package of its own);
+  // r0 is a flat 18.0.0 build (@p0/m1 and @p0/m1/sub each a package of its own);
   // r1 a dense 18.2.0 build shipping only @p0/m1/sub under ^18. At init r1 skips onto the map, which serves
   // @p0/m1/sub from r0, although the shared @p0/m1 18.2.0 lacks /sub. A clone of r1 loaded at runtime is
   // served by the map as r1 is.

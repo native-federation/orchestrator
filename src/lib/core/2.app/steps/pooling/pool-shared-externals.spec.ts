@@ -169,7 +169,7 @@ describe('createPoolSharedExternals', () => {
     });
   });
 
-  // W1: a scope carrying no pool state is not pooled. Pooling's work shows up as storage writes of the scope it
+  // A scope carrying no pool state is not pooled. Pooling's work shows up as storage writes of the scope it
   // pools, so a scope without pool state must cost exactly what it costs on a page with no pool anywhere. Which
   // scopes are pooled at all is pinned by plan.spec.ts.
   describe('skips work', () => {
@@ -206,7 +206,7 @@ describe('createPoolSharedExternals', () => {
       };
     };
 
-    it('writes a scope without pool state as if no scope had any (W1)', async () => {
+    it('writes a scope without pool state as if no scope had any', async () => {
       const alone = await trafficOf({ labelled: false, pooledElsewhere: false });
       const besidePool = await trafficOf({ labelled: false, pooledElsewhere: true });
       const pooled = await trafficOf({ labelled: true, pooledElsewhere: false });

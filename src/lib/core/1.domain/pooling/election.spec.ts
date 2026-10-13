@@ -186,8 +186,8 @@ describe('subpool rounds', () => {
    * Every remote below rejects round 1's 3.0.0. x's build serves x, a and b (3); y's serves y and a (2); b's
    * serves b and a; a's only itself. x forms the first subpool and takes a and b with it, which leaves y
    * serving only itself: y runs its own build, not a subpool claiming a again. Shrunk by hand from the
-   * property counterexample of a formSubpools cache that was not narrowed to the remotes still waiting
-   * (C4, e2979f7); that mutant put a in both subpools, and the later one won.
+   * property counterexample of a formSubpools cache that was not narrowed to the remotes still waiting;
+   * that mutant put a in both subpools, and the later one won.
    */
   it('takes a remote into one subpool only: a build it no longer waits for serves only itself', () => {
     const election = electFrom([

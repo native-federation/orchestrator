@@ -656,7 +656,7 @@ describe('pooling regressions', () => {
       .versions.map(v => `${v.tag}:${v.action}:[${v.remotes.map(r => r.name).join(',')}]`);
 
   /**
-   * Finding 1. mfe-b pins core to exactly 17.1.0 and mfe-a's `~17.1.1` rejects it, so the newer 17.1.1 is
+   * mfe-b pins core to exactly 17.1.0 and mfe-a's `~17.1.1` rejects it, so the newer 17.1.1 is
    * shared and 17.1.0's only row is mfe-b's `scope` row. mfe-c, loaded at runtime with 17.1.0 under `^17.1.0`, accepts the shared 17.1.1
    * and the page maps it onto `imports`. Filed into mfe-b's `scope` row, the next page scoped it to its own
    * 17.1.0 instead: a tear beside anything it shares with mfe-a, and a page that differs across a reload.
@@ -700,12 +700,12 @@ describe('pooling regressions', () => {
   });
 
   /**
-   * Finding 2, and the architect's two follow-ups on the same state. The host mfe-a runs 19.2.0; mfe-b and
-   * mfe-c pin 19.1.0 exactly, so they run mfe-b's build as a subpool. anim then has no `share` row: both
-   * copies `skip` onto mfe-b through per-consumer overrides, and `imports` never names it. mfe-d, loaded with
-   * only anim@19.1.0, joined that `skip` row and got `skip` with nothing `covered`: an unmapped bare
-   * specifier. It now shares its own copy. The next init re-elects the pool with it, as a cold init does, and
-   * mfe-d, agreeing with the host, fills the host's map with that copy.
+   * The host mfe-a runs 19.2.0; mfe-b and mfe-c pin 19.1.0 exactly, so they run mfe-b's build as a
+   * subpool. anim then has no `share` row: both copies `skip` onto mfe-b through per-consumer overrides,
+   * and `imports` never names it. mfe-d, loaded with only anim@19.1.0, joined that `skip` row and got
+   * `skip` with nothing `covered`: an unmapped bare specifier. It now shares its own copy. The next init
+   * re-elects the pool with it, as a cold init does, and mfe-d, agreeing with the host, fills the host's
+   * map with that copy.
    */
   describe('a dynamically loaded copy of a member nothing shares still resolves', () => {
     let p: ReturnType<typeof portfolio>;

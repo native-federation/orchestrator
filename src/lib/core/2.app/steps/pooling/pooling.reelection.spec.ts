@@ -292,7 +292,7 @@ describe('pooling re-election', () => {
         return { warm, reelected: settled(q, await q.reelect()) };
       };
 
-      // N3. W, W2 and W3 ship `@x/core/testing` 2.0.0; R ships `@x/core` 1.0.0 with that entrypoint, which
+      // W, W2 and W3 ship `@x/core/testing` 2.0.0; R ships `@x/core` 1.0.0 with that entrypoint, which
       // makes them one pool `x`; S ships `@x/core/testing` 1.0.0 under a strict `~1.0.0`. R's build serves S
       // as a subpool. R redeploys shipping nothing: eviction deletes `@x/core`, the last external of the pool
       // R shipped. Unless eviction marks `@x/core/testing` dirty, nothing dirty is left, pooling skips
@@ -316,7 +316,7 @@ describe('pooling re-election', () => {
         expect(pages.warm).toEqual(pages.reelected);
       });
 
-      // F3. a and b are labelled `x` by everyone; c is labelled `y` by W and Q, but R labels it `x`, which
+      // a and b are labelled `x` by everyone; c is labelled `y` by W and Q, but R labels it `x`, which
       // joins all three into one pool, where Q's c 1.0.0 islands Q's whole family `incompatible`. R redeploys
       // labelling c `y`: the pool splits into {a, b} and a lone c, but only c (whose copies changed) is
       // dirty. Unless every pool of the scope is re-elected, the untouched half keeps the merged election: Q's
@@ -346,7 +346,7 @@ describe('pooling re-election', () => {
         expect(pages.warm).toEqual(pages.reelected);
       });
 
-      // P1. Per-remote labels: Y labels a and b `p`, X labels a `q`, and W, V, U label c1 and c2 `q`; X's
+      // Per-remote labels: Y labels a and b `p`, X labels a `q`, and W, V, U label c1 and c2 `q`; X's
       // label joins everything into one pool `q`, won by Y. X redeploys without `a`: the pool splits into
       // {a, b} (now `p`) and {c1, c2}, which keeps the name `q` and has no dirty member. Unless every pool of
       // the scope is re-elected, warm keeps `q`'s stale election: `poolWinner` Y, which ships no member of `q`, one

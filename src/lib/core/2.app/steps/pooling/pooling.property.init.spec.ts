@@ -363,7 +363,7 @@ describe('pooling properties: init (generated portfolios)', { timeout: TIMEOUT }
  * fetched again and its old copies evicted), over portfolios with label noise (`Relabel`): the changes that
  * split, join or empty a pool. The oracle is the next warm page re-electing every pool of that same state.
  *
- * The partial warm re-elections `pooling.reelection.spec.ts` reproduces (N3, F3, P1) failed this: a label
+ * The partial warm re-elections `pooling.reelection.spec.ts` reproduces failed this: a label
  * change that splits a pool and an eviction that deletes a pool member left a part of the pool clean.
  */
 describe('pooling properties: redeploys (generated portfolios)', { timeout: TIMEOUT }, () => {
@@ -376,7 +376,7 @@ describe('pooling properties: redeploys (generated portfolios)', { timeout: TIME
 
   // Not a cold page of the final portfolio: cold breaks ties by name where warm keeps the stored winner
   // instead; that is no partial re-election. `outcome` leaves `poolWinner` out, which a stale election keeps
-  // (P1), so the winners are compared too.
+  // when a split pool keeps its name, so the winners are compared too.
   const warmEqualsReelected = async ([spec, redeployed]: [PortfolioSpec, Redeploy[]]) => {
     const rig = openPortfolio({
       host: hostOf(spec),

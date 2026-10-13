@@ -380,7 +380,7 @@ describe('findSplitRemotes', () => {
   it('catches two entrypoints of one package at different tags, though each specifier has one', () => {
     // Material ships entrypoints only. mfe-b's `/table@22.0.6` is global, and mfe-a's `/sort@22.0.8` is
     // self-filled from mfe-a beside it. Each specifier resolves to one tag, but mfe-a reaches mfe-b's table
-    // one hop in (through the global core mfe-b ships): two Material builds — review finding F1's outcome.
+    // one hop in (through the global core mfe-b ships): two Material builds.
     const entrypoint = (remote: string, tag: string, specifier: string) => ({
       tag,
       host: false,
