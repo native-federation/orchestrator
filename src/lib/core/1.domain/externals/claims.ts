@@ -1,6 +1,6 @@
 import type { DeepReadonly } from 'lib/utils/deep-readonly';
 import type { RemoteName } from '../remote/remote-info.contract';
-import type { ExternalName, SharedExternal } from './external.contract';
+import { type ExternalName, GLOBAL_SCOPE, type SharedExternal } from './external.contract';
 import type { SharedVersion, SharedVersionMeta, VersionName } from './version.contract';
 import type { Specifier } from './specifier';
 import { forEachVersionEntry } from './basis';
@@ -65,6 +65,18 @@ export function claimTable(
       if (version.action === 'share') claimShareRow(name, version);
 
   return table;
+}
+
+// What a committed map serves in one scope, from externals in record order: `imports` holds only the copies
+// marked cached, a named scope's override may name any copy. `without` is a loaded remote whose copies the
+// record already holds but the committed map does not.
+export function committedClaims(
+  externals: Iterable<readonly [ExternalName, DeepReadonly<SharedExternal>]>,
+  { shareScope, without }: { shareScope: string; without?: RemoteName }
+): Map<Specifier, Claim> {
+  const publishes = (copy: SharedVersionMeta) =>
+    copy.name !== without && (shareScope !== GLOBAL_SCOPE || copy.cached);
+  return claimTable(externals, publishes).claims;
 }
 
 // One version's claims, ordered as `claimTable` orders them within a tag: the serving copy, then record order.

@@ -1,5 +1,5 @@
-import { claimTable, type Claim } from './claims';
-import type { SharedExternal } from './external.contract';
+import { claimTable, committedClaims, type Claim } from './claims';
+import { GLOBAL_SCOPE, type SharedExternal } from './external.contract';
 import type { SharedVersion, SharedVersionAction, SharedVersionMeta } from './version.contract';
 
 const copy = (name: string, entries: string[], extra: Partial<SharedVersionMeta> = {}) =>
@@ -188,5 +188,32 @@ describe('claimTable', () => {
 
     expect(table.claims.size).toBe(0);
     expect(table.shareClaims.size).toBe(0);
+  });
+});
+describe('committedClaims', () => {
+  // r1 is the cached copy of the share row, r2 joined it uncached and adds fw/testing, r3 is the load.
+  const record = (): [string, SharedExternal][] => [
+    [
+      'fw',
+      external(
+        version('share', [
+          copy('r3', ['fw', 'fw/testing'], { cached: true }),
+          copy('r1', ['fw'], { cached: true }),
+          copy('r2', ['fw', 'fw/testing']),
+        ])
+      ),
+    ],
+  ];
+
+  it('in the global scope, reads only the cached copies, never the loaded remote', () => {
+    const claims = committedClaims(record(), { shareScope: GLOBAL_SCOPE, without: 'r3' });
+
+    expect(readable(claims)).toEqual({ fw: 'fw@1.0.0:r1' });
+  });
+
+  it('in a named scope, reads every copy but the loaded remote', () => {
+    const claims = committedClaims(record(), { shareScope: 'team', without: 'r3' });
+
+    expect(readable(claims)).toEqual({ fw: 'fw@1.0.0:r1', 'fw/testing': 'fw@1.0.0:r2' });
   });
 });

@@ -6,7 +6,7 @@ import {
   type SharedVersionMeta,
   type VersionName,
 } from 'lib/core/1.domain';
-import { claimTable } from 'lib/core/1.domain/externals/claims';
+import { committedClaims } from 'lib/core/1.domain/externals/claims';
 import type { AcceptsTag } from 'lib/core/1.domain/externals/compatibility';
 import { packageOf, type Specifier, SpecifierTags } from 'lib/core/1.domain/externals/specifier';
 import * as _path from 'lib/utils/path';
@@ -61,8 +61,7 @@ type MapPolicy = {
 };
 
 // A `scope` copy counts as served by its build: its files are already in the map under its own scope.
-// `without` is left out: `update-cache` has already stored a loaded remote's copies, but the committed map holds
-// none of them.
+// `without`'s build is left out of `builds` too.
 export function committedView(
   members: PoolMember[],
   shipped: ReadonlyMap<RemoteName, readonly Copy[]>,
@@ -71,11 +70,8 @@ export function committedView(
 ): CommittedView {
   const global: CommittedView['global'] = new Map();
 
-  // `imports` holds only the copies marked cached; a named scope's override may name any copy.
-  const publishes = (meta: SharedVersionMeta) =>
-    meta.name !== without && (shareScope !== GLOBAL_SCOPE || meta.cached);
   // Mirrors what `generate-import-map` emitted, so `global` is what the committed map really serves.
-  const { claims } = claimTable(inRecordOrder(members, recordOrder), publishes);
+  const claims = committedClaims(inRecordOrder(members, recordOrder), { shareScope, without });
   for (const [specifier, { tag, copy }] of claims)
     global.set(specifier, { tag, remote: copy.name, file: copy.entries[specifier]! });
 
