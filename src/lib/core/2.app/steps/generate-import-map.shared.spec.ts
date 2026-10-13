@@ -89,6 +89,37 @@ describe('createGenerateImportMap (shared-externals)', () => {
     });
   });
 
+  // The serving build is decided before the map, and the claims seed from it; listed second, its copy must
+  // still publish, or nobody would.
+  it("should publish a share row's serving copy even when another copy leads the row", async () => {
+    adapters.sharedExternalsRepo.getFromScope = vi.fn(() => ({
+      'dep-a': {
+        ...mockExternal_A({
+          dirty: false,
+          versions: [
+            mockVersion_A.v2_1_1({
+              action: 'share',
+              remotes: {
+                'team/mfe1': { entries: { 'dep-a': 'dep-a.js' } },
+                'team/mfe2': { entries: { 'dep-a': 'dep-a.js', 'dep-a/sub': 'dep-a-sub.js' } },
+              },
+            }),
+          ],
+        }),
+        servingBuild: 'team/mfe2',
+      },
+    }));
+
+    const actual = await generateImportMap();
+
+    expect(actual).toEqual({
+      imports: {
+        'dep-a': mockScopeUrl_MFE2({ file: 'dep-a.js' }),
+        'dep-a/sub': mockScopeUrl_MFE2({ file: 'dep-a-sub.js' }),
+      },
+    });
+  });
+
   it('should self-fill a global entrypoint declared only by a skipped version', async () => {
     // Skip (v2_1_3) is processed before the share (v2_1_2) in the desc-sorted loop; the
     // second pass fills 'dep-a/sub' from the skip's own scope regardless of order.

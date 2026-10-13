@@ -456,14 +456,17 @@ export function createGenerateImportMap(
     // chunks are not needed and calling it cached would claim a mapping it does not have.
     const scopes = new Map<RemoteName, string>();
 
-    for (const [packageName, remote] of versionEntries(version)) {
+    for (const [packageName, declarer] of versionEntries(version)) {
+      // The serving build claims first, so its copy publishes wherever it sits in the row.
+      const claimed = claims.get(packageName)?.copy;
+      const remote = claimed && version.remotes.includes(claimed) ? claimed : undefined;
       // Another external claimed this specifier as one of its own entries — reachable when
       // `feature.convertFlatSharedInfo` is off and one remote emits a secondary entrypoint as a
       // package of its own. First writer wins; whoever loses would otherwise be repointed silently.
-      if (claims.get(packageName)?.copy !== remote) {
+      if (!remote) {
         config.log.debug(
           4,
-          `[${GLOBAL_SCOPE}][${externalName}][${remote.name}] Entrypoint '${packageName}' is already mapped by another external, keeping '${importMap.imports[packageName]}'.`
+          `[${GLOBAL_SCOPE}][${externalName}][${declarer.name}] Entrypoint '${packageName}' is already mapped by another external, keeping '${importMap.imports[packageName]}'.`
         );
         continue;
       }
