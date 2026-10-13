@@ -3,6 +3,7 @@ import { compareStrings } from 'lib/utils/compare-strings';
 import type { RemoteName } from '../remote/remote-info.contract';
 import type { AcceptsTag } from './compatibility';
 import type { ExternalName, SharedExternal, shareScope } from './external.contract';
+import { mergeRows, redirectRow } from './rows';
 import { packageOf } from './specifier';
 import type { SharedVersion, SharedVersionMeta, VersionName } from './version.contract';
 
@@ -15,7 +16,7 @@ export type ServingCandidate = ServingBuild & {
   rootBasis: boolean;
 };
 
-type PackageExternals = readonly (readonly [ExternalName, DeepReadonly<SharedExternal>])[];
+export type PackageExternals = readonly (readonly [ExternalName, DeepReadonly<SharedExternal>])[];
 type Row = DeepReadonly<SharedVersion>;
 type Placed = { row: Row; copy: DeepReadonly<SharedVersionMeta> };
 
@@ -37,6 +38,9 @@ export function packagesOf(scope: DeepReadonly<shareScope>): Map<ExternalName, E
   return packages;
 }
 
+export const isPooled = (externals: PackageExternals): boolean =>
+  externals.some(([, e]) => e.poolName !== undefined);
+
 // `externals` are one package's, in record order. A share row of the root fixes the tag its secondaries follow.
 export function servingBuildOf(
   externals: PackageExternals,
@@ -48,10 +52,32 @@ export function servingBuildOf(
   const rows = rootRows.length > 0 ? rootRows : externals.flatMap(([, e]) => shareRows(e));
 
   // The election already chose the global build; ranking again per package could split a pool.
-  if (externals.some(([, e]) => e.poolName !== undefined)) return electedBuild(rows);
+  if (isPooled(externals)) return electedBuild(rows);
 
   const best = candidatesOf(rows, rootRows, consumersOf(externals), accepts).sort(byServingRank)[0];
   return best && { remote: best.remote, tag: best.tag };
+}
+
+export type ServingObjector = { copy: SharedVersionMeta; tag: VersionName };
+
+// Every share row at another tag follows the serving build the way a version follows its winner. Mutates
+// `external` in place; `objector` is the first strict copy that keeps its own build instead.
+export function followServingBuild(
+  external: SharedExternal,
+  serving: ServingBuild,
+  accepts: AcceptsTag
+): { external: SharedExternal; objector?: ServingObjector } {
+  let objector: ServingObjector | undefined;
+  const rebuilt = external.versions.flatMap(version => {
+    if (version.action !== 'share' || version.tag === serving.tag) return [version];
+    const rows = redirectRow(version, serving.tag, accepts);
+    // A share row redirects into a `scope` row only of copies that reject the tag strictly.
+    const scoped = rows.find(row => row.action === 'scope');
+    if (scoped && !objector) objector = { copy: scoped.remotes[0]!, tag: scoped.tag };
+    return rows;
+  });
+  external.versions = mergeRows(rebuilt);
+  return { external, objector };
 }
 
 function shareRows(external: DeepReadonly<SharedExternal> | undefined): Row[] {

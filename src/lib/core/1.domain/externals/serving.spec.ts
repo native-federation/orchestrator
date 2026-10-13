@@ -3,6 +3,7 @@ import type { AcceptsTag } from './compatibility';
 import type { ExternalName, SharedExternal } from './external.contract';
 import {
   byServingRank,
+  followServingBuild,
   packagesOf,
   servingBuildOf,
   type ServingBuild,
@@ -271,5 +272,101 @@ describe('servingBuildOf', () => {
       }),
       { seed: 20261013, numRuns: 500 }
     );
+  });
+});
+
+describe('followServingBuild', () => {
+  // `tag:action:[remotes]`, the way the pooling specs read a record.
+  const shape = (e: SharedExternal) =>
+    e.versions.map(v => `${v.tag}:${v.action}:[${v.remotes.map(r => r.name)}]`);
+  const toServing: ServingBuild = { remote: 'serving', tag: '2.0.0' };
+  const strict = { strictVersion: true };
+
+  it('scopes a share row whose copies all reject the serving tag strictly, and reports one', () => {
+    const objector = copy('a', ['fw'], strict);
+    const record = external(
+      version('share', [copy('serving', ['fw'], { requiredVersion: '^2.0.0' })], '2.0.0'),
+      version('share', [objector], '1.0.0')
+    );
+
+    const result = followServingBuild(record, toServing, accepts);
+
+    expect(shape(result.external)).toEqual(['2.0.0:share:[serving]', '1.0.0:scope:[a]']);
+    expect(result.objector).toEqual({ copy: objector, tag: '1.0.0' });
+    expect(result.external).toBe(record);
+  });
+
+  it('skips a share row whose copies accept the serving tag or are not strict', () => {
+    const record = external(
+      version('share', [copy('serving', ['fw'], { requiredVersion: '^2.0.0' })], '2.0.0'),
+      version(
+        'share',
+        [
+          copy('lenient', ['fw']),
+          copy('accepting', ['fw'], { ...strict, requiredVersion: '^2.0.0' }),
+        ],
+        '1.0.0'
+      )
+    );
+
+    const result = followServingBuild(record, toServing, accepts);
+
+    expect(shape(result.external)).toEqual([
+      '2.0.0:share:[serving]',
+      '1.0.0:skip:[lenient,accepting]',
+    ]);
+    expect(result.objector).toBeUndefined();
+  });
+
+  it('splits a mixed share row and merges the split into an existing row of its tag', () => {
+    const record = external(
+      version('share', [copy('serving', ['fw'], { requiredVersion: '^2.0.0' })], '2.0.0'),
+      version('share', [copy('lenient', ['fw']), copy('a', ['fw'], strict)], '1.0.0'),
+      version('scope', [copy('b', ['fw'], strict)], '1.0.0')
+    );
+
+    const result = followServingBuild(record, toServing, accepts);
+
+    expect(shape(result.external)).toEqual([
+      '2.0.0:share:[serving]',
+      '1.0.0:skip:[lenient]',
+      '1.0.0:scope:[a,b]',
+    ]);
+    expect(result.objector?.copy.name).toBe('a');
+  });
+
+  it('reports the first objector in record order', () => {
+    const record = external(
+      version('share', [copy('first', ['fw'], { ...strict, requiredVersion: '^3.0.0' })], '3.0.0'),
+      version('share', [copy('serving', ['fw'], { requiredVersion: '^2.0.0' })], '2.0.0'),
+      version('share', [copy('second', ['fw'], strict)], '1.0.0')
+    );
+
+    const result = followServingBuild(record, toServing, accepts);
+
+    expect(shape(result.external)).toEqual([
+      '3.0.0:scope:[first]',
+      '2.0.0:share:[serving]',
+      '1.0.0:scope:[second]',
+    ]);
+    expect(result.objector).toEqual({
+      copy: expect.objectContaining({ name: 'first' }),
+      tag: '3.0.0',
+    });
+  });
+
+  it('leaves share rows at the serving tag, and skip and scope rows, untouched', () => {
+    const rows = [
+      version('share', [copy('serving', ['fw'], { requiredVersion: '^2.0.0' })], '2.0.0'),
+      version('skip', [copy('other', ['fw'], strict)], '2.0.0'),
+      version('skip', [copy('skipped', ['fw'], strict)], '1.0.0'),
+      version('scope', [copy('scoped', ['fw/testing'])], '1.0.0'),
+    ];
+    const record = external(...rows.map(row => ({ ...row, remotes: [...row.remotes] })));
+
+    const result = followServingBuild(record, toServing, accepts);
+
+    expect(result.external.versions).toEqual(rows);
+    expect(result.objector).toBeUndefined();
   });
 });
