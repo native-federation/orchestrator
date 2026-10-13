@@ -120,9 +120,8 @@ describe('createGenerateImportMap (shared-externals)', () => {
     });
   });
 
-  it('should self-fill a global entrypoint declared only by a skipped version', async () => {
-    // Skip (v2_1_3) is processed before the share (v2_1_2) in the desc-sorted loop; the
-    // second pass fills 'dep-a/sub' from the skip's own scope regardless of order.
+  it('should leave a global entrypoint declared only by a skipped version unmapped', async () => {
+    // Only share rows claim; a skip copy's entrypoint the shared version lacks stays out of `imports`.
     adapters.sharedExternalsRepo.getFromScope = vi.fn(() => ({
       'dep-a': mockExternal_A({
         dirty: false,
@@ -143,7 +142,6 @@ describe('createGenerateImportMap (shared-externals)', () => {
     expect(actual).toEqual({
       imports: {
         'dep-a': mockScopeUrl_HOST({ file: 'dep-a.js' }),
-        'dep-a/sub': mockScopeUrl_MFE2({ file: 'dep-a-sub.js' }),
       },
     });
   });
@@ -174,7 +172,7 @@ describe('createGenerateImportMap (shared-externals)', () => {
     });
   });
 
-  it('should self-fill a global entrypoint declared only by a non-basis remote of a skip version', async () => {
+  it('should leave a global entrypoint declared only by a non-basis remote of a skip version unmapped', async () => {
     adapters.sharedExternalsRepo.getFromScope = vi.fn(() => ({
       'dep-a': mockExternal_A({
         dirty: false,
@@ -196,7 +194,6 @@ describe('createGenerateImportMap (shared-externals)', () => {
     expect(actual).toEqual({
       imports: {
         'dep-a': mockScopeUrl_HOST({ file: 'dep-a.js' }),
-        'dep-a/sub': mockScopeUrl_MFE2({ file: 'dep-a-sub.js' }),
       },
     });
   });

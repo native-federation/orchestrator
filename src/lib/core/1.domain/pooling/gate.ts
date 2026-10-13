@@ -98,7 +98,7 @@ export function committedView(
         let runs = runsOffMap.get(meta.name);
         if (!runs) runsOffMap.set(meta.name, (runs = new Map()));
         for (const specifier in meta.entries) {
-          // A shared copy runs its own file only for an entrypoint the map lacks: it filled it itself.
+          // A shared copy runs its own file only for an entrypoint the map lacks.
           if (version.action !== 'scope' && !servedBy && global.has(specifier)) continue;
           // A subpool member's copy keeps its own tag in the record but runs its build's files.
           const tag =

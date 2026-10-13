@@ -22,23 +22,16 @@ const external = (...versions: SharedVersion[]): SharedExternal => ({ dirty: fal
 
 // Specifier -> "external@tag:remote", the readable form of a claim.
 const readable = (claims: Map<string, Claim>) =>
-  Object.fromEntries(
-    [...claims].map(([s, c]) => [s, `${c.external}@${c.tag}:${c.copy.name}:${c.action}`])
-  );
+  Object.fromEntries([...claims].map(([s, c]) => [s, `${c.external}@${c.tag}:${c.copy.name}`]));
 
 describe('claimTable', () => {
-  it('claims every share row in record order before any skip copy', () => {
+  it('lets no skip copy claim', () => {
     const table = claimTable([
       ['dep-a', external(version('skip', [copy('r1', ['dep-a', 'dep-b'])]))],
       ['dep-b', external(version('share', [copy('r2', ['dep-b'])], '2.0.0'))],
     ]);
 
-    expect(readable(table.claims)).toEqual({
-      'dep-b': 'dep-b@2.0.0:r2:share',
-      'dep-a': 'dep-a@1.0.0:r1:skip',
-    });
-    // Insertion order is claim order: the share row's claim comes first.
-    expect([...table.claims.keys()]).toEqual(['dep-b', 'dep-a']);
+    expect(readable(table.claims)).toEqual({ 'dep-b': 'dep-b@2.0.0:r2' });
   });
 
   it('keeps the first share row per specifier across externals (flat beside dense)', () => {
@@ -48,8 +41,8 @@ describe('claimTable', () => {
     ]);
 
     expect(readable(table.claims)).toEqual({
-      fw: 'fw@1.0.0:r1:share',
-      'fw/testing': 'fw@1.0.0:r1:share',
+      fw: 'fw@1.0.0:r1',
+      'fw/testing': 'fw@1.0.0:r1',
     });
   });
 
@@ -66,9 +59,9 @@ describe('claimTable', () => {
     expect(table.claims.has('fw/testing/extra')).toBe(false);
     // A named scope has no such guard: every share row claims what is still free.
     expect(readable(table.shareClaims)).toEqual({
-      fw: 'fw@1.0.0:r1:share',
-      'fw/testing': 'fw@1.0.0:r1:share',
-      'fw/testing/extra': 'fw/testing@2.0.0:r2:share',
+      fw: 'fw@1.0.0:r1',
+      'fw/testing': 'fw@1.0.0:r1',
+      'fw/testing/extra': 'fw/testing@2.0.0:r2',
     });
   });
 
@@ -87,10 +80,9 @@ describe('claimTable', () => {
           version('share', [copy('r1', ['dep']), copy('r2', ['dep', 'dep/x'], { servedBy: 'r9' })])
         ),
       ],
-      ['other', external(version('skip', [copy('r3', ['dep/x'], { servedBy: 'r9' })]))],
     ]);
 
-    expect(readable(table.claims)).toEqual({ dep: 'dep@1.0.0:r1:share' });
+    expect(readable(table.claims)).toEqual({ dep: 'dep@1.0.0:r1' });
   });
 
   it('lets the next copy claim what `publishes` turns down', () => {
@@ -99,7 +91,7 @@ describe('claimTable', () => {
       c => c.name !== 'r1'
     );
 
-    expect(readable(table.claims)).toEqual({ dep: 'dep@1.0.0:r2:share' });
+    expect(readable(table.claims)).toEqual({ dep: 'dep@1.0.0:r2' });
   });
 
   it('lets a same-tag share row of a claimed name claim nothing, without reporting it as a duplicate', () => {
@@ -113,8 +105,8 @@ describe('claimTable', () => {
 
     expect(table.duplicates.size).toBe(0);
     expect(readable(table.claims)).toEqual({
-      fw: 'fw@1.0.0:r1:share',
-      'fw/testing': 'fw@1.0.0:r1:share',
+      fw: 'fw@1.0.0:r1',
+      'fw/testing': 'fw@1.0.0:r1',
     });
   });
 
@@ -134,8 +126,8 @@ describe('claimTable', () => {
       ]);
 
       expect(readable(table.claims)).toEqual({
-        fw: 'fw@1.0.0:r2:share',
-        'fw/testing': 'fw@1.0.0:r2:share',
+        fw: 'fw@1.0.0:r2',
+        'fw/testing': 'fw@1.0.0:r2',
       });
       expect(readable(table.shareClaims)).toEqual(readable(table.claims));
       expect(table.duplicates.size).toBe(0);
@@ -152,8 +144,8 @@ describe('claimTable', () => {
 
       expect(table.duplicates.size).toBe(0);
       expect(readable(table.claims)).toEqual({
-        fw: 'fw@1.0.0:r1:share',
-        'fw/testing': 'fw@1.0.0:r1:share',
+        fw: 'fw@1.0.0:r1',
+        'fw/testing': 'fw@1.0.0:r1',
       });
     });
 
@@ -166,8 +158,8 @@ describe('claimTable', () => {
       ]);
 
       expect(readable(table.claims)).toEqual({
-        fw: 'fw@1.0.0:r2:share',
-        'fw/extra': 'fw@1.0.0:r1:share',
+        fw: 'fw@1.0.0:r2',
+        'fw/extra': 'fw@1.0.0:r1',
       });
     });
 
@@ -177,7 +169,7 @@ describe('claimTable', () => {
         c => c.name !== 'r2'
       );
 
-      expect(readable(table.claims)).toEqual({ fw: 'fw@1.0.0:r1:share' });
+      expect(readable(table.claims)).toEqual({ fw: 'fw@1.0.0:r1' });
     });
 
     it('still reports a share row at another tag than the serving copy as a duplicate', () => {
@@ -187,7 +179,7 @@ describe('claimTable', () => {
       ]);
 
       expect(table.duplicates).toEqual(new Set([other]));
-      expect(readable(table.claims)).toEqual({ fw: 'fw@1.0.0:r2:share' });
+      expect(readable(table.claims)).toEqual({ fw: 'fw@1.0.0:r2' });
     });
   });
 

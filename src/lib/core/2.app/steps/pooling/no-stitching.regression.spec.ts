@@ -81,6 +81,10 @@ type Case = {
   name: string;
   entries: RemoteEntry[];
   dynamic?: RemoteEntry[];
+  // After the loads, a new page runs a warm init over the stored record; that page's map is judged.
+  reload?: boolean;
+  // `strict.strictExternalCompatibility`.
+  strict?: boolean;
   hosts?: string[];
   scope?: string;
   // What a file imports beyond its own package's entrypoints and chunks.
@@ -102,11 +106,16 @@ const run = async (c: Case) => {
       realRepositories: true,
       assertNoTear: false,
       hosts: c.hosts ?? [],
+      strict: c.strict,
       ...(c.scope && { scope: c.scope }),
     }
   );
   let map: ImportMap = await p.runInit(c.entries);
   for (const d of c.dynamic ?? []) map = (await p.runDynamic(d)).merged;
+  if (c.reload) {
+    p.reload();
+    map = await p.runInit();
+  }
   const faults = pageFaults({
     importMap: map,
     entries: [...c.entries, ...(c.dynamic ?? [])],
@@ -390,6 +399,24 @@ describe('a remote runs every specifier of a package from one build', () => {
         };
       })
     ),
+    // r, loaded at runtime under strict compatibility, ships core/sub without core; a's build has no sub. The load
+    // stores r's copy in the share row beside a's. The next page's warm init holds no election (nothing is
+    // dirty), and the share row publishes r's sub beside a's core, so r's sub binds a's core.
+    {
+      name: 'runs a package from one build on a warm page after a runtime load joined its share row',
+      entries: [entry('a', shared(CORE))],
+      dynamic: [
+        entry(
+          'r',
+          { ...shared(CORE, { strict: true }), entries: { [SUB]: file(SUB) } },
+          shared(FORMS, { strict: true })
+        ),
+      ],
+      strict: true,
+      deps: { [SUB]: [CORE] },
+      reload: true,
+      known: { r: { stitched: ['@fw/core: a r'] } },
+    },
   ];
 
   for (const c of cases) register(c);

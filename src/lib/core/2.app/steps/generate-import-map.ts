@@ -394,6 +394,7 @@ export function createGenerateImportMap(
     const sharedExternals = ports.sharedExternalsRepo.getFromScope();
     const index = buildServedIndex(sharedExternals);
     const { claims, duplicates } = claimTable(Object.entries(sharedExternals));
+    const claimed = claimsByCopy(claims);
     const served: ServedScope[] = [];
     const cachedBefore = new Map<string, string>();
 
@@ -415,19 +416,7 @@ export function createGenerateImportMap(
           continue;
         }
 
-        // Marks and registers the copies it maps, the basis included — so `cached` names the copies this
-        // map really publishes, which the dynamic path reads as what it may call covered.
-        mergeVersionEntries(importMap, chunkBundles, externalName, version, claims);
-      }
-    }
-
-    // Second pass, once every external's winner has claimed its imports: a specifier can be an entry of one
-    // external and a package of its own in another (flat vs dense), so filling per external would let a
-    // skipped copy claim it before the winner that serves it got there.
-    for (const [externalName, external] of Object.entries(sharedExternals)) {
-      for (const version of external.versions) {
-        if (version.action !== 'skip') continue;
-        selfFillUncovered(importMap, chunkBundles, externalName, version.remotes, claims);
+        publishClaims(importMap, chunkBundles, externalName, version, claimed);
       }
     }
 
@@ -442,68 +431,36 @@ export function createGenerateImportMap(
     return importMap;
   }
 
-  // Copies of one tag build the same code, so serving a specifier only some of them bundle is not
-  // tearing: the version exposes the union of its copies.
-  function mergeVersionEntries(
+  function claimsByCopy(claims: Map<Specifier, Claim>): Map<SharedVersionMeta, Specifier[]> {
+    const claimed = new Map<SharedVersionMeta, Specifier[]>();
+    for (const [specifier, { copy }] of claims) {
+      const specifiers = claimed.get(copy);
+      if (specifiers) specifiers.push(specifier);
+      else claimed.set(copy, [specifier]);
+    }
+    return claimed;
+  }
+
+  // Marks and registers each copy that claims a specifier, so `cached` names the copies this map really
+  // publishes, which the dynamic path reads as what it may call covered.
+  function publishClaims(
     importMap: ImportMap,
     chunkBundles: Record<string, Set<string>>,
     externalName: string,
     version: SharedVersion,
-    claims: Map<Specifier, Claim>
+    claimed: Map<SharedVersionMeta, Specifier[]>
   ): void {
-    // Scope lookup and chunk registration belong to the copy, not to each of its specifiers. A copy none
-    // of whose specifiers survive the check below never enters it: nothing points at its build, so its
-    // chunks are not needed and calling it cached would claim a mapping it does not have.
-    const scopes = new Map<RemoteName, string>();
-
-    for (const [packageName, declarer] of versionEntries(version)) {
-      // The serving build claims first, so its copy publishes wherever it sits in the row.
-      const claimed = claims.get(packageName)?.copy;
-      const remote = claimed && version.remotes.includes(claimed) ? claimed : undefined;
-      // Another external claimed this specifier as one of its own entries — reachable when
-      // `feature.convertFlatSharedInfo` is off and one remote emits a secondary entrypoint as a
-      // package of its own. First writer wins; whoever loses would otherwise be repointed silently.
-      if (!remote) {
-        config.log.debug(
-          4,
-          `[${GLOBAL_SCOPE}][${externalName}][${declarer.name}] Entrypoint '${packageName}' is already mapped by another external, keeping '${importMap.imports[packageName]}'.`
-        );
-        continue;
-      }
-      let scope = scopes.get(remote.name);
-      if (scope === undefined) {
-        scopes.set(remote.name, (scope = getScope(GLOBAL_SCOPE, remote.name, externalName)));
-        registerBundleChunks(chunkBundles, remote.name, remote.bundle);
-        remote.cached = true;
-      }
-      const file = remote.entries[packageName]!;
-      const url = _path.join(scope, file);
-      addToGlobal(importMap, { [packageName]: url });
-      addIntegrity(importMap, url, remote.name, file);
-    }
-  }
-
-  function selfFillUncovered(
-    importMap: ImportMap,
-    chunkBundles: Record<string, Set<string>>,
-    externalName: string,
-    remotes: SharedVersionMeta[],
-    claims: Map<Specifier, Claim>
-  ): void {
-    for (const remote of remotes) {
-      // A remote pooling placed in a subpool takes every entrypoint from that subpool's build, so filling
-      // from its own would put a second build into the global mapping.
-      if (remote.servedBy) continue;
-      for (const [packageName, file] of Object.entries(remote.entries)) {
-        const claim = claims.get(packageName)!;
-        if (claim.action === 'share') continue;
-        if (claim.copy !== remote) continue;
-        const scope = getScope(GLOBAL_SCOPE, remote.name, externalName);
+    for (const copy of version.remotes) {
+      const specifiers = claimed.get(copy);
+      if (!specifiers) continue;
+      const scope = getScope(GLOBAL_SCOPE, copy.name, externalName);
+      registerBundleChunks(chunkBundles, copy.name, copy.bundle);
+      copy.cached = true;
+      for (const specifier of specifiers) {
+        const file = copy.entries[specifier]!;
         const url = _path.join(scope, file);
-        addToGlobal(importMap, { [packageName]: url });
-        addIntegrity(importMap, url, remote.name, file);
-        registerBundleChunks(chunkBundles, remote.name, remote.bundle);
-        remote.cached = true;
+        addToGlobal(importMap, { [specifier]: url });
+        addIntegrity(importMap, url, copy.name, file);
       }
     }
   }

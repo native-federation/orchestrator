@@ -153,8 +153,8 @@ describe('committedView', () => {
       expect([...builds.keys()]).toEqual(['mfe5']);
     });
 
-    // A package's secondary entrypoints are routinely published from a `skip` copy of the shared tag.
-    it('includes a specifier only a skipping copy publishes', () => {
+    // Only share rows publish: a `skip` copy's entrypoint the shared version lacks is not in `imports`.
+    it('leaves out a specifier only a skipping copy ships', () => {
       const members = [
         member('@ng/core', [
           { tag: '22.0.8', action: 'share', copies: [{ remote: 'mfe5' }] },
@@ -162,10 +162,7 @@ describe('committedView', () => {
         ]),
       ];
 
-      expect(viewOf(members).global.get('@ng/core/testing')).toMatchObject({
-        tag: '22.0.8',
-        remote: 'mfe2',
-      });
+      expect(viewOf(members).global.has('@ng/core/testing')).toBe(false);
     });
 
     // The map names a subpool copy's specifiers from its subpool's build, in its own scope, so counting it as
@@ -219,13 +216,12 @@ describe('committedView', () => {
       expect([...viewOf(runtimeJoiners()).global.keys()]).toEqual(['@ng/core']);
     });
 
-    // A named scope has no `imports` to inherit: the load's own scope gets an override, which may name any copy,
-    // as update-cache's `provided` does there.
+    // A named scope has no `imports` to inherit: the load's own scope gets an override, which may name any copy of
+    // the shared version, as update-cache's `provided` does there.
     it('counts that copy in a named scope', () => {
       expect([...viewOf(runtimeJoiners(), undefined, 'team').global]).toEqual([
         ['@ng/core', { tag: '22.0.8', remote: 'mfe5', file: '@ng/core.js' }],
         ['@ng/core/new', { tag: '22.0.8', remote: 'joiner', file: 'n.js' }],
-        ['@ng/core/late', { tag: '22.0.8', remote: 'late', file: 'l.js' }],
       ]);
     });
 

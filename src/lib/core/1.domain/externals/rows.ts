@@ -32,7 +32,7 @@ export function mergeRows(versions: SharedVersion[], lead?: SharedVersion): Shar
   });
 }
 
-// Coverage enforcement can leave a `scope` version beside a shareable one at the same tag.
+// `redirectRow` and `scopeRemote` can leave a `scope` row beside a shareable one at the same tag.
 export function findVersionForTag(
   versions: SharedVersion[],
   tag: string
