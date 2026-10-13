@@ -251,9 +251,10 @@ function tornPackage(remote: RemoteName, reaches: ReadonlyMap<Specifier, Reach>)
   return undefined;
 }
 
-// U-27 by file: a committed file binds its pool-mates where its build resolves them (off the map where it runs
-// them so, else the map), so every build whose file the remote reaches, directly or through another such file,
-// must resolve each specifier it ships to the file the remote does, or the one the first such build does.
+// `offMapBinding` by file rather than tag: a committed file binds its pool-mates where its build resolves them
+// (off the map where it runs them so, else the map), so every build whose file the remote reaches, directly or
+// through another such file, must resolve each specifier it ships to the file the remote does, or the one the
+// first such build does.
 function boundByFile(
   reaches: ReadonlyMap<Specifier, Reach>,
   view: CommittedView
