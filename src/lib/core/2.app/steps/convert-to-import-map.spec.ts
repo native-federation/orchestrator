@@ -221,7 +221,8 @@ describe('createConvertToImportMap', () => {
       });
     });
 
-    it('should self-fill entrypoints the override lacks from the remote own scope', async () => {
+    // A skip is wholly covered by its override, so nothing of the remote's own build is mapped beside it.
+    it('should map a skip from its override alone', async () => {
       const remoteEntry: RemoteEntry = mockRemoteEntry_MFE2({
         exposes: [],
         shared: [
@@ -241,7 +242,6 @@ describe('createConvertToImportMap', () => {
         scopes: {
           [mockScopeUrl_MFE2()]: {
             'dep-a': mockScopeUrl_MFE1({ file: 'dep-a.js' }),
-            'dep-a/sub': mockScopeUrl_MFE2({ file: 'dep-a-sub.js' }),
           },
         },
       });

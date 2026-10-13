@@ -111,7 +111,13 @@ const run = async (c: Case) => {
     }
   );
   let map: ImportMap = await p.runInit(c.entries);
-  for (const d of c.dynamic ?? []) map = (await p.runDynamic(d)).merged;
+  // Per load, the `imports` keys its delta re-declares: a browser rejects each one.
+  const remapped: string[][] = [];
+  for (const d of c.dynamic ?? []) {
+    const { committed, importMap, merged } = await p.runDynamic(d);
+    remapped.push(Object.keys(importMap.imports).filter(key => key in committed.imports));
+    map = merged;
+  }
   if (c.reload) {
     p.reload();
     map = await p.runInit();
@@ -122,13 +128,14 @@ const run = async (c: Case) => {
     hosts: c.hosts,
     importsOf: importsFrom(c.deps ?? {}),
   });
-  return { map, faults };
+  return { map, faults, remapped };
 };
 
 const register = (c: Case) => {
   (c.known ? it.fails : it)(c.name, async () => {
-    const { map, faults } = await run(c);
+    const { map, faults, remapped } = await run(c);
     expect(faults).toEqual(c.expectFaults ?? {});
+    expect(remapped).toEqual((c.dynamic ?? []).map(() => []));
     c.expectMap?.(map);
   });
   if (c.known) {
@@ -340,25 +347,17 @@ describe('a remote runs every specifier of a package from one build', () => {
         expect(map.scopes?.['http://u/']?.[SUB]).toBe('http://d/fw_core_sub.js');
       },
     },
-    // A remote loaded at runtime self-fills interop in its own scope, but its
-    // bundle's chunk is never mapped there.
+    // A remote loaded at runtime ships interop, which the page lacks: it runs core and interop from its own
+    // build, with its bundle's chunk mapped in its own scope.
     ...pools.map((pool): Case => ({
       name: `maps the chunks of every entrypoint a dynamic remote runs (pool=${pool})`,
       hosts: ['host'],
       entries: [entry('host', shared(CORE, { pool, chunked: true }))],
       dynamic: [entry('mfe4', shared(CORE, { pool, chunked: true, entrypoints: [INTEROP] }))],
-      known: {
-        mfe4: {
-          unresolved: ['http://mfe4/fw_core_interop.js -> @nf-internal/chunk-browser-fw_core'],
-          stitched: ['@fw/core: host* mfe4*'],
-        },
-      },
     })),
-    // The dense chunked host lists
-    // testing; flat r, loaded at runtime, ships strict core@16 and testing@16. Its core is scoped, but its
-    // testing external has no share row of its own, so the load shares it: the delta maps testing in
-    // `imports`, which the page already maps, and a browser rejects the override. r runs the host's testing,
-    // which binds the host's core.
+    // The dense chunked host lists testing; flat r, loaded at runtime, ships strict core@16 and testing@16,
+    // which the page serves at 17. r runs both from its own build, in its own scope: the delta maps nothing in
+    // `imports`, which a browser would reject for a key the page already maps.
     ...[true, false].map((flatChunks): Case => ({
       name: `remaps no entrypoint the page already maps (flat chunks=${flatChunks})`,
       hosts: ['host'],
@@ -373,14 +372,89 @@ describe('a remote runs every specifier of a package from one build', () => {
           ...(flatChunks ? [flatChunk('r')] : [])
         ),
       ],
-      known: {
-        r: {
-          twice: ['@fw/core: http://host/fw_core.js http://r/fw_core.js'],
-          torn: ['@fw/core: host r'],
-          stitched: [`@fw/core: host* r${flatChunks ? '*' : ''}`],
+    })),
+    // As above with r's ranges lenient, and with r at the host's own tag: nothing scopes r, so it follows the
+    // host for the whole package. Its flat testing has no share row of its own, yet the host's core row
+    // already serves it, so the load maps no key of its own.
+    ...['16.0.0', '17.0.0'].flatMap(version =>
+      [true, false].map((flatChunks): Case => ({
+        name: `follows the page's build of a package a flat remote loads at runtime (${version}, flat chunks=${flatChunks})`,
+        hosts: ['host'],
+        entries: [
+          entry('host', shared(CORE, { pool: false, chunked: true, entrypoints: [TESTING] })),
+        ],
+        dynamic: [
+          entry(
+            'r',
+            shared(TESTING, { pool: false, version, range: `^${version}` }),
+            shared(CORE, { pool: false, version, range: `^${version}` }),
+            ...(flatChunks ? [flatChunk('r')] : [])
+          ),
+        ],
+        expectMap: map => {
+          expect(resolve(map, CORE, 'http://r/expose.js')).toBe('http://host/fw_core.js');
+          expect(resolve(map, TESTING, 'http://r/expose.js')).toBe(
+            'http://host/fw_core_testing.js'
+          );
         },
+      }))
+    ),
+    // Unpooled, all lenient. The host's 17.2.0 build ships core alone; r0's 17.1.0 build ships core and sub, so
+    // init runs r0 wholly from its own build. r7, loaded at runtime at 17.0.0, ships core and sub too: the
+    // map serves only core, so r7 runs both from its own build, on the load's page and on the next one.
+    ...[false, true].map((reload): Case => ({
+      name: `runs a loaded remote wholly from its own build when the page serves only part of its package (reload=${reload})`,
+      hosts: ['host'],
+      deps: { [SUB]: [CORE] },
+      entries: [
+        entry('host', shared(CORE, { pool: false, version: '17.2.0', range: '^17.0.0' })),
+        entry(
+          'r0',
+          shared(CORE, { pool: false, version: '17.1.0', range: '^17.0.0', entrypoints: [SUB] })
+        ),
+      ],
+      dynamic: [
+        entry(
+          'r7',
+          shared(CORE, { pool: false, version: '17.0.0', range: '^17.0.0', entrypoints: [SUB] })
+        ),
+      ],
+      reload,
+      expectMap: map => {
+        expect(map.imports[CORE]).toBe('http://host/fw_core.js');
+        expect(resolve(map, CORE, 'http://r7/expose.js')).toBe('http://r7/fw_core.js');
+        expect(resolve(map, SUB, 'http://r7/expose.js')).toBe('http://r7/fw_core_sub.js');
       },
     })),
+    // A load at a newer patch the page's build satisfies (1.0.1 under `~1.0.0`): with the same entrypoints it
+    // runs the page's build; with an entrypoint the page lacks, its whole package from its own.
+    ...pools.flatMap(pool =>
+      [false, true].map((extra): Case => ({
+        name: `runs a load at a compatible tag ${extra ? 'with an extra entrypoint from its own build' : "from the page's build"} (pool=${pool})`,
+        hosts: ['host'],
+        deps: { [INTEROP]: [CORE] },
+        entries: [entry('host', shared(CORE, { pool, version: '1.0.0', range: '~1.0.0' }))],
+        dynamic: [
+          entry(
+            'mfe',
+            shared(CORE, {
+              pool,
+              version: '1.0.1',
+              range: '~1.0.0',
+              ...(extra && { entrypoints: [INTEROP] }),
+            })
+          ),
+        ],
+        expectMap: map => {
+          const owner = extra ? 'mfe' : 'host';
+          expect(resolve(map, CORE, 'http://mfe/expose.js')).toBe(`http://${owner}/fw_core.js`);
+          if (extra)
+            expect(resolve(map, INTEROP, 'http://mfe/expose.js')).toBe(
+              'http://mfe/fw_core_interop.js'
+            );
+        },
+      }))
+    ),
     // The host ships only a flat testing@1.0.0; r ships a dense core@2.0.0 that lists testing. The root's
     // share row decides who serves the package: unpooled, both run core and testing from r's build; pooled,
     // the election scopes r's family and the host keeps its own testing. Clean in either registration order.

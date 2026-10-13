@@ -189,6 +189,38 @@ describe('pooling properties: dynamic loads (generated portfolios)', { timeout: 
         }
       ));
 
+  // 107 without pool labels: no gate places the load, so a flat external whose specifier the committed map
+  // already serves through a dense copy is update-cache's alone to resolve.
+  const unlabelled = (entry: RemoteEntry): RemoteEntry => ({
+    ...entry,
+    shared: entry.shared.map(({ pool: _pool, ...info }) => info),
+  });
+  for (const [offset, { mode, loads, runs }] of [
+    [115, pageModes[0]],
+    [116, pageModes[1]],
+  ] as const)
+    it(`dynamic additivity with flat and dense builds, unpooled (${mode})`, () =>
+      run(
+        offset,
+        portfolioArbitrary({ maxRemotes: 12, flat: true }).chain(spec =>
+          fc.tuple(fc.constant(lenient(spec)), loads(spec))
+        ),
+        runs,
+        async ([spec, extras]) => {
+          const entries = toRemoteEntries(spec).map(unlabelled);
+          const rig = openPortfolio({ host: hostOf(spec) });
+          await rig.init(entries);
+          let index = entries.length;
+
+          for (const extra of extras) {
+            const added = unlabelled(toRemoteEntry(extra, index++));
+            if (mode === 'reload') rig.reload();
+            const { committed, delta } = await rig.load(added);
+            expect(Object.keys(delta.imports).filter(key => key in committed.imports)).toEqual([]);
+          }
+        }
+      ));
+
   // The record a load leaves is what the next page rebuilds its map from: the page had the loaded remote been
   // in the manifest. Compared as the tag each remote runs per specifier, since which of two copies of one tag
   // publishes a file is record order.

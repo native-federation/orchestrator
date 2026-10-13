@@ -1606,9 +1606,13 @@ describe('pooling regressions', () => {
         [ROUTER]: 'http://l/fw_router.js',
       });
       expect(p.islands()).toEqual({ c: 'uncovered', l: 'uncovered' });
+      // l already runs core from its own build, so b's router, whose build resolves core to the host's file, is
+      // the first thing that keeps it off the map.
       expect(p.config.log.warn).toHaveBeenLastCalledWith(
         8,
-        expect.stringContaining("gap '@fw/core/testing'")
+        expect.stringContaining(
+          "committed build 'b', whose files it would reach, resolves '@fw/core'"
+        )
       );
     });
 

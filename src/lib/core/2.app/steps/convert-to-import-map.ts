@@ -61,26 +61,14 @@ export function createConvertToImportMap(
       // consumer. A global skip without one inherits the committed global mapping and needs no entry of
       // its own.
       if (actions[external.packageName]!.action === 'skip') {
-        const { override, covered } = actions[external.packageName]!;
+        const { override } = actions[external.packageName]!;
         if (override) {
           Object.entries(override).forEach(([packageName, url]) => {
             addToScopes(remoteEntryScope, packageName, url, importMap);
           });
-          serveUncovered(
-            remoteEntry,
-            external,
-            covered ?? Object.keys(override),
-            remoteEntryScope,
-            importMap
-          );
           return;
         }
-        if (!external.shareScope) {
-          if (covered) {
-            serveUncovered(remoteEntry, external, covered, remoteEntryScope, importMap);
-          }
-          return;
-        }
+        if (!external.shareScope) return;
         // Reaching here means the resolver failed to produce the expected override.
         log.error(
           9,
@@ -170,22 +158,6 @@ export function createConvertToImportMap(
       });
     });
     return importMap;
-  }
-
-  function serveUncovered(
-    remoteEntry: RemoteEntry,
-    external: { packageName: string; entries: Record<string, string> },
-    covered: string[],
-    remoteEntryScope: string,
-    importMap: ImportMap
-  ): void {
-    const provided = new Set(covered);
-    Object.entries(external.entries).forEach(([packageName, fileName]) => {
-      if (provided.has(packageName)) return;
-      const url = _path.join(remoteEntryScope, fileName);
-      addToScopes(remoteEntryScope, packageName, url, importMap);
-      addIntegrity(importMap, url, remoteEntry.integrity, fileName);
-    });
   }
 
   function addIntegrity(

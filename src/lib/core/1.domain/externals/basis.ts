@@ -61,24 +61,13 @@ export function versionEntries(version: SharedVersion): Map<string, SharedVersio
   return collectEntries(version, undefined);
 }
 
-// The part of that surface a committed import map already publishes, which on the dynamic path is less than
-// all of it: a copy that joined at runtime served its extra entrypoints into its own scope alone, so it is
-// part of the version yet can serve nobody else. `cached` is set by whichever import-map builder mapped the
-// copy, so it answers exactly that. Only a consumer that resolves through the committed mapping needs this
-// — a per-consumer override names its provider outright and can use any copy.
-export function committedEntries(version: SharedVersion): Map<string, SharedVersionMeta> {
-  return collectEntries(version, remote => remote.cached);
-}
-
 /**
- * The walk both of those keep the first claim of: which copies of a version may publish a specifier, in basis
- * precedence. Exposed so a caller that models the same fill order without needing the map — the pooling gates
- * ask which build a consumer lands on, per specifier — reads the `servedBy` rule from here instead of
+ * The walk `versionEntries` keeps the first claim of: which copies of a version may publish a specifier, in
+ * basis precedence. Exposed so a caller that models the same fill order without needing the map — the pooling
+ * gates ask which build a consumer lands on, per specifier — reads the `servedBy` rule from here instead of
  * restating it. It deliberately does not dedup: the callers do, and this way the walk allocates nothing.
  *
- * `accepts` is for a caller with a further reason to discount a copy (`committedEntries`: one the committed
- * map does not publish). Filtering the *result* is not the same thing — that drops the specifier instead of
- * letting the next copy claim it.
+ * `accepts` lets a caller discount a copy without dropping its specifiers for the next copy to claim.
  */
 export function forEachVersionEntry(
   version: DeepReadonly<SharedVersion>,
