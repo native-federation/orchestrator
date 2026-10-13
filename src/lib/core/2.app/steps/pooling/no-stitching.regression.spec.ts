@@ -418,6 +418,47 @@ describe('the host never borrows an entrypoint', () => {
     };
   });
 
+  // As above, beside r, which ships core and interop, and s, which ships core alone. No remote's copy
+  // replaces the host's interop, so the root stays unmapped and the host's import unresolved; r and s run
+  // core from r's build.
+  const rootGapBesideFamily = [true, false].map((hostFirst): Case => {
+    const host = entry('host', shared(INTEROP));
+    const others = [entry('r', shared(CORE, { entrypoints: [INTEROP] })), entry('s', shared(CORE))];
+    return {
+      name: `leaves the root unmapped when the host ships only a secondary a remote ships with its root (host first=${hostFirst})`,
+      hosts: ['host'],
+      deps: { [INTEROP]: [CORE] },
+      entries: hostFirst ? [host, ...others] : [...others, host],
+      expectFaults: { host: { unresolved: ['http://host/fw_core_interop.js -> @fw/core'] } },
+      expectMap: map => {
+        expect(map.imports[CORE]).toBeUndefined();
+        expect(resolve(map, CORE, 'http://r/expose.js')).toBe('http://r/fw_core.js');
+        expect(resolve(map, INTEROP, 'http://r/expose.js')).toBe('http://r/fw_core_interop.js');
+        expect(resolve(map, CORE, 'http://s/expose.js')).toBe('http://r/fw_core.js');
+      },
+    };
+  });
+
+  // Unpooled, the same shape is not a gap in the map: r's core row serves the root globally and the host's
+  // interop moves to the host's scope, where its import of core binds r's. No build ships both, so the host
+  // runs core from two builds; only a build of the host that ships its root avoids it.
+  const unpooledRootGap = [true, false].map((hostFirst): Case => {
+    const host = entry('host', shared(INTEROP, { pool: false }));
+    const r = entry('r', shared(CORE, { pool: false }));
+    return {
+      name: `serves the root from a remote when the unpooled host ships only a secondary (host first=${hostFirst})`,
+      hosts: ['host'],
+      deps: { [INTEROP]: [CORE] },
+      entries: hostFirst ? [host, r] : [r, host],
+      expectFaults: { host: { stitched: ['@fw/core: host r'] } },
+      expectMap: map => {
+        expect(map.imports[CORE]).toBe('http://r/fw_core.js');
+        expect(map.imports[INTEROP]).toBeUndefined();
+        expect(map.scopes?.['http://host/']?.[INTEROP]).toBe('http://host/fw_core_interop.js');
+      },
+    };
+  });
+
   const cases: Case[] = pools.flatMap(pool =>
     (['dense', 'flat'] as const).flatMap(layout =>
       [true, false].map((hostFirst): Case => {
@@ -442,5 +483,5 @@ describe('the host never borrows an entrypoint', () => {
     )
   );
 
-  for (const c of [...cases, ...rootGap]) register(c);
+  for (const c of [...cases, ...rootGap, ...rootGapBesideFamily, ...unpooledRootGap]) register(c);
 });
