@@ -304,10 +304,11 @@ export const portfolio = (
 
   // The dynamic flow for one remote entry, fetched by URL, over the map this page holds: its init's plus every
   // earlier load's delta. Regenerating it from the record would publish earlier loads' copies in `imports` and
-  // mark them `cached`, which no real page does. A page that ran no init (seeded) generates it once.
+  // mark them `cached`, which no real page does. A page that ran no init (seeded, or reloaded) runs a warm init
+  // once, as production commits no map without one.
   const runDynamic = async (entry: RemoteEntry): Promise<DynamicLoad> => {
     publish(entry);
-    const committed = page ?? (await drivers.generateImportMap());
+    const committed = page ?? (await runInit());
     installed = undefined;
     actions = undefined;
     await createInitRemoteEntryFlow({ flow: drivers, adapters, config })(entry.url);
