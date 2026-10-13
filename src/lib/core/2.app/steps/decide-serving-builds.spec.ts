@@ -146,25 +146,47 @@ describe('createDecideServingBuilds', () => {
     });
   });
 
-  it("leaves a pooled package's rows as the election placed them", async () => {
+  describe('a pooled package', () => {
     const versions = {
       fw: [row('fw', '2.0.0', 'share', [shipsAll])],
       'fw/testing': [row('fw/testing', '1.0.0', 'share', [{ remote: 'b', strict: true }])],
     };
-    seed({
-      fw: { dirty: false, poolName: 'p', versions: structuredClone(versions.fw) },
-      'fw/testing': {
-        dirty: false,
-        poolName: 'p',
-        versions: structuredClone(versions['fw/testing']),
-      },
+    // As the election stores it: the same pool and winner on every member.
+    const seedPool = (poolWinner?: string) =>
+      seed(
+        Object.fromEntries(
+          Object.entries(versions).map(([name, rows]) => [
+            name,
+            {
+              dirty: false,
+              poolName: 'p',
+              ...(poolWinner ? { poolWinner } : {}),
+              versions: structuredClone(rows),
+            },
+          ])
+        )
+      );
+
+    it('keeps the rows the election placed and stores its winner as the serving build', async () => {
+      seedPool('a');
+
+      await decide();
+
+      expect(stored().fw!.versions).toEqual(versions.fw);
+      expect(stored()['fw/testing']!.versions).toEqual(versions['fw/testing']);
+      expect(stored()['fw/testing']!.servingBuild).toBe('a');
     });
 
-    await decide();
+    it('stores no serving build without a winner, and keeps the rows', async () => {
+      seedPool();
 
-    expect(stored().fw!.versions).toEqual(versions.fw);
-    expect(stored()['fw/testing']!.versions).toEqual(versions['fw/testing']);
-    expect(stored()['fw/testing']!.servingBuild).toBe('a');
+      await decide();
+
+      expect(stored().fw!.versions).toEqual(versions.fw);
+      expect(stored()['fw/testing']!.versions).toEqual(versions['fw/testing']);
+      expect('servingBuild' in stored().fw!).toBe(false);
+      expect('servingBuild' in stored()['fw/testing']!).toBe(false);
+    });
   });
 
   it('redirects a secondary that has a share row of its own at the serving tag', async () => {

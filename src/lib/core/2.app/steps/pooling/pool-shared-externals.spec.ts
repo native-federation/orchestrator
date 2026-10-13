@@ -1049,7 +1049,7 @@ describe('createPoolSharedExternals', () => {
     });
 
     it('writes a healthy re-election back exactly as stored', async () => {
-      const stored = { poolName: 'framework', poolWinner: 'mfe1' };
+      const stored = { poolName: 'framework', poolWinner: 'mfe1', servingBuild: 'mfe1' };
       for (const name of ['@framework/core', '@framework/common'])
         p.seed(name, [at('17.0.0', name, [copy('mfe1'), copy('mfe2')], 'share')], true, stored);
       const seeded = { core: decided('@framework/core'), common: decided('@framework/common') };

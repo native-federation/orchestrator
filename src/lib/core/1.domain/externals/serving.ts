@@ -52,7 +52,7 @@ export function servingBuildOf(
   const rows = rootRows.length > 0 ? rootRows : externals.flatMap(([, e]) => shareRows(e));
 
   // The election already chose the global build; ranking again per package could split a pool.
-  if (isPooled(externals)) return electedBuild(rows);
+  if (isPooled(externals)) return winnerBuild(externals, rows);
 
   const ranked = candidatesOf(rows, rootRows, consumersOf(externals), accepts).sort(byServingRank);
   const best = ranked[0];
@@ -126,12 +126,13 @@ function candidatesOf(
   return [...candidates.values()];
 }
 
-function electedBuild(rows: Row[]): ServingBuild | undefined {
-  for (const row of rows) {
-    const basis = row.remotes.find(copy => !copy.servedBy);
-    if (basis) return { remote: basis.name, tag: row.tag };
-  }
-  return undefined;
+// The pool's winner, where it ships the package; otherwise none, and the claims keep record order.
+function winnerBuild(externals: PackageExternals, rows: Row[]): ServingBuild | undefined {
+  const winner = externals.find(([, e]) => e.poolWinner !== undefined)?.[1].poolWinner;
+  if (winner === undefined) return undefined;
+  const rootFirst = [...rows, ...externals.flatMap(([, e]) => shareRows(e))];
+  const row = rootFirst.find(r => r.remotes.some(copy => copy.name === winner && !copy.servedBy));
+  return row && { remote: winner, tag: row.tag };
 }
 
 function consumersOf(externals: PackageExternals): Map<RemoteName, Placed[]> {

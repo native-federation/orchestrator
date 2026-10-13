@@ -104,7 +104,7 @@ describe('stored shape', () => {
       scopedVersion: keysOf(scoped),
     }).toEqual({
       storage: ['remotes', 'scoped-externals', 'shared-chunks', 'shared-externals'],
-      sharedExternal: ['dirty', 'poolName', 'poolWinner', 'versions'],
+      sharedExternal: ['dirty', 'poolName', 'poolWinner', 'servingBuild', 'versions'],
       sharedVersion: ['action', 'host', 'remotes', 'tag'],
       sharedVersionMeta: [
         'bundle',

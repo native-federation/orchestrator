@@ -121,31 +121,69 @@ describe('servingBuildOf', () => {
     expect(result).toEqual<ServingBuild>({ remote: 'r2', tag: '2.0.0' });
   });
 
-  it("gives a pooled package its root row's basis even when another copy is cached", () => {
-    const result = serving([
-      'fw',
-      {
-        ...external(
-          version('share', [copy('winner', ['fw']), copy('member', ['fw'], { cached: true })])
+  describe('a pooled package', () => {
+    const pooled = (winner: string | undefined, ...versions: SharedVersion[]): SharedExternal => ({
+      ...external(...versions),
+      poolName: 'team',
+      ...(winner ? { poolWinner: winner } : {}),
+    });
+
+    it("takes its pool winner's build, unranked, even when another copy is cached", () => {
+      const result = serving([
+        'fw',
+        pooled(
+          'winner',
+          version('share', [copy('member', ['fw'], { cached: true }), copy('winner', ['fw'])])
         ),
-        poolName: 'team',
-      },
-    ]);
+      ]);
 
-    expect(result).toEqual<ServingBuild>({ remote: 'winner', tag: '1.0.0' });
-  });
+      expect(result).toEqual<ServingBuild>({ remote: 'winner', tag: '1.0.0' });
+    });
 
-  it("falls back to a pooled package's first share row in record order without a root", () => {
-    const result = serving(
-      ['fw/a', { ...external(version('skip', [copy('r1', ['fw/a'])])), poolName: 'team' }],
-      [
-        'fw/b',
-        { ...external(version('share', [copy('r2', ['fw/b'])], '2.0.0')), poolName: 'team' },
-      ],
-      ['fw/c', external(version('share', [copy('r3', ['fw/c'], { cached: true })], '3.0.0'))]
-    );
+    it("takes the winner's tag from whichever share row of the package it ships", () => {
+      const result = serving(
+        ['fw/a', pooled('r2', version('skip', [copy('r1', ['fw/a'])]))],
+        ['fw/b', pooled('r2', version('share', [copy('r2', ['fw/b'])], '2.0.0'))],
+        ['fw/c', external(version('share', [copy('r3', ['fw/c'], { cached: true })], '3.0.0'))]
+      );
 
-    expect(result).toEqual<ServingBuild>({ remote: 'r2', tag: '2.0.0' });
+      expect(result).toEqual<ServingBuild>({ remote: 'r2', tag: '2.0.0' });
+    });
+
+    // Without one, the claims fall back to record order, as they do without the field.
+    it('has no serving build when its winner ships none of it, or there is no winner', () => {
+      const shipped = version('share', [copy('member', ['fw'])]);
+
+      expect(serving(['fw', pooled('elsewhere', shipped)])).toBeUndefined();
+      expect(serving(['fw', pooled(undefined, shipped)])).toBeUndefined();
+    });
+
+    it("ignores a winner's copy that runs another build", () => {
+      const result = serving([
+        'fw',
+        pooled(
+          'winner',
+          version('share', [copy('member', ['fw']), copy('winner', ['fw'], { servedBy: 'other' })])
+        ),
+      ]);
+
+      expect(result).toBeUndefined();
+    });
+
+    it('is pooled when only a secondary carries the pool name', () => {
+      // Ranked, the cached copy would serve: it costs no download.
+      const result = serving(
+        [
+          'fw',
+          external(
+            version('share', [copy('basis', ['fw']), copy('cached', ['fw'], { cached: true })])
+          ),
+        ],
+        ['fw/a', pooled('basis', version('share', [copy('basis', ['fw/a'])]))]
+      );
+
+      expect(result).toEqual<ServingBuild>({ remote: 'basis', tag: '1.0.0' });
+    });
   });
 
   it('serves the host over a cached build', () => {
@@ -322,21 +360,6 @@ describe('servingBuildOf', () => {
       }),
       { seed: 20261013, numRuns: 1000 }
     );
-  });
-
-  it("gives a package whose secondary alone carries a pool name the root row's basis, unranked", () => {
-    // Ranked, the cached copy would serve: it costs no download.
-    const result = serving(
-      [
-        'fw',
-        external(
-          version('share', [copy('basis', ['fw']), copy('cached', ['fw'], { cached: true })])
-        ),
-      ],
-      ['fw/a', { ...external(version('share', [copy('basis', ['fw/a'])])), poolName: 'team' }]
-    );
-
-    expect(result).toEqual<ServingBuild>({ remote: 'basis', tag: '1.0.0' });
   });
 });
 

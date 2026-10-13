@@ -8,9 +8,9 @@ import { importsFrom, pageFaults, resolve, type PageFaults } from 'lib/testing/p
  * imports all it ships, and each file's imports resolve through the scopes matching that file's own URL
  * (closest referrer), not the remote that started the chain.
  *
- * Every case fails today. `known` holds the oracle's verdict on today's map: the target spec is registered as
- * `it.fails` and a sibling spec pins `known`, so a crash or a different failure turns red. Deleting `known`
- * runs the target spec for real.
+ * A case that still fails carries `known`, the oracle's verdict on today's map: the target spec is registered
+ * as `it.fails` and a sibling spec pins `known`, so a crash or a different failure turns red. A case without
+ * `known` runs the target spec for real.
  * The harness's own no-tear oracle is off: it compares tags only, so it passes every case here.
  */
 
@@ -89,18 +89,16 @@ type Case = {
   expectMap?: (map: ImportMap) => void;
   // While the case still fails: the oracle's verdict on today's map.
   known?: Record<string, PageFaults>;
-  // Today's map passes the harness's tag oracle: the pin runs with it on.
-  tagOracleBlind?: boolean;
 };
 
 let storage = 0;
-const run = async (c: Case, assertNoTear = false) => {
+const run = async (c: Case) => {
   const p = portfolio(
     {},
     {
       storage: `nf-no-stitching-${storage++}`,
       realRepositories: true,
-      assertNoTear,
+      assertNoTear: false,
       hosts: c.hosts ?? [],
       ...(c.scope && { scope: c.scope }),
     }
@@ -126,7 +124,7 @@ const register = (c: Case) => {
     const known = c.known;
     const kinds = [...new Set(Object.values(known).flatMap(Object.keys))].sort().join(', ');
     it(`${c.name}: today ${kinds}`, async () => {
-      const { faults } = await run(c, c.tagOracleBlind);
+      const { faults } = await run(c);
       expect(faults).toEqual(known);
     });
   }
@@ -220,13 +218,6 @@ describe('a remote runs every specifier of a package from one build', () => {
           expect(resolve(map, TESTING, 'http://mfe1/expose.js')).toBe(
             'http://mfe1/fw_core_testing.js'
           ),
-        known: {
-          mfe1: {
-            twice: ['@fw/core: http://mfe1/fw_core.js http://mfe2/fw_core.js'],
-            torn: ['@fw/core: mfe1 mfe2'],
-            stitched: ['@fw/core: mfe1 mfe2'],
-          },
-        },
       };
     }),
     // u ships core with interop, unchunked, and scopes rxjs to its own strict 6.6.0; the host
@@ -280,10 +271,6 @@ describe('a remote runs every specifier of a package from one build', () => {
         ),
       ],
       expectMap: map => expect(map.imports[TESTING]).toBe('http://r1/fw_core_testing.js'),
-      known: {
-        r0: { torn: ['@fw/core: r0 r1'], stitched: ['@fw/core: r0* r1*'] },
-        r1: { torn: ['@fw/core: r0 r1'], stitched: ['@fw/core: r0* r1*'] },
-      },
     },
     // With a host: the dense chunked host lists testing;
     // flat-chunked r ships it as an external of its own, registered before its core, so r's testing row claims
@@ -302,10 +289,6 @@ describe('a remote runs every specifier of a package from one build', () => {
         entry('host', shared(CORE, { pool, chunked: true, entrypoints: [TESTING] })),
       ],
       expectMap: map => expect(map.imports[TESTING]).toBe('http://host/fw_core_testing.js'),
-      known: {
-        r: { torn: ['@fw/core: host r'], stitched: ['@fw/core: host* r*'] },
-        host: { torn: ['@fw/core: host r'], stitched: ['@fw/core: host* r*'] },
-      },
     })),
     // b's `core/b` imports `core/a`, which the map serves from the host a's build; from b's
     // URL, with no scope row for it, it binds a's `core/a`. Chunked, b's `core/b` pulls b's internals beside
@@ -359,8 +342,6 @@ describe('a remote runs every specifier of a package from one build', () => {
         entry('r1', shared(CORE, { entrypoints: [SUB] })),
         entry('r0', shared(CORE), shared(SUB)),
       ],
-      known: { r0: { stitched: ['@fw/core: r0 r1'] }, r1: { stitched: ['@fw/core: r0 r1'] } },
-      tagOracleBlind: true,
     },
     // A remote loaded at runtime self-fills interop in its own scope, but its
     // bundle's chunk is never mapped there.

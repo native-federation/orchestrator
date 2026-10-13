@@ -69,6 +69,15 @@ const pooledPart = ({ importMap, record }: { importMap: ImportMap; record: share
   };
 };
 
+// The build each unpooled external's package is served from, as stored. A pooled package takes the build its
+// election made global, and the election breaks an exact round-1 tie by record order, so pools are left out.
+const servingBuilds = (record: shareScope) =>
+  Object.fromEntries(
+    Object.entries(record)
+      .filter(([, external]) => external.poolName === undefined)
+      .map(([name, external]) => [name, external.servingBuild ?? null])
+  );
+
 describe('pooling properties: init (generated portfolios)', { timeout: TIMEOUT }, () => {
   // The two oracles run as separate properties, so a failure names which of them broke.
   it('no-tear (resolution): no remote resolves a combination no build shipped', () =>
@@ -152,8 +161,43 @@ describe('pooling properties: init (generated portfolios)', { timeout: TIMEOUT }
         const a = await openPortfolio({ host }).init(entries);
         const b = await openPortfolio({ host }).init(order.map(i => entries[i]!));
         expect(outcome(b.importMap, b.record)).toEqual(outcome(a.importMap, a.record));
+        expect(servingBuilds(b.record)).toEqual(servingBuilds(a.record));
       }
     ));
+
+  // As above with flat and dense builds of one package side by side, chunked or not, globally and in a named
+  // share scope: ties between builds go to the remote's name, so the order remotes register in picks neither
+  // the build that serves an unpooled package nor its tag. Known and not compared: a specifier the serving
+  // build does not ship is still filled from the version's other copies in record order.
+  for (const [offset, shareScope] of [
+    [30, undefined],
+    [31, 'team'],
+  ] as const)
+    it(`order independence: any registration order serves each package from the same build, ${shareScope ?? 'global'} share scope`, () =>
+      run(
+        offset,
+        portfolioArbitrary({ flat: true, chunks: true, ...(shareScope && { shareScope }) }).chain(
+          spec =>
+            fc.tuple(
+              fc.constant(lenient(spec)),
+              fc.shuffledSubarray(
+                spec.remotes.map((_, i) => i),
+                { minLength: spec.remotes.length, maxLength: spec.remotes.length }
+              )
+            )
+        ),
+        200,
+        async ([spec, order]) => {
+          const entries = toRemoteEntries(spec);
+          const host = hostOf(spec);
+          const a = await openPortfolio({ host, scope: shareScope }).init(entries);
+          const b = await openPortfolio({ host, scope: shareScope }).init(
+            order.map(i => entries[i]!)
+          );
+          expect(servingBuilds(b.record)).toEqual(servingBuilds(a.record));
+          expect(outcome(b.importMap, b.record).runs).toEqual(outcome(a.importMap, a.record).runs);
+        }
+      ));
 
   it('idempotence: a warm init writes nothing and yields the same map', () =>
     run(4, portfolioArbitrary({ latestSharedExternal: true }), 100, async spec => {
