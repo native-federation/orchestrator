@@ -519,6 +519,48 @@ describe('createGetShared', () => {
     });
   });
 
+  // MF must hand out the files the import map serves, or a consumer would run a second build of the package.
+  describe('the build the import map serves', () => {
+    const servedBy = (servingBuild: string) =>
+      global(
+        {
+          'ui-lib': {
+            ...mockExternal.shared([
+              mockSharedVersion('2.1.0', 'ui-lib', {
+                remotes: {
+                  'team/a': { entries: { 'ui-lib': 'ui-lib.js' } },
+                  'team/b': { entries: { 'ui-lib': 'ui-lib.js', 'ui-lib/sub': 'ui-lib-sub.js' } },
+                },
+                action: 'share',
+              }),
+            ]),
+            servingBuild,
+          },
+        },
+        { 'team/a': 'https://cdn.test/a/', 'team/b': 'https://cdn.test/b/' }
+      );
+
+    it('sources each entrypoint from the serving build, wherever its copy sits in the row', async () => {
+      const ports = setup(servedBy('team/b'));
+      ports.browser.importModule.mockResolvedValue({});
+
+      const shared = createGetShared(ports)();
+      await shared['ui-lib']![0]!.get();
+      await shared['ui-lib/sub']![0]!.get();
+
+      expect(ports.browser.importModule.mock.calls).toEqual([
+        ['https://cdn.test/b/ui-lib.js'],
+        ['https://cdn.test/b/ui-lib-sub.js'],
+      ]);
+    });
+
+    it('shares no entrypoint only a copy beside the serving build ships', () => {
+      const shared = createGetShared(setup(servedBy('team/a')))();
+
+      expect(Object.keys(shared)).toEqual(['ui-lib']);
+    });
+  });
+
   describe('requiredVersion across sibling remotes', () => {
     const siblings = (
       remotes: Record<string, Partial<SharedVersionMeta> & { file?: string }>

@@ -1,8 +1,12 @@
 import type { DrivingContract } from 'lib/core/2.app/driving-ports/driving.contract';
-import type { SharedVersion, SharedVersionMeta } from 'lib/core/1.domain';
-import { versionEntries } from 'lib/core/1.domain/externals/basis';
+import type { ForSharedExternalsStorage } from 'lib/core/2.app/driving-ports/for-shared-externals-storage.port';
+import type { SharedExternal, SharedVersion, SharedVersionMeta } from 'lib/core/1.domain';
+import { claimTable } from 'lib/core/1.domain/externals/claims';
+import type { Specifier } from 'lib/core/1.domain/externals/specifier';
 import type { GetSharedOptions, ShareInfos, Shared } from './share-infos.contract';
 import * as _path from 'lib/utils/path';
+
+type ScopeType = ReturnType<ForSharedExternalsStorage['scopeType']>;
 
 /**
  * Adapts native federation's shared externals to the `ShareInfos` shape webpack
@@ -18,41 +22,23 @@ export function createGetShared(
       const scopeType = ports.sharedExternalsRepo.scopeType(scope);
       const externals = ports.sharedExternalsRepo.getFromScope(scope);
 
-      for (const external of Object.values(externals)) {
-        const shareVersions = external.versions.filter(v => v.action === 'share');
-        if (shareVersions.length === 0) continue;
+      for (const { specifier, version, source } of sharedEntrypoints(externals, scopeType)) {
+        const url = resolveUrl(source, source.entries[specifier]!);
+        if (!url) continue;
 
-        // The strict scope is a version -> location map: every version is shared
-        // side by side and stays non-singleton. Other scopes share one singleton.
-        const versions = scopeType === 'strict' ? shareVersions : shareVersions.slice(0, 1);
-        const singleton = scopeType === 'strict' ? false : (options.singleton ?? true);
+        const shareObject: Shared = {
+          version: version.tag,
+          get: () => ports.browser.importModule(url).then(module => () => module),
+          shareConfig: {
+            singleton: scopeType === 'strict' ? false : (options.singleton ?? true),
+            requiredVersion: resolveRequiredVersion(version, options, scopeType),
+            ...(scopeType === 'strict' ? { strictVersion: true } : {}),
+          },
+        };
+        if (scopeType !== 'global') shareObject.scope = scope;
 
-        for (const version of versions) {
-          if (!version.remotes[0]) continue;
-
-          const requiredVersion = resolveRequiredVersion(version, options, scopeType);
-
-          // MF's shared config is flat: one key per entrypoint. Emit a separate
-          // Shared for each merged entry so secondary entrypoints reach MF consumers.
-          for (const [entryName, source] of versionEntries(version)) {
-            const url = resolveUrl(source, source.entries[entryName]!);
-            if (!url) continue;
-
-            const shareObject: Shared = {
-              version: version.tag,
-              get: () => ports.browser.importModule(url).then(module => () => module),
-              shareConfig: {
-                singleton,
-                requiredVersion,
-                ...(scopeType === 'strict' ? { strictVersion: true } : {}),
-              },
-            };
-            if (scopeType !== 'global') shareObject.scope = scope;
-
-            if (!shared[entryName]) shared[entryName] = [];
-            shared[entryName]!.push(shareObject);
-          }
-        }
+        if (!shared[specifier]) shared[specifier] = [];
+        shared[specifier]!.push(shareObject);
       }
     }
 
@@ -67,10 +53,46 @@ export function createGetShared(
   }
 }
 
+type SharedEntrypoint = { specifier: Specifier; version: SharedVersion; source: SharedVersionMeta };
+
+function sharedEntrypoints(
+  externals: Record<string, SharedExternal>,
+  scopeType: ScopeType
+): SharedEntrypoint[] {
+  if (scopeType === 'strict') return strictEntrypoints(externals);
+  return servedEntrypoints(externals, scopeType === 'global' ? 'claims' : 'shareClaims');
+}
+
+// The strict scope is a version -> location map: every version is shared side by side, from its basis copy.
+function strictEntrypoints(externals: Record<string, SharedExternal>): SharedEntrypoint[] {
+  const out: SharedEntrypoint[] = [];
+  for (const external of Object.values(externals))
+    for (const version of external.versions) {
+      const source = version.remotes[0];
+      if (version.action !== 'share' || !source) continue;
+      for (const specifier in source.entries) out.push({ specifier, version, source });
+    }
+  return out;
+}
+
+// One singleton per specifier, from the build the import map serves it from.
+function servedEntrypoints(
+  externals: Record<string, SharedExternal>,
+  view: 'claims' | 'shareClaims'
+): SharedEntrypoint[] {
+  return [...claimTable(Object.entries(externals))[view]].map(
+    ([specifier, { external, tag, copy }]) => ({
+      specifier,
+      version: externals[external]!.versions.find(v => v.action === 'share' && v.tag === tag)!,
+      source: copy,
+    })
+  );
+}
+
 function resolveRequiredVersion(
   version: SharedVersion,
   options: GetSharedOptions,
-  scopeType: 'global' | 'strict' | 'shareScope'
+  scopeType: ScopeType
 ): string {
   // Strict shares a specific version, not a range: pin to the exact tag so a
   // consumer reuses only that version (MF matches via satisfy(version, required)).
@@ -78,10 +100,9 @@ function resolveRequiredVersion(
   if (typeof options.requiredVersionPrefix === 'string') {
     return `${options.requiredVersionPrefix}${version.tag}`;
   }
-  // `remotes[0]` is the serving basis, ordered by entrypoint coverage: it says nothing about
-  // what the version demands. Advertising its range would let MF hand a sibling a copy that
-  // sibling's own range rejects, so a disagreement pins to the tag — the only value no remote
-  // can reject, and the one the import map already commits to.
+  // The copy MF hands out says nothing about what the version demands. Advertising its range would let MF
+  // hand a sibling a copy that sibling's own range rejects, so a disagreement pins to the tag — the only value
+  // no remote can reject, and the one the import map already commits to.
   const declared = new Set(version.remotes.map(r => r.requiredVersion));
   if (declared.size > 1) return version.tag;
 
