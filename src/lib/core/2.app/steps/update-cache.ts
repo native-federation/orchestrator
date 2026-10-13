@@ -11,7 +11,6 @@ import { createAcceptsTag } from 'lib/core/1.domain/externals/compatibility';
 import {
   addRemoteToVersion,
   committedEntries,
-  uncoveredEntrypoints,
   versionEntries,
 } from 'lib/core/1.domain/externals/basis';
 import type { DrivingContract } from '../driving-ports/driving.contract';
@@ -49,12 +48,11 @@ export function createUpdateCache(
       const actions: SharedInfoActions = {};
 
       storeRemoteEntry(remoteEntry, (entry, external, ctx) => {
-        const { action, provided, sameVersion } = resolveSharedExternal(entry, external, ctx);
+        const { action, provided } = resolveSharedExternal(entry, external, ctx);
         actions[external.packageName] = { action };
 
         if (action === 'skip' && provided) {
           actions[external.packageName]!.covered = Array.from(provided.keys());
-          if (sameVersion) actions[external.packageName]!.sameVersion = true;
 
           if (external.shareScope) {
             actions[external.packageName]!.override = resolveOverrideEntries(
@@ -79,7 +77,6 @@ export function createUpdateCache(
   ): {
     action: SharedVersionAction;
     provided?: Map<string, SharedVersionMeta>;
-    sameVersion?: boolean;
   } {
     let action: SharedVersionAction = scopeType === 'strict' ? 'share' : 'skip';
 
@@ -106,30 +103,13 @@ export function createUpdateCache(
     //
     // What the shared version can serve *this* remote, which is not its whole surface: a global skip
     // inherits the committed `imports`, so only a copy already published there covers it, while a
-    // shareScope skip gets a per-consumer override that can name any copy. Both the tear check and
-    // `covered` read it, or `convert-to-import-map` would self-fill what this step called covered.
+    // shareScope skip gets a per-consumer override that can name any copy. `covered` reads it, or
+    // `convert-to-import-map` would self-fill what this step called covered.
     const provided = sharedVersion
       ? sharedInfo.shareScope
         ? versionEntries(sharedVersion)
         : committedEntries(sharedVersion)
       : undefined;
-    const sameVersion = sharedVersion?.tag === tag;
-
-    if (action === 'skip' && provided && !sameVersion) {
-      const uncovered = uncoveredEntrypoints(remote, provided);
-      if (uncovered.length > 0) {
-        const msg = `[${sharedInfo.shareScope ?? GLOBAL_SCOPE}][${remoteEntry.name}][${sharedInfo.packageName}] Entrypoints not covered by the shared version: ${uncovered.join(', ')}.`;
-
-        if (config.strict.strictEntryPointCoverage) {
-          config.log.error(8, msg);
-          throw new NFError(`Could not process remote '${remoteEntry.name}'`);
-        }
-        if (config.profile.scopeUncoveredEntrypoints) {
-          config.log.debug(8, msg);
-          action = 'scope';
-        }
-      }
-    }
 
     // A `scope` row is another remote's own files, and a `skip` row nobody shares serves nothing globally.
     const matchingVersion = sharedVersion
@@ -152,7 +132,7 @@ export function createUpdateCache(
     }
 
     write();
-    return { action, provided, sameVersion };
+    return { action, provided };
   }
 
   // Each entrypoint is served by the copy of the shared version that declares it.

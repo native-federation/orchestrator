@@ -152,11 +152,9 @@ export function createPoolDynamicExternals(
       ports.sharedExternalsRepo.addOrUpdate(name, record, scope);
   }
 
-  // Whether an entrypoint a skip leaves uncovered may come from the remote's own build: the coverage policies
-  // refuse it, and so does the next page of a named scope, for a skip-only package, under `strictImportMap`.
+  // Whether an entrypoint a skip leaves uncovered may come from the remote's own build: the next page of a
+  // named scope refuses it, for a skip-only package, under `strictImportMap`.
   function maySelfFill(scope: string): boolean {
-    if (config.strict.strictEntryPointCoverage || config.profile.scopeUncoveredEntrypoints)
-      return false;
     return scope === GLOBAL_SCOPE || !config.strict.strictImportMap;
   }
 

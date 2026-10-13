@@ -222,12 +222,7 @@ describe('createGenerateImportMap (shareScope-externals)', () => {
 
   // The shared version's surface is the union of its copies, so a skipped version is remapped to
   // entrypoints no single copy of the winner bundles alone.
-  it.each([
-    ['neither setting', () => {}],
-    ['scopeUncoveredEntrypoints', () => (config.profile.scopeUncoveredEntrypoints = true)],
-    ['strictEntryPointCoverage', () => (config.strict.strictEntryPointCoverage = true)],
-  ])('should remap to a merged entrypoint of the shared version with %s', async (_name, enable) => {
-    enable();
+  it('should remap to a merged entrypoint of the shared version', async () => {
     adapters.sharedExternalsRepo.getFromScope = vi.fn((scope?: string): shareScope => {
       return !scope || scope === GLOBAL_SCOPE
         ? {}
@@ -311,7 +306,6 @@ describe('createGenerateImportMap (shareScope-externals)', () => {
     const sub = { 'dep-a': 'dep-a.js', 'dep-a/sub': 'dep-a-sub.js' };
 
     it('should map an entrypoint the override lacks from the other external sharing it', async () => {
-      config.strict.strictEntryPointCoverage = true;
       config.strict.strictImportMap = true;
       adapters.sharedExternalsRepo.getFromScope = vi.fn((scope?: string): shareScope =>
         !scope || scope === GLOBAL_SCOPE
@@ -475,63 +469,6 @@ describe('createGenerateImportMap (shareScope-externals)', () => {
       'dep-a': mockScopeUrl_MFE2({ file: 'dep-a.js' }),
     });
     expect(config.log.error).not.toHaveBeenCalled();
-  });
-
-  it('should warn and drop the uncovered entrypoint when scopeUncoveredEntrypoints is on', async () => {
-    config.profile.scopeUncoveredEntrypoints = true;
-    adapters.sharedExternalsRepo.getFromScope = vi.fn((scope?: string): shareScope => {
-      return !scope || scope === GLOBAL_SCOPE
-        ? {}
-        : {
-            'dep-a': mockExternal_A({
-              dirty: false,
-              versions: [
-                mockVersion_A.v2_1_2({ action: 'share', remotes: ['team/mfe1'] }),
-                mockVersion_A.v2_1_1({
-                  action: 'skip',
-                  remotes: {
-                    'team/mfe2': { entries: { 'dep-a': 'dep-a.js', 'dep-a/sub': 'dep-a-sub.js' } },
-                  },
-                }),
-              ],
-            }),
-          };
-    });
-
-    const actual = await generateImportMap();
-
-    expect(actual.scopes![mockScopeUrl_MFE2()]).toEqual({
-      'dep-a': mockScopeUrl_MFE1({ file: 'dep-a.js' }),
-    });
-    expect(config.log.warn).toHaveBeenCalledWith(
-      4,
-      "[custom-scope][dep-a][team/mfe2] Entrypoint 'dep-a/sub' is not covered by the shared version."
-    );
-  });
-
-  it('should throw for an uncovered entrypoint when strictEntryPointCoverage and strictImportMap', async () => {
-    config.strict.strictEntryPointCoverage = true;
-    config.strict.strictImportMap = true;
-    adapters.sharedExternalsRepo.getFromScope = vi.fn((scope?: string): shareScope => {
-      return !scope || scope === GLOBAL_SCOPE
-        ? {}
-        : {
-            'dep-a': mockExternal_A({
-              dirty: false,
-              versions: [
-                mockVersion_A.v2_1_2({ action: 'share', remotes: ['team/mfe1'] }),
-                mockVersion_A.v2_1_1({
-                  action: 'skip',
-                  remotes: {
-                    'team/mfe2': { entries: { 'dep-a': 'dep-a.js', 'dep-a/sub': 'dep-a-sub.js' } },
-                  },
-                }),
-              ],
-            }),
-          };
-    });
-
-    await expect(generateImportMap()).rejects.toThrow('Could not create ImportMap.');
   });
 
   it('should fallback to scope with the action skip and no shared externals.', async () => {

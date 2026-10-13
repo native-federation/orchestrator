@@ -892,7 +892,6 @@ describe('pooling regressions', () => {
       expect(actions['@ui/kit']).toEqual({
         action: 'skip',
         covered: ['@ui/kit', '@ui/kit/sub'],
-        sameVersion: true,
       });
       expect(resolves(merged, 'team/mfe-d', '@ui/kit/sub')).toBe(file('team/mfe-a', '@ui/kit/sub'));
       // The share row keeps mfe-a's copy; mfe-d's runs its files from a skip row at the same tag.

@@ -25,12 +25,10 @@ export const mockConfig = (): ConfigContract => ({
     strictExternalSameVersionCompatibility: false,
     strictExternalVersion: false,
     strictImportMap: false,
-    strictEntryPointCoverage: false,
   },
   profile: {
     latestSharedExternal: false,
     skipInvalidExternalVersions: false,
-    scopeUncoveredEntrypoints: false,
     overrideCachedRemotes: 'always',
     overrideCachedRemotesIfURLMatches: false,
   },

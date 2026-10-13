@@ -47,8 +47,7 @@ export type CoherenceInput = {
  * entries (docs/version-resolver.md §"Merging within a version").
  *
  * Reads the map the way a browser would (a remote's own scope entry wins over `imports`), so it fails on
- * exactly the combinations a page would really run. Deliberately not called `findTears`:
- * `apply-winner.ts:110` owns that name for entrypoint coverage, which is a different failure.
+ * exactly the combinations a page would really run.
  */
 export function findIncoherentRemotes({
   importMap,

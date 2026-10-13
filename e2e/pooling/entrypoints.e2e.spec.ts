@@ -123,7 +123,7 @@ test.describe('entrypoint coverage: a remote joining an already-resolved version
     wide('team/mfe3', SCOPE.mfe3),
   ];
 
-  test('self-fills the joining remote by default', async ({ nf }) => {
+  test('self-fills the joining remote', async ({ nf }) => {
     const [first, late] = joined();
     await nf.init([first]);
     expect((await nf.map()).imports[`${M}/sort`]).toBeUndefined();
@@ -136,34 +136,6 @@ test.describe('entrypoint coverage: a remote joining an already-resolved version
     expect(map.imports[`${M}/sort`]).toBe(`${SCOPE.mfe3}${M}/sort.js`);
     expect(storedActions(await nf.store(), M)).toEqual([`${TAG}:share`]);
   });
-
-  // The joiner builds the tag that is already shared, so the two copies merge and the union of their
-  // entrypoints is published. Both coverage settings only govern tears *between* versions, so neither
-  // splits the joiner out — nothing here is torn to begin with.
-  for (const [name, profile, strict] of [
-    ['scopeUncoveredEntrypoints', { scopeUncoveredEntrypoints: true }, undefined],
-    ['strictEntryPointCoverage', undefined, { strictEntryPointCoverage: true }],
-  ] as const) {
-    test(`merges the joining remote into the cached version under ${name}`, async ({ nf }) => {
-      const [first, late] = joined();
-      const options = { ...(profile ? { profile } : {}), ...(strict ? { strict } : {}) };
-      await nf.init([first], options);
-      await nf.init([first, late], options);
-
-      // One record on the tag: the joiner deduped into the shared copy rather than taking its own.
-      expect(storedActions(await nf.store(), M)).toEqual([`${TAG}:share`]);
-
-      const map = await nf.map();
-      expect(map.imports[`${M}/table`]).toBe(`${SCOPE.mfe1}${M}/table.js`);
-      // `/sort` is the entrypoint only the joiner bundles, published from its build at the same tag.
-      expect(map.imports[`${M}/sort`]).toBe(`${SCOPE.mfe3}${M}/sort.js`);
-      expect((await nf.load('team/mfe3')).seen).toEqual({
-        [M]: build(1),
-        [`${M}/table`]: build(1),
-        [`${M}/sort`]: build(3),
-      });
-    });
-  }
 
   test('re-resolves compatibility when a strict remote joins a skipped version', async ({ nf }) => {
     // 22.0.5 is skipped on the first init because mfe2 accepts whatever is shared. mfe3 then joins

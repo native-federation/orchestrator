@@ -77,8 +77,7 @@ export function createDetermineSharedExternals(
     return Promise.resolve();
   };
 
-  // Entrypoints declared by the versions `winner` would skip that its own copies can't serve. Prices
-  // exactly the tears `applyWinner.findTears` would report.
+  // Entrypoints declared by the versions `winner` would skip that its own copies can't serve.
   function uncoveredTears(
     external: SharedExternal,
     winner: SharedVersion,

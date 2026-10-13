@@ -305,41 +305,29 @@ the shared version ships `@angular/core` while a compatible, deduped remote on a
 
 Serving those two specifiers from two **different versions** is a **tear**. It is harmless for most
 libraries but can break packages whose secondary entrypoints share module-singleton state with the primary.
-Three behaviours are available, in precedence order:
+An unpooled package **self-fills**: the specifier is served from the declaring remote's own build. Nothing is
+dropped; the package tears.
 
-| Setting | Behaviour on an entrypoint uncovered by the shared version |
-| --- | --- |
-| [`strict.strictEntryPointCoverage`](./config.md#modeConfig) | **Throws.** Resolution refuses to share a package it cannot serve coherently. |
-| [`profile.scopeUncoveredEntrypoints`](./config.md#modeConfig) | **Scopes.** The uncovered copy is split out into a `scope` version of its own tag and serves its whole `entries` bunch from its own build. Sharing continues for the copies the shared version does cover. |
-| neither (default) | **Self-fills.** The specifier is served from the declaring remote's own build and a warning is logged. Nothing is dropped; the package tears. |
-
-**Inside a pool the tear cannot happen at all**, whichever of the three is configured: pooling tests coverage
+**Inside a pool the tear cannot happen at all**: pooling tests coverage
 itself, **per specifier**, and a remote no build covers takes its whole family from its own build (see
 [How pooling resolves](#how-pooling-resolves)). Per specifier is the load-bearing part — a build can be the
 elected basis of every *member* of a pool and still not carry one secondary entrypoint, which the mapping then
 serves from the declaring remote's own build at that remote's own tag. Every test pooling applies, including
-the borrowing of same-tag entrypoints from other builds, is therefore keyed on specifiers. All three
-settings are `false` in every shipped profile, so a pooled family relies on the pooling rule, and an unpooled
-package still self-fills as described.
+the borrowing of same-tag entrypoints from other builds, is therefore keyed on specifiers.
 
-Both settings are strictly about tears between versions; copies of the shared version itself always merge,
-whatever they are set to. A subpool copy is exempt in both directions — it cannot cover anyone else, and
-the shared version cannot tear it, because it resolves through its subpool's build rather than through the
-version. Scoping is per remote copy, not per version: given a shared surface
-`{table, sort}`, a skipped `{table}` and a skipped `{table, paginator}`, only the third is split out — the
-first two keep sharing. The import-map builders keep a last-resort net for stale storage: an uncovered
-specifier reaching them is refused under `strictEntryPointCoverage` or
-[`strict.strictImportMap`](./config.md#modeConfig), and warned about otherwise.
+Copies of the shared version itself always merge. A subpool copy is exempt in both directions — it cannot
+cover anyone else, and the shared version cannot tear it, because it resolves through its subpool's build
+rather than through the version.
 
-The additive dynamic-init path applies the same policy to a runtime remote whose tag differs from the shared
-one, but measures it against a smaller surface: what the **committed** import map publishes for the version,
+The additive dynamic-init path measures a runtime remote whose tag differs from the shared one against a
+smaller surface: what the **committed** import map publishes for the version,
 not the whole union. A copy that joined at runtime served its own extra entrypoints into its own scope alone
 — the committed `imports` cannot be added to — so it is part of the version and covers nobody. Reading the
 whole union there would report a specifier as covered that the joining remote has no way to resolve. A
 shareScope skip is not restricted this way: it is handed a per-consumer override that names its provider
 outright, so any copy can serve it.
 
-To minimise tears (and scope promotions) the resolver also uses coverage as a **tiebreaker** when choosing
+To minimise tears the resolver also uses coverage as a **tiebreaker** when choosing
 the shared version: among candidates that tie on the extra-downloads heuristic, it prefers the one whose
 merged entries leave the fewest specifiers uncovered across the versions it would skip. A decisive
 extra-downloads winner is never overridden, and an exact tie still keeps the highest version.
@@ -576,9 +564,7 @@ flowchart TD
 > Externals in a [pool](#dependency-pooling) skip this flow: the pool elects its members together, and
 > `determine` only reports them as re-elected.
 
-> The "least extra downloads" choice (F5) is tie-broken by entrypoint coverage, and with
-> [`profile.scopeUncoveredEntrypoints`](./config.md#modeConfig) a `SKIP` copy whose specifiers the
-> winner cannot cover is promoted to `SCOPE` — copies of the winner's own tag merge instead. See
+> The "least extra downloads" choice (F5) is tie-broken by entrypoint coverage. See
 > [Entrypoint coverage and tearing](#entrypoint-coverage-and-tearing).
 
 #### A verdict belongs to the copy, not the version
@@ -1049,8 +1035,8 @@ it. In order:
    row, an entrypoint it filled, or a build that published before its pool formed), else the map. And a chunked
    copy never runs part of a package beside the map's files of it. A range rejecting a global tag moves it on
    with cause `incompatible`. A member the resolver scoped is judged the same way: a strict range that rejects
-   the map's tag islands the family as `incompatible`, while a copy `scopeUncoveredEntrypoints` scoped for an
-   entrypoint the shared version lacks becomes a skip when the map serves every entrypoint it ships, as at init.
+   the map's tag islands the family as `incompatible`, while one scoped for any other reason becomes a skip when
+   the map serves every entrypoint it ships, as at init.
 2. **Otherwise it serves its own family**, with its `poolCause` recorded, and is warned in the dynamic lines of
    [What pooling logs](#what-pooling-logs). A remote in a named scope whose map files belong to a remote no
    longer in the cache serves itself too (`uncovered`): its scope cannot map those files, and half its family on
@@ -1135,7 +1121,7 @@ Each new dependency gets one of these actions during dynamic init:
 | --------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **SKIP**  | Version already exists or use existing shared version. In a shareScope context this action is used for overriding by skipping the provided external and loading a compatible cached version instead. |
 | **SHARE** | No compatible version exists (yet), become the shared version for this scope                                                                                                                         |
-| **SCOPE** | A copy whose own range rejects the shared version while `strictVersion: true` (never when the shared version is the copy's own), or (under `scopeUncoveredEntrypoints`) one **on another tag** whose entrypoints the shared winner cannot cover — served coherently from its own build. Per copy, not per version: co-tagged copies that accept the shared version keep deduping, and a copy of the shared tag merges its extra entrypoints in, serving them from its own build. |
+| **SCOPE** | A copy whose own range rejects the shared version while `strictVersion: true` (never when the shared version is the copy's own), served from its own build. Per copy, not per version: co-tagged copies that accept the shared version keep deduping, and a copy of the shared tag merges its extra entrypoints in, serving them from its own build. |
 
 ### Example: Dynamic Loading Scenario
 

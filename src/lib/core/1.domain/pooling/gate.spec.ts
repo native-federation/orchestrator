@@ -294,8 +294,8 @@ describe('coverFromMap', () => {
     }
   });
 
-  // mfe's copy of `@ng/core` ships rxjs-interop, which the map lacks; the map serves its root from F. With
-  // the coverage policies off, mfe would self-fill rxjs-interop from its own build. A flat file binds its
+  // mfe's copy of `@ng/core` ships rxjs-interop, which the map lacks; the map serves its root from F. mfe
+  // would self-fill rxjs-interop from its own build. A flat file binds its
   // imports through the map, so that is a cover. A chunked one imports mfe's own core internals beside F's
   // core: the package is torn, and no member is covered.
   it("reports a package torn when a chunked copy's own entrypoint would run beside the map's files", () => {

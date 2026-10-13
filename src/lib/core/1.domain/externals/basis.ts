@@ -108,12 +108,8 @@ function collectEntries(
 // A `versionEntries` map or a bare name set both answer "can this be served?".
 type Covered = Pick<ReadonlySet<string>, 'has'>;
 
-export function uncoveredEntrypoints(remote: SharedVersionMeta, covered: Covered): string[] {
-  return Object.keys(remote.entries).filter(entrypoint => !covered.has(entrypoint));
-}
-
-// `uncoveredEntrypoints` without materializing the names: the resolver's O(versions²) selection
-// loop asks this once per remote per candidate and only needs the count. Keep the two in sync.
+// Counted rather than listed: the resolver's O(versions²) selection loop asks this once per remote per
+// candidate.
 export function countUncoveredEntrypoints(remote: SharedVersionMeta, covered: Covered): number {
   let uncovered = 0;
   for (const entrypoint in remote.entries) {

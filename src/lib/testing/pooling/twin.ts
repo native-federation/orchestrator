@@ -72,7 +72,6 @@ export async function twinGate(
   const rig = openPortfolio({
     host,
     latestSharedExternal: spec.latestSharedExternal,
-    scopeUncoveredEntrypoints: spec.scopeUncoveredEntrypoints,
     ...(scope && { scope }),
   });
   const init = await rig.init(entries);

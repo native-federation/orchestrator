@@ -638,24 +638,33 @@ describe('island warnings (contract)', () => {
 
       it('bound: a committed file binds a specifier to the map, the load to its own', async () => {
         // The host ships http's testing entrypoint as a package of its own; m ships it inside http, which
-        // nobody serves. Without a self-fill, m would run its own testing beside the host's, which the host's
-        // files bind.
+        // nobody serves. A named scope under `strictImportMap` refuses the self-fill, so m would run its own
+        // testing beside the host's, which the host's files bind.
+        const team = (entry: RemoteEntry): RemoteEntry => ({
+          ...entry,
+          shared: entry.shared.map(s => ({ ...s, shareScope: 'team' })),
+        });
         p = portfolio(
           {},
-          { storage: 'nf-island-warnings-bound', realRepositories: true, hosts: ['host'] }
+          {
+            storage: 'nf-island-warnings-bound',
+            realRepositories: true,
+            hosts: ['host'],
+            scope: 'team',
+          }
         );
-        p.config.strict.strictEntryPointCoverage = true;
-        await p.runInit([whole('host', shared('@fw/core'), shared('@fw/http/testing'))]);
+        p.config.strict.strictImportMap = true;
+        await p.runInit([team(whole('host', shared('@fw/core'), shared('@fw/http/testing')))]);
         vi.mocked(p.config.log.warn).mockClear();
 
         await p.runDynamic(
-          whole('m', shared('@fw/core'), shared('@fw/http', ['@fw/http/testing']))
+          team(whole('m', shared('@fw/core'), shared('@fw/http', ['@fw/http/testing'])))
         );
 
         expect(p.islands()).toEqual({ m: 'uncovered' });
         // The host runs testing on the map, so this is not the off-map case above; the line is the same.
         expect(warnings()).toEqual([
-          "[__GLOBAL__] 'm' serves its own family: committed build 'host', whose files it would reach, resolves '@fw/http/testing' to another file than it would. All 3 of its entrypoints are scoped for it.",
+          "[team] 'm' serves its own family: committed build 'host', whose files it would reach, resolves '@fw/http/testing' to another file than it would. All 3 of its entrypoints are scoped for it.",
         ]);
       });
     });

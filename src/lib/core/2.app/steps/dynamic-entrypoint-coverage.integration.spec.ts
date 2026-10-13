@@ -110,22 +110,4 @@ describe('entrypoint coverage on the dynamic path (integration)', () => {
       'dep-a/sub': mockScopeUrl_MFE3({ file: 'dep-a-sub.js' }),
     });
   });
-
-  // The same disagreement decides whether a copy on *another* tag is torn, which is what the coverage
-  // settings act on: `/sub` sits in the version's surface but not in the map, so mfe3 does tear and the
-  // policy has to see it. Left to `convert-to-import-map` alone it would throw here instead.
-  it('should treat a specifier only a runtime-joined copy provides as a tear for another tag', async () => {
-    await init();
-    await join(mockRemoteEntry_MFE2({ exposes: [], shared: [withSub('v2_1_2')] }));
-
-    config.strict.strictEntryPointCoverage = true;
-    await expect(
-      join(mockRemoteEntry_MFE3({ exposes: [], shared: [withSub('v2_1_1')] }))
-    ).rejects.toThrow("Could not process remote 'team/mfe3'");
-
-    expect(config.log.error).toHaveBeenCalledWith(
-      8,
-      `[${GLOBAL_SCOPE}][team/mfe3][dep-a] Entrypoints not covered by the shared version: dep-a/sub.`
-    );
-  });
 });

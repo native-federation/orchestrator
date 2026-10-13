@@ -30,7 +30,6 @@ import {
   scopeUrlsOf,
   servedOffMap,
   torn,
-  unmapped,
 } from 'lib/testing/pooling/property-harness';
 
 /**
@@ -100,16 +99,12 @@ describe('pooling properties: dynamic loads (generated portfolios)', { timeout: 
         portfolioArbitrary({
           maxRemotes: 12,
           labelNoise: true,
-          scopeUncoveredEntrypoints: true,
         }).chain(spec => fc.tuple(fc.constant(lenient(spec)), loads(spec))),
         runs,
         async ([spec, extras]) => {
           const entries = toRemoteEntries(spec);
           const host = hostOf(spec);
-          const rig = openPortfolio({
-            host,
-            scopeUncoveredEntrypoints: spec.scopeUncoveredEntrypoints,
-          });
+          const rig = openPortfolio({ host });
           await rig.init(entries);
           const loaded = [...entries];
 
@@ -136,12 +131,6 @@ describe('pooling properties: dynamic loads (generated portfolios)', { timeout: 
             loaded.push(added);
             const after = torn(merged, record, scopeUrlsOf(loaded), host);
             expect(after.filter(t => !before.includes(t))).toEqual([]);
-            if (spec.scopeUncoveredEntrypoints)
-              expect(
-                unmapped(outcome(merged, record, scopeUrlsOf(loaded)).runs).filter(k =>
-                  k.startsWith(`${added.name}|`)
-                )
-              ).toEqual([]);
           }
         }
       ));

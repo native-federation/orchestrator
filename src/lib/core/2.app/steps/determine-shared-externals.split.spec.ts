@@ -187,52 +187,6 @@ describe('determine: splitting a version on election', () => {
     });
   });
 
-  it('subjects the newly deduping copy to the entrypoint coverage policy', async () => {
-    // New interaction: while the copy sat in a `scope` row, `findTears` skipped it. Now that it dedups it
-    // is checked like any other skip, and `scopeTornRemotes` merges it into the scope row already at its
-    // tag — so a split can be undone by coverage, which is the right outcome and not a second row.
-    config.profile.scopeUncoveredEntrypoints = true;
-    seed([
-      majority('2.2.0', 4),
-      version('2.1.0', [
-        {
-          remote: 'team/mfe-a',
-          req: '^2.1.0',
-          entries: { 'dep-a': 'a.js', 'dep-a/extra': 'x.js' },
-        },
-        { remote: 'team/mfe-c', req: '~2.1.0' },
-      ]),
-    ]);
-
-    await createDetermineSharedExternals(config, adapters)();
-
-    expect(rows()).toEqual([majorityRow('2.2.0', 4), '2.1.0:scope:[team/mfe-c,team/mfe-a]']);
-  });
-
-  it("puts a torn newer copy's scope row above an older winner", async () => {
-    // The newer copy is not strict, so it dedups to the older winner; coverage then tears it and empties
-    // its row. Its scope row has to take the emptied row's place, not land after the winner's.
-    config.profile.scopeUncoveredEntrypoints = true;
-    seed([
-      version('2.2.0', [
-        {
-          remote: 'team/mfe-n',
-          req: '^2.2.0',
-          strict: false,
-          entries: { 'dep-a': 'a.js', 'dep-a/extra': 'x.js' },
-        },
-      ]),
-      version(
-        '2.1.0',
-        Array.from({ length: 4 }, (_, i) => ({ remote: `team/maj${i + 1}`, req: '~2.1.0' }))
-      ),
-    ]);
-
-    await createDetermineSharedExternals(config, adapters)();
-
-    expect(rows()).toEqual(['2.2.0:scope:[team/mfe-n]', majorityRow('2.1.0', 4)]);
-  });
-
   it('still refuses the portfolio under strictExternalCompatibility', async () => {
     config.strict.strictExternalCompatibility = true;
     seed([
@@ -249,9 +203,8 @@ describe('determine: splitting a version on election', () => {
 
   // Pooling runs first and leaves nothing dirty with pool results (plan.spec.ts, the portfolio harness), so
   // determine never reads a `servedBy`. Should a stale one reach it anyway, it means nothing here: the copy
-  // is priced and scoped like any other.
+  // is priced and placed like any other.
   it('elects a copy carrying a stale servedBy as if it carried none', async () => {
-    config.profile.scopeUncoveredEntrypoints = true;
     seed([
       majority('2.2.0', 4),
       version('2.1.0', [
@@ -266,8 +219,8 @@ describe('determine: splitting a version on election', () => {
 
     await createDetermineSharedExternals(config, adapters)();
 
-    // Nothing the shared 2.2.0 ships covers `/extra`, so mfe-a is torn and takes its own build.
-    expect(rows()).toEqual([majorityRow('2.2.0', 4), '2.1.0:scope:[team/mfe-a]']);
+    // mfe-a dedups to the shared 2.2.0 like any non-strict copy.
+    expect(rows()).toEqual([majorityRow('2.2.0', 4), '2.1.0:skip:[team/mfe-a]']);
   });
 
   // The objective has to price a rejected row at the copies that really self-serve. Charging it for every

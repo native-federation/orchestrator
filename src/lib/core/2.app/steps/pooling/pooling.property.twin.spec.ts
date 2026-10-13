@@ -27,7 +27,6 @@ describe('pooling properties: twin loads (generated portfolios)', { timeout: TIM
         maxRemotes: 12,
         labelNoise: true,
         latestSharedExternal: true,
-        scopeUncoveredEntrypoints: true,
       }),
       50,
       twinGates
@@ -44,26 +43,6 @@ describe('pooling properties: twin loads (generated portfolios)', { timeout: TIM
           maxRemotes: 12,
           labelNoise: true,
           flat: true,
-          ...(shareScope && { shareScope }),
-        }),
-        50,
-        twinGates
-      ));
-
-  // Flat builds ship each entrypoint as a package of its own, which the map can still serve where the shared
-  // version lacks it.
-  for (const [offset, shareScope] of [
-    [114, undefined],
-    [115, 'team'],
-  ] as const)
-    it(`twin with flat and dense builds under scopeUncoveredEntrypoints, ${shareScope ?? 'global'} share scope`, () =>
-      run(
-        offset,
-        twinArbitrary({
-          maxRemotes: 12,
-          labelNoise: true,
-          flat: true,
-          scopeUncoveredEntrypoints: true,
           ...(shareScope && { shareScope }),
         }),
         50,
@@ -106,15 +85,14 @@ describe('pooling properties: twin counterexamples', () => {
 
   // fx-sf-global (tester-9). r0 is a flat 18.0.0 build (@p0/m1 and @p0/m1/sub each a package of its own);
   // r1 a dense 18.2.0 build shipping only @p0/m1/sub under ^18. At init r1 skips onto the map, which serves
-  // @p0/m1/sub from r0. Under scopeUncoveredEntrypoints the resolver scopes a clone of r1 (the shared
-  // @p0/m1 18.2.0 lacks /sub); the gate judges it all the same, and the map serves it as it serves r1.
+  // @p0/m1/sub from r0, although the shared @p0/m1 18.2.0 lacks /sub. A clone of r1 loaded at runtime is
+  // served by the map as r1 is.
   const m1 = (flat: boolean, minor: number, members: (string | null)[]) =>
     remote(flat, { major: 1, minor, patch: 0, members, range: 'major' }, 'caret');
   const sfGlobal = {
     poolSizes: [3],
     strict: false,
     host: null,
-    scopeUncoveredEntrypoints: true,
     remotes: [m1(true, 0, [null, 'root+sub', null]), m1(false, 2, [null, 'sub', null])],
   } as unknown as PortfolioSpec;
 

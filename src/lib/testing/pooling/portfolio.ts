@@ -56,8 +56,6 @@ export type PortfolioOptions = {
   strict?: boolean;
   /** `profile.latestSharedExternal`. */
   latestSharedExternal?: boolean;
-  /** `profile.scopeUncoveredEntrypoints`. */
-  scopeUncoveredEntrypoints?: boolean;
   /**
    * Remote info, scoped externals and chunks real on the namespace too, rather than mocked off `scopeUrls`:
    * needed to init from remote entries and to `reload`.
@@ -88,7 +86,6 @@ export const portfolio = (
     assertNoTear: checkTear = true,
     strict = false,
     latestSharedExternal = false,
-    scopeUncoveredEntrypoints = false,
     realRepositories = false,
     scope = GLOBAL_SCOPE,
   }: PortfolioOptions = {}
@@ -111,7 +108,6 @@ export const portfolio = (
     const config: ConfigContract = mockConfig();
     config.strict.strictExternalCompatibility = strict;
     config.profile.latestSharedExternal = latestSharedExternal;
-    config.profile.scopeUncoveredEntrypoints = scopeUncoveredEntrypoints;
     const adapters: DrivingContract = mockAdapters();
     const storageConfig = { storage: globalThisStorageEntry(storage), clearStorage };
     adapters.versionCheck = createVersionCheck();

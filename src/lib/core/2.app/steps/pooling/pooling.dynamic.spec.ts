@@ -177,8 +177,8 @@ describe('pooling (dynamic)', () => {
     });
   });
 
-  describe('under scopeUncoveredEntrypoints', () => {
-    const options = { realRepositories: true, scopeUncoveredEntrypoints: true } as const;
+  describe('a load at the committed tag', () => {
+    const options = { realRepositories: true } as const;
     const fw = (entrypoints: string[] = []) => [
       shared('@fw/core', '17.0.0', '^17.0.0', { strict: false, entrypoints }),
       shared('@fw/common', '17.0.0', '^17.0.0', { strict: false }),

@@ -804,8 +804,8 @@ describe('createPoolDynamicExternals', () => {
     });
 
     it("records a resolver scope for a missing entrypoint as 'uncovered', not a range rejection", async () => {
-      // Under `scopeUncoveredEntrypoints` the resolver scopes mfe's common@17.0.1: its `/http` entrypoint is
-      // not in the committed 17.0.0, though its range takes 17.0.0. The family self-serves for coverage.
+      // mfe's common@17.0.1 arrives scoped though its range takes the committed 17.0.0, whose surface lacks
+      // its `/http` entrypoint. The family self-serves for coverage.
       const entry = entryWith(shared('@framework/core'), shared('@framework/common'));
       const common = committed('@framework/common', { tag: '17.0.0', remotes: ['host'] });
       common.versions.push({
@@ -1034,8 +1034,8 @@ describe('createPoolDynamicExternals', () => {
       ]);
     });
 
-    // The resolver scoped mfe's `@fw/http` (under `scopeUncoveredEntrypoints`, say): the shared version lacks
-    // its testing entrypoint. The map serves that entrypoint from F's flat package, so the gate judges mfe
+    // mfe's `@fw/http` arrives scoped though no range rejects the shared version, which lacks its testing
+    // entrypoint. The map serves that entrypoint from F's flat package, so the gate judges mfe
     // global, as init would, and the scope becomes a skip. X is a committed island at the same tag.
     it('turns a resolver scope the map serves into a skip, leaving the scope row to the others', async () => {
       givenCommitted({
@@ -1146,65 +1146,37 @@ describe('createPoolDynamicExternals', () => {
       expect(verdictsWritten()).toEqual(['mfe@@fw/core: uncovered', 'mfe@@fw/http: uncovered']);
     });
 
-    // Under a coverage policy a skip refuses what it does not cover, and a named scope under `strictImportMap`
-    // refuses a skip-only package with an entrypoint no shared version serves on the next page, so the partial
-    // share would publish its own testing. But mfe takes F's core, whose file resolves testing to F's: two
-    // files of one specifier, so mfe serves its whole family itself.
-    it.each([
-      [
-        'strictEntryPointCoverage',
-        undefined,
-        (c: ConfigContract): void => {
-          c.strict.strictEntryPointCoverage = true;
-        },
-      ],
-      [
-        'scopeUncoveredEntrypoints',
-        undefined,
-        (c: ConfigContract): void => {
-          c.profile.scopeUncoveredEntrypoints = true;
-        },
-      ],
-      [
-        'strictImportMap',
-        'team',
-        (c: ConfigContract): void => {
-          c.strict.strictImportMap = true;
-        },
-      ],
-    ] as const)(
-      'scopes the family of a partly served share under %s (%s)',
-      async (_policy, shareScope, set) => {
-        set(config);
-        scopeUrls('F');
-        givenCommitted({
-          '@fw/core': external(
-            row('17.0.0', 'share', copy('F', ['@fw/core'], true), copy('mfe', ['@fw/core']))
-          ),
-          '@fw/http/testing': external(
-            row('17.0.0', 'share', copy('F', ['@fw/http/testing'], true))
-          ),
-          '@fw/http': external(
-            row('17.0.0', 'share', copy('mfe', ['@fw/http', '@fw/http/testing'], true))
-          ),
-        });
+    // A named scope under `strictImportMap` refuses a skip-only package with an entrypoint no shared version
+    // serves on the next page, so the partial share would publish its own testing. But mfe takes F's core,
+    // whose file resolves testing to F's: two files of one specifier, so mfe serves its whole family itself.
+    it('scopes the family of a partly served share under strictImportMap', async () => {
+      config.strict.strictImportMap = true;
+      scopeUrls('F');
+      givenCommitted({
+        '@fw/core': external(
+          row('17.0.0', 'share', copy('F', ['@fw/core'], true), copy('mfe', ['@fw/core']))
+        ),
+        '@fw/http/testing': external(row('17.0.0', 'share', copy('F', ['@fw/http/testing'], true))),
+        '@fw/http': external(
+          row('17.0.0', 'share', copy('mfe', ['@fw/http', '@fw/http/testing'], true))
+        ),
+      });
 
-        const { actions } = await poolDynamicExternals(load(shareScope));
+      const { actions } = await poolDynamicExternals(load('team'));
 
-        expect(actions).toEqual({
-          '@fw/core': { action: 'scope' },
-          '@fw/http': { action: 'scope' },
-        });
-        expect(verdictsWritten()).toEqual(['mfe@@fw/core: uncovered', 'mfe@@fw/http: uncovered']);
-        // F runs testing on the map; the line names the build whose file binds it all the same.
-        expect(config.log.warn).toHaveBeenCalledOnce();
-        expect(config.log.warn).toHaveBeenCalledWith(
-          8,
-          // Wording is pinned in island-warnings.contract.spec.ts alone.
-          expect.stringContaining("committed build 'F'")
-        );
-      }
-    );
+      expect(actions).toEqual({
+        '@fw/core': { action: 'scope' },
+        '@fw/http': { action: 'scope' },
+      });
+      expect(verdictsWritten()).toEqual(['mfe@@fw/core: uncovered', 'mfe@@fw/http: uncovered']);
+      // F runs testing on the map; the line names the build whose file binds it all the same.
+      expect(config.log.warn).toHaveBeenCalledOnce();
+      expect(config.log.warn).toHaveBeenCalledWith(
+        8,
+        // Wording is pinned in island-warnings.contract.spec.ts alone.
+        expect.stringContaining("committed build 'F'")
+      );
+    });
 
     describe('a skip whose entrypoint another package serves', () => {
       // G ships `@fw/core` 17.0.1 and, flat, `@fw/core/testing`. The shared version of `@fw/core` lacks

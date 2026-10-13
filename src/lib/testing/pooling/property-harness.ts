@@ -142,7 +142,6 @@ export function openPortfolio(
     strict?: boolean;
     scope?: string;
     latestSharedExternal?: boolean;
-    scopeUncoveredEntrypoints?: boolean;
   } = {}
 ) {
   const p = portfolio(
@@ -151,7 +150,6 @@ export function openPortfolio(
       hosts: o.host === undefined ? [] : [o.host],
       strict: o.strict,
       latestSharedExternal: o.latestSharedExternal,
-      scopeUncoveredEntrypoints: o.scopeUncoveredEntrypoints,
       ...(o.scope === undefined ? {} : { scope: o.scope }),
       storage: `nf-pooling-property-${namespaces++}`,
       realRepositories: true,
@@ -212,7 +210,6 @@ export async function initOrRefuse(spec: PortfolioSpec) {
     host,
     scope: spec.shareScope,
     latestSharedExternal: spec.latestSharedExternal,
-    scopeUncoveredEntrypoints: spec.scopeUncoveredEntrypoints,
   });
   try {
     const result = await rig.init(entries);
@@ -266,10 +263,6 @@ export function outcome(
       }
   return { runs, verdicts };
 }
-
-// Every `remote|specifier` a remote ships that the map leaves unresolved.
-export const unmapped = (runs: Record<string, string | null>): string[] =>
-  Object.keys(runs).filter(key => runs[key] === null);
 
 // `runs` split into the `remote|specifier` keys of the externals `record` names a pool for and the rest.
 export function byPooling(runs: Record<string, string | null>, record: shareScope) {

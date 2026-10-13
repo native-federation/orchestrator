@@ -201,13 +201,6 @@ export function createGenerateImportMap(
               addToScope(importMap, consumerScope, { [packageName]: claim.url });
               continue;
             }
-            if (
-              config.strict.strictEntryPointCoverage ||
-              config.profile.scopeUncoveredEntrypoints
-            ) {
-              warnUncoveredEntrypoint(shareScope, externalName, consumer.name, packageName);
-              continue;
-            }
             const url = _path.join(consumerScope, file);
             addToScope(importMap, consumerScope, { [packageName]: url });
             addIntegrity(importMap, url, consumer.name, file);
@@ -450,7 +443,7 @@ export function createGenerateImportMap(
   }
 
   // Copies of one tag build the same code, so serving a specifier only some of them bundle is not
-  // tearing: the version exposes the union of its copies, whatever the coverage policy.
+  // tearing: the version exposes the union of its copies.
   function mergeVersionEntries(
     importMap: ImportMap,
     chunkBundles: Record<string, Set<string>>,
@@ -487,7 +480,6 @@ export function createGenerateImportMap(
     }
   }
 
-  // Reaching here with a coverage policy set means stale storage, so it is refused instead.
   function selfFillUncovered(
     importMap: ImportMap,
     chunkBundles: Record<string, Set<string>>,
@@ -502,10 +494,6 @@ export function createGenerateImportMap(
       for (const [packageName, file] of Object.entries(remote.entries)) {
         const claim = claims.get(packageName)!;
         if (claim.action === 'share') continue;
-        if (config.strict.strictEntryPointCoverage || config.profile.scopeUncoveredEntrypoints) {
-          warnUncoveredEntrypoint(GLOBAL_SCOPE, externalName, remote.name, packageName);
-          continue;
-        }
         if (claim.copy !== remote) continue;
         const scope = getScope(GLOBAL_SCOPE, remote.name, externalName);
         const url = _path.join(scope, file);
@@ -515,20 +503,6 @@ export function createGenerateImportMap(
         remote.cached = true;
       }
     }
-  }
-
-  function warnUncoveredEntrypoint(
-    scope: string,
-    externalName: string,
-    remoteName: RemoteName,
-    packageName: string
-  ): void {
-    const msg = `[${scope}][${externalName}][${remoteName}] Entrypoint '${packageName}' is not covered by the shared version.`;
-    if (config.strict.strictEntryPointCoverage || config.strict.strictImportMap) {
-      config.log.error(4, msg);
-      throw new NFError('Could not create ImportMap.');
-    }
-    config.log.warn(4, msg);
   }
 
   function notifyDuplicateGlobalExternal(externalName: string): void {
