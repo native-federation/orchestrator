@@ -1,9 +1,9 @@
 import {
   addRemoteToVersion,
   countUncoveredEntrypoints,
+  forEachVersionEntry,
   isBetterBasis,
   versionDemands,
-  versionEntries,
 } from './basis';
 import type { SharedVersion, SharedVersionMeta } from './version.contract';
 
@@ -19,6 +19,15 @@ const remote = (
   cached,
   entries: Object.fromEntries(entries.map(e => [e, `${e.replace(/\//g, '-')}.js`])),
 });
+
+// The first claim per entrypoint, as every caller of the walk keeps it.
+const firstClaims = (v: SharedVersion): Map<string, SharedVersionMeta> => {
+  const claims = new Map<string, SharedVersionMeta>();
+  forEachVersionEntry(v, undefined, (entrypoint, r) => {
+    if (!claims.has(entrypoint)) claims.set(entrypoint, r);
+  });
+  return claims;
+};
 
 const version = (remotes: SharedVersionMeta[], host = false): SharedVersion => ({
   tag: '2.1.0',
@@ -160,11 +169,11 @@ describe('basis', () => {
     });
   });
 
-  describe('versionEntries', () => {
+  describe('forEachVersionEntry', () => {
     it('should merge the entrypoints of every copy', () => {
       const v = version([remote('a', ['dep-a']), remote('b', ['dep-a', 'dep-a/sub'])]);
 
-      expect(Array.from(versionEntries(v), ([entry, r]) => [entry, r.name])).toEqual([
+      expect(Array.from(firstClaims(v), ([entry, r]) => [entry, r.name])).toEqual([
         ['dep-a', 'a'],
         ['dep-a/sub', 'b'],
       ]);
@@ -173,7 +182,7 @@ describe('basis', () => {
     it('should let the earliest copy claim a shared entrypoint', () => {
       const v = version([remote('basis', ['dep-a']), remote('other', ['dep-a'])]);
 
-      expect(versionEntries(v).get('dep-a')!.name).toBe('basis');
+      expect(firstClaims(v).get('dep-a')!.name).toBe('basis');
     });
 
     // Pooling placed `subpooled` in a foreign build's subpool, so the import map names that build's files in
@@ -183,20 +192,20 @@ describe('basis', () => {
       const subpooled = { ...remote('subpooled', ['dep-a', 'dep-a/sub']), servedBy: 'elsewhere' };
       const v = version([remote('basis', ['dep-a']), subpooled]);
 
-      expect(Array.from(versionEntries(v).keys())).toEqual(['dep-a']);
+      expect(Array.from(firstClaims(v).keys())).toEqual(['dep-a']);
     });
 
     it('should fall through to the next copy for an entrypoint a subpool copy claimed first', () => {
       const subpooled = { ...remote('subpooled', ['dep-a']), servedBy: 'elsewhere' };
       const v = version([subpooled, remote('serving', ['dep-a'])]);
 
-      expect(versionEntries(v).get('dep-a')!.name).toBe('serving');
+      expect(firstClaims(v).get('dep-a')!.name).toBe('serving');
     });
   });
 
   describe('countUncoveredEntrypoints', () => {
     it('should count the entrypoints the version cannot serve', () => {
-      const covered = versionEntries(version([remote('a', ['dep-a'])]));
+      const covered = firstClaims(version([remote('a', ['dep-a'])]));
 
       expect(
         countUncoveredEntrypoints(remote('b', ['dep-a', 'dep-a/sub', 'dep-a/x']), covered)
@@ -210,7 +219,7 @@ describe('basis', () => {
 
       addRemoteToVersion(v, sibling);
 
-      expect(countUncoveredEntrypoints(sibling, versionEntries(v))).toBe(0);
+      expect(countUncoveredEntrypoints(sibling, firstClaims(v))).toBe(0);
     });
   });
 });

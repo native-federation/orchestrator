@@ -90,11 +90,13 @@ export function committedView(
     for (const version of member.external.versions)
       for (const meta of version.remotes) {
         const { servedBy } = meta;
+        // A share copy runs the map's files; only the loader's may ship more, and no reader looks it up.
+        if (version.action === 'share' && !servedBy) continue;
         let runs = runsOffMap.get(meta.name);
         if (!runs) runsOffMap.set(meta.name, (runs = new Map()));
         for (const specifier in meta.entries) {
-          // A shared copy runs its own file only for an entrypoint the map lacks.
-          if (version.action !== 'scope' && !servedBy && global.has(specifier)) continue;
+          // A skip copy runs its own file only for an entrypoint the map lacks.
+          if (version.action === 'skip' && !servedBy && global.has(specifier)) continue;
           // A subpool member's copy keeps its own tag in the record but runs its build's files.
           const tag =
             (servedBy ? builds.get(servedBy)?.tags.pinnedTag(specifier) : undefined) ?? version.tag;
