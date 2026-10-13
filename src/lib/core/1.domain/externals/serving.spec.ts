@@ -140,7 +140,7 @@ describe('servingBuildOf', () => {
       expect(result).toEqual<ServingBuild>({ remote: 'winner', tag: '1.0.0' });
     });
 
-    it("takes the winner's tag from whichever share row of the package it ships", () => {
+    it("takes the winner's tag from any share row of a package without a root", () => {
       const result = serving(
         ['fw/a', pooled('r2', version('skip', [copy('r1', ['fw/a'])]))],
         ['fw/b', pooled('r2', version('share', [copy('r2', ['fw/b'])], '2.0.0'))],
@@ -156,6 +156,16 @@ describe('servingBuildOf', () => {
 
       expect(serving(['fw', pooled('elsewhere', shipped)])).toBeUndefined();
       expect(serving(['fw', pooled(undefined, shipped)])).toBeUndefined();
+    });
+
+    it("serves nothing when the winner ships only a flat secondary beside another build's root", () => {
+      // Seeding the winner would run the root from one build and the secondary from another.
+      const result = serving(
+        ['fw', pooled('winner', version('share', [copy('member', ['fw', 'fw/testing'])]))],
+        ['fw/testing', pooled('winner', version('share', [copy('winner', ['fw/testing'])]))]
+      );
+
+      expect(result).toBeUndefined();
     });
 
     it("ignores a winner's copy that runs another build", () => {

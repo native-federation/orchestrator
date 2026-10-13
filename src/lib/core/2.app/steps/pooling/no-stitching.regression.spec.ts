@@ -343,6 +343,20 @@ describe('a remote runs every specifier of a package from one build', () => {
         entry('r0', shared(CORE), shared(SUB)),
       ],
     },
+    // The host wins the pool but ships only core/sub, as a flat external of its own; chunked d and unchunked u
+    // ship core{core, core/sub}, and d serves the root (without u, d is islanded and nothing is shared). Serving
+    // the winner's sub beside d's root would run d's core internals beside the host's sub chunk, so the package
+    // stays on d's build.
+    {
+      name: "takes a pooled package from its root's build when the winner ships only a flat secondary",
+      hosts: ['host'],
+      entries: [
+        entry('d', shared(CORE, { chunked: true, entrypoints: [SUB] })),
+        entry('u', shared(CORE, { entrypoints: [SUB] })),
+        entry('host', shared(SUB, { chunked: true })),
+      ],
+      expectMap: map => expect(map.imports[SUB]).toBe('http://d/fw_core_sub.js'),
+    },
     // A remote loaded at runtime self-fills interop in its own scope, but its
     // bundle's chunk is never mapped there.
     ...pools.map((pool): Case => ({

@@ -126,12 +126,12 @@ function candidatesOf(
   return [...candidates.values()];
 }
 
-// The pool's winner, where it ships the package; otherwise none, and the claims keep record order.
+// The pool's winner, where it ships the root (or, without one, any of the package); otherwise none, and the
+// claims keep record order.
 function winnerBuild(externals: PackageExternals, rows: Row[]): ServingBuild | undefined {
   const winner = externals.find(([, e]) => e.poolWinner !== undefined)?.[1].poolWinner;
   if (winner === undefined) return undefined;
-  const rootFirst = [...rows, ...externals.flatMap(([, e]) => shareRows(e))];
-  const row = rootFirst.find(r => r.remotes.some(copy => copy.name === winner && !copy.servedBy));
+  const row = rows.find(r => r.remotes.some(copy => copy.name === winner && !copy.servedBy));
   return row && { remote: winner, tag: row.tag };
 }
 
