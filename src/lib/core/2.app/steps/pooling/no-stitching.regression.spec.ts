@@ -474,10 +474,10 @@ describe('a remote runs every specifier of a package from one build', () => {
       })
     ),
     // r, loaded at runtime under strict compatibility, ships core/sub without core; a's build has no sub. The load
-    // stores r's copy in the share row beside a's. The next page's warm init holds no election (nothing is
-    // dirty), and the share row publishes r's sub beside a's core, so r's sub binds a's core.
+    // runs r's sub from r's own scope, and the next page's warm init keeps it there instead of publishing it beside
+    // a's core. r's sub still imports a's core, the one stitch a cold init of the same portfolio has too.
     {
-      name: 'runs a package from one build on a warm page after a runtime load joined its share row',
+      name: 'runs a secondary a load ships without its root from its own scope on the warm page, as a cold init does',
       entries: [entry('a', shared(CORE))],
       dynamic: [
         entry(
@@ -489,7 +489,11 @@ describe('a remote runs every specifier of a package from one build', () => {
       strict: true,
       deps: { [SUB]: [CORE] },
       reload: true,
-      known: { r: { stitched: ['@fw/core: a r'] } },
+      expectFaults: { r: { stitched: ['@fw/core: a r'] } },
+      expectMap: map => {
+        expect(map.imports[SUB]).toBeUndefined();
+        expect(resolve(map, SUB, 'http://r/expose.js')).toBe('http://r/fw_core_sub.js');
+      },
     },
   ];
 

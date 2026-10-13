@@ -1,4 +1,4 @@
-import { claimTable, committedClaims, type Claim } from './claims';
+import { claimTable, committedClaims, versionClaims, type Claim } from './claims';
 import { GLOBAL_SCOPE, type SharedExternal } from './external.contract';
 import type { SharedVersion, SharedVersionAction, SharedVersionMeta } from './version.contract';
 
@@ -149,7 +149,8 @@ describe('claimTable', () => {
       });
     });
 
-    it('leaves what the serving copy does not ship to record order', () => {
+    // In a named scope as in `imports`: one build per package.
+    it('claims nothing of a share row the serving copy does not ship', () => {
       const table = claimTable([
         [
           'fw',
@@ -157,19 +158,17 @@ describe('claimTable', () => {
         ],
       ]);
 
-      expect(readable(table.claims)).toEqual({
-        fw: 'fw@1.0.0:r2',
-        'fw/extra': 'fw@1.0.0:r1',
-      });
+      expect(readable(table.claims)).toEqual({ fw: 'fw@1.0.0:r2' });
+      expect(readable(table.shareClaims)).toEqual({ fw: 'fw@1.0.0:r2' });
     });
 
-    it('seeds nothing from a serving copy `publishes` turns down', () => {
+    it('claims nothing of an external whose serving copy `publishes` turns down', () => {
       const table = claimTable(
         [['fw', served('r2', version('share', [copy('r1', ['fw']), copy('r2', ['fw'])]))]],
         c => c.name !== 'r2'
       );
 
-      expect(readable(table.claims)).toEqual({ fw: 'fw@1.0.0:r1' });
+      expect(readable(table.claims)).toEqual({});
     });
 
     it('still reports a share row at another tag than the serving copy as a duplicate', () => {
@@ -215,5 +214,19 @@ describe('committedClaims', () => {
     const claims = committedClaims(record(), { shareScope: 'team', without: 'r3' });
 
     expect(readable(claims)).toEqual({ fw: 'fw@1.0.0:r1', 'fw/testing': 'fw@1.0.0:r2' });
+  });
+});
+
+describe('versionClaims', () => {
+  const row = () => version('share', [copy('r1', ['fw', 'fw/extra']), copy('r2', ['fw'])]);
+  const names = (claims: Map<string, SharedVersionMeta>) =>
+    Object.fromEntries([...claims].map(([s, c]) => [s, c.name]));
+
+  it('claims from the serving copy alone', () => {
+    expect(names(versionClaims(row(), 'r2'))).toEqual({ fw: 'r2' });
+  });
+
+  it('claims every copy in record order without a serving build', () => {
+    expect(names(versionClaims(row(), undefined))).toEqual({ fw: 'r1', 'fw/extra': 'r1' });
   });
 });

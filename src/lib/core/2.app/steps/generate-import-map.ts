@@ -10,6 +10,7 @@ import {
   type SharedVersion,
   type SharedVersionMeta,
 } from 'lib/core/1.domain';
+import { forEachVersionEntry } from 'lib/core/1.domain/externals/basis';
 import { claimTable, versionClaims, type Claim } from 'lib/core/1.domain/externals/claims';
 import type { Specifier } from 'lib/core/1.domain/externals/specifier';
 import type { LoggingConfig } from '../config/log.contract';
@@ -245,9 +246,7 @@ export function createGenerateImportMap(
     }
 
     const servedByClaims = () =>
-      external.versions
-        .filter(v => v.action === 'skip')
-        .every(v => [...versionClaims(v).keys()].every(servedElsewhere));
+      external.versions.filter(v => v.action === 'skip').every(v => shipsOnly(v, servedElsewhere));
 
     if (sharedVersions.length < 1 && !servedByClaims()) {
       if (config.strict.strictImportMap) {
@@ -561,4 +560,12 @@ export function createGenerateImportMap(
         return new NFError('Could not create ImportMap.');
       });
   }
+}
+
+function shipsOnly(version: SharedVersion, served: (specifier: Specifier) => boolean): boolean {
+  let only = true;
+  forEachVersionEntry(version, undefined, specifier => {
+    only &&= served(specifier);
+  });
+  return only;
 }

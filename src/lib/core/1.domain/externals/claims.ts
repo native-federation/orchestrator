@@ -12,13 +12,13 @@ export type Claim = {
 };
 
 export type ClaimTable = {
-  // What `imports` serves: each external's serving build, then share rows in record order; the first claim per
-  // specifier wins. A skip copy claims nothing.
+  // What `imports` serves: an external with a serving build claims that build's copy alone, one without claims its
+  // share rows in record order; the first claim per specifier wins. A skip copy claims nothing.
   claims: Map<Specifier, Claim>;
   // Share rows reached after their external's name was claimed at another tag. A row whose name another row
   // claimed claims nothing, duplicate or not.
   duplicates: Set<DeepReadonly<SharedVersion>>;
-  // The first claim per specifier over every share row, duplicates included, which is what a named scope reads.
+  // What a named scope serves: the same rule over every share row, duplicates included.
   shareClaims: Map<Specifier, Claim>;
 };
 
@@ -49,20 +49,25 @@ export function claimTable(
     }
   };
 
-  const claimShareRow = (name: ExternalName, version: DeepReadonly<SharedVersion>) => {
-    claim(table.shareClaims, name, version);
+  const claimShareRow = (
+    name: ExternalName,
+    external: DeepReadonly<SharedExternal>,
+    version: DeepReadonly<SharedVersion>
+  ) => {
     const prior = table.claims.get(name);
-    // The seed already claimed this row's name; the row still claims what the serving copy doesn't ship.
-    if (!prior || (prior.external === name && prior.tag === version.tag))
-      claim(table.claims, name, version);
-    else if (prior.tag !== version.tag) table.duplicates.add(version);
+    const duplicate = prior !== undefined && prior.tag !== version.tag;
+    if (duplicate) table.duplicates.add(version);
+    // The seed already claimed an external with a serving build.
+    if (external.servingBuild) return;
+    claim(table.shareClaims, name, version);
+    if (!duplicate && (!prior || prior.external === name)) claim(table.claims, name, version);
   };
 
   for (const [name, external] of ordered)
     if (external.servingBuild) seedServingBuild(name, external);
   for (const [name, external] of ordered)
     for (const version of external.versions)
-      if (version.action === 'share') claimShareRow(name, version);
+      if (version.action === 'share') claimShareRow(name, external, version);
 
   return table;
 }
@@ -79,16 +84,19 @@ export function committedClaims(
   return claimTable(externals, publishes).claims;
 }
 
-// One version's claims, ordered as `claimTable` orders them within a tag: the serving copy, then record order.
+// One version's claims as `claimTable` makes them: the serving copy alone when there is one, else every copy in
+// record order.
 export function versionClaims(
   version: DeepReadonly<SharedVersion>,
-  servingBuild?: RemoteName
+  servingBuild: RemoteName | undefined
 ): Map<Specifier, SharedVersionMeta> {
   const claims = new Map<Specifier, SharedVersionMeta>();
   const claim = (specifier: Specifier, copy: SharedVersionMeta) => {
     if (!claims.has(specifier)) claims.set(specifier, copy);
   };
-  if (servingBuild) forEachVersionEntry(version, copy => copy.name === servingBuild, claim);
-  forEachVersionEntry(version, undefined, claim);
+  const accepts = servingBuild
+    ? (copy: SharedVersionMeta) => copy.name === servingBuild
+    : undefined;
+  forEachVersionEntry(version, accepts, claim);
   return claims;
 }
