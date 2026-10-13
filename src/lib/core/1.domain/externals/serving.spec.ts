@@ -1,4 +1,6 @@
 import fc from 'fast-check';
+import { compareStrings } from 'lib/utils/compare-strings';
+import { addRemoteToVersion } from './basis';
 import { claimTable } from './claims';
 import type { AcceptsTag } from './compatibility';
 import type { ExternalName, SharedExternal } from './external.contract';
@@ -238,56 +240,103 @@ describe('servingBuildOf', () => {
     expect(serving()).toBeUndefined();
   });
 
-  it('ignores the order of externals and of rows (unpooled)', () => {
-    const names = ['fw', 'fw/a', 'fw/b'];
+  // Rows are built the way registration builds them (`addRemoteToVersion`), in a shuffled remote order, so the
+  // basis each row ends up with (host, cached, coverage, then name) is what decides, not insertion order.
+  it('ignores the order remotes register in, and of externals and rows (unpooled)', () => {
+    const secondaries = ['fw/a', 'fw/b'];
     const tags = ['1.0.0', '2.0.0'];
     const actions: SharedVersionAction[] = ['share', 'share', 'skip', 'scope'];
 
-    // One build ships one tag of the package, so each remote picks a tag and the externals it ships.
+    // One build ships one tag of the package: dense lists its secondaries as entries of the root's copy, flat
+    // ships each as an external of its own.
     const build = fc.record({
       tag: fc.constantFrom(...tags),
-      ships: fc.subarray(names, { minLength: 1 }),
+      root: fc.boolean(),
+      ships: fc.subarray(secondaries),
+      dense: fc.boolean(),
       action: fc.constantFrom(...actions),
       cached: fc.boolean(),
       strictVersion: fc.boolean(),
       requiredVersion: fc.constantFrom('^1.0.0', '^2.0.0'),
+      host: fc.boolean(),
     });
-    const portfolio = fc.dictionary(fc.constantFrom('r1', 'r2', 'r3', 'r4', 'R5'), build, {
-      minKeys: 1,
-    });
-
     type Build = typeof build extends fc.Arbitrary<infer T> ? T : never;
-    const toRecord = (builds: Record<string, Build>) => {
+    const portfolio = fc
+      .dictionary(fc.constantFrom('r1', 'r2', 'r3', 'r4', 'R5'), build, { minKeys: 1 })
+      .filter(builds => Object.values(builds).some(b => b.root || b.ships.length > 0))
+      .chain(builds => {
+        const remotes = Object.keys(builds);
+        const permutation = { minLength: remotes.length, maxLength: remotes.length };
+        return fc.tuple(
+          fc.constant(builds),
+          fc.shuffledSubarray(remotes, permutation),
+          fc.shuffledSubarray(remotes, permutation),
+          fc.integer()
+        );
+      });
+
+    // The page has at most one host: the first flagged remote by name, whatever the order.
+    const hostOf = (builds: Record<string, Build>) =>
+      Object.keys(builds)
+        .filter(name => builds[name]!.host)
+        .sort(compareStrings)[0];
+
+    const toRecord = (builds: Record<string, Build>, order: string[]) => {
+      const host = hostOf(builds);
       const record = new Map<ExternalName, SharedExternal>();
-      for (const [name, b] of Object.entries(builds))
-        for (const ext of b.ships) {
-          const e = record.get(ext) ?? external();
-          record.set(ext, e);
-          let row = e.versions.find(v => v.tag === b.tag && v.action === b.action);
-          if (!row) e.versions.push((row = version(b.action, [], b.tag)));
-          const { cached, strictVersion, requiredVersion } = b;
-          row.remotes.push(copy(name, [ext], { cached, strictVersion, requiredVersion }));
-        }
+      const add = (ext: ExternalName, b: Build, remote: string, entries: string[]) => {
+        const e = record.get(ext) ?? external();
+        record.set(ext, e);
+        let row = e.versions.find(v => v.tag === b.tag && v.action === b.action);
+        if (!row) e.versions.push((row = version(b.action, [], b.tag)));
+        const { cached, strictVersion, requiredVersion } = b;
+        addRemoteToVersion(
+          row,
+          copy(remote, entries, { cached, strictVersion, requiredVersion }),
+          remote === host
+        );
+      };
+      for (const remote of order) {
+        const b = builds[remote]!;
+        if (b.root) add('fw', b, remote, b.dense ? ['fw', ...b.ships] : ['fw']);
+        if (!(b.root && b.dense)) for (const ext of b.ships) add(ext, b, remote, [ext]);
+      }
       return [...record];
     };
 
     fc.assert(
-      fc.property(portfolio, fc.integer(), (builds, seed) => {
-        const record = toRecord(builds);
+      fc.property(portfolio, ([builds, first, second, seed]) => {
         const shuffle = <T>(items: T[], salt: number) =>
           items
             .map((item, i) => ({ item, key: Math.sin(seed + salt * 31 + i) }))
             .sort((a, b) => a.key - b.key)
             .map(({ item }) => item);
-        const shuffled = shuffle(record, 0).map(
+        const shuffled = shuffle(toRecord(builds, second), 0).map(
           ([name, e], i) =>
             [name, { ...e, versions: shuffle(e.versions, i + 1) }] as [ExternalName, SharedExternal]
         );
 
-        expect(servingBuildOf(shuffled, accepts)).toEqual(servingBuildOf(record, accepts));
+        expect(servingBuildOf(shuffled, accepts)).toEqual(
+          servingBuildOf(toRecord(builds, first), accepts)
+        );
       }),
-      { seed: 20261013, numRuns: 500 }
+      { seed: 20261013, numRuns: 1000 }
     );
+  });
+
+  it("gives a package whose secondary alone carries a pool name the root row's basis, unranked", () => {
+    // Ranked, the cached copy would serve: it costs no download.
+    const result = serving(
+      [
+        'fw',
+        external(
+          version('share', [copy('basis', ['fw']), copy('cached', ['fw'], { cached: true })])
+        ),
+      ],
+      ['fw/a', { ...external(version('share', [copy('basis', ['fw/a'])])), poolName: 'team' }]
+    );
+
+    expect(result).toEqual<ServingBuild>({ remote: 'basis', tag: '1.0.0' });
   });
 });
 
