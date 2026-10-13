@@ -934,14 +934,12 @@ portfolio had deliberately pooled apart.
 Every line starts with a prefix, given per line below: `[<scope>][pool:<name>]` for init's lines about one pool
 (`<name>` is the pool's name as stored), `[<scope>]` for init's lines about a whole scope and for the dynamic
 gate's, and `[<scope>][<remote>]` for the dynamic line about a build missing from the cache. At init, every
-remote not on the elected build gets a `warn`, subpool members included, ending in one of four clauses that say
+remote not on the elected build gets a `warn`, subpool members included, ending in one of three clauses that say
 where its copies come from:
 
 - `All N of its entrypoints are scoped for it.` — it serves its whole family itself;
 - `It runs in subpool '<build>' for all N of its entrypoints.` — it runs another remote's build;
-- `Its build serves subpool '<self>': its N entrypoints and K other remote(s).` — its build runs the subpool;
-- `It takes the elected files where its versions match; the rest of its N entrypoints are scoped for it.` — its
-  group agrees with the global map and keeps its files (rule 5).
+- `Its build serves subpool '<self>': its N entrypoints and K other remote(s).` — its build runs the subpool.
 
 | level | prefix | line | what to do |
 | --- | --- | --- | --- |

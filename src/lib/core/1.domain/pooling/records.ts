@@ -11,9 +11,7 @@ import type {
 } from 'lib/core/1.domain';
 import { addRemoteToVersion } from 'lib/core/1.domain/externals/basis';
 import { byTag, mergeRows, rowAt } from 'lib/core/1.domain/externals/rows';
-import { packageOf, type Specifier } from 'lib/core/1.domain/externals/specifier';
-import type { IsChunked } from './builds';
-import { tearsPackage } from './rules';
+import type { Specifier } from 'lib/core/1.domain/externals/specifier';
 import type { Election } from './election';
 import type { PoolMember, PoolName } from './membership';
 
@@ -23,32 +21,22 @@ export type PlacedPool = Omit<Election, 'agreeing'> & {
   keepsGlobalFiles: ReadonlySet<RemoteName>;
 };
 
-// Rule 5 holds per group on one build (a subpool, or a self-serving remote), so its members bind each other
-// on one build. See docs/version-resolver.md §"How the verdicts land in the record and the map".
+// Rule 5 holds per group on one build (a subpool, or a self-serving remote): a build takes the global files only
+// where every copy its remotes ship takes them, so none of its remotes runs a family from two builds. See
+// docs/version-resolver.md §"How the verdicts land in the record and the map".
 export function placePool(
   election: Election,
   poolName: PoolName,
-  members: readonly PoolMember[],
-  isChunked: IsChunked
+  members: readonly PoolMember[]
 ): PlacedPool {
   const { agreeing, globalTags, placements, ...placed } = election;
-  const servedPackages = new Set([...globalTags.keys()].map(packageOf));
-  // A copy off the map beside a specifier the map serves runs a second instance of it.
-  const tears = (meta: SharedVersionMeta) => {
-    const chunked = isChunked(meta.name, meta.bundle);
-    return Object.keys(meta.entries).some(
-      s => globalTags.has(s) || tearsPackage(chunked, s, servedPackages)
-    );
-  };
   const keepsGlobalFiles = new Set(agreeing);
   for (const member of members) {
     const takesGlobalFiles = globalFilesTaker(member, { globalTags, placements }, agreeing);
     for (const version of member.external.versions)
-      for (const meta of version.remotes) {
-        const runs = runsOn(placements, meta.name);
-        if (keepsGlobalFiles.has(runs) && !takesGlobalFiles(meta, version.tag) && tears(meta))
-          keepsGlobalFiles.delete(runs);
-      }
+      for (const meta of version.remotes)
+        if (placements.get(meta.name)!.kind !== 'global' && !takesGlobalFiles(meta, version.tag))
+          keepsGlobalFiles.delete(runsOn(placements, meta.name));
   }
   return { ...placed, globalTags, placements, poolName, keepsGlobalFiles };
 }

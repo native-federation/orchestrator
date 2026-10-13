@@ -81,7 +81,7 @@ export function createPoolSharedExternals(
       previousWinner: previousWinner(members),
       latestFirst: config.profile.latestSharedExternal,
     });
-    const placed = placePool(election, poolName, members, isChunked);
+    const placed = placePool(election, poolName, members);
     report(poolName, members, placed, scope);
     return members.map(m => [
       m.name,
@@ -148,9 +148,7 @@ function missWarning(
       ? `It runs in subpool '${placement.owner}' for all ${imports} of its entrypoints.`
       : subpoolSize > 1
         ? `Its build serves subpool '${remote}': its ${imports} entrypoints and ${subpoolSize - 1} other remote(s).`
-        : placed.keepsGlobalFiles.has(remote)
-          ? `It takes the elected files where its versions match; the rest of its ${imports} entrypoints are scoped for it.`
-          : `All ${imports} of its entrypoints are scoped for it.`;
+        : `All ${imports} of its entrypoints are scoped for it.`;
 
   if (miss.cause === 'incompatible')
     return `'${remote}' is islanded: its range rejects '${miss.member}@${miss.tag}' of the elected build '${placed.winner}'. ${where}`;

@@ -477,7 +477,6 @@ describe('the host never borrows an entrypoint', () => {
             expect(resolve(map, CORE, 'http://r/expose.js')).toBe('http://r/fw_core.js');
             expect(resolve(map, INTEROP, 'http://r/expose.js')).toBe('http://r/fw_core_interop.js');
           },
-          ...(pool && layout === 'flat' && { known: { r: { stitched: ['@fw/core: host r'] } } }),
         };
       })
     )

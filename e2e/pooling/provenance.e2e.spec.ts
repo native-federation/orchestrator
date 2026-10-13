@@ -135,8 +135,8 @@ test.describe('provenance: the init path keeps a family on one build', () => {
     // This is #63's own second repro with the one change that hid it: the router provider does not ship
     // core, so the consumer is not itself the router basis. The host's build is round 1 whatever it serves,
     // and both remotes agree with it — but they ship router at two tags, so router is not published for
-    // either. mfe2 takes the host's core (its own 22.0.5) and runs its own router beside it, never mfe1's
-    // 22.1.0; mfe1 runs its own router. 3 downloads.
+    // either. mfe2 runs core and router from its own build, never the host's core beside its own router or
+    // mfe1's 22.1.0; mfe1 runs its own router. 3 downloads.
     await nf.init(
       [
         remote('team/mfe1', SCOPE.mfe1, [dep('@angular/router', '22.1.0', { req: '^22.1.0' })]),
@@ -160,11 +160,14 @@ test.describe('provenance: the init path keeps a family on one build', () => {
     expect(map.imports['@angular/router']).toBeUndefined();
     expect(map.scopes).toEqual({
       [SCOPE.mfe1]: { '@angular/router': 'http://mfe1/@angular/router.js' },
-      [SCOPE.mfe2]: { '@angular/router': 'http://mfe2/@angular/router.js' },
+      [SCOPE.mfe2]: {
+        '@angular/core': 'http://mfe2/@angular/core.js',
+        '@angular/router': 'http://mfe2/@angular/router.js',
+      },
     });
 
     expect((await nf.load('team/mfe2')).seen).toEqual({
-      '@angular/core': 'host.service|@angular/core@22.0.5',
+      '@angular/core': 'mfe2|@angular/core@22.0.5',
       '@angular/router': 'mfe2|@angular/router@22.0.5',
     });
     await nf.loadAll();
@@ -260,8 +263,8 @@ test.describe('provenance: the cases no tag comparison can reach', () => {
     // core@22.0.5 and agree on it *byte for byte*, so the old verdict survives any tightening of the
     // comparison — minor line, patch, or exact tag equality alike. The pair that matters, material against
     // cdk, is in neither build. mfe1's build is elected (both others agree with it), and cdk — shipped at
-    // two tags by the remotes that agree — is published for neither, so each keeps its own beside the
-    // elected files it matches. 4 downloads; the gate pipeline paid 5.
+    // two tags by the remotes that agree — is published for neither, so each runs its whole family from its
+    // own build. 6 downloads.
     //
     // material and cdk are one npm scope, so scope labelling groups them, and they are a vendor lockstep
     // pair: 22.0.5 against 22.1.0 is a combination the vendor never shipped.
@@ -290,18 +293,18 @@ test.describe('provenance: the cases no tag comparison can reach', () => {
       )
     ).toEqual(['angular', 'angular', 'angular']);
 
-    // Each runs exactly the tags its own build shipped: the lockstep pair stays 22.0.5 for mfe3, and mfe2's
-    // cdk@22.1.0 never meets mfe3's material.
+    // Each runs its own build: the lockstep pair stays 22.0.5 for mfe3, and mfe2's cdk@22.1.0 never meets
+    // mfe3's material.
     expect((await nf.load('team/mfe3')).seen).toEqual({
-      '@angular/material': 'mfe1|@angular/material@22.0.5',
+      '@angular/material': 'mfe3|@angular/material@22.0.5',
       '@angular/cdk': 'mfe3|@angular/cdk@22.0.5',
     });
     expect((await nf.load('team/mfe2')).seen).toEqual({
-      '@angular/core': 'mfe1|@angular/core@22.0.5',
+      '@angular/core': 'mfe2|@angular/core@22.0.5',
       '@angular/cdk': 'mfe2|@angular/cdk@22.1.0',
     });
     await nf.loadAll();
-    expect(nf.downloads()).toHaveLength(4);
+    expect(nf.downloads()).toHaveLength(6);
   });
 });
 

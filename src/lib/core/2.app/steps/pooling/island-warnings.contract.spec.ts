@@ -187,8 +187,9 @@ describe('island warnings (contract)', () => {
       ]);
     });
 
-    it('agreeing: a remote takes the elected files and serves the rest itself', async () => {
-      // b and c agree with a on core but ship cdk at two tags, so cdk cannot be published for both.
+    it('agreeing: a remote that serves one package itself has all its entrypoints scoped', async () => {
+      // b and c agree with a on core but ship cdk at two tags, so cdk cannot be published for both, and each
+      // runs the family from its own build.
       p.seed('@framework/core', [
         p.version('17.0.0', '@framework/core', [
           { remote: 'team/mfe-a', req: '^17.0.0' },
@@ -208,8 +209,8 @@ describe('island warnings (contract)', () => {
 
       expect(p.islands()).toEqual({ 'team/mfe-b': 'uncovered', 'team/mfe-c': 'uncovered' });
       expect(warnings()).toEqual([
-        "[__GLOBAL__][pool:framework] 'team/mfe-b' serves its own family: no elected build offers every entrypoint it imports at a version it accepts (gap '@framework/cdk', closest 'team/mfe-a'). It takes the elected files where its versions match; the rest of its 2 entrypoints are scoped for it.",
-        "[__GLOBAL__][pool:framework] 'team/mfe-c' serves its own family: no elected build offers every entrypoint it imports at a version it accepts (gap '@framework/cdk', closest 'team/mfe-a'). It takes the elected files where its versions match; the rest of its 2 entrypoints are scoped for it.",
+        "[__GLOBAL__][pool:framework] 'team/mfe-b' serves its own family: no elected build offers every entrypoint it imports at a version it accepts (gap '@framework/cdk', closest 'team/mfe-a'). All 2 of its entrypoints are scoped for it.",
+        "[__GLOBAL__][pool:framework] 'team/mfe-c' serves its own family: no elected build offers every entrypoint it imports at a version it accepts (gap '@framework/cdk', closest 'team/mfe-a'). All 2 of its entrypoints are scoped for it.",
       ]);
     });
 
@@ -320,8 +321,8 @@ describe('island warnings (contract)', () => {
 
       expect(p.islands()).toEqual({ 'team/mfe-a': 'uncovered', 'team/mfe-b': 'uncovered' });
       expect(warnings()).toEqual([
-        "[__GLOBAL__][pool:angular] 'team/mfe-b' serves its own family: no elected build offers every entrypoint it imports at a version it accepts (gap '@angular/router', closest 'team/host'). It takes the elected files where its versions match; the rest of its 2 entrypoints are scoped for it.",
-        "[__GLOBAL__][pool:angular] 'team/mfe-a' serves its own family: no elected build offers every entrypoint it imports at a version it accepts (gap '@angular/router', closest 'team/host'). It takes the elected files where its versions match; the rest of its 1 entrypoints are scoped for it.",
+        "[__GLOBAL__][pool:angular] 'team/mfe-b' serves its own family: no elected build offers every entrypoint it imports at a version it accepts (gap '@angular/router', closest 'team/host'). All 2 of its entrypoints are scoped for it.",
+        "[__GLOBAL__][pool:angular] 'team/mfe-a' serves its own family: no elected build offers every entrypoint it imports at a version it accepts (gap '@angular/router', closest 'team/host'). All 1 of its entrypoints are scoped for it.",
       ]);
     });
 
@@ -348,8 +349,8 @@ describe('island warnings (contract)', () => {
 
       expect(p.islands()).toEqual({ 'team/mfe-b': 'uncovered', 'team/mfe-c': 'uncovered' });
       expect(warnings()).toEqual([
-        "[__GLOBAL__][pool:angular] 'team/mfe-b' serves its own family: no elected build offers every entrypoint it imports at a version it accepts (gap '@angular/cdk', closest 'team/mfe-a'). It takes the elected files where its versions match; the rest of its 2 entrypoints are scoped for it.",
-        "[__GLOBAL__][pool:angular] 'team/mfe-c' serves its own family: no elected build offers every entrypoint it imports at a version it accepts (gap '@angular/cdk', closest 'team/mfe-a'). It takes the elected files where its versions match; the rest of its 2 entrypoints are scoped for it.",
+        "[__GLOBAL__][pool:angular] 'team/mfe-b' serves its own family: no elected build offers every entrypoint it imports at a version it accepts (gap '@angular/cdk', closest 'team/mfe-a'). All 2 of its entrypoints are scoped for it.",
+        "[__GLOBAL__][pool:angular] 'team/mfe-c' serves its own family: no elected build offers every entrypoint it imports at a version it accepts (gap '@angular/cdk', closest 'team/mfe-a'). All 2 of its entrypoints are scoped for it.",
       ]);
     });
 

@@ -663,9 +663,9 @@ describe('createPoolSharedExternals', () => {
       expect(namesOf('@framework/common', 'share')).toEqual(['a']);
     });
 
-    it('lets an agreeing remote take the elected files and serve only the rest itself', async () => {
+    it('runs an agreeing remote that serves one package itself on its own build for the whole family', async () => {
       // b and c agree with a on core@17 but ship cdk at two different tags, so cdk cannot be published for
-      // both: each runs its own cdk and takes the global core.
+      // both: each runs its own cdk, and so its own core too, rather than the global core beside it.
       p.seed('@framework/core', [
         at('17.0.0', '@framework/core', [
           copy('a', '^17.0.0'),
@@ -681,9 +681,15 @@ describe('createPoolSharedExternals', () => {
 
       await p.runInit();
 
-      expect(namesOf('@framework/core', 'share')).toEqual(['a', 'b', 'c']);
+      expect(namesOf('@framework/core', 'share')).toEqual(['a']);
+      expect(namesOf('@framework/core', 'scope')).toEqual(['b', 'c']);
       expect(namesOf('@framework/cdk', 'scope')).toEqual(['b', 'c']);
-      expect(verdicts()).toEqual(['b@@framework/cdk: uncovered', 'c@@framework/cdk: uncovered']);
+      expect(verdicts()).toEqual([
+        'b@@framework/cdk: uncovered',
+        'b@@framework/core: uncovered',
+        'c@@framework/cdk: uncovered',
+        'c@@framework/core: uncovered',
+      ]);
     });
 
     it('keeps a subpool copy off a claimed global file at its tag when round 1 serves another', async () => {
@@ -757,9 +763,9 @@ describe('createPoolSharedExternals', () => {
         ]);
       });
 
-      it('serves a sibling entrypoint shipped at the elected tag from its own build only', async () => {
+      it('runs a remote whose sibling entrypoint the winner lacks on its own build, core included', async () => {
         // Same shape, but a's `/table` is at the elected 17.0.2. The winner b ships no `/table`, and round 1
-        // borrows none, so a runs Material from its own build and still takes the global core.
+        // borrows none, so a runs Material from its own build, and its core with it.
         seedCore();
         p.seed(material, [
           at('17.0.2', material, [
@@ -772,7 +778,10 @@ describe('createPoolSharedExternals', () => {
         await p.runInit();
 
         expect(rowsOf(material)).toEqual(['17.0.2:share:[b,c]', '17.0.2:scope:[a]']);
-        expect(verdicts()).toEqual(['a@@framework/material: uncovered']);
+        expect(verdicts()).toEqual([
+          'a@@framework/core: uncovered',
+          'a@@framework/material: uncovered',
+        ]);
       });
     });
 
@@ -865,8 +874,8 @@ describe('createPoolSharedExternals', () => {
 
       it('dissolves a subpool the extension leaves with its build alone', async () => {
         // a also ships cdk@17.1.0, c ships cdk@17.0.0 and their ranges keep them apart, so cdk is not
-        // published: r moves global, a cannot, and a subpool of one is none. r leads the animations row: a
-        // serves cdk itself, so a file of its would bind a's cdk for whoever takes it.
+        // published: r moves global, a cannot, and a subpool of one is none. a and c serve cdk themselves, so
+        // each runs the rest of the family from its own build too.
         seedPortfolio([copy('c', '^17.0.0')]);
         p.seed('@framework/cdk', [
           at('17.1.0', '@framework/cdk', [copy('a', '~17.1.0')]),
@@ -875,9 +884,15 @@ describe('createPoolSharedExternals', () => {
 
         await p.runInit();
 
-        expect(rowsOf('@framework/animations')).toEqual(['17.0.0:share:[r,a]']);
+        expect(rowsOf('@framework/animations')).toEqual(['17.0.0:share:[r]', '17.0.0:scope:[a]']);
         expect(namesOf('@framework/cdk', 'scope')).toEqual(['a', 'c']);
-        expect(verdicts()).toEqual(['a@@framework/cdk: uncovered', 'c@@framework/cdk: uncovered']);
+        expect(verdicts()).toEqual([
+          'a@@framework/animations: uncovered',
+          'a@@framework/cdk: uncovered',
+          'a@@framework/core: uncovered',
+          'c@@framework/cdk: uncovered',
+          'c@@framework/core: uncovered',
+        ]);
       });
 
       it('keeps a subpool whose build the extension serves while another member still needs it', async () => {
@@ -997,7 +1012,12 @@ describe('createPoolSharedExternals', () => {
 
       await p.runInit();
 
-      expect(verdicts()).toEqual(['c@@framework/cdk: uncovered', 'd@@framework/cdk: uncovered']);
+      expect(verdicts()).toEqual([
+        'c@@framework/cdk: uncovered',
+        'c@@framework/core: uncovered',
+        'd@@framework/cdk: uncovered',
+        'd@@framework/core: uncovered',
+      ]);
     });
   });
 
@@ -1043,8 +1063,8 @@ describe('createPoolSharedExternals', () => {
       await p.runInit();
 
       expect(causeOf('@framework/cdk', 'c')).toBe('uncovered');
-      // Its core is the elected tag and it agrees, so that copy resolves globally with no cause.
-      expect(causeOf('@framework/core', 'c')).toBeUndefined();
+      // Its core is the elected tag and it agrees, yet it runs the family from one build: its own.
+      expect(causeOf('@framework/core', 'c')).toBe('uncovered');
     });
 
     it('writes a healthy re-election back exactly as stored', async () => {
