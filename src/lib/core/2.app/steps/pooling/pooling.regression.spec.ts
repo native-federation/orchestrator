@@ -970,15 +970,15 @@ describe('pooling regressions', () => {
   });
 
   /**
-   * D28. A record the orchestrator never writes itself: a remote lists `@fw/core` twice, at 1.0.1 and at
+   * A record the orchestrator never writes itself: a remote lists `@fw/core` twice, at 1.0.1 and at
    * 1.0.0 with another file. A build ships one copy per member, so the election, the dynamic gate and the
    * no-tear oracle all read its first row, whole: the build is core 1.0.1 beside common 1.0.0. The gate's own
    * first-row read is pinned in pool-dynamic-externals.spec.ts.
    */
-  describe('D28: a duplicated row is read as the first one', () => {
+  describe('a duplicated row is read as the first one', () => {
     let p: ReturnType<typeof portfolio>;
     beforeEach(() => {
-      p = portfolio({}, { storage: 'nf-regression-d28', realRepositories: true });
+      p = portfolio({}, { storage: 'nf-regression-duplicated-row', realRepositories: true });
     });
 
     // mfe-d disagrees with the map's core 1.0.1, so it takes the map's files only because a build shipped

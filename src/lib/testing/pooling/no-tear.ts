@@ -32,14 +32,14 @@ export type CoherenceInput = {
   /** The pool's members as stored — what `sharedExternalsRepo.getFromScope` returns, filtered to the pool. */
   members: Record<ExternalName, SharedExternal>;
   scopeUrls: Record<RemoteName, string>;
-  /** I3's only exemption: a host cannot be repointed onto another build, so it is never judged. */
+  /** The no-tear check's only exemption: a host cannot be repointed onto another build. */
   hosts?: RemoteName[];
   /** Whether a copy's files import its build's internal chunks; none do when left out. */
   isChunked?: (remote: RemoteName, bundle: string | undefined) => boolean;
 };
 
 /**
- * I3, the no-tear invariant, checked off the emitted import map rather than off the stored verdicts:
+ * The no-tear invariant, checked off the emitted import map rather than off the stored verdicts:
  * for every non-host remote, the `(specifier → tag)` combination it really resolves must be a subset of
  * some live build's own combination. Which remote serves a given tag is left to `findSplitRemotes`, so this
  * compares tags only, never origins. A build that ships a package at a tag also witnesses that package's
@@ -59,7 +59,7 @@ export function findIncoherentRemotes({
   const tagOfUrl = new Map<string, VersionName>();
 
   for (const external of Object.values(members)) {
-    // D28: a build ships one copy per member, so a second row of one remote is read as its first.
+    // A build ships one copy per member, so a second row of one remote is read as its first.
     const read = new Set<RemoteName>();
     for (const version of external.versions) {
       for (const meta of version.remotes) {
@@ -162,7 +162,8 @@ export type Split = {
  *
  * Walks every file a remote reaches and requires one tag per specifier, and per package, and one file per
  * specifier, across the whole walk. Which peers a file really imports is unknown, so every specifier its owner
- * ships counts as an edge: conservative, never blind. A host is exempt as in I3, though its files are walked.
+ * ships counts as an edge: conservative, never blind. A host is exempt as in `findIncoherentRemotes`,
+ * though its files are walked.
  *
  * Pass **one pool's** members. Across pools the walk finds couplings no pool declares — e.g. a private
  * library in its own pool binding the global framework inside a remote that runs its own — which pooling
@@ -224,7 +225,7 @@ export type ChunkTear = {
  * files from two builds run two copies of its internals even at one tag. Walks every file a remote reaches,
  * as `findSplitRemotes` does (a file resolves its imports from where it lives), and flags a package whose
  * files come from more than one build when any of those copies is chunked: origins, not tags. A host is
- * exempt for the same reason as in I3.
+ * exempt for the same reason as in `findIncoherentRemotes`.
  */
 export function findChunkTornRemotes(input: CoherenceInput): ChunkTear[] {
   const exempt = new Set(input.hosts ?? []);

@@ -111,9 +111,9 @@ describe('a build read from the record', () => {
     expect(buildFor('shell', members).host).toBe(true);
   });
 
-  // Corrupt input, pinned for D28: the record writer never lists a remote twice for one member. The first row
-  // per (remote, member) wins whole, host bit included, so a host row further down marks nothing; a reader
-  // that ORed the host bit over every row would make shell the host here.
+  // Corrupt input: the record writer never lists a remote twice for one member. The first row per
+  // (remote, member) wins whole, host bit included, so a host row further down marks nothing; a reader that
+  // ORed the host bit over every row would make shell the host here.
   it('takes the host bit from the first row only, like the rest of the copy', () => {
     const members = [
       member('@angular/core', [

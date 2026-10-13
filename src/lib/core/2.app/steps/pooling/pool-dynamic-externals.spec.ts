@@ -111,7 +111,7 @@ describe('createPoolDynamicExternals', () => {
       )
       .sort();
 
-  // D28: a record the orchestrator never writes itself, mfe listing core twice. A remote ships one copy per
+  // A record the orchestrator never writes itself: mfe lists core twice. A remote ships one copy per
   // member, so the gate reads mfe's first row, as the election does: core 17.0.0, which the map serves. The
   // second row's ^16 would reject the committed 17.0.0 and island mfe for a copy it does not run.
   it('reads a duplicated row of the loaded remote as the first one', async () => {

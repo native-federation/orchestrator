@@ -46,7 +46,7 @@ export type { CopySpec };
 export type Island = PoolCause | `subpool ${RemoteName}`;
 
 export type PortfolioOptions = {
-  /** I3's only exemption: a host cannot be repointed onto another build. */
+  /** The no-tear check's only exemption: a host cannot be repointed onto another build. */
   hosts?: RemoteName[];
   /** The `globalThis` namespace the repositories store under. */
   storage?: string;

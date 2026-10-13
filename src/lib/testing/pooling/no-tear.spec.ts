@@ -11,8 +11,8 @@ import {
 
 /**
  * The guard's own test. A checker that cannot fail is worse than no checker, so the torn case comes
- * first: `findIncoherentRemotes` is only load-bearing for I3 if it catches a combination no build
- * shipped.
+ * first: `findIncoherentRemotes` is only load-bearing for the no-tear invariant if it catches a
+ * combination no build shipped.
  */
 describe('findIncoherentRemotes', () => {
   const SCOPE = {
@@ -124,7 +124,8 @@ describe('findIncoherentRemotes', () => {
   });
 
   // Origin is free, tag is not: mfe-a taking core from a *different* remote that ships the same tag
-  // is interchangeable, so it must not register as incoherent (I3 is per version).
+  // is not a tear by this check, so it must not register as incoherent (the check compares tags, never
+  // origins).
   it('does not mind which remote served a tag, only which tag', () => {
     const record = members();
     // A second provider of mfe-a's own tag, so the global mapping can serve core from mfe-c instead.
