@@ -191,37 +191,37 @@ describe('pooling (dynamic)', () => {
         )
       );
 
-    // jsdev-b-5's sameTagExtra, the nearest flow shape to a partly served resolver scope (which a coherent
-    // committed map never produces): mfe ships the committed 17.0.0 core plus a `/testing` the map lacks.
-    // Same-tag copies merge, so the resolver skips rather than scopes, and the load lands as a cold init of
-    // the whole portfolio places mfe. Fails while the files differ: a cold init runs the whole family from
-    // mfe's build, which serves both remotes, but the load keeps the committed core and serves `testing` from
-    // mfe's own build beside it.
-    it.fails(
-      'places a load at the committed tag with an extra entrypoint as a cold init does',
-      async () => {
-        const committed = () => [entry('a0', ...fw())];
-        const loaded = () => entry('mfe', ...fw(['@fw/core/testing']));
-        const page = portfolio({}, { ...options, storage: 'nf-pooling-dynamic-same-tag' });
-        await page.runInit(committed());
+    // mfe ships the committed 17.0.0 core plus a `/testing` the map lacks. The map serves the package only in
+    // part, so the load runs mfe's whole `fw` family from its own build and leaves a0 on the committed one. The
+    // load leaves its externals dirty, so the next warm init re-elects them and lands where a cold init does.
+    it("runs a load's family from its own build when the map lacks an entrypoint at the committed tag", async () => {
+      const committed = () => [entry('a0', ...fw())];
+      const loaded = () => entry('mfe', ...fw(['@fw/core/testing']));
+      const specifiers = ['@fw/core', '@fw/core/testing', '@fw/common'];
+      const page = portfolio({}, { ...options, storage: 'nf-pooling-dynamic-same-tag' });
+      await page.runInit(committed());
 
-        const { actions, merged } = await page.runDynamic(loaded());
+      const { actions, merged } = await page.runDynamic(loaded());
 
-        const cold = portfolio({}, { ...options, storage: 'nf-pooling-dynamic-same-tag-cold' });
-        const coldMap = await cold.runInit([...committed(), loaded()]);
-        expect(actions['@fw/core']).toMatchObject({ action: 'skip', covered: ['@fw/core'] });
-        expect(page.islands()).toEqual({});
-        expect(cold.islands()).toEqual({});
-        // mfe's copies join the share rows at the committed tag, as at a cold init.
-        expect(rowsOf(page.stored(), 'mfe')).toEqual([
-          ['@fw/core', '17.0.0', 'share', null, null],
-          ['@fw/common', '17.0.0', 'share', null, null],
-        ]);
-        expect(rowsOf(page.stored(), 'mfe')).toEqual(rowsOf(cold.stored(), 'mfe'));
-        for (const specifier of ['@fw/core', '@fw/core/testing', '@fw/common'])
-          expect(resolves(merged, 'mfe', specifier)).toBe(resolves(coldMap, 'mfe', specifier));
-      }
-    );
+      expect(actions['@fw/core']).toEqual({ action: 'scope' });
+      expect(actions['@fw/common']).toEqual({ action: 'scope' });
+      expect(page.islands()).toEqual({ mfe: 'uncovered' });
+      for (const specifier of specifiers)
+        expect(resolves(merged, 'mfe', specifier)).toBe(file('mfe', specifier));
+      expect(resolves(merged, 'a0', '@fw/core')).toBe(file('a0', '@fw/core'));
+      expect(resolves(merged, 'a0', '@fw/common')).toBe(file('a0', '@fw/common'));
+
+      page.reload();
+      const warm = await page.runInit([...committed(), loaded()]);
+      expect(page.islands()).toEqual({});
+      expect(rowsOf(page.stored(), 'mfe')).toEqual([
+        ['@fw/core', '17.0.0', 'share', null, null],
+        ['@fw/common', '17.0.0', 'share', null, null],
+      ]);
+      for (const remote of ['a0', 'mfe'])
+        for (const specifier of specifiers)
+          expect(resolves(warm, remote, specifier)).toBe(file('mfe', specifier));
+    });
   });
 
   /**
