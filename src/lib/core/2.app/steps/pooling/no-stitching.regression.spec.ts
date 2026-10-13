@@ -85,8 +85,10 @@ type Case = {
   scope?: string;
   // What a file imports beyond its own package's entrypoints and chunks.
   deps?: Record<string, string[]>;
-  // The case's own expectations on the fixed map, beyond a clean oracle verdict.
+  // The case's own expectations on the fixed map, beyond the oracle verdict.
   expectMap?: (map: ImportMap) => void;
+  // The oracle's verdict on the fixed map, when a fault is the intended outcome.
+  expectFaults?: Record<string, PageFaults>;
   // While the case still fails: the oracle's verdict on today's map.
   known?: Record<string, PageFaults>;
 };
@@ -117,7 +119,7 @@ const run = async (c: Case) => {
 const register = (c: Case) => {
   (c.known ? it.fails : it)(c.name, async () => {
     const { map, faults } = await run(c);
-    expect(faults).toEqual({});
+    expect(faults).toEqual(c.expectFaults ?? {});
     c.expectMap?.(map);
   });
   if (c.known) {
@@ -420,6 +422,24 @@ describe('a remote runs every specifier of a package from one build', () => {
 // build, even one of the same tag. The remote that ships the specifier runs the whole package from its own build
 // instead. Dense: r lists interop in its core; flat: r ships interop as an external of its own.
 describe('the host never borrows an entrypoint', () => {
+  // The host ships only interop, whose file imports core; r ships core alone. The host's import stays
+  // unresolved rather than binding r's core, and r runs core from its own build.
+  const rootGap = [true, false].map((hostFirst): Case => {
+    const host = entry('host', shared(INTEROP));
+    const r = entry('r', shared(CORE));
+    return {
+      name: `leaves the root unmapped when the host ships only a secondary that imports it (host first=${hostFirst})`,
+      hosts: ['host'],
+      deps: { [INTEROP]: [CORE] },
+      entries: hostFirst ? [host, r] : [r, host],
+      expectFaults: { host: { unresolved: ['http://host/fw_core_interop.js -> @fw/core'] } },
+      expectMap: map => {
+        expect(map.imports[CORE]).toBeUndefined();
+        expect(resolve(map, CORE, 'http://r/expose.js')).toBe('http://r/fw_core.js');
+      },
+    };
+  });
+
   const cases: Case[] = pools.flatMap(pool =>
     (['dense', 'flat'] as const).flatMap(layout =>
       [true, false].map((hostFirst): Case => {
@@ -444,5 +464,5 @@ describe('the host never borrows an entrypoint', () => {
     )
   );
 
-  for (const c of cases) register(c);
+  for (const c of [...cases, ...rootGap]) register(c);
 });
