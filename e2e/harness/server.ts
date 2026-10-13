@@ -181,12 +181,12 @@ export const startServer = async (boot: string): Promise<Harness> => {
   let portfolio = EMPTY;
   const requests: Request[] = [];
 
-  const page = (shim: boolean) => ({
+  const page = (shim: boolean, mapOverrides: boolean) => ({
     type: 'text/html',
     body:
       `<!doctype html><html><head><meta charset="utf-8"><title>nfo e2e</title>` +
       (shim
-        ? `<script>window.esmsInitOptions={shimMode:true,mapOverrides:true}</script>` +
+        ? `<script>window.esmsInitOptions={shimMode:true,mapOverrides:${mapOverrides}}</script>` +
           `<script src="/es-module-shims.js"></script>`
         : ``) +
       // A classic script, deliberately: a `type="module"` boot would itself be a module load, and a
@@ -206,7 +206,11 @@ export const startServer = async (boot: string): Promise<Harness> => {
     };
 
     if (host === PAGE_HOST) {
-      if (url.pathname === '/') return send(page(url.searchParams.get('shim') === '1'), 'page');
+      if (url.pathname === '/')
+        return send(
+          page(url.searchParams.get('shim') === '1', url.searchParams.get('overrides') !== '0'),
+          'page'
+        );
       if (url.pathname === '/es-module-shims.js') return send(js(shims), 'page');
       if (url.pathname === '/nfo-e2e.js') return send(js(boot), 'page');
       if (url.pathname === '/manifest.json')
