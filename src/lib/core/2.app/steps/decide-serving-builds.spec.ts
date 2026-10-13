@@ -416,6 +416,71 @@ describe('createDecideServingBuilds', () => {
     );
   });
 
+  // The strict share scope keeps every tag apart, so no build serves a package there. One serving
+  // build would skip the other remote's copy, or throw under strictVersion + strictExternalCompatibility.
+  describe('the strict share scope', () => {
+    const shared = (version: string, strictVersion: boolean): DenseSharedInfo =>
+      ({
+        packageName: '@fw/core',
+        version,
+        requiredVersion: version,
+        singleton: true,
+        strictVersion,
+        shareScope: 'strict',
+        entries: { '@fw/core': `${version}/fw_core.js` },
+      }) as DenseSharedInfo;
+    const entry = (name: string, ...sharedInfo: DenseSharedInfo[]): RemoteEntry =>
+      ({
+        name,
+        url: `http://${name}/remoteEntry.json`,
+        exposes: [],
+        shared: sharedInfo,
+      }) as unknown as RemoteEntry;
+
+    let storage = 0;
+    describe.each([
+      ['a first', (e: RemoteEntry[]) => e],
+      ['b first', (e: RemoteEntry[]) => [...e].reverse()],
+    ])('%s', (_, order) => {
+      it.each([
+        [false, false],
+        [false, true],
+        [true, false],
+        [true, true],
+      ])(
+        'maps each remote to its own tag and stores no serving build (strictVersion=%s, strictExternalCompatibility=%s)',
+        async (strictVersion, strict) => {
+          const p = portfolio(
+            {},
+            {
+              storage: `nf-dsb-strict-${storage++}`,
+              realRepositories: true,
+              scope: 'strict',
+              strict,
+            }
+          );
+          const entries = order([
+            entry('a', shared('2.1.0', strictVersion)),
+            entry('b', shared('2.2.0', strictVersion)),
+          ]);
+
+          const map = await p.runInit(entries);
+
+          const core = p.stored()['@fw/core']!;
+          expect(
+            core.versions.map(v => `${v.tag}:${v.action}:[${v.remotes.map(r => r.name)}]`)
+          ).toEqual(['2.2.0:share:[b]', '2.1.0:share:[a]']);
+          expect('servingBuild' in core).toBe(false);
+          expect(map.imports).toEqual({});
+          expect(map.scopes).toEqual({
+            'http://a/': { '@fw/core': 'http://a/2.1.0/fw_core.js' },
+            'http://b/': { '@fw/core': 'http://b/2.2.0/fw_core.js' },
+          });
+        }
+      );
+    });
+  });
+
   describe('on a second run', () => {
     beforeEach(() =>
       seed({

@@ -244,8 +244,8 @@ fill (see below).
 #### One build per package
 
 A package is its primary external plus any flat secondary externals (`@angular/core/testing` reported as an
-external of its own). Per share scope — global, each named shareScope, and `strict` — every package is served
-from **one build**, picked after the shared versions are determined and stored as `servingBuild` on every
+external of its own). Per share scope — global and each named shareScope — every package is served from
+**one build**, picked after the shared versions are determined and stored as `servingBuild` on every
 external of the package in that scope.
 
 - A **pooled** package takes its pool's winner, the build its election made global, when the winner has a copy

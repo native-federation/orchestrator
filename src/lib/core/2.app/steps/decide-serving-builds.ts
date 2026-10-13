@@ -28,6 +28,7 @@ export function createDecideServingBuilds(
 
     try {
       for (const shareScope of ports.sharedExternalsRepo.getScopes()) {
+        if (ports.sharedExternalsRepo.scopeType(shareScope) === 'strict') continue;
         const sharedExternals = ports.sharedExternalsRepo.getFromScope(shareScope);
         for (const [pkg, names] of packagesOf(sharedExternals)) {
           const externals = names.map(name => [name, sharedExternals[name]!] as const);
