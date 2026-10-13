@@ -1,6 +1,7 @@
 import fc from 'fast-check';
-import { GLOBAL_SCOPE, type ImportMap, type shareScope } from 'lib/core/1.domain';
+import { GLOBAL_SCOPE, type ImportMap, type RemoteEntry, type shareScope } from 'lib/core/1.domain';
 import {
+  generatedImports,
   hostOf,
   portfolioArbitrary,
   redeployArbitrary,
@@ -28,6 +29,7 @@ import {
 import * as _path from 'lib/utils/path';
 import { copiesByRemote } from 'lib/core/1.domain/pooling/builds';
 import { committedView } from 'lib/core/1.domain/pooling/gate';
+import { pageFaults, resolve } from 'lib/testing/pooling/page-graph';
 
 /**
  * Pooling invariants over generated portfolios (`generate-portfolio.ts`), through the real init steps with
@@ -67,6 +69,19 @@ const pooledPart = ({ importMap, record }: { importMap: ImportMap; record: share
     ),
   };
 };
+
+// Per remote, the file each specifier it ships resolves to from its own URL.
+const resolvedFiles = (importMap: ImportMap, entries: RemoteEntry[]) =>
+  Object.fromEntries(
+    entries.flatMap(entry =>
+      entry.shared.flatMap(shared =>
+        Object.keys(shared.entries).map(specifier => [
+          `${entry.name}|${specifier}`,
+          resolve(importMap, specifier, scopeUrlOf(entry.name)) ?? null,
+        ])
+      )
+    )
+  );
 
 // The build each external's package is served from, as stored.
 const servingBuilds = (record: shareScope) =>
@@ -127,6 +142,39 @@ describe('pooling properties: init (generated portfolios)', { timeout: TIMEOUT }
         }
       ));
 
+  // The page oracle (`page-graph.ts`) per remote over every file its code reaches: one build per package, no
+  // package's internals from two builds, no specifier at two URLs, nothing unresolved. Leaks (another package's
+  // file binding a second build through its scope) are left out. A generated file never imports a root its
+  // own build lacks, so a host shipping a secondary without its root (left unresolved) never arises.
+  for (const [offset, shareScope] of [
+    [40, undefined],
+    [41, 'team'],
+  ] as const)
+    it(`page: every remote runs each package from one build, ${shareScope ?? 'global'} share scope`, () =>
+      run(
+        offset,
+        portfolioArbitrary({
+          flat: true,
+          chunks: true,
+          labelNoise: true,
+          ...(shareScope && { shareScope }),
+        }),
+        300,
+        async spec => {
+          const init = await initOrRefuse(spec);
+          if (!init.ok) return;
+          const { importMap } = init.result;
+          expect(
+            pageFaults({
+              importMap,
+              entries: init.entries,
+              hosts: init.host === undefined ? [] : [init.host],
+              importsOf: generatedImports(init.entries),
+            })
+          ).toEqual({});
+        }
+      ));
+
   it('order independence: any registration order runs the same tags with the same verdicts', () =>
     run(
       3,
@@ -150,26 +198,29 @@ describe('pooling properties: init (generated portfolios)', { timeout: TIMEOUT }
       }
     ));
 
-  // As above with flat and dense builds of one package side by side, chunked or not, globally and in a named
-  // share scope: ties between builds go to the remote's name, so the order remotes register in picks neither
-  // the build that serves a package nor its tag. Known and not compared: a specifier the serving
-  // build does not ship is still filled from the version's other copies in record order.
+  // As above with flat and dense builds of one package side by side, chunked or not, with label noise,
+  // globally and in a named share scope: ties between builds go to the remote's name, so the order remotes
+  // register in picks neither the build that serves a package nor any file a remote runs.
   for (const [offset, shareScope] of [
     [30, undefined],
     [31, 'team'],
   ] as const)
-    it(`order independence: any registration order serves each package from the same build, ${shareScope ?? 'global'} share scope`, () =>
+    it(`order independence: any registration order serves each package from the same build and runs the same files, ${shareScope ?? 'global'} share scope`, () =>
       run(
         offset,
-        portfolioArbitrary({ flat: true, chunks: true, ...(shareScope && { shareScope }) }).chain(
-          spec =>
-            fc.tuple(
-              fc.constant(lenient(spec)),
-              fc.shuffledSubarray(
-                spec.remotes.map((_, i) => i),
-                { minLength: spec.remotes.length, maxLength: spec.remotes.length }
-              )
+        portfolioArbitrary({
+          flat: true,
+          chunks: true,
+          labelNoise: true,
+          ...(shareScope && { shareScope }),
+        }).chain(spec =>
+          fc.tuple(
+            fc.constant(lenient(spec)),
+            fc.shuffledSubarray(
+              spec.remotes.map((_, i) => i),
+              { minLength: spec.remotes.length, maxLength: spec.remotes.length }
             )
+          )
         ),
         200,
         async ([spec, order]) => {
@@ -180,7 +231,7 @@ describe('pooling properties: init (generated portfolios)', { timeout: TIMEOUT }
             order.map(i => entries[i]!)
           );
           expect(servingBuilds(b.record)).toEqual(servingBuilds(a.record));
-          expect(outcome(b.importMap, b.record).runs).toEqual(outcome(a.importMap, a.record).runs);
+          expect(resolvedFiles(b.importMap, entries)).toEqual(resolvedFiles(a.importMap, entries));
         }
       ));
 
