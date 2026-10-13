@@ -31,8 +31,6 @@ export type Election = {
   winner: RemoteName;
   winnerIsHost: boolean;
   globalTags: SpecifierTags;
-  // Subpool owners and self-serving remotes that agree with the final global tags (rule 5).
-  agreeing: ReadonlySet<RemoteName>;
   placements: ReadonlyMap<RemoteName, Placement>;
   // In warning order: subpools in election order, then self. A strict range's rejection wins, as
   // `strictExternalCompatibility` refuses that. Undefined only for a subpool's owner the global map
@@ -88,14 +86,10 @@ export function elect(input: ElectionInput): Election {
 
   const firstSeen = new Map(pool.remotes.map((r, i) => [r, i]));
   const self = state.pending.sort((a, b) => firstSeen.get(a)! - firstSeen.get(b)!);
-  const agreeing = new Set(
-    [...state.subpools.map(p => p.owner), ...self].filter(r => pool.agreesAt(r, state.globalTags))
-  );
   return {
     winner: state.winner,
     winnerIsHost: hostRemote !== undefined,
     globalTags: state.globalTags,
-    agreeing,
     ...placeRemotes(state.globalRemotes, state.subpools, self, r => missOf(pool, state, r)),
   };
 }
@@ -131,8 +125,8 @@ function roundOne(pool: Pool, hostRemote: RemoteName | undefined): State {
   type Candidate = {
     build: Build;
     served: RemoteName[];
-    // Remotes that agree without being served still take this build's files (rule 5): when no build serves
-    // more than itself, that is what separates a build its peers share from an outlier.
+    // Remotes that agree without being served: when no build serves more than itself, they separate a build
+    // its peers share from an outlier.
     agreeing: number;
   };
   const scored = new Map<string, Omit<Candidate, 'build'>>();

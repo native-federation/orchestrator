@@ -650,7 +650,7 @@ are elected by pooling alone; the per-external resolver leaves them untouched (s
 | **settle** | The loop after extension (step 4): the global map drops every tag no remote on it ships, and a remote it no longer serves moves to a subpool or a later round, until nothing changes. |
 | **extended global tags** | The global map's tags once extension has added the packages the winner does not ship (step 4 of [How pooling resolves](#how-pooling-resolves)); a remote they serve moves onto the global map when one build shipped the combination it would resolve. |
 | **subpool** | Remotes off the global map that run one remote's build through scopes. Named after that remote; its members' copies record it as `servedBy`. |
-| **self-served** | A remote that runs its own build for its whole family, or, when it agrees with the global map, for everything the global map does not give it. Its scoped copies record why as `poolCause`. |
+| **self-served** | A remote that runs its own build for its whole family. Its scoped copies record why as `poolCause`. |
 | **island** | A self-served remote whose range rejects a tag of the elected build (`poolCause: incompatible`); the log says it "is islanded". One the elected build does not cover is `uncovered` and "serves its own family". |
 | **gate** | The dynamic path's check: per pool, a remote loaded by `initRemoteEntry` either resolves through the committed global map or serves itself, judged per file: no specifier it reaches may resolve to two files. It holds no election (see [Scope and dynamic init](#scope-and-dynamic-init)). |
 | `poolCause`, `servedBy`, `poolWinner` | The results pooling stores on the record; see [What pooling stores](#what-pooling-stores). |
@@ -772,19 +772,14 @@ counting a build's package at its tag for that package's other entrypoints. The 
 to another build's `common@18.0.1` is a pair no build shipped, so a remote importing both stays where the
 rounds put it (or serves itself, `uncovered`) rather than resolving that pair.
 
-**5. Agreement takes the global files, all or nothing.** A remote running its own build — a subpool's build or
-a remote left alone — that agrees with the final coverage on *everything* both ship takes the global files for
-those packages and serves only the rest itself. This is decided per **group**, a subpool or a remote serving
-itself, over every copy of every member. The group keeps the global files only if none of its copies that run off
-the map ships a specifier the global map serves, or is chunked and ships an entrypoint of a package the global
-map serves. Otherwise its whole family runs on its own build: a file the group took from the map would bind the
-map's copy beside the one the group runs itself. This can cost downloads where nothing tore (the host stays the
-main pool and every other build a coherent subpool). A remote that disagrees on anything takes nothing global,
-**not even a file at its own version**: that file's own imports bind the global peers, so it would run the
-global `core` under its own `router` one hop in. A remote that serves any member itself publishes no global
-file; it takes a copy global only where a build whose files resolve globally lists every entrypoint of that
-copy in its own copy of the same member, at the same tag, since the import map maps a specifier from whichever
-member reaches it first.
+**5. A group off the map runs its whole family on its own build.** A **group** — a subpool, or a remote serving
+itself — takes no global file, even where its build agrees with the final coverage: a file the group took from
+the map would bind the map's copies beside the ones it runs itself. A remote that agrees and that the final
+coverage serves is already on the global map (step 4), unless it is the build of a subpool whose other members
+still need it. This can cost downloads where nothing tore (the host
+stays the main pool and every other build a coherent subpool). A remote that disagrees on anything takes nothing
+global, **not even a file at its own version**: that file's own imports bind the global peers, so it would run
+the global `core` under its own `router` one hop in.
 
 **6. Everyone left serves themselves**, with the reason recorded (`poolCause`, see
 [What pooling stores](#what-pooling-stores)).
@@ -799,9 +794,7 @@ flowchart TD
     R2 -->|Yes| AN[Subpool: it and the remotes it serves<br/>run its build's files through scopes]
     AN --> R2
     R2 -->|No| EX[Extension: publish packages the winner lacks<br/>when every agreeing contributor ships one tag]
-    EX --> AG{Agrees with the final coverage<br/>on everything both ship?}
-    AG -->|Yes| T[Takes the global files for those packages,<br/>serves the rest itself]
-    AG -->|No| S[Serves its whole family itself<br/>poolCause + warn]
+    EX --> S[Serves its whole family itself<br/>poolCause + warn]
 ```
 
 **Host precedence is absolute.** The host's build is round 1 whenever it ships any member, whatever it serves:
@@ -852,8 +845,7 @@ Each member is rebuilt with one version (a **row**) per `(tag, action)`, newest 
   winner's; every copy resolving globally at that tag joins it. The tag is read from any of the member's
   entrypoints, because a package can be shipped entrypoint-only (`material/table` without `material`).
 - **`skip`** — copies resolving globally at another tag their range accepts; a subpool's copies with
-  `servedBy: <its build>`, the build's own copies naming itself. A subpool whose build agrees with the global
-  map (rule 5) resolves globally instead.
+  `servedBy: <its build>`, the build's own copies naming itself.
 - **`scope`** — copies of a remote serving itself, with their `poolCause`.
 
 **Every subpool's build maps its own family onto itself.** A consumer's scope governs only the consumer's

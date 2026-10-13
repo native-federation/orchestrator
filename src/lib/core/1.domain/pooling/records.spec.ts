@@ -4,7 +4,7 @@ import { createAcceptsTag } from 'lib/core/1.domain/externals/compatibility';
 import { createVersionCheck } from 'lib/core/3.adapters/checks/version.check';
 import { elect } from './election';
 import type { PoolMember } from './membership';
-import { memberRecord, placePool, renamedRecords } from './records';
+import { memberRecord, renamedRecords } from './records';
 
 /**
  * The records the init step writes are computed here, before any write, and nothing here may change what it
@@ -58,7 +58,7 @@ describe('memberRecord', () => {
       latestFirst: false,
       isChunked: () => false,
     });
-    const placed = placePool(election, 'x', members);
+    const placed = { ...election, poolName: 'x' };
 
     const records = members.map(m => memberRecord(m, placed, compare));
 
@@ -84,7 +84,7 @@ describe('memberRecord', () => {
       latestFirst: false,
       isChunked: () => false,
     });
-    const placed = placePool(election, 'x', members);
+    const placed = { ...election, poolName: 'x' };
 
     const flags = members.flatMap(m =>
       memberRecord(m, placed, compare).versions.flatMap(v => v.remotes.map(r => r.cached))
@@ -193,7 +193,7 @@ describe('a remote that leaves the pool for its family', () => {
         latestFirst: false,
         isChunked: () => false,
       });
-      const placed = placePool(election, 'fw', order);
+      const placed = { ...election, poolName: 'fw' };
 
       const rows = members.map(m =>
         memberRecord(m, placed, compare).versions.map(

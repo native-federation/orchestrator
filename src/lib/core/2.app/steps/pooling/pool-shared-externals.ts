@@ -9,7 +9,7 @@ import { type Copy, copiesByRemote, specifierCount } from 'lib/core/1.domain/poo
 import { elect, type PoolMiss, previousWinner } from 'lib/core/1.domain/pooling/election';
 import type { PoolMember, PoolName } from 'lib/core/1.domain/pooling/membership';
 import { type ElectionPlan, planElection } from 'lib/core/1.domain/pooling/plan';
-import { memberRecord, type PlacedPool, placePool } from 'lib/core/1.domain/pooling/records';
+import { memberRecord, type PlacedPool } from 'lib/core/1.domain/pooling/records';
 import { createIsChunked } from './is-chunked';
 
 export function createPoolSharedExternals(
@@ -81,7 +81,7 @@ export function createPoolSharedExternals(
       previousWinner: previousWinner(members),
       latestFirst: config.profile.latestSharedExternal,
     });
-    const placed = placePool(election, poolName, members);
+    const placed: PlacedPool = { ...election, poolName };
     report(poolName, members, placed, scope);
     return members.map(m => [
       m.name,

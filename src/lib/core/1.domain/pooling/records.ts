@@ -11,66 +11,10 @@ import type {
 } from 'lib/core/1.domain';
 import { addRemoteToVersion } from 'lib/core/1.domain/externals/basis';
 import { byTag, mergeRows, rowAt } from 'lib/core/1.domain/externals/rows';
-import type { Specifier } from 'lib/core/1.domain/externals/specifier';
 import type { Election } from './election';
 import type { PoolMember, PoolName } from './membership';
 
-export type PlacedPool = Omit<Election, 'agreeing'> & {
-  poolName: PoolName;
-  // The builds, among those agreeing with round 1, whose remotes take its files where their versions match.
-  keepsGlobalFiles: ReadonlySet<RemoteName>;
-};
-
-// Rule 5 holds per group on one build (a subpool, or a self-serving remote): a build takes the global files only
-// where every copy its remotes ship takes them, so none of its remotes runs a family from two builds. See
-// docs/version-resolver.md §"How the verdicts land in the record and the map".
-export function placePool(
-  election: Election,
-  poolName: PoolName,
-  members: readonly PoolMember[]
-): PlacedPool {
-  const { agreeing, globalTags, placements, ...placed } = election;
-  const keepsGlobalFiles = new Set(agreeing);
-  for (const member of members) {
-    const takesGlobalFiles = globalFilesTaker(member, { globalTags, placements }, agreeing);
-    for (const version of member.external.versions)
-      for (const meta of version.remotes)
-        if (placements.get(meta.name)!.kind !== 'global' && !takesGlobalFiles(meta, version.tag))
-          keepsGlobalFiles.delete(runsOn(placements, meta.name));
-  }
-  return { ...placed, globalTags, placements, poolName, keepsGlobalFiles };
-}
-
-const runsOn = (placements: Election['placements'], name: RemoteName) => {
-  const placement = placements.get(name)!;
-  return placement.kind === 'subpool' ? placement.owner : name;
-};
-
-// Rule 5: a build that keeps the global files takes them where a global copy at its tag lists every file it
-// takes.
-function globalFilesTaker(
-  member: PoolMember,
-  { globalTags, placements }: Pick<Election, 'globalTags' | 'placements'>,
-  keepsGlobalFiles: ReadonlySet<RemoteName>
-) {
-  // What the global copies of this member ship, per tag. The import map maps a specifier from whichever
-  // external reaches it first, so a global copy in another member's record cannot stop a copy of this one
-  // claiming it.
-  const claimableAt = new Map<VersionName, Set<Specifier>>();
-  for (const version of member.external.versions)
-    for (const { name, entries } of version.remotes)
-      if (placements.get(name)!.kind === 'global') {
-        let specifiers = claimableAt.get(version.tag);
-        if (!specifiers) claimableAt.set(version.tag, (specifiers = new Set()));
-        for (const s in entries) specifiers.add(s);
-      }
-
-  return (meta: SharedVersionMeta, tag: VersionName) =>
-    keepsGlobalFiles.has(runsOn(placements, meta.name)) &&
-    Object.keys(meta.entries).every(
-      s => globalTags.get(s) === tag && claimableAt.get(tag)?.has(s) === true
-    );
-}
+export type PlacedPool = Election & { poolName: PoolName };
 
 // One row per (tag, action); see docs/version-resolver.md §"How the verdicts land in the record and the map".
 export function memberRecord(
@@ -87,7 +31,6 @@ export function memberRecord(
       for (const s in meta.entries) sharedTag ??= globalTags.get(s);
 
   const claimsGlobally = (name: RemoteName) => placements.get(name)!.kind === 'global';
-  const takesGlobalFiles = globalFilesTaker(member, pool, pool.keepsGlobalFiles);
 
   const placed: SharedVersion[] = [];
   let winnerRow: SharedVersion | undefined;
@@ -106,7 +49,7 @@ export function memberRecord(
       // The import map is rebuilt from scratch, so it re-marks what it publishes.
       const meta = { ...rest, cached: false };
       const placement = placements.get(meta.name)!;
-      if (placement.kind === 'global' || takesGlobalFiles(meta, version.tag))
+      if (placement.kind === 'global')
         place(version.tag, version.tag === sharedTag ? 'share' : 'skip', meta);
       else if (placement.kind === 'subpool')
         place(version.tag, 'skip', { ...meta, servedBy: placement.owner });
