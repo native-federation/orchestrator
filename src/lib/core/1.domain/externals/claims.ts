@@ -1,4 +1,5 @@
 import type { DeepReadonly } from 'lib/utils/deep-readonly';
+import type { RemoteName } from '../remote/remote-info.contract';
 import type { ExternalName, SharedExternal } from './external.contract';
 import type { SharedVersion, SharedVersionMeta, VersionName } from './version.contract';
 import type { Specifier } from './specifier';
@@ -64,4 +65,18 @@ export function claimTable(
       if (version.action === 'share') claimShareRow(name, version);
 
   return table;
+}
+
+// One version's claims, ordered as `claimTable` orders them within a tag: the serving copy, then record order.
+export function versionClaims(
+  version: DeepReadonly<SharedVersion>,
+  servingBuild?: RemoteName
+): Map<Specifier, SharedVersionMeta> {
+  const claims = new Map<Specifier, SharedVersionMeta>();
+  const claim = (specifier: Specifier, copy: SharedVersionMeta) => {
+    if (!claims.has(specifier)) claims.set(specifier, copy);
+  };
+  if (servingBuild) forEachVersionEntry(version, copy => copy.name === servingBuild, claim);
+  forEachVersionEntry(version, undefined, claim);
+  return claims;
 }

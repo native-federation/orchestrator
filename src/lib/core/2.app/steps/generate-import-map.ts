@@ -10,8 +10,7 @@ import {
   type SharedVersion,
   type SharedVersionMeta,
 } from 'lib/core/1.domain';
-import { versionEntries } from 'lib/core/1.domain/externals/basis';
-import { claimTable, type Claim } from 'lib/core/1.domain/externals/claims';
+import { claimTable, versionClaims, type Claim } from 'lib/core/1.domain/externals/claims';
 import type { Specifier } from 'lib/core/1.domain/externals/specifier';
 import type { LoggingConfig } from '../config/log.contract';
 import type { ModeConfig } from '../config/mode.contract';
@@ -132,8 +131,7 @@ export function createGenerateImportMap(
         }
 
         // Serve every entrypoint from one version: this one, or the override version when a
-        // 'skip' is redirected elsewhere. Within a version the copies merge, so the surface is
-        // the union of what they bundle, each specifier from the copy that declares it.
+        // 'skip' is redirected elsewhere.
         let serving = version;
 
         if (version.action === 'skip') {
@@ -149,7 +147,7 @@ export function createGenerateImportMap(
           }
         }
 
-        const provided = versionEntries(serving);
+        const provided = versionClaims(serving, external.servingBuild);
         const mappings: (Mapping & { packageName: string })[] = [];
 
         for (const [packageName, provider] of provided) {
@@ -193,18 +191,10 @@ export function createGenerateImportMap(
           for (const m of mappings) {
             addToScope(importMap, consumerScope, { [m.packageName]: m.url });
           }
-          // Entrypoints no copy of the serving version has are served from this remote's own build.
-          for (const [packageName, file] of Object.entries(consumer.entries)) {
+          for (const packageName of Object.keys(consumer.entries)) {
             if (provided.has(packageName)) continue;
             const claim = claimedElsewhere(externalName, packageName);
-            if (claim) {
-              addToScope(importMap, consumerScope, { [packageName]: claim.url });
-              continue;
-            }
-            const url = _path.join(consumerScope, file);
-            addToScope(importMap, consumerScope, { [packageName]: url });
-            addIntegrity(importMap, url, consumer.name, file);
-            consumer.cached = true;
+            if (claim) addToScope(importMap, consumerScope, { [packageName]: claim.url });
           }
         });
         for (const m of mappings) {
@@ -257,7 +247,7 @@ export function createGenerateImportMap(
     const servedByClaims = () =>
       external.versions
         .filter(v => v.action === 'skip')
-        .every(v => [...versionEntries(v).keys()].every(servedElsewhere));
+        .every(v => [...versionClaims(v).keys()].every(servedElsewhere));
 
     if (sharedVersions.length < 1 && !servedByClaims()) {
       if (config.strict.strictImportMap) {

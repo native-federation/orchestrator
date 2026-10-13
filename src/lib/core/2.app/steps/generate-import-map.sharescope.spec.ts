@@ -262,7 +262,17 @@ describe('createGenerateImportMap (shareScope-externals)', () => {
     expect(config.log.warn).not.toHaveBeenCalled();
   });
 
-  it('should self-fill entrypoints a skipped version declares but the override lacks', async () => {
+  // A hand-built record: no init or load writes it, because init moves a remote the shared version does not
+  // cover onto `scope` rows first. It pins that only share rows claim, as in the global map: a skip copy's
+  // entrypoint the shared version lacks stays out of the skipped remote's scope, and its own copy is not
+  // marked `cached`.
+  it('should leave an entrypoint declared only by a skipped version unmapped', async () => {
+    const skipped = mockVersion_A.v2_1_1({
+      action: 'skip',
+      remotes: {
+        'team/mfe2': { entries: { 'dep-a': 'dep-a.js', 'dep-a/sub': 'dep-a-sub.js' } },
+      },
+    });
     adapters.sharedExternalsRepo.getFromScope = vi.fn((scope?: string): shareScope => {
       return !scope || scope === GLOBAL_SCOPE
         ? {}
@@ -271,12 +281,7 @@ describe('createGenerateImportMap (shareScope-externals)', () => {
               dirty: false,
               versions: [
                 mockVersion_A.v2_1_2({ action: 'share', remotes: ['team/mfe1'] }),
-                mockVersion_A.v2_1_1({
-                  action: 'skip',
-                  remotes: {
-                    'team/mfe2': { entries: { 'dep-a': 'dep-a.js', 'dep-a/sub': 'dep-a-sub.js' } },
-                  },
-                }),
+                skipped,
               ],
             }),
           };
@@ -291,11 +296,53 @@ describe('createGenerateImportMap (shareScope-externals)', () => {
           'dep-a': mockScopeUrl_MFE1({ file: 'dep-a.js' }),
         },
         [mockScopeUrl_MFE2()]: {
-          // primary covered by the override provider (mfe1)
           'dep-a': mockScopeUrl_MFE1({ file: 'dep-a.js' }),
-          // secondary the override can't provide, served from mfe2's own build
-          'dep-a/sub': mockScopeUrl_MFE2({ file: 'dep-a-sub.js' }),
         },
+      },
+    });
+    expect(skipped.remotes[0]!.cached).toBe(false);
+  });
+
+  // The serving build is decided before the map; listed second, its copy still serves every remote of the
+  // version, not the copy that leads the row.
+  it("should publish a share row's serving copy even when another copy leads the row", async () => {
+    adapters.sharedExternalsRepo.getFromScope = vi.fn((scope?: string): shareScope =>
+      !scope || scope === GLOBAL_SCOPE
+        ? {}
+        : {
+            'dep-a': {
+              ...mockExternal_A({
+                dirty: false,
+                versions: [
+                  mockVersion_A.v2_1_2({
+                    action: 'share',
+                    remotes: {
+                      'team/mfe1': { entries: { 'dep-a': 'dep-a.js' } },
+                      'team/mfe2': {
+                        entries: { 'dep-a': 'dep-a.js', 'dep-a/sub': 'dep-a-sub.js' },
+                      },
+                    },
+                  }),
+                  mockVersion_A.v2_1_1({ action: 'skip', remotes: ['team/mfe3'] }),
+                ],
+              }),
+              servingBuild: 'team/mfe2',
+            },
+          }
+    );
+
+    const actual = await generateImportMap();
+
+    const served = {
+      'dep-a': mockScopeUrl_MFE2({ file: 'dep-a.js' }),
+      'dep-a/sub': mockScopeUrl_MFE2({ file: 'dep-a-sub.js' }),
+    };
+    expect(actual).toEqual({
+      imports: {},
+      scopes: {
+        [mockScopeUrl_MFE1()]: served,
+        [mockScopeUrl_MFE2()]: served,
+        [mockScopeUrl_MFE3()]: served,
       },
     });
   });
@@ -439,6 +486,58 @@ describe('createGenerateImportMap (shareScope-externals)', () => {
         expect(record['dep-a/sub']!.versions[0]!.remotes[0]!.cached).toBe(false);
         expect(config.log.warn).not.toHaveBeenCalled();
         expect(config.log.error).not.toHaveBeenCalled();
+      });
+    }
+
+    // The serving build ships the package flat, so its `dep-a` copy lists the root alone and the dense copy
+    // leads the row. Every remote still runs the root and `dep-a/sub` from the serving build.
+    const servedFlat = (flatFirst: boolean): shareScope => {
+      const denseFirst = {
+        ...mockExternal_A({
+          versions: [
+            mockVersion_A.v2_1_2({
+              action: 'share',
+              remotes: {
+                'team/mfe1': { entries: sub },
+                'team/mfe2': { entries: { 'dep-a': 'dep-a-flat.js' } },
+              },
+            }),
+          ],
+        }),
+        servingBuild: 'team/mfe2',
+      };
+      const flatSub = {
+        ...mockExternal.shared([
+          mockVersion.shared('2.1.2', 'dep-a/sub', {
+            action: 'share',
+            remotes: { 'team/mfe2': { file: 'dep-a-sub-flat.js' } },
+          }),
+        ]),
+        servingBuild: 'team/mfe2',
+      };
+      return flatFirst
+        ? { 'dep-a/sub': flatSub, 'dep-a': denseFirst }
+        : { 'dep-a': denseFirst, 'dep-a/sub': flatSub };
+    };
+
+    for (const flatFirst of [false, true]) {
+      it(`should serve a package from its flat serving build when a dense copy leads the row (${flatFirst ? 'flat first' : 'dense first'})`, async () => {
+        const record = servedFlat(flatFirst);
+        adapters.sharedExternalsRepo.getFromScope = vi.fn((scope?: string): shareScope =>
+          !scope || scope === GLOBAL_SCOPE ? {} : record
+        );
+
+        const actual = await generateImportMap();
+
+        const fromServing = {
+          'dep-a': mockScopeUrl_MFE2({ file: 'dep-a-flat.js' }),
+          'dep-a/sub': mockScopeUrl_MFE2({ file: 'dep-a-sub-flat.js' }),
+        };
+        expect(actual.scopes).toEqual({
+          [mockScopeUrl_MFE1()]: fromServing,
+          [mockScopeUrl_MFE2()]: fromServing,
+        });
+        expect(record['dep-a']!.versions[0]!.remotes[0]!.cached).toBe(false);
       });
     }
   });
