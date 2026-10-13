@@ -41,10 +41,9 @@ export type CoherenceInput = {
 /**
  * I3, the no-tear invariant, checked off the emitted import map rather than off the stored verdicts:
  * for every non-host remote, the `(specifier → tag)` combination it really resolves must be a subset of
- * some live build's own combination. Which remote *serves* a given tag is free — two builds at one tag
- * are interchangeable providers — so this compares tags only, never origins. A build that ships a package
- * at a tag also witnesses that package's other entrypoints at it: copies of one version merge their
- * entries (docs/version-resolver.md §"Merging within a version").
+ * some live build's own combination. Which remote serves a given tag is left to `findSplitRemotes`, so this
+ * compares tags only, never origins. A build that ships a package at a tag also witnesses that package's
+ * other entrypoints at it (docs/version-resolver.md §"Copies of one version").
  *
  * Reads the map the way a browser would (a remote's own scope entry wins over `imports`), so it fails on
  * exactly the combinations a page would really run.

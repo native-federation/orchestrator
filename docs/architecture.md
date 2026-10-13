@@ -325,6 +325,9 @@ classDiagram
     }
     class SharedExternal {
         dirty: boolean
+        poolName?: string
+        poolWinner?: string
+        servingBuild?: string
         versions: SharedVersion[]
     }
     class SharedVersion{
@@ -340,6 +343,9 @@ classDiagram
         cached: boolean
         name: string
         bundle?: string
+        pool?: string
+        servedBy?: string
+        poolCause?: 'incompatible'|'uncovered'
     }
     class ScopedExternals {
         Map<.string, ScopedExternal>
@@ -640,8 +646,9 @@ Enforced by ESLint (`no-restricted-imports` in `eslint.config.js`):
 | The init step: plan, elect, log, write; throws under `strictExternalCompatibility`     | `2.app/steps/pooling/pool-shared-externals.ts`, port `for-pooling-shared-externals.port.ts`   |
 | The dynamic step: judge the loaded remote, rewrite its actions, write its moved copies | `2.app/steps/pooling/pool-dynamic-externals.ts`, port `for-pooling-dynamic-externals.port.ts` |
 | Mapping a subpool's copies onto its build (`servedBy`)                                 | `2.app/steps/generate-import-map.ts`                                                          |
+| Which copy publishes each specifier: the serving build's copy, then record order       | `1.domain/externals/claims.ts` (`claimTable`, `versionClaims`)                                |
 | Marking a pool's other members dirty when removing a remote empties a member           | `3.adapters/storage/shared-externals.repository.ts`                                           |
 
-The two pipelines stay separate. Init runs `processRemoteEntries → poolSharedExternals → determineSharedExternals → decideServingBuilds → generateImportMap → commitChanges` and re-elects every pool of a scope with a dirty external; pooling runs before `determine`, which leaves pooled externals alone. `decideServingBuilds` then stores one serving build per package in each share scope, the one the import map serves every specifier of that package from (see [One build per package](./version-resolver.md#one-build-per-package)). `initRemoteEntry` runs `updateCache → poolDynamicExternals → convertToImportMap → commitChanges`, or `rollbackChanges` when a step fails: a committed import map cannot change, so it elects nothing and only judges the loaded remote against the committed record (see [Scope and dynamic init](./version-resolver.md#scope-and-dynamic-init)).
+The two pipelines stay separate. Init runs `processRemoteEntries → poolSharedExternals → determineSharedExternals → decideServingBuilds → generateImportMap → commitChanges` and re-elects every pool of a scope with a dirty external; pooling runs before `determine`, which leaves pooled externals alone. `decideServingBuilds` then stores one serving build per package in each share scope but `strict` (see [One build per package](./version-resolver.md#one-build-per-package)). `generateImportMap` publishes each specifier from the copy that claims it: the serving build's copy first, then the other copies of its share row in record order; a skipped copy claims nothing. The `strict` scope has no serving build, so each of its tags publishes its own copies, basis first. `initRemoteEntry` runs `updateCache → poolDynamicExternals → convertToImportMap → commitChanges`, or `rollbackChanges` when a step fails: a committed import map cannot change, so it elects nothing and only judges the loaded remote against the committed record (see [Scope and dynamic init](./version-resolver.md#scope-and-dynamic-init)).
 
 Adding a new flow means adding a new folder under `src/lib/`, a `<name>.index.ts` barrel next to the existing ones, and one bundle entry in `build.js`.

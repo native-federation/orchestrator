@@ -49,10 +49,8 @@ export function versionDemands(version: SharedVersion): SharedVersionMeta[] {
   return Array.from(distinct.values());
 }
 
-// Every copy of a version builds the same tag, so a specifier only some of them bundle is not a
-// tear: the version exposes the union of its copies' entrypoints, each served by the first copy
-// that declares it — basis precedence first. See
-// docs/version-resolver.md#entrypoint-coverage-and-tearing.
+// The copies build one tag, so this is what the version ships, not whose files a consumer runs; see
+// docs/version-resolver.md#copies-of-one-version.
 //
 // Only copies that publish their own files count. Pooling places a copy in a subpool running a foreign
 // build via `servedBy`, and the import map then names that build's files for it, per consumer — so what
