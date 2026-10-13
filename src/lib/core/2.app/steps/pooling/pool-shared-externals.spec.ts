@@ -301,8 +301,7 @@ describe('createPoolSharedExternals', () => {
       expect(shareOf('@framework/common')).toMatchObject({ tag: '17.0.0', host: true });
     });
 
-    // Two builds that each serve only themselves and agree with nobody; a comes first in record order and is
-    // newer.
+    // Two builds that each serve only themselves and agree with nobody; a is newer.
     const seedTied = (winners: { core?: string; common?: string }) => {
       for (const [name, poolWinner] of [
         ['@framework/core', winners.core],
@@ -330,19 +329,19 @@ describe('createPoolSharedExternals', () => {
     });
 
     it("leads the winner's row with its copy, so the map publishes the winner's file", async () => {
-      // x is listed first and ties with a; the stored winner a keeps the tie. `remotes[0]` is the copy the
-      // global map publishes, so a's copy must move to the front.
+      // a is listed first and wins a tie by name; the stored winner x keeps the tie. `remotes[0]` is the copy
+      // the global map publishes, so x's copy must move to the front.
       for (const name of ['@framework/core', '@framework/common'])
-        p.seed(name, [at('17.0.0', name, [copy('x'), copy('a')], 'share')], true, {
-          poolWinner: 'a',
+        p.seed(name, [at('17.0.0', name, [copy('a'), copy('x')], 'share')], true, {
+          poolWinner: 'x',
         });
 
       const importMap = await p.runInit();
 
-      expect(p.record('@framework/core').poolWinner).toBe('a');
-      expect(rowsOf('@framework/core')).toEqual(['17.0.0:share:[a,x]']);
+      expect(p.record('@framework/core').poolWinner).toBe('x');
+      expect(rowsOf('@framework/core')).toEqual(['17.0.0:share:[x,a]']);
       // The properties map URLs to tags, so they cannot tell two copies of one tag apart; only this can.
-      expect(importMap.imports['@framework/core']).toBe('http://a/@framework/core.js');
+      expect(importMap.imports['@framework/core']).toBe('http://x/@framework/core.js');
     });
 
     // Both ways round: whichever member is read first, taking its stored winner instead of none elects b in
@@ -357,7 +356,7 @@ describe('createPoolSharedExternals', () => {
 
         await p.runInit();
 
-        // No previous winner, so record order breaks the tie.
+        // No previous winner, so the newer build breaks the tie.
         expect(shareOf('@framework/core')!.tag).toBe('18.0.0');
         expect(p.record('@framework/common').poolWinner).toBe('a');
       }
@@ -372,9 +371,9 @@ describe('createPoolSharedExternals', () => {
       expect(p.record('@framework/common').poolWinner).toBe('b');
     });
 
-    // m4 is the only member both ship, so neither build serves the other and record order elects x. The
-    // stored winner used to be inferred from the bases of the `share` rows, which a's own rows (m1..m3)
-    // outnumber, so re-electing every member flipped it to a.
+    // m4 is the only member both ship, so neither build serves the other and the name elects a. The stored
+    // winner used to be inferred from the bases of the `share` rows, which x's own rows (m1..m3) outnumber, so
+    // re-electing every member flipped it to x.
     it('keeps a tied winner when every member is re-elected and when a joiner reorders the record', async () => {
       const seed = (name: string, remotes: string[]) =>
         p.seed(name, [
@@ -384,27 +383,27 @@ describe('createPoolSharedExternals', () => {
             remotes.map(remote => copy(remote))
           ),
         ]);
-      seed('@fam/m0', ['x']);
-      for (const name of ['@fam/m1', '@fam/m2', '@fam/m3']) seed(name, ['a']);
-      seed('@fam/m4', ['x', 'a']);
+      seed('@fam/m0', ['a']);
+      for (const name of ['@fam/m1', '@fam/m2', '@fam/m3']) seed(name, ['x']);
+      seed('@fam/m4', ['a', 'x']);
 
       const coldMap = await p.runInit();
       const coldRecord = structuredClone(p.stored());
-      expect(coldMap.imports['@fam/m4']).toBe('http://x/@fam/m4.js');
+      expect(coldMap.imports['@fam/m4']).toBe('http://a/@fam/m4.js');
 
       for (const [name, external] of Object.entries(p.stored()))
         p.adapters.sharedExternalsRepo.addOrUpdate(name, { ...external, dirty: true }, undefined);
       expect(await p.runInit()).toEqual(coldMap);
       expect(p.stored()).toEqual(coldRecord);
 
-      // Members are ordered by name, so a's joiner puts a first in record order; the tie still holds, and only
-      // the stored winner keeps it. The joiner has no `poolWinner` yet.
-      seed('@fam/a', ['a']);
+      // Members are ordered by name, so x's joiner puts x first in record order; the winner holds. The joiner
+      // has no `poolWinner` yet.
+      seed('@fam/a', ['x']);
       const warmMap = await p.runInit();
 
       expect(p.record('@fam/m4')).toEqual(coldRecord['@fam/m4']);
-      expect(warmMap.imports['@fam/m4']).toBe('http://x/@fam/m4.js');
-      expect(Object.values(p.stored()).map(e => e.poolWinner)).toEqual(Array(6).fill('x'));
+      expect(warmMap.imports['@fam/m4']).toBe('http://a/@fam/m4.js');
+      expect(Object.values(p.stored()).map(e => e.poolWinner)).toEqual(Array(6).fill('a'));
     });
 
     it('ignores a stored winner that ships no member any more', async () => {
@@ -417,28 +416,27 @@ describe('createPoolSharedExternals', () => {
     });
 
     // x and a ship one build, tag for tag, so they tie on every key and neither is newer; with no stored
-    // winner, the copy listed first in the record wins. Both ways round, so neither name order nor the
-    // reverse of the record can pass this.
-    it.each([
-      { order: ['x', 'a'], winner: 'x' },
-      { order: ['a', 'x'], winner: 'a' },
-    ])('breaks a round-1 tie by record order ($order)', async ({ order, winner }) => {
-      for (const name of ['@framework/core', '@framework/common'])
-        p.seed(name, [
-          at(
-            '17.0.0',
-            name,
-            order.map(remote => copy(remote)),
-            'share'
-          ),
-        ]);
+    // winner, the name that sorts first wins. Both ways round, so record order cannot pass this.
+    it.each([{ order: ['x', 'a'] }, { order: ['a', 'x'] }])(
+      'breaks a round-1 tie by name, in either record order ($order)',
+      async ({ order }) => {
+        for (const name of ['@framework/core', '@framework/common'])
+          p.seed(name, [
+            at(
+              '17.0.0',
+              name,
+              order.map(remote => copy(remote)),
+              'share'
+            ),
+          ]);
 
-      const importMap = await p.runInit();
+        const importMap = await p.runInit();
 
-      expect(p.record('@framework/core').poolWinner).toBe(winner);
-      expect(rowsOf('@framework/core')).toEqual([`17.0.0:share:[${order}]`]);
-      expect(importMap.imports['@framework/core']).toBe(`http://${winner}/@framework/core.js`);
-    });
+        expect(p.record('@framework/core').poolWinner).toBe('a');
+        expect(rowsOf('@framework/core')).toEqual(['17.0.0:share:[a,x]']);
+        expect(importMap.imports['@framework/core']).toBe('http://a/@framework/core.js');
+      }
+    );
 
     it('takes the newest build first under latestSharedExternal', async () => {
       p.config.profile.latestSharedExternal = true;

@@ -45,7 +45,7 @@ type Subpool = { owner: RemoteName; remotes: RemoteName[] };
 type Pool = ElectionInput & {
   shipped: Map<RemoteName, Copy[]>;
   builds: Map<RemoteName, Build>;
-  // In record order: the order remotes first appear in the pool's versions, which round 1's ties fall back to.
+  // In record order: the order remotes first appear in the pool's versions.
   remotes: RemoteName[];
   servesAt: (remote: RemoteName, tags: SpecifierTags) => boolean;
   agreesAt: (remote: RemoteName, tags: SpecifierTags) => boolean;
@@ -109,7 +109,7 @@ function newer(pool: Pool, a: Build, b: Build): number {
   return 0;
 }
 
-// The sort is stable, so the input order breaks what the keys and the newer build leave tied.
+// What the keys and the newer build leave tied goes to the name that sorts first, never to record order.
 function rank<C extends { build: Build }>(pool: Pool, candidates: C[], keys: ((c: C) => number)[]) {
   const scored = candidates.map(c => ({ c, k: keys.map(key => key(c)) }));
   scored.sort((a, b) => {
@@ -117,7 +117,7 @@ function rank<C extends { build: Build }>(pool: Pool, candidates: C[], keys: ((c
       const d = b.k[i]! - a.k[i]!;
       if (d !== 0) return d;
     }
-    return newer(pool, b.c.build, a.c.build);
+    return newer(pool, b.c.build, a.c.build) || compareStrings(a.c.build.owner, b.c.build.owner);
   });
   return scored[0]?.c;
 }
@@ -211,9 +211,7 @@ function formSubpools(pool: Pool, state: State): void {
   );
   for (;;) {
     const stillPending = new Set(state.pending);
-    // A tie goes by name, never record order; see docs/version-resolver.md §"How pooling resolves", step 3.
-    const candidates = [...state.pending]
-      .sort(compareStrings)
+    const candidates = state.pending
       .map(owner => {
         const { build, served } = servable.get(owner)!;
         return { build, served: served.filter(r => stillPending.has(r)) };

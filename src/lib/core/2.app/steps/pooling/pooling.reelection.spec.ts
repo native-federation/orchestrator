@@ -195,7 +195,7 @@ describe('pooling re-election', () => {
       );
 
       const cold = await p.runInit([a, b, c]);
-      // a and b ship the same family, so record order makes a the winner.
+      // a and b ship the same family, so the name makes a the winner.
       expect(cold.imports['@fw/core']).toBe('http://a/fw_core.js');
       expect(p.record('@fw/core').poolWinner).toBe('team/a');
 
@@ -276,7 +276,7 @@ describe('pooling re-election', () => {
       };
 
       // Cold page of `before` (plus any `loaded` at runtime), warm page of `after` over it, then a warm page that re-elects every pool of
-      // that same state. Not a cold page of `after`: a cold page breaks ties by record order where a warm one
+      // that same state. Not a cold page of `after`: a cold page breaks ties by name where a warm one
       // keeps the stored winner, a difference that fix does not touch.
       const warmAndReelected = async (
         before: RemoteEntry[],

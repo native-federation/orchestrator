@@ -69,13 +69,10 @@ const pooledPart = ({ importMap, record }: { importMap: ImportMap; record: share
   };
 };
 
-// The build each unpooled external's package is served from, as stored. A pooled package takes the build its
-// election made global, and the election breaks an exact round-1 tie by record order, so pools are left out.
+// The build each external's package is served from, as stored.
 const servingBuilds = (record: shareScope) =>
   Object.fromEntries(
-    Object.entries(record)
-      .filter(([, external]) => external.poolName === undefined)
-      .map(([name, external]) => [name, external.servingBuild ?? null])
+    Object.entries(record).map(([name, external]) => [name, external.servingBuild ?? null])
   );
 
 describe('pooling properties: init (generated portfolios)', { timeout: TIMEOUT }, () => {
@@ -167,7 +164,7 @@ describe('pooling properties: init (generated portfolios)', { timeout: TIMEOUT }
 
   // As above with flat and dense builds of one package side by side, chunked or not, globally and in a named
   // share scope: ties between builds go to the remote's name, so the order remotes register in picks neither
-  // the build that serves an unpooled package nor its tag. Known and not compared: a specifier the serving
+  // the build that serves a package nor its tag. Known and not compared: a specifier the serving
   // build does not ship is still filled from the version's other copies in record order.
   for (const [offset, shareScope] of [
     [30, undefined],
@@ -338,7 +335,7 @@ describe('pooling properties: redeploys (generated portfolios)', { timeout: TIME
       expect(strayNames(init.result.record)).toEqual([]);
     }));
 
-  // Not a cold page of the final portfolio: cold breaks ties by record order where warm keeps the stored winner
+  // Not a cold page of the final portfolio: cold breaks ties by name where warm keeps the stored winner
   // instead; that is no partial re-election. `outcome` leaves `poolWinner` out, which a stale election keeps
   // (P1), so the winners are compared too.
   const warmEqualsReelected = async ([spec, redeployed]: [PortfolioSpec, Redeploy[]]) => {

@@ -744,7 +744,7 @@ Candidates rank by, in order:
 3. most remotes that agree without being served — what separates a build its peers share from an outlier when
    no build serves more than itself;
 4. the build the stored record already elected (so a re-election on equal terms does not flip the family);
-5. the newer build, then record order (the order remotes first appear in the pool's versions).
+5. the newer build, then the name that sorts first (code-unit order), never record order.
 
 One build is **newer** than another when the first member both ship, in the pool's member order (by name),
 whose tags differ is newer in it — two unrelated version lines, such as `rxjs` and `@angular/core`, are never
