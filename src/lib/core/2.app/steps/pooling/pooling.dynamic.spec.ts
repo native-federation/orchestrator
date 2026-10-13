@@ -195,9 +195,10 @@ describe('pooling (dynamic)', () => {
     // jsdev-b-5's sameTagExtra, the nearest flow shape to a partly served resolver scope (which a coherent
     // committed map never produces): mfe ships the committed 17.0.0 core plus a `/testing` the map lacks.
     // Same-tag copies merge, so the resolver skips rather than scopes, and the load lands as a cold init of
-    // the whole portfolio places mfe.
+    // the whole portfolio places mfe. The committed build's name sorts first, so the cold init's equal
+    // `@fw/common` copies keep it as their basis too, as the committed map does.
     it('places a load at the committed tag with an extra entrypoint as a cold init does', async () => {
-      const committed = () => [entry('r0', ...fw())];
+      const committed = () => [entry('a0', ...fw())];
       const loaded = () => entry('mfe', ...fw(['@fw/core/testing']));
       const page = portfolio({}, { ...options, storage: 'nf-pooling-dynamic-same-tag' });
       await page.runInit(committed());

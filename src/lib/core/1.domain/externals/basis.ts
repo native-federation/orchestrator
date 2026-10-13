@@ -1,13 +1,16 @@
 import type { DeepReadonly } from 'lib/utils/deep-readonly';
+import { compareStrings } from 'lib/utils/compare-strings';
 import type { SharedVersion, SharedVersionMeta } from './version.contract';
 
 const coverage = (remote: SharedVersionMeta): number => Object.keys(remote.entries).length;
 
 // `remotes[0]` is the basis: the copy every consumer of the version resolves to. Host and cached
-// outrank coverage because repointing them invalidates a committed import map.
+// outrank coverage because repointing them invalidates a committed import map. An exact tie goes to the
+// name, so the basis does not depend on the order remotes register in.
 export function isBetterBasis(candidate: SharedVersionMeta, basis: SharedVersionMeta): boolean {
   if (basis.cached !== candidate.cached) return candidate.cached;
-  return coverage(candidate) > coverage(basis);
+  const byCoverage = coverage(candidate) - coverage(basis);
+  return byCoverage === 0 ? compareStrings(candidate.name, basis.name) < 0 : byCoverage > 0;
 }
 
 export function addRemoteToVersion(

@@ -37,8 +37,11 @@ describe('basis', () => {
       );
     });
 
-    it('should keep the incumbent on an equal entrypoint count', () => {
+    it('should break an equal entrypoint count on the name, in code-unit order', () => {
       expect(isBetterBasis(remote('b', ['dep-a']), remote('a', ['dep-a']))).toBe(false);
+      expect(isBetterBasis(remote('a', ['dep-a']), remote('b', ['dep-a']))).toBe(true);
+      // Code units, not locale: uppercase sorts before lowercase.
+      expect(isBetterBasis(remote('B', ['dep-a']), remote('a', ['dep-a']))).toBe(true);
     });
 
     it('should prefer a cached copy over a wider uncached one', () => {
@@ -88,6 +91,26 @@ describe('basis', () => {
 
       expect(v.remotes.map(r => r.name)).toEqual(['host', 'a']);
       expect(v.host).toBe(true);
+    });
+
+    it.each([
+      ['a first', ['team/a', 'team/b']],
+      ['b first', ['team/b', 'team/a']],
+    ])('should give an exact tie to the name whatever the insertion order (%s)', (_, order) => {
+      const [first, second] = order.map(name => remote(name, ['dep-a']));
+      const v = version([first!]);
+
+      addRemoteToVersion(v, second!);
+
+      expect(v.remotes[0]!.name).toBe('team/a');
+    });
+
+    it('should leave a host basis on an exact tie with a name that sorts first', () => {
+      const v = version([remote('team/b', ['dep-a'])], true);
+
+      addRemoteToVersion(v, remote('team/a', ['dep-a']));
+
+      expect(v.remotes.map(r => r.name)).toEqual(['team/b', 'team/a']);
     });
 
     it('should keep arrival order stable across repeated equal inserts', () => {

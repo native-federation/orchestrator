@@ -349,9 +349,9 @@ describe('pooling re-election', () => {
       // P1. Per-remote labels: Y labels a and b `p`, X labels a `q`, and W, V, U label c1 and c2 `q`; X's
       // label joins everything into one pool `q`, won by Y. X redeploys without `a`: the pool splits into
       // {a, b} (now `p`) and {c1, c2}, which keeps the name `q` and has no dirty member. Unless every pool of
-      // the scope is re-elected, warm keeps `q`'s stale election: `poolWinner` Y, which ships no member of `q`, U's
-      // 18 as a subpool for V, and W `uncovered`. A re-election elects V's 18 for `q` (global) and islands W
-      // as `incompatible`.
+      // the scope is re-elected, warm keeps `q`'s stale election: `poolWinner` Y, which ships no member of `q`, one
+      // equal 18 as a subpool for the other, and W `uncovered`. A re-election elects U's 18 for `q` (global;
+      // V's equal 18 loses on the name) and islands W as `incompatible`.
       it('re-elects the half of a split pool that keeps its name', async () => {
         const lenient = (pool: string | null, name: string, version: string) =>
           sharedIn(pool, name, version, `^${version}`, { strict: false });
@@ -364,8 +364,8 @@ describe('pooling re-election', () => {
           [Y, redeployed('X', lenient(null, 'zzz', '1.0.0')), W, V, U]
         );
 
-        expect(pages.reelected.pools['c1']).toBe('q won by V');
-        expect(pages.warm.pools['c1']).toBe('q won by V');
+        expect(pages.reelected.pools['c1']).toBe('q won by U');
+        expect(pages.warm.pools['c1']).toBe('q won by U');
         expect(pages.warm).toEqual(pages.reelected);
       });
 
