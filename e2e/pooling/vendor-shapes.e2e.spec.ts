@@ -208,22 +208,21 @@ test.describe('shapes: flat externals and `convertFlatSharedInfo`', () => {
       ]),
     ].map(entry => shape(entry, { externals: 'flat', chunking: 'dense' }));
 
-  test('off, each entrypoint is its own external and the package tears across two builds', async ({
+  test('off, each entrypoint is its own external and the pool serves the whole package from one build', async ({
     nf,
   }) => {
     await nf.init(coverage(), { flatSharedInfo: false });
 
-    // `@angular/material` and `@angular/material/sort` are unrelated externals here, so each elects its
-    // own provider: the root and `/table` come from mfe1, `/sort` from mfe3. Nothing is wrong by the
-    // resolver's lights — the tags match — but the page ends up running two builds of one package.
+    // `@angular/material` and `@angular/material/sort` are separate externals here, but members of one
+    // scope-labelled pool. Each build is elected on its own entrypoints, so only mfe3's, which ships all
+    // three, serves every remote: the whole package comes from mfe3, as with the flag on.
     const map = await nf.map();
-    expect(map.imports[M]).toBe(`${SCOPE.mfe1}${M}.js`);
-    expect(map.imports[`${M}/table`]).toBe(`${SCOPE.mfe1}${M}/table.js`);
+    expect(map.imports[M]).toBe(`${SCOPE.mfe3}${M}.js`);
+    expect(map.imports[`${M}/table`]).toBe(`${SCOPE.mfe3}${M}/table.js`);
     expect(map.imports[`${M}/sort`]).toBe(`${SCOPE.mfe3}${M}/sort.js`);
 
     await nf.loadAll();
-    expect(await originsServing(nf, M)).toEqual(['mfe1', 'mfe3']);
-    // And no gate reacts: the entrypoints are separate members of one scope-labelled pool, agreeing on one tag.
+    expect(await originsServing(nf, M)).toEqual(['mfe3']);
     expect(await nf.islands()).toEqual([]);
   });
 

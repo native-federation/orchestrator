@@ -203,34 +203,6 @@ describe('subpool rounds', () => {
     expect(inSubpool(election, 'y')).toEqual([]);
     expect(election.placements.get('y')).toEqual({ kind: 'self', cause: 'incompatible' });
   });
-
-  /**
-   * c wins round 1 and borrows p/a@1.0.1 from l and g, which agree with it. g is served, so a global remote
-   * already publishes p/a and l is no lender: l (x uncovered) may join b's subpool though b disagrees with
-   * the global tags (q@1.0.1). Only a loan no round-1 remote ships keeps its lender out of such a subpool
-   * (docs/version-resolver.md §"How pooling resolves", step 2). Counting l as a lender anyway keeps l out of
-   * b's subpool; l then adds x to the global tags and goes global, and b is left serving itself. Shrunk from a
-   * fuzz counterexample.
-   */
-  it('lets a remote whose loan a global remote already ships join a subpool whose build disagrees', () => {
-    const at = (tag: string, req: string, ...specifiers: string[]) => ({ tag, req, specifiers });
-    const election = electFrom([
-      { name: 'c', copies: { p: at('1.0.1', '1.0.1', 'p/b'), q: at('1.0.0', '1.0.0', 'q/a') } },
-      {
-        name: 'b',
-        copies: {
-          p: at('1.0.1', '^1.0.0', 'p/a'),
-          q: at('1.0.1', '^1.0.0', 'q'),
-          x: at('1.0.0', '^1.0.0', 'x'),
-        },
-      },
-      { name: 'l', copies: { p: at('1.0.1', '^1.0.0', 'p/a'), x: at('1.0.0', '^1.0.0', 'x') } },
-      { name: 'g', copies: { p: at('1.0.1', '^1.0.0', 'p/a'), q: at('1.0.0', '^1.0.0', 'q/a') } },
-    ]);
-
-    expect(inGlobal(election)).toEqual(['c', 'g']);
-    expect(inSubpool(election, 'b')).toEqual(['b', 'l']);
-  });
 });
 
 describe('chunked copies', () => {
@@ -238,33 +210,55 @@ describe('chunked copies', () => {
 
   /**
    * The host ships core alone; x and y ship mat at one tag but each with an entrypoint the other lacks. Round
-   * 1 serves neither, and both agree with the host, so extension publishes mat. From flat builds it publishes
-   * the union. A chunked file imports its own build's mat internals, so mat/a from x beside mat/b from y would
-   * run two of them: mat is not extended, and x and y serve themselves.
+   * 1 serves neither, and both agree with the host, so extension publishes mat — from one build only, so
+   * every specifier of mat runs from the build that shipped it, chunked or not. Neither copy contains the
+   * other, so the name picks x; y serves itself.
    */
-  it('extends a package that builds ship with different entrypoints only when none of them is chunked', () => {
+  it('extends a package that builds ship with different entrypoints from one of them', () => {
     const builds: Build[] = [
       { name: 'host', copies: { core: at('1.0.0', 'core') } },
+      { name: 'y', copies: { core: at('1.0.0', 'core'), mat: at('2.0.0', 'mat', 'mat/b') } },
+      { name: 'x', copies: { core: at('1.0.0', 'core'), mat: at('2.0.0', 'mat', 'mat/a') } },
+    ];
+
+    for (const chunked of [[], ['x'], ['y'], ['x', 'y']]) {
+      const election = electFrom(builds, { host: 'host', chunked });
+      expect([...election.globalTags]).toEqual([
+        ['core', '1.0.0'],
+        ['mat', '2.0.0'],
+        ['mat/a', '2.0.0'],
+      ]);
+      expect(inGlobal(election)).toEqual(['host', 'x']);
+      expect(election.placements.get('y')).toEqual({ kind: 'self', cause: 'uncovered' });
+    }
+  });
+
+  // The copy that contains the most others is published, so every remote whose copy it contains runs on it.
+  it('extends a package from the copy that contains the most others', () => {
+    const builds: Build[] = [
+      { name: 'host', copies: { core: at('1.0.0', 'core') } },
+      {
+        name: 'a',
+        copies: { core: at('1.0.0', 'core'), mat: at('2.0.0', 'mat', 'mat/a', 'mat/z') },
+      },
+      {
+        name: 'w',
+        copies: { core: at('1.0.0', 'core'), mat: at('2.0.0', 'mat', 'mat/a', 'mat/b') },
+      },
       { name: 'x', copies: { core: at('1.0.0', 'core'), mat: at('2.0.0', 'mat', 'mat/a') } },
       { name: 'y', copies: { core: at('1.0.0', 'core'), mat: at('2.0.0', 'mat', 'mat/b') } },
     ];
 
-    const flat = electFrom(builds, { host: 'host' });
-    expect([...flat.globalTags]).toEqual([
+    const election = electFrom(builds, { host: 'host' });
+
+    expect([...election.globalTags]).toEqual([
       ['core', '1.0.0'],
       ['mat', '2.0.0'],
       ['mat/a', '2.0.0'],
       ['mat/b', '2.0.0'],
     ]);
-    expect(inGlobal(flat)).toEqual(['host', 'x', 'y']);
-
-    for (const chunked of [['x'], ['y'], ['x', 'y']]) {
-      const election = electFrom(builds, { host: 'host', chunked });
-      expect([...election.globalTags]).toEqual([['core', '1.0.0']]);
-      expect(inGlobal(election)).toEqual(['host']);
-      expect(election.placements.get('x')).toEqual({ kind: 'self', cause: 'uncovered' });
-      expect(election.placements.get('y')).toEqual({ kind: 'self', cause: 'uncovered' });
-    }
+    expect(inGlobal(election).sort()).toEqual(['host', 'w', 'x', 'y']);
+    expect(election.placements.get('a')).toEqual({ kind: 'self', cause: 'uncovered' });
   });
 
   // The same entrypoints from every contributor: whichever build's files the map takes, each runs beside its
@@ -287,10 +281,9 @@ describe('chunked copies', () => {
     expect(inGlobal(election).sort()).toEqual(['host', 'x', 'y']);
   });
 
-  // As above, but x and y ship mat flat: `mat` and `mat/a` are members of their own, and the map claims each
-  // member's row on its own, in record order, so `mat` could come from x and `mat/a` from y. Whatever the
-  // order, mat is not extended; flat, it would be.
-  it('extends a package flat chunked builds ship with the same entrypoints only from one of them', () => {
+  // As above, but x and y ship mat flat: `mat` and `mat/a` are members of their own. Both ship the same
+  // entrypoints, so whichever build's copy the map takes, each runs every specifier of mat from it.
+  it('extends a package flat builds ship with the same entrypoints, chunked or not', () => {
     const flat = (name: string): Build => ({
       name,
       copies: {
@@ -304,49 +297,34 @@ describe('chunked copies', () => {
     for (const builds of [
       [host, flat('x'), flat('y')],
       [host, flat('y'), flat('x')],
-    ]) {
-      const election = electFrom(builds, { host: 'host', chunked: ['x', 'y'] });
-      expect([...election.globalTags]).toEqual([['core', '1.0.0']]);
-      // One build serves both off the map instead.
-      expect(inGlobal(election)).toEqual(['host']);
-      expect(election.placements.get('x')).toMatchObject({ kind: 'subpool' });
-      expect(election.placements.get('y')).toEqual(election.placements.get('x'));
-      expect([...electFrom(builds, { host: 'host' }).globalTags]).toEqual([
-        ['core', '1.0.0'],
-        ['mat', '2.0.0'],
-        ['mat/a', '2.0.0'],
-      ]);
-    }
-    // One flat chunked contributor publishes every row itself.
-    expect([...electFrom([host, flat('x')], { host: 'host', chunked: ['x'] }).globalTags]).toEqual([
-      ['core', '1.0.0'],
-      ['mat', '2.0.0'],
-      ['mat/a', '2.0.0'],
-    ]);
+    ])
+      for (const chunked of [[], ['x', 'y']]) {
+        const election = electFrom(builds, { host: 'host', chunked });
+        expect([...election.globalTags]).toEqual([
+          ['core', '1.0.0'],
+          ['mat', '2.0.0'],
+          ['mat/a', '2.0.0'],
+        ]);
+        expect(inGlobal(election).sort()).toEqual(['host', 'x', 'y']);
+      }
   });
 
   /**
-   * The host ships core alone; l ships core with rxjs-interop at the host's tag. A flat lender's rxjs-interop
-   * binds core through the map, so round 1 borrows it and serves l. A chunked lender's imports its own core
-   * internals, which beside the host's core run a second core: it lends nothing, and l serves itself.
+   * The host ships core alone; l ships core with rxjs-interop at the host's tag. Round 1 serves a build on
+   * its own tags, so the host borrows no entrypoint, from a flat build or a chunked one: l serves itself.
    */
-  it("borrows an entrypoint from a flat build only, never a chunked build's", () => {
+  it('borrows no entrypoint from another build of the same tag', () => {
     const builds: Build[] = [
       { name: 'host', copies: { core: at('1.0.0', 'core') } },
       { name: 'l', copies: { core: at('1.0.0', 'core', 'core/rxjs-interop') } },
     ];
 
-    const flat = electFrom(builds, { host: 'host' });
-    expect([...flat.globalTags]).toEqual([
-      ['core', '1.0.0'],
-      ['core/rxjs-interop', '1.0.0'],
-    ]);
-    expect(inGlobal(flat)).toEqual(['host', 'l']);
-
-    const chunked = electFrom(builds, { host: 'host', chunked: ['l'] });
-    expect([...chunked.globalTags]).toEqual([['core', '1.0.0']]);
-    expect(inGlobal(chunked)).toEqual(['host']);
-    expect(chunked.placements.get('l')).toEqual({ kind: 'self', cause: 'uncovered' });
+    for (const chunked of [[], ['l']]) {
+      const election = electFrom(builds, { host: 'host', chunked });
+      expect([...election.globalTags]).toEqual([['core', '1.0.0']]);
+      expect(inGlobal(election)).toEqual(['host']);
+      expect(election.placements.get('l')).toEqual({ kind: 'self', cause: 'uncovered' });
+    }
   });
 });
 
@@ -437,9 +415,9 @@ describe('host fill', () => {
     expect(inSubpool(election, 'o')).toEqual(['r', 'o']);
   });
 
-  // r's el sits at another tag than g's offer, so the map never publishes it and the guard ignores it: g's
-  // copy is the only one, whatever its entrypoints. r lacks el/x on the map and stays in o's subpool.
-  it('guards a chunked package only over the copies at the offered tag', () => {
+  // r's el sits at another tag than g's, and a contributor ships el, so r's wider copy never competes for
+  // it: g's is published, and r lacks el/x on the map and stays in o's subpool.
+  it("publishes a contributor's copy over a wider fill copy at another tag", () => {
     const election = electFrom(
       [
         host,
@@ -447,7 +425,7 @@ describe('host fill', () => {
         agreeing('r', at('1.0.1', '^1.0.0', 'el', 'el/x')),
         agreeing('g', at('1.0.0', '1.0.0', 'el')),
       ],
-      { host: 'host', chunked: ['r', 'g'] }
+      { host: 'host' }
     );
 
     expect([...election.globalTags]).toEqual([...HOST_TAGS, ['el', '1.0.0']]);
@@ -455,38 +433,30 @@ describe('host fill', () => {
     expect(inSubpool(election, 'o')).toEqual(['r', 'o']);
   });
 
-  // The chunked-copy guard holds for fill members as for contributors.
-  it('fills a package members ship with different entrypoints only when none of them is chunked', () => {
+  // As for contributors, one member's copy is published: neither contains the other, so the name picks r1, and
+  // r2 stays in o's subpool, chunked or not.
+  it('fills a package members ship with different entrypoints from one of them', () => {
     const builds = [
       host,
       o('1.0.0', 'el/a', 'el/b'),
-      agreeing('r1', at('1.0.0', '^1.0.0', 'el', 'el/a')),
       agreeing('r2', at('1.0.0', '^1.0.0', 'el', 'el/b')),
+      agreeing('r1', at('1.0.0', '^1.0.0', 'el', 'el/a')),
     ];
 
-    const flat = electFrom(builds, { host: 'host' });
-    expect([...flat.globalTags]).toEqual([
-      ...HOST_TAGS,
-      ['el', '1.0.0'],
-      ['el/a', '1.0.0'],
-      ['el/b', '1.0.0'],
-    ]);
-    expect(inGlobal(flat)).toEqual(['host', 'r1', 'r2']);
-
-    for (const chunked of [['r1'], ['r1', 'r2']]) {
+    for (const chunked of [[], ['r1'], ['r1', 'r2']]) {
       const election = electFrom(builds, { host: 'host', chunked });
-      expect([...election.globalTags]).toEqual(HOST_TAGS);
-      expect(inSubpool(election, 'o')).toEqual(['r1', 'r2', 'o']);
+      expect([...election.globalTags]).toEqual([...HOST_TAGS, ['el', '1.0.0'], ['el/a', '1.0.0']]);
+      expect(inGlobal(election)).toEqual(['host', 'r1']);
+      expect(inSubpool(election, 'o')).toEqual(['r2', 'o']);
     }
   });
 
   /**
-   * c serves itself and contributes mat with mat/a; r, in o's subpool, ships mat alone at the same tag. Once
-   * r goes global it publishes its copy in the same row, so the guard runs over contributors and fill members
-   * together: with c chunked, mat is not extended, c serves itself and r stays in o's subpool. A guard over
-   * contributors alone would extend mat and move both.
+   * c serves itself and contributes mat with mat/a; r, in o's subpool, ships mat alone at the same tag. A
+   * contributor ships mat, so no fill member is asked; r's copy is contained in c's, so r goes global and
+   * runs c's mat, chunked or not.
    */
-  it('guards a chunked package over contributors and fill members together', () => {
+  it("moves a fill member onto a contributor's copy that contains its own", () => {
     const mat = (...specifiers: string[]) => at('2.0.0', '^2.0.0', ...specifiers);
     const remotes: Record<string, Build> = {
       o: { name: 'o', copies: { core: at('1.1.0', '^1.1.0', 'core'), mat: mat('mat') } },
@@ -498,18 +468,17 @@ describe('host fill', () => {
       ['o', 'r', 'c'],
       ['c', 'o', 'r'],
       ['r', 'c', 'o'],
-    ]) {
-      const builds = [host, family('w1'), family('w2'), ...order.map(n => remotes[n]!)];
-
-      const flat = electFrom(builds, { host: 'host' });
-      expect([...flat.globalTags]).toEqual([...HOST_TAGS, ['mat', '2.0.0'], ['mat/a', '2.0.0']]);
-      expect(inGlobal(flat).sort()).toEqual(['c', 'host', 'r', 'w1', 'w2']);
-
-      const election = electFrom(builds, { host: 'host', chunked: ['c'] });
-      expect([...election.globalTags]).toEqual(HOST_TAGS);
-      expect(inGlobal(election)).toEqual(['host', 'w1', 'w2']);
-      expect(inSubpool(election, 'o').sort()).toEqual(['o', 'r']);
-      expect(election.placements.get('c')).toEqual({ kind: 'self', cause: 'uncovered' });
-    }
+    ])
+      for (const chunked of [[], ['c']]) {
+        const builds = [host, family('w1'), family('w2'), ...order.map(n => remotes[n]!)];
+        const election = electFrom(builds, { host: 'host', chunked });
+        expect([...election.globalTags]).toEqual([
+          ...HOST_TAGS,
+          ['mat', '2.0.0'],
+          ['mat/a', '2.0.0'],
+        ]);
+        expect(inGlobal(election).sort()).toEqual(['c', 'host', 'r', 'w1', 'w2']);
+        expect(election.placements.get('o')).toEqual({ kind: 'self', cause: 'incompatible' });
+      }
   });
 });

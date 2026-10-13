@@ -177,15 +177,15 @@ describe('createDecideServingBuilds', () => {
       expect(stored()['fw/testing']!.servingBuild).toBe('a');
     });
 
-    it('stores no serving build without a winner, and keeps the rows', async () => {
+    it('stores the widest copy of the root as the serving build without a winner, and keeps the rows', async () => {
       seedPool();
 
       await decide();
 
       expect(stored().fw!.versions).toEqual(versions.fw);
       expect(stored()['fw/testing']!.versions).toEqual(versions['fw/testing']);
-      expect('servingBuild' in stored().fw!).toBe(false);
-      expect('servingBuild' in stored()['fw/testing']!).toBe(false);
+      expect(stored().fw!.servingBuild).toBe('a');
+      expect(stored()['fw/testing']!.servingBuild).toBe('a');
     });
   });
 

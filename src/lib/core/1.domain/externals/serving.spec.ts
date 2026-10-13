@@ -150,22 +150,43 @@ describe('servingBuildOf', () => {
       expect(result).toEqual<ServingBuild>({ remote: 'r2', tag: '2.0.0' });
     });
 
-    // Without one, the claims fall back to record order, as they do without the field.
-    it('has no serving build when its winner ships none of it, or there is no winner', () => {
-      const shipped = version('share', [copy('member', ['fw'])]);
+    // The election publishes a package its winner does not ship from one copy, which contains every other
+    // global copy; the widest copy is that one, or one with the same entrypoints.
+    it('takes the widest copy when its winner ships none of it, or there is no winner', () => {
+      const shipped = version('share', [
+        copy('narrow', ['fw']),
+        copy('wide', ['fw', 'fw/a']),
+        copy('tied', ['fw']),
+      ]);
 
-      expect(serving(['fw', pooled('elsewhere', shipped)])).toBeUndefined();
-      expect(serving(['fw', pooled(undefined, shipped)])).toBeUndefined();
+      expect(serving(['fw', pooled('elsewhere', shipped)])).toEqual({
+        remote: 'wide',
+        tag: '1.0.0',
+      });
+      expect(serving(['fw', pooled(undefined, shipped)])).toEqual({ remote: 'wide', tag: '1.0.0' });
     });
 
-    it("serves nothing when the winner ships only a flat secondary beside another build's root", () => {
+    it('counts the entrypoints a copy ships in every share row of the package, and breaks a tie by name', () => {
+      const result = serving(
+        ['fw', pooled('elsewhere', version('share', [copy('y', ['fw']), copy('x', ['fw'])]))],
+        ['fw/a', pooled('elsewhere', version('share', [copy('x', ['fw/a']), copy('y', ['fw/a'])]))],
+        ['fw/b', pooled('elsewhere', version('share', [copy('y', ['fw/b'])]))]
+      );
+
+      expect(result).toEqual<ServingBuild>({ remote: 'y', tag: '1.0.0' });
+      expect(
+        serving(['fw', pooled(undefined, version('share', [copy('y', ['fw']), copy('x', ['fw'])]))])
+      ).toEqual<ServingBuild>({ remote: 'x', tag: '1.0.0' });
+    });
+
+    it("takes the root's build when the winner ships only a flat secondary beside it", () => {
       // Seeding the winner would run the root from one build and the secondary from another.
       const result = serving(
         ['fw', pooled('winner', version('share', [copy('member', ['fw', 'fw/testing'])]))],
         ['fw/testing', pooled('winner', version('share', [copy('winner', ['fw/testing'])]))]
       );
 
-      expect(result).toBeUndefined();
+      expect(result).toEqual<ServingBuild>({ remote: 'member', tag: '1.0.0' });
     });
 
     it("ignores a winner's copy that runs another build", () => {
@@ -177,7 +198,7 @@ describe('servingBuildOf', () => {
         ),
       ]);
 
-      expect(result).toBeUndefined();
+      expect(result).toEqual<ServingBuild>({ remote: 'member', tag: '1.0.0' });
     });
 
     it('is pooled when only a secondary carries the pool name', () => {

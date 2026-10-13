@@ -52,7 +52,7 @@ export function servingBuildOf(
   const rows = rootRows.length > 0 ? rootRows : externals.flatMap(([, e]) => shareRows(e));
 
   // The election already chose the global build; ranking again per package could split a pool.
-  if (isPooled(externals)) return winnerBuild(externals, rows);
+  if (isPooled(externals)) return pooledBuild(externals, rows);
 
   const ranked = candidatesOf(rows, rootRows, consumersOf(externals), accepts).sort(byServingRank);
   const best = ranked[0];
@@ -126,13 +126,25 @@ function candidatesOf(
   return [...candidates.values()];
 }
 
-// The pool's winner, where it ships the root (or, without one, any of the package); otherwise none, and the
-// claims keep record order.
-function winnerBuild(externals: PackageExternals, rows: Row[]): ServingBuild | undefined {
+// The pool's winner, where it ships the root (or, without one, any of the package); otherwise the widest copy:
+// every share-row copy lies within the one the election published, so the widest ships exactly it.
+function pooledBuild(externals: PackageExternals, rows: Row[]): ServingBuild | undefined {
   const winner = externals.find(([, e]) => e.poolWinner !== undefined)?.[1].poolWinner;
-  if (winner === undefined) return undefined;
-  const row = rows.find(r => r.remotes.some(copy => copy.name === winner && !copy.servedBy));
-  return row && { remote: winner, tag: row.tag };
+  const shipped = rows.flatMap(row =>
+    row.remotes.filter(copy => !copy.servedBy).map(copy => ({ remote: copy.name, tag: row.tag }))
+  );
+  const own = shipped.find(c => c.remote === winner);
+  if (own) return own;
+  const width = ({ remote, tag }: ServingBuild) =>
+    externals.reduce((n, [, e]) => {
+      const copy = shareRows(e)
+        .find(row => row.tag === tag)
+        ?.remotes.find(c => c.name === remote);
+      return n + Object.keys(copy?.entries ?? {}).length;
+    }, 0);
+  return shipped
+    .map(c => ({ c, width: width(c) }))
+    .sort((a, b) => b.width - a.width || compareStrings(a.c.remote, b.c.remote))[0]?.c;
 }
 
 function consumersOf(externals: PackageExternals): Map<RemoteName, Placed[]> {

@@ -757,9 +757,9 @@ describe('createPoolSharedExternals', () => {
         ]);
       });
 
-      it('publishes a sibling entrypoint shipped at the elected tag', async () => {
-        // Same shape, but a's `/table` is at the elected 17.0.2: one Material build, so it is served
-        // globally.
+      it('serves a sibling entrypoint shipped at the elected tag from its own build only', async () => {
+        // Same shape, but a's `/table` is at the elected 17.0.2. The winner b ships no `/table`, and round 1
+        // borrows none, so a runs Material from its own build and still takes the global core.
         seedCore();
         p.seed(material, [
           at('17.0.2', material, [
@@ -771,21 +771,15 @@ describe('createPoolSharedExternals', () => {
 
         await p.runInit();
 
-        // Every build borrows the other entrypoint at the same tag in round 1, so all three serve everyone
-        // and which copy leads the row is only the tiebreak; one row is the point.
-        expect(p.record(material).versions).toHaveLength(1);
-        expect(namesOf(material, 'share')).toEqual(['a', 'b', 'c']);
-        expect(verdicts()).toEqual([]);
+        expect(rowsOf(material)).toEqual(['17.0.2:share:[b,c]', '17.0.2:scope:[a]']);
+        expect(verdicts()).toEqual(['a@@framework/material: uncovered']);
       });
     });
 
-    it('keeps a build round 1 borrows an entrypoint from on a route that publishes it', async () => {
-      // b agrees with w's core@1.1 and is the only build shipping core/testing@1.1, which round 1 borrows to
-      // serve r (core@1.0 + testing, ^1). b misses round 1 (it needs p, which w lacks). In a's subpool
-      // (core@1.2, disagreeing), b's copy would be servedBy a and nothing would publish core/testing@1.1: r
-      // would self-fill a 1.0 testing next to the global 1.1 core. The subpool runs b's build instead (a and
-      // b), agreeing, so the extension publishes p from it — and then serves both a and b, whose ^1 takes the
-      // global 1.1: the subpool dissolves into round 1 and b's testing is shared.
+    it('runs a remote that needs an entrypoint the winner lacks on a build that ships it whole', async () => {
+      // w wins round 1 with core@1.1 and q. r (core@1.0 + testing, ^1) needs core/testing, which w lacks; b
+      // ships it at w's tag, but round 1 borrows nothing, so r is not served globally. a's build (core@1.2 +
+      // testing + p) serves a, b and r, which then run every core specifier from a's build.
       const core = '@framework/core';
       const testing = '@framework/core/testing';
       const files = (...specifiers: string[]) => ({
@@ -819,10 +813,17 @@ describe('createPoolSharedExternals', () => {
 
       expect(rowsOf(core)).toEqual([
         '1.2.0:skip:[a]',
-        '1.1.0:share:[w,w2,w3,w4,b]',
+        '1.1.0:share:[w,w2,w3,w4]',
+        '1.1.0:skip:[b]',
         '1.0.0:skip:[r]',
       ]);
-      expect(verdicts()).toEqual([]);
+      expect(verdicts()).toEqual([
+        'a@@framework/core: served by a',
+        'a@@framework/p: served by a',
+        'b@@framework/core: served by a',
+        'b@@framework/p: served by a',
+        'r@@framework/core: served by a',
+      ]);
     });
 
     describe('a subpool the extension serves', () => {

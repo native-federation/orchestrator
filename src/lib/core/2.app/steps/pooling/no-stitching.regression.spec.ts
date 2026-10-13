@@ -159,8 +159,8 @@ describe('a remote runs every specifier of a package from one build', () => {
       ],
       known: { mfe: { torn: ['@fw/core: host mfe'], stitched: ['@fw/core: host* mfe*'] } },
     },
-    // u lends interop to the host's core and chunked c ships it too; c registers first, so
-    // its copy leads the row and the map publishes c's interop, which binds c's core internals.
+    // u and chunked c ship interop at the host's core tag. Round 1 borrows nothing for the host, so the map
+    // never publishes c's interop, which would bind c's core internals beside the host's core.
     {
       name: "serves no chunked copy's entrypoint beside the host's core",
       hosts: ['host'],
@@ -174,14 +174,9 @@ describe('a remote runs every specifier of a package from one build', () => {
         entry('host', shared(CORE), shared(FORMS)),
       ],
       expectMap: map => expect(map.imports[INTEROP]).not.toBe('http://c/fw_core_interop.js'),
-      known: {
-        c: { torn: ['@fw/core: c host'], stitched: ['@fw/core: c* host'] },
-        u: { torn: ['@fw/core: c host'], stitched: ['@fw/core: c* host'] },
-      },
     },
-    // r3 wins with core alone and borrows testing from r1, which forms keeps off the map;
-    // only chunked r0 still ships testing globally, so the loan is kept and the map runs r0's testing beside
-    // r3's core.
+    // r3 wins with core alone; r1 (kept off the map by forms) and chunked r0 ship testing at its tag. Round 1
+    // borrows nothing, so the map never publishes r0's testing beside r3's core.
     {
       name: "runs testing from its core's build when only a chunked copy ships it globally",
       entries: [
@@ -190,10 +185,6 @@ describe('a remote runs every specifier of a package from one build', () => {
         entry('r2', shared(FORMS, at('17.0.1'))),
         entry('r3', shared(CORE, at('17.0.1')), shared('@fw/x')),
       ],
-      known: {
-        r0: { torn: ['@fw/core: r0 r3'], stitched: ['@fw/core: r0* r3'] },
-        r1: { torn: ['@fw/core: r0 r3'], stitched: ['@fw/core: r0* r3'] },
-      },
     },
     // mfe2 is dense core@2 listing testing; mfe1 is flat core@1, strict, so it runs its own
     // core, and its own testing external is that package's only share row. Core's row claims the testing
@@ -344,9 +335,8 @@ describe('a remote runs every specifier of a package from one build', () => {
       ],
     },
     // The host wins the pool but ships only core/sub, as a flat external of its own; chunked d and unchunked u
-    // ship core{core, core/sub}, and d serves the root (without u, d is islanded and nothing is shared). Serving
-    // the winner's sub beside d's root would run d's core internals beside the host's sub chunk, so the package
-    // stays on d's build.
+    // ship core{core, core/sub}. The host borrows no root, so d and u run the whole package from d's build in a
+    // subpool, and the host its own sub: nobody runs d's core internals beside the host's sub chunk.
     {
       name: "takes a pooled package from its root's build when the winner ships only a flat secondary",
       hosts: ['host'],
@@ -355,7 +345,11 @@ describe('a remote runs every specifier of a package from one build', () => {
         entry('u', shared(CORE, { entrypoints: [SUB] })),
         entry('host', shared(SUB, { chunked: true })),
       ],
-      expectMap: map => expect(map.imports[SUB]).toBe('http://d/fw_core_sub.js'),
+      expectMap: map => {
+        expect(map.imports[SUB]).toBe('http://host/fw_core_sub.js');
+        expect(map.scopes?.['http://u/']?.[CORE]).toBe('http://d/fw_core.js');
+        expect(map.scopes?.['http://u/']?.[SUB]).toBe('http://d/fw_core_sub.js');
+      },
     },
     // A remote loaded at runtime self-fills interop in its own scope, but its
     // bundle's chunk is never mapped there.
