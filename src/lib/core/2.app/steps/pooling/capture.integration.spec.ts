@@ -60,8 +60,8 @@ async function init(names: string[]) {
       Record<string, Record<string, Record<string, SharedExternal>>>
     >
   )[ns]!['shared-externals']!['__GLOBAL__']!;
-  // Per pool: an unpooled package may legitimately self-fill across tags (the default policy), and two pools
-  // are coordinated by nobody, so each is judged on its own.
+  // Per pool: outside a pool the unit is the package, not the family, and two pools are coordinated by
+  // nobody, so each is judged on its own.
   const pools = new Map<string, Record<string, SharedExternal>>();
   for (const [name, external] of Object.entries(stored)) {
     if (external.poolName === undefined) continue;

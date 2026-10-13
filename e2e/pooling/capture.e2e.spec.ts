@@ -160,9 +160,9 @@ test.describe('capture: the synthetic siblings', () => {
 
     const map = await nf.map();
     // The seven's shared platform-browser is unchanged, and its `/animations` entrypoints leave the global
-    // map with mfe11: the only build that carried them is now serving only itself. Same file, whichever
-    // build serves it: mfe3, mfe4 and mfe5 tie on round 1 (each borrows `material/sort` at its own Material
-    // tag), and record order breaks it.
+    // map with mfe11: the only build that carried them is now serving only itself. Same file in every 22.0.8
+    // build; mfe5's serves it, the only one shipping `material/sort` beside the `material/table` that mfe3
+    // and mfe4 take from it.
     expect(map.imports['@angular/platform-browser']).toMatch(
       /^http:\/\/mfe\d+\/_angular_platform_browser\.djzJcPG8PR\.js$/
     );
