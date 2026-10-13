@@ -329,7 +329,7 @@ outright, so any copy can serve it.
 
 To minimise tears the resolver also uses coverage as a **tiebreaker** when choosing
 the shared version: among candidates that tie on the extra-downloads heuristic, it prefers the one whose
-merged entries leave the fewest specifiers uncovered across the versions it would skip. A decisive
+basis copy leaves the fewest specifiers uncovered across the versions it would skip. A decisive
 extra-downloads winner is never overridden, and an exact tie still keeps the highest version.
 
 ### Shared scopes

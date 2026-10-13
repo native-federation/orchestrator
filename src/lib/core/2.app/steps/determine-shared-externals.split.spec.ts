@@ -202,15 +202,21 @@ describe('determine: splitting a version on election', () => {
   });
 
   // Pooling runs first and leaves nothing dirty with pool results (plan.spec.ts, the portfolio harness), so
-  // determine never reads a `servedBy`. Should a stale one reach it anyway, it means nothing here: the copy
-  // is priced and placed like any other.
-  it('elects a copy carrying a stale servedBy as if it carried none', async () => {
+  // determine never reads a `servedBy`. Should a stale one reach it anyway, pricing still honours it: such a
+  // copy publishes no files of its own, so it is never the basis a candidate is priced on. Both candidates
+  // here then leave one entrypoint uncovered (2.2.0 lacks mfe-a's dep-a/extra; 2.1.0 has no basis, so
+  // mfe-b's dep-a), downloads are equal (all non-strict), and the tie goes to the newer version. Read
+  // without `servedBy`, 2.1.0 would cover both and win.
+  it('never prices a version on a copy carrying a stale servedBy', async () => {
     seed([
-      majority('2.2.0', 4),
+      version('2.2.0', [
+        { remote: 'team/mfe-b', req: '^2.1.0', strict: false, entries: { 'dep-a': 'a.js' } },
+      ]),
       version('2.1.0', [
         {
           remote: 'team/mfe-a',
           req: '^2.1.0',
+          strict: false,
           servedBy: 'team/mfe9',
           entries: { 'dep-a': 'a.js', 'dep-a/extra': 'x.js' },
         },
@@ -219,8 +225,7 @@ describe('determine: splitting a version on election', () => {
 
     await createDetermineSharedExternals(config, adapters)();
 
-    // mfe-a dedups to the shared 2.2.0 like any non-strict copy.
-    expect(rows()).toEqual([majorityRow('2.2.0', 4), '2.1.0:skip:[team/mfe-a]']);
+    expect(rows()).toEqual(['2.2.0:share:[team/mfe-b]', '2.1.0:skip:[team/mfe-a]']);
   });
 
   // The objective has to price a rejected row at the copies that really self-serve. Charging it for every
@@ -287,6 +292,43 @@ describe('determine: splitting a version on election', () => {
       await createDetermineSharedExternals(config, adapters)();
 
       expect(rows()).toEqual(['2.3.0:share:[team/a1]', '2.1.0:skip:[team/b1,team/b2]']);
+    });
+
+    // The serving build is decided after the election, so a candidate is priced on its basis copy, which
+    // stands in for the copy that will serve it. 2.1.0's basis is cached b1 (cached outranks coverage), which
+    // lacks dep-a/x: electing it leaves a1's dep-a/x uncovered, as electing 2.2.0 leaves b1's dep-a/y. Equal
+    // downloads (all non-strict) and equal tears, so the newer version wins. Priced on the union of 2.1.0's
+    // copies (b2 adds dep-a/x) it would cover a1 fully and win.
+    it("prices a candidate on its basis copy's entrypoints, not every copy's", async () => {
+      seed([
+        version('2.2.0', [
+          {
+            remote: 'team/a1',
+            req: '^2.1.0',
+            strict: false,
+            entries: { 'dep-a': 'a.js', 'dep-a/x': 'x.js' },
+          },
+        ]),
+        version('2.1.0', [
+          {
+            remote: 'team/b1',
+            req: '^2.1.0',
+            strict: false,
+            cached: true,
+            entries: { 'dep-a': 'a.js', 'dep-a/y': 'y.js' },
+          },
+          {
+            remote: 'team/b2',
+            req: '^2.1.0',
+            strict: false,
+            entries: { 'dep-a': 'a.js', 'dep-a/x': 'x.js' },
+          },
+        ]),
+      ]);
+
+      await createDetermineSharedExternals(config, adapters)();
+
+      expect(rows()).toEqual(['2.2.0:share:[team/a1]', '2.1.0:skip:[team/b1,team/b2]']);
     });
   });
 

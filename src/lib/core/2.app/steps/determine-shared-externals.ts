@@ -1,6 +1,6 @@
 import type { ForDeterminingSharedExternals } from '../driver-ports/init/for-determining-shared-externals.port';
 import { GLOBAL_SCOPE, type SharedExternal, type SharedVersion } from 'lib/core/1.domain';
-import { countUncoveredEntrypoints, versionEntries } from 'lib/core/1.domain/externals/basis';
+import { countUncoveredEntrypoints } from 'lib/core/1.domain/externals/basis';
 import {
   type AcceptsTag,
   createAcceptsTag,
@@ -77,17 +77,18 @@ export function createDetermineSharedExternals(
     return Promise.resolve();
   };
 
-  // Entrypoints declared by the versions `winner` would skip that its own copies can't serve.
+  // Entrypoints declared by the versions `winner` would skip that its basis copy can't serve.
   function uncoveredTears(
     external: SharedExternal,
     winner: SharedVersion,
     accepts: (version: SharedVersion, tag: string) => boolean
   ): number {
-    const basis = versionEntries(winner);
+    const basis = winner.remotes.find(r => !r.servedBy);
+    const covered = new Set(Object.keys(basis?.entries ?? {}));
     return external.versions.reduce((sum, v) => {
       if (v === winner) return sum;
       if (!accepts(v, winner.tag)) return sum;
-      return v.remotes.reduce((n, r) => n + countUncoveredEntrypoints(r, basis), sum);
+      return v.remotes.reduce((n, r) => n + countUncoveredEntrypoints(r, covered), sum);
     }, 0);
   }
 
