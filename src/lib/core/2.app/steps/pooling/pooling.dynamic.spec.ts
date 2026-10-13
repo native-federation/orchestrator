@@ -220,4 +220,48 @@ describe('pooling (dynamic)', () => {
         expect(resolves(merged, 'mfe', specifier)).toBe(resolves(coldMap, 'mfe', specifier));
     });
   });
+
+  /**
+   * r0 and mfe ship identical builds of the family, so only the name tells them apart, and mfe sorts first.
+   * A cold init of both hands the family to mfe. A load of mfe over a committed r0 cannot repoint the files the
+   * page already runs, so it takes r0's; the warm inits after it keep them, as r0's copies are the cached ones,
+   * and the second writes nothing. The page stays on r0 until its storage is cleared: a stable answer, not
+   * the cold one.
+   */
+  describe('a load whose build ties the committed one exactly', () => {
+    const fw = () => [
+      shared('@fw/core', '17.0.0', '^17.0.0', { entrypoints: ['@fw/core/testing'] }),
+      shared('@fw/common', '17.0.0', '^17.0.0'),
+    ];
+    const SPECIFIERS = ['@fw/core', '@fw/core/testing', '@fw/common'];
+
+    it("keeps the committed build's files, where a cold init picks the build whose name sorts first", async () => {
+      const page = portfolio({}, { realRepositories: true, storage: 'nf-pooling-dynamic-tie' });
+      await page.runInit([entry('r0', ...fw())]);
+      page.reload();
+
+      const { merged } = await page.runDynamic(entry('mfe', ...fw()));
+      for (const specifier of SPECIFIERS)
+        expect(resolves(merged, 'mfe', specifier)).toBe(file('r0', specifier));
+
+      // The load leaves its externals dirty, so the first warm init re-elects them; r0 keeps the pool.
+      page.reload();
+      const warm = await page.runInit([entry('r0', ...fw()), entry('mfe', ...fw())]);
+      expect(page.stored()['@fw/core']!.poolWinner).toBe('r0');
+      for (const specifier of SPECIFIERS) {
+        expect(resolves(warm, 'mfe', specifier)).toBe(file('r0', specifier));
+        expect(resolves(warm, 'r0', specifier)).toBe(file('r0', specifier));
+      }
+      page.reload();
+      await page.runInit([entry('r0', ...fw()), entry('mfe', ...fw())]);
+      expect(page.writes()).toBe(0);
+
+      const cold = portfolio({}, { realRepositories: true, storage: 'nf-pooling-dynamic-tie-cold' });
+      const coldMap = await cold.runInit([entry('r0', ...fw()), entry('mfe', ...fw())]);
+      for (const specifier of SPECIFIERS) {
+        expect(resolves(coldMap, 'mfe', specifier)).toBe(file('mfe', specifier));
+        expect(resolves(coldMap, 'r0', specifier)).toBe(file('mfe', specifier));
+      }
+    });
+  });
 });
