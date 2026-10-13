@@ -420,3 +420,35 @@ describe('a remote runs every specifier of a package from one build', () => {
 
   for (const c of cases) register(c);
 });
+
+// The host's files may import a specifier its build never declared (an entrypoint its build skipped, or a dynamic
+// `import()` the build tool missed); init sees only what builds declare, so it never fills that gap from another
+// build, even one of the same tag. The remote that ships the specifier runs the whole package from its own build
+// instead. Dense: r lists interop in its core; flat: r ships interop as an external of its own.
+describe('the host never borrows an entrypoint', () => {
+  const cases: Case[] = pools.flatMap(pool =>
+    (['dense', 'flat'] as const).flatMap(layout =>
+      [true, false].map((hostFirst): Case => {
+        const host = entry('host', shared(CORE, { pool }));
+        const r =
+          layout === 'dense'
+            ? entry('r', shared(CORE, { pool, entrypoints: [INTEROP] }))
+            : entry('r', shared(CORE, { pool }), shared(INTEROP, { pool }));
+        return {
+          name: `leaves a specifier the host lacks unmapped even when a same-tag remote ships it (pool=${pool}, ${layout}, host first=${hostFirst})`,
+          hosts: ['host'],
+          entries: hostFirst ? [host, r] : [r, host],
+          expectMap: map => {
+            expect(map.imports[CORE]).toBe('http://host/fw_core.js');
+            expect(map.imports[INTEROP]).toBeUndefined();
+            expect(resolve(map, CORE, 'http://r/expose.js')).toBe('http://r/fw_core.js');
+            expect(resolve(map, INTEROP, 'http://r/expose.js')).toBe('http://r/fw_core_interop.js');
+          },
+          known: { r: { stitched: ['@fw/core: host r'] } },
+        };
+      })
+    )
+  );
+
+  for (const c of cases) register(c);
+});
