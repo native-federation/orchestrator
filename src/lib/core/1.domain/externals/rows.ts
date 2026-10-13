@@ -1,3 +1,4 @@
+import type { RemoteName } from '../remote/remote-info.contract';
 import type { AcceptsTag } from './compatibility';
 import type { SharedVersion, SharedVersionAction, VersionName } from './version.contract';
 
@@ -70,4 +71,30 @@ export function redirectRow(
   // Beside its source rather than appended: the record stays newest-first, which `write()`
   // guarantees and a later election reads as "the latest".
   return [version, { tag: version.tag, host: false, action: 'scope', remotes: [...objecting] }];
+}
+
+// Moves `remote`'s copies out of every `share` and `skip` row into the `scope` row of their tag; a new scope row
+// goes right after its source, so the record stays newest-first. Mutates the source rows, returns the new list.
+export function scopeRemote(versions: SharedVersion[], remote: RemoteName): SharedVersion[] {
+  const rows = [...versions];
+  for (const source of versions) {
+    if (source.action === 'scope') continue;
+    const copies = source.remotes.filter(r => r.name === remote);
+    if (copies.length === 0) continue;
+    // The host leads its row and a later election finds the host's tag by the flag, so both move with it.
+    const host = source.host && copies.includes(source.remotes[0]!);
+    source.remotes = source.remotes.filter(r => r.name !== remote);
+    if (host) source.host = false;
+
+    let scoped = rowAt(rows, source.tag, 'scope');
+    if (!scoped) {
+      scoped = { tag: source.tag, host: false, action: 'scope', remotes: [] };
+      rows.splice(rows.indexOf(source) + 1, 0, scoped);
+    }
+    if (host) {
+      scoped.host = true;
+      scoped.remotes.unshift(...copies);
+    } else scoped.remotes.push(...copies);
+  }
+  return rows.filter(v => v.remotes.length > 0);
 }

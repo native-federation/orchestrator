@@ -1,7 +1,7 @@
 import { createVersionCheck } from 'lib/core/3.adapters/checks/version.check';
 import { mockVersionRemote } from 'lib/testing/domain/externals/version.mock';
 import { createAcceptsTag } from './compatibility';
-import { byTag, findVersionForTag, mergeRows, redirectRow, rowAt } from './rows';
+import { byTag, findVersionForTag, mergeRows, redirectRow, rowAt, scopeRemote } from './rows';
 import type { SharedVersion, SharedVersionAction, SharedVersionMeta } from './version.contract';
 
 const row = (tag: string, action: SharedVersionAction, ...remotes: string[]): SharedVersion => ({
@@ -135,6 +135,63 @@ describe('rows', () => {
       // a rejects 2.2.0 strictly; b accepts it; c rejects it but is not strict.
       expect(shape(rows)).toEqual(['2.1.0:skip:[b,c]', '2.1.0:scope:[a]']);
       expect(rows[0]).toBe(version);
+    });
+  });
+
+  describe('scopeRemote', () => {
+    it("moves the remote's copy into a scope row of its tag, right after its source row", () => {
+      const versions = [row('2.0.0', 'share', 'a', 'r'), row('1.0.0', 'skip', 'b')];
+
+      expect(shape(scopeRemote(versions, 'r'))).toEqual([
+        '2.0.0:share:[a]',
+        '2.0.0:scope:[r]',
+        '1.0.0:skip:[b]',
+      ]);
+    });
+
+    // The emptied row goes, so a newer copy's scope row keeps its place above an older winner and the record
+    // stays newest-first.
+    it('drops the row it empties, the scope row taking its place', () => {
+      const versions = [row('2.2.0', 'skip', 'r'), row('2.1.0', 'share', 'a')];
+
+      expect(shape(scopeRemote(versions, 'r'))).toEqual(['2.2.0:scope:[r]', '2.1.0:share:[a]']);
+    });
+
+    it('joins a scope row already at the tag, and leaves scope rows and other remotes alone', () => {
+      const versions = [
+        row('2.0.0', 'scope', 'c'),
+        row('2.0.0', 'skip', 'r', 'b'),
+        row('1.0.0', 'scope', 'r'),
+      ];
+
+      expect(shape(scopeRemote(versions, 'r'))).toEqual([
+        '2.0.0:scope:[c,r]',
+        '2.0.0:skip:[b]',
+        '1.0.0:scope:[r]',
+      ]);
+    });
+
+    // determine finds the host's tag by the flag; a flag left on the source would hand the host's precedence
+    // to whichever copy now leads it.
+    it("carries the host's flag to the scope row, its copy in front", () => {
+      const source: SharedVersion = { ...row('2.0.0', 'share', 'host', 'a'), host: true };
+      const versions = [row('2.0.0', 'scope', 'c'), source];
+
+      const rows = scopeRemote(versions, 'host');
+
+      expect(shape(rows)).toEqual(['2.0.0:scope:[host,c]', '2.0.0:share:[a]']);
+      expect(rows.map(v => v.host)).toEqual([true, false]);
+    });
+
+    it("leaves a host row's flag when another remote leaves it", () => {
+      const versions = [{ ...row('2.0.0', 'share', 'host', 'r'), host: true }];
+
+      const rows = scopeRemote(versions, 'r');
+
+      expect(rows.map(v => [v.action, v.host])).toEqual([
+        ['share', true],
+        ['scope', false],
+      ]);
     });
   });
 });

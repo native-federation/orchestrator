@@ -3,7 +3,7 @@ import { compareStrings } from 'lib/utils/compare-strings';
 import type { RemoteName } from '../remote/remote-info.contract';
 import type { AcceptsTag } from './compatibility';
 import type { ExternalName, SharedExternal, shareScope } from './external.contract';
-import { mergeRows, redirectRow } from './rows';
+import { mergeRows, redirectRow, rowAt } from './rows';
 import { packageOf } from './specifier';
 import type { SharedVersion, SharedVersionMeta, VersionName } from './version.contract';
 
@@ -59,20 +59,17 @@ export function servingBuildOf(
   return best && { remote: best.remote, tag: best.tag };
 }
 
-// Whether `name` still resolves at the serving tag once its other share rows follow the serving build: it has a
-// share row there, or the serving build ships it.
-export function resolvesAtServingTag(
-  externals: PackageExternals,
-  serving: ServingBuild,
-  name: ExternalName
-): boolean {
-  const own = externals.find(([n]) => n === name)?.[1];
-  if (shareRows(own).some(row => row.tag === serving.tag)) return true;
-  return externals.some(([, e]) =>
-    shareRows(e).some(row =>
-      row.remotes.some(copy => copy.name === serving.remote && name in copy.entries)
-    )
-  );
+// The serving build's copy at its tag publishes even where that external's own election skipped it, so every
+// specifier the build ships stays in its surface. Mutates `external` in place.
+export function shareServingCopy(external: SharedExternal, serving: ServingBuild): void {
+  if (rowAt(external.versions, serving.tag, 'share')) return;
+  const row = rowAt(external.versions, serving.tag, 'skip');
+  const copy = row?.remotes.find(c => c.name === serving.remote);
+  if (!row || !copy) return;
+  row.action = 'share';
+  // A host leading the row stops being its basis.
+  if (row.remotes[0] !== copy) row.host = false;
+  row.remotes = [copy, ...row.remotes.filter(c => c !== copy)];
 }
 
 export type ServingObjector = { copy: SharedVersionMeta; tag: VersionName };
@@ -114,12 +111,14 @@ function candidatesOf(
       const key = `${row.tag}|${copy.name}`;
       if (copy.servedBy || candidates.has(key)) continue;
       const basis = copy === row.remotes[0];
+      const build = { remote: copy.name, tag: row.tag };
+      const fallbacks = fallbacksFrom(consumers, build);
       candidates.set(key, {
         remote: copy.name,
         tag: row.tag,
         host: basis && row.host,
-        downloads: downloadsOf(copy.name, row.tag, consumers, accepts),
-        fallbacks: 0,
+        downloads: downloadsOf(build, fallbacks, consumers, accepts),
+        fallbacks: fallbacks.length,
         rootBasis: basis && rootRows.includes(row),
       });
     }
@@ -161,17 +160,41 @@ function consumersOf(externals: PackageExternals): Map<RemoteName, Placed[]> {
 
 // One per build of the package the page would load beyond what it already has: a cached copy costs nothing.
 function downloadsOf(
-  serving: RemoteName,
-  tag: VersionName,
+  serving: ServingBuild,
+  fallbacks: RemoteName[],
   consumers: Map<RemoteName, Placed[]>,
   accepts: AcceptsTag
 ): number {
   let downloads = 0;
   for (const [remote, placed] of consumers) {
     if (placed.every(({ copy }) => copy.cached)) continue;
-    if (remote === serving || runsOffMap(placed, tag, accepts)) downloads++;
+    if (
+      remote === serving.remote ||
+      fallbacks.includes(remote) ||
+      runsOffMap(placed, serving.tag, accepts)
+    )
+      downloads++;
   }
   return downloads;
+}
+
+// The remotes that ship a specifier of the package outside the serving build's own copies at its tag. Each
+// serves the whole package from its own build instead, so none of its files imports another build's.
+export function fallbacksOf(externals: PackageExternals, serving: ServingBuild): RemoteName[] {
+  return fallbacksFrom(consumersOf(externals), serving);
+}
+
+function fallbacksFrom(consumers: Map<RemoteName, Placed[]>, serving: ServingBuild): RemoteName[] {
+  const surface = new Set(
+    (consumers.get(serving.remote) ?? [])
+      .filter(({ row }) => row.tag === serving.tag && row.action !== 'scope')
+      .flatMap(({ copy }) => Object.keys(copy.entries))
+  );
+  const uncovered = ({ row, copy }: Placed) =>
+    row.action !== 'scope' && Object.keys(copy.entries).some(s => !surface.has(s));
+  return [...consumers]
+    .filter(([remote, placed]) => remote !== serving.remote && placed.some(uncovered))
+    .map(([remote]) => remote);
 }
 
 function runsOffMap(placed: Placed[], tag: VersionName, accepts: AcceptsTag): boolean {

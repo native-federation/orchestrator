@@ -136,8 +136,8 @@ const pools = ['fw', false] as const;
 
 describe('a remote runs every specifier of a package from one build', () => {
   const cases: Case[] = [
-    // Unpooled, on 4.7.0 too. The host's core leads the 17.0.0 row; b's copy adds interop,
-    // whose file imports b's chunk: b runs b's core internals beside the host's core.
+    // Unpooled. The host's core leads the 17.0.0 row; b's copy adds interop, whose file imports b's chunk. The
+    // host's build lacks interop, so b runs core from its own build, chunk included.
     {
       name: 'serves no chunked entrypoint beside another copy of its version (unpooled)',
       hosts: ['a'],
@@ -149,9 +149,9 @@ describe('a remote runs every specifier of a package from one build', () => {
           shared(FORMS, { pool: false, chunked: true })
         ),
       ],
-      known: { b: { torn: ['@fw/core: a b'], stitched: ['@fw/core: a* b*'] } },
     },
-    // Pooled: the host pins core in round 1, so no chunk guard sees mfe's chunked interop.
+    // Pooled: the host pins core in round 1 and lacks interop, so mfe runs core from its own build, its chunked
+    // interop included.
     {
       name: 'serves no chunked entrypoint beside the pinned host core',
       hosts: ['host'],
@@ -159,7 +159,6 @@ describe('a remote runs every specifier of a package from one build', () => {
         entry('mfe', shared(CORE, { chunked: true, entrypoints: [INTEROP] })),
         entry('host', shared(CORE, { chunked: true })),
       ],
-      known: { mfe: { torn: ['@fw/core: host mfe'], stitched: ['@fw/core: host* mfe*'] } },
     },
     // u and chunked c ship interop at the host's core tag. Round 1 borrows nothing for the host, so the map
     // never publishes c's interop, which would bind c's core internals beside the host's core.
@@ -214,9 +213,10 @@ describe('a remote runs every specifier of a package from one build', () => {
       };
     }),
     // u ships core with interop, unchunked, and scopes rxjs to its own strict 6.6.0; the host
-    // h ships core without interop and rxjs 7.8.0. Both files import rxjs, each through its own URL: u runs the
-    // host's core on rxjs 7 beside its own interop on rxjs 6. Without a host the same map leaks the winner's
-    // scope, a separate defect that one build per package does not fix, so that variant is not here.
+    // h ships core without interop and rxjs 7.8.0. Both files import rxjs, each through its own URL: the host's
+    // build lacks interop, so u runs core from its own build, and both of u's files bind rxjs 6.6.0 through u's
+    // scope. Without a host the same map leaks the winner's scope, a separate defect that one build per package
+    // does not fix, so that variant is not here.
     ...pools.flatMap(pool =>
       [undefined, 'custom'].map((shareScope): Case => ({
         name: `binds no file's imports through another build's scope (pool=${pool}, scope=${shareScope ?? 'global'})`,
@@ -241,13 +241,6 @@ describe('a remote runs every specifier of a package from one build', () => {
             shared(RXJS, { pool: false, shareScope, version: '7.8.0', range: '^7.0.0' })
           ),
         ],
-        known: {
-          u: {
-            twice: ['rxjs: http://h/rxjs.js http://u/rxjs.js'],
-            torn: ['rxjs: h u'],
-            stitched: ['@fw/core: h u', 'rxjs: h u'],
-          },
-        },
       }))
     ),
     // No host: chunked dense r0 ships core{core, testing}; chunked flat r1 ships core,
@@ -283,9 +276,8 @@ describe('a remote runs every specifier of a package from one build', () => {
       ],
       expectMap: map => expect(map.imports[TESTING]).toBe('http://host/fw_core_testing.js'),
     })),
-    // b's `core/b` imports `core/a`, which the map serves from the host a's build; from b's
-    // URL, with no scope row for it, it binds a's `core/a`. Chunked, b's `core/b` pulls b's internals beside
-    // a's; unchunked nothing loads twice, yet b and r run core from two builds.
+    // b's `core/b` imports `core/a`. The host a ships core and `core/a` but not `core/b`, so b and r each run
+    // core from their own build and `core/a` binds their own copy, chunked or not.
     ...[true, false].map((chunked): Case => ({
       name: `runs no entrypoint that imports a sibling another build serves (chunked=${chunked})`,
       hosts: ['a'],
@@ -294,15 +286,9 @@ describe('a remote runs every specifier of a package from one build', () => {
         entry('r', shared(CORE, { chunked, entrypoints: [A, B] })),
         entry('a', shared(CORE, { chunked, entrypoints: [A] })),
       ],
-      known: chunked
-        ? {
-            b: { torn: ['@fw/core: a b'], stitched: ['@fw/core: a* b*'] },
-            r: { torn: ['@fw/core: a b'], stitched: ['@fw/core: a* b*'] },
-          }
-        : { b: { stitched: ['@fw/core: a b'] }, r: { stitched: ['@fw/core: a b'] } },
     })),
-    // b lends interop and scopes forms to its own strict 16.0.0; interop imports forms. r
-    // runs the map's forms (17) and b's interop, which binds forms through b's URL.
+    // b and r ship interop, which the host's core lacks, so each runs core from its own build. Interop imports
+    // forms: b's binds b's strict 16.0.0 through b's URL, r's binds the map's forms (17).
     {
       name: "binds no sibling package through the scope of another build's entrypoint",
       hosts: ['a'],
@@ -316,14 +302,6 @@ describe('a remote runs every specifier of a package from one build', () => {
         entry('r', shared(CORE, { entrypoints: [INTEROP] }), shared(FORMS, { pool: false })),
         entry('a', shared(CORE), shared(FORMS, { pool: false })),
       ],
-      known: {
-        b: { stitched: ['@fw/core: a b'] },
-        r: {
-          twice: ['@fw/forms: http://a/fw_forms.js http://b/fw_forms.js'],
-          torn: ['@fw/forms: a b'],
-          stitched: ['@fw/core: a b', '@fw/forms: a b'],
-        },
-      },
     },
     // Unchunked, so nothing loads twice and the tag oracle passes it: the flat host r0 ships core and core/sub
     // as externals of their own, dense r1 ships core{core, core/sub}. The core row serves r1's sub (the
@@ -458,7 +436,7 @@ describe('the host never borrows an entrypoint', () => {
             expect(resolve(map, CORE, 'http://r/expose.js')).toBe('http://r/fw_core.js');
             expect(resolve(map, INTEROP, 'http://r/expose.js')).toBe('http://r/fw_core_interop.js');
           },
-          known: { r: { stitched: ['@fw/core: host r'] } },
+          ...(pool && layout === 'flat' && { known: { r: { stitched: ['@fw/core: host r'] } } }),
         };
       })
     )

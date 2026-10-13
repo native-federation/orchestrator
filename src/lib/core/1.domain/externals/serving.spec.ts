@@ -6,10 +6,11 @@ import type { AcceptsTag } from './compatibility';
 import type { ExternalName, SharedExternal } from './external.contract';
 import {
   byServingRank,
+  fallbacksOf,
   followServingBuild,
   packagesOf,
-  resolvesAtServingTag,
   servingBuildOf,
+  shareServingCopy,
   type ServingBuild,
   type ServingCandidate,
 } from './serving';
@@ -114,10 +115,15 @@ describe('servingBuildOf', () => {
   it('ranks a package that has secondary entrypoints only across their tags', () => {
     const result = serving(
       ['ui/table', external(version('share', [copy('r1', ['ui/table'])], '1.0.0'))],
-      ['ui/sort', external(version('share', [copy('r2', ['ui/sort'], { cached: true })], '2.0.0'))]
+      [
+        'ui/sort',
+        external(
+          version('share', [copy('r2', ['ui/sort', 'ui/table'], { cached: true })], '2.0.0')
+        ),
+      ]
     );
 
-    // r2 is already downloaded; r1 would cost a download.
+    // r2 is already downloaded and covers r1; r1 would cost a download and leave r2 on its own build.
     expect(result).toEqual<ServingBuild>({ remote: 'r2', tag: '2.0.0' });
   });
 
@@ -238,8 +244,8 @@ describe('servingBuildOf', () => {
     for (const [, e] of externals) e.servingBuild = build.remote;
 
     expect(build).toEqual<ServingBuild>({ remote: 'remote', tag: '2.0.0' });
-    // The host's own row follows the root's build, so the host runs the whole package from it.
-    expect(resolvesAtServingTag(externals, build, 'fw/testing')).toBe(true);
+    // The root's build covers the host's copy, so the host runs the whole package from it.
+    expect(fallbacksOf(externals, build)).toEqual([]);
     expect(claimTable(externals).claims.get('fw/testing')?.copy.name).toBe('remote');
   });
 
@@ -277,6 +283,83 @@ describe('servingBuildOf', () => {
     );
 
     expect(result).toEqual<ServingBuild>({ remote: 'c', tag: '1.0.0' });
+  });
+
+  describe('a copy the serving build does not cover', () => {
+    // b ships fw/testing, which a's build at 1.0.0 lacks.
+    const uncovered = (cachedA = false, cachedB = false): [ExternalName, SharedExternal][] => [
+      [
+        'fw',
+        external(
+          version('share', [
+            copy('a', ['fw'], { cached: cachedA }),
+            copy('b', ['fw'], { cached: cachedB }),
+          ])
+        ),
+      ],
+      [
+        'fw/testing',
+        external(version('skip', [copy('b', ['fw/testing'], { cached: cachedB })], '0.9.0')),
+      ],
+    ];
+
+    it("prices the copy's own build as a download", () => {
+      // Serving the cached a still loads b's own build (1), as serving b does; unpriced, a would win at 0.
+      expect(serving(...uncovered(true))).toEqual<ServingBuild>({ remote: 'b', tag: '1.0.0' });
+    });
+
+    it('ranks the build that covers it first when the downloads tie', () => {
+      // All cached: both cost nothing, and the name alone would pick a.
+      expect(serving(...uncovered(true, true))).toEqual<ServingBuild>({
+        remote: 'b',
+        tag: '1.0.0',
+      });
+    });
+
+    it("falls back for a specifier outside the serving build's copies at the serving tag", () => {
+      expect(fallbacksOf(uncovered(), { remote: 'a', tag: '1.0.0' })).toEqual(['b']);
+      expect(fallbacksOf(uncovered(), { remote: 'b', tag: '1.0.0' })).toEqual([]);
+    });
+
+    it("counts only the serving build's copies at the serving tag as covering", () => {
+      const externals: [ExternalName, SharedExternal][] = [
+        ['fw', external(version('share', [copy('a', ['fw'])], '2.0.0'))],
+        [
+          'fw/testing',
+          external(
+            version('skip', [copy('a', ['fw/testing'])], '1.0.0'),
+            version('share', [copy('b', ['fw/testing'])], '1.0.0')
+          ),
+        ],
+      ];
+
+      expect(fallbacksOf(externals, { remote: 'a', tag: '2.0.0' })).toEqual(['b']);
+    });
+
+    // The global map never publishes the serving build's scope copy: B maps it in its own scope only.
+    it("never counts the serving build's scope copies as covering", () => {
+      const externals: [ExternalName, SharedExternal][] = [
+        ['fw', external(version('share', [copy('a', ['fw'])]))],
+        [
+          'fw/testing',
+          external(
+            version('share', [copy('b', ['fw/testing'])], '0.9.0'),
+            version('scope', [copy('a', ['fw/testing'])])
+          ),
+        ],
+      ];
+
+      expect(fallbacksOf(externals, { remote: 'a', tag: '1.0.0' })).toEqual(['b']);
+    });
+
+    it('leaves a copy that already runs from a scope row out', () => {
+      const externals: [ExternalName, SharedExternal][] = [
+        ['fw', external(version('share', [copy('a', ['fw'])]))],
+        ['fw/testing', external(version('scope', [copy('b', ['fw/testing'])], '0.9.0'))],
+      ];
+
+      expect(fallbacksOf(externals, { remote: 'a', tag: '1.0.0' })).toEqual([]);
+    });
   });
 
   it('breaks an equal rank by name, not by record order', () => {
@@ -394,45 +477,38 @@ describe('servingBuildOf', () => {
   });
 });
 
-describe('resolvesAtServingTag', () => {
+describe('shareServingCopy', () => {
   const toServing: ServingBuild = { remote: 'serving', tag: '2.0.0' };
-  const root: [ExternalName, SharedExternal] = [
-    'fw',
-    external(version('share', [copy('serving', ['fw', 'fw/shipped'])], '2.0.0')),
-  ];
+  const shape = (e: SharedExternal) =>
+    e.versions.map(v => `${v.tag}:${v.action}:[${v.remotes.map(r => r.name)}]`);
 
-  it('holds for an external with a share row at the serving tag, whoever ships it', () => {
-    const testing: [ExternalName, SharedExternal] = [
-      'fw/testing',
-      external(
-        version('share', [copy('other', ['fw/testing'])], '2.0.0'),
-        version('share', [copy('old', ['fw/testing'])], '1.0.0')
-      ),
-    ];
+  it("shares the serving build's skipped copy at the serving tag, in front of its row", () => {
+    const testing = external(
+      version('share', [copy('old', ['fw/testing'])], '1.0.0'),
+      version(
+        'skip',
+        [copy('other', ['fw/testing']), copy('serving', ['fw/testing'])],
+        '2.0.0',
+        true
+      )
+    );
 
-    expect(resolvesAtServingTag([root, testing], toServing, 'fw/testing')).toBe(true);
+    shareServingCopy(testing, toServing);
+
+    expect(shape(testing)).toEqual(['1.0.0:share:[old]', '2.0.0:share:[serving,other]']);
+    // The host no longer leads the row.
+    expect(testing.versions[1]!.host).toBe(false);
   });
 
-  it("holds for an external the serving build ships in another external's share row", () => {
-    const shipped: [ExternalName, SharedExternal] = [
-      'fw/shipped',
-      external(version('share', [copy('old', ['fw/shipped'])], '1.0.0')),
-    ];
+  it('leaves an external with a share row at the serving tag, or without the copy there, alone', () => {
+    const shared = external(version('share', [copy('other', ['fw/testing'])], '2.0.0'));
+    const elsewhere = external(version('skip', [copy('serving', ['fw/testing'])], '1.0.0'));
+    const before = structuredClone([shared, elsewhere]);
 
-    expect(resolvesAtServingTag([root, shipped], toServing, 'fw/shipped')).toBe(true);
-  });
+    shareServingCopy(shared, toServing);
+    shareServingCopy(elsewhere, toServing);
 
-  it('fails for an external with neither', () => {
-    const testing: [ExternalName, SharedExternal] = [
-      'fw/testing',
-      external(
-        version('share', [copy('old', ['fw/testing'])], '1.0.0'),
-        // Only a share row counts: a skip row at the serving tag publishes nothing.
-        version('skip', [copy('serving', ['fw/testing'])], '2.0.0')
-      ),
-    ];
-
-    expect(resolvesAtServingTag([root, testing], toServing, 'fw/testing')).toBe(false);
+    expect([shared, elsewhere]).toEqual(before);
   });
 });
 

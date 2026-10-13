@@ -1,12 +1,14 @@
 import type { ForDecidingServingBuilds } from '../driver-ports/init/for-deciding-serving-builds.port';
 import type { ExternalName, RemoteName, SharedExternal } from 'lib/core/1.domain';
 import { type AcceptsTag, createAcceptsTag } from 'lib/core/1.domain/externals/compatibility';
+import { scopeRemote } from 'lib/core/1.domain/externals/rows';
 import {
+  fallbacksOf,
   followServingBuild,
   isPooled,
   packagesOf,
-  resolvesAtServingTag,
   servingBuildOf,
+  shareServingCopy,
   type ServingBuild,
 } from 'lib/core/1.domain/externals/serving';
 import type { DrivingContract } from '../driving-ports/driving.contract';
@@ -44,22 +46,21 @@ export function createDecideServingBuilds(
     externals: StoredPackage,
     accepts: AcceptsTag
   ): void {
+    // Taken first: falling back and following the serving build rewrite the stored externals in place.
+    const before = externals.map(([, external]) => JSON.stringify(external));
     const serving = servingBuildOf(externals, accepts);
     // The election already placed a pooled package's rows.
     const toFollow = isPooled(externals) ? undefined : serving;
-    // Decided before any external moves; an external that would resolve nowhere keeps its own rows.
-    const follows = toFollow ? followersOf(externals, toFollow) : new Set<ExternalName>();
+    if (toFollow) fallBack(externals, toFollow);
 
-    for (const [name, external] of externals) {
-      // Taken first: following the serving build rewrites the stored external in place.
-      const before = JSON.stringify(external);
+    externals.forEach(([name, external], i) => {
       const decided = withServingBuild(
-        toFollow && follows.has(name) ? follow(pkg, name, external, toFollow, accepts) : external,
+        toFollow ? follow(pkg, name, external, toFollow, accepts) : external,
         serving?.remote
       );
-      if (JSON.stringify(decided) !== before)
+      if (JSON.stringify(decided) !== before[i])
         ports.sharedExternalsRepo.addOrUpdate(name, decided, shareScope);
-    }
+    });
   }
 
   function follow(
@@ -82,8 +83,11 @@ function withServingBuild(external: SharedExternal, servingBuild?: RemoteName): 
   return servingBuild ? { ...rest, servingBuild } : rest;
 }
 
-function followersOf(externals: StoredPackage, serving: ServingBuild): Set<ExternalName> {
-  return new Set(
-    externals.map(([name]) => name).filter(name => resolvesAtServingTag(externals, serving, name))
-  );
+// The serving copy publishes first, so a remote it covers stays; one it does not runs the package from its own
+// build.
+function fallBack(externals: StoredPackage, serving: ServingBuild): void {
+  for (const [, external] of externals) shareServingCopy(external, serving);
+  for (const remote of fallbacksOf(externals, serving))
+    for (const [, external] of externals)
+      external.versions = scopeRemote(external.versions, remote);
 }
