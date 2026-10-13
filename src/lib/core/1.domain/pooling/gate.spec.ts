@@ -249,10 +249,15 @@ describe('committedView', () => {
         for (const { external } of members) external.servingBuild = 'dense';
 
         expect(
-          committedView(members, copiesByRemote(members, () => false), recordOrder, {
-            shareScope: GLOBAL_SCOPE,
-            without: 'loaded',
-          }).global.get('@ng/core/testing')
+          committedView(
+            members,
+            copiesByRemote(members, () => false),
+            recordOrder,
+            {
+              shareScope: GLOBAL_SCOPE,
+              without: 'loaded',
+            }
+          ).global.get('@ng/core/testing')
         ).toEqual({ tag: '22.0.8', remote: 'dense', file: 't.js' });
       });
   });
