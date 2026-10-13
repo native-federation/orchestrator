@@ -238,7 +238,11 @@ describe('createGenerateImportMap (shared-externals)', () => {
           }),
           mockVersion_A.v2_1_1({
             action: 'share',
-            remotes: { 'team/mfe2': { entries: { 'dep-a/sub': 'dep-a-sub.js' } } },
+            remotes: {
+              'team/mfe2': {
+                entries: { 'dep-a/sub': 'dep-a-sub.js', 'dep-a/sub/extra': 'dep-a-sub-extra.js' },
+              },
+            },
           }),
         ],
       }),
@@ -445,6 +449,50 @@ describe('createGenerateImportMap (shared-externals)', () => {
       4,
       '[dep-a] Shared external has multiple shared versions.'
     );
+  });
+
+  // A flat build emits `dep-a/sub` as an external of its own; at the shared tag it is the same version, not a
+  // second one, and it adds no file of its own build beside the root's.
+  it('should not report a flat secondary external at the dense root tag as a second shared version', async () => {
+    config.strict.strictImportMap = true;
+
+    adapters.sharedExternalsRepo.getFromScope = vi.fn(() => ({
+      'dep-a': mockExternal_A({
+        dirty: false,
+        versions: [
+          mockVersion_A.v2_1_1({
+            action: 'share',
+            remotes: {
+              'team/mfe1': { entries: { 'dep-a': 'dep-a.js', 'dep-a/sub': 'dep-a-sub.js' } },
+            },
+          }),
+        ],
+      }),
+      'dep-a/sub': mockExternal_A({
+        dirty: false,
+        versions: [
+          mockVersion_A.v2_1_1({
+            action: 'share',
+            remotes: {
+              'team/mfe2': {
+                entries: { 'dep-a/sub': 'dep-a-sub.js', 'dep-a/sub/extra': 'dep-a-sub-extra.js' },
+              },
+            },
+          }),
+        ],
+      }),
+    }));
+
+    const actual = await generateImportMap();
+
+    expect(actual).toEqual({
+      imports: {
+        'dep-a': mockScopeUrl_MFE1({ file: 'dep-a.js' }),
+        'dep-a/sub': mockScopeUrl_MFE1({ file: 'dep-a-sub.js' }),
+      },
+    });
+    expect(config.log.warn).not.toHaveBeenCalled();
+    expect(config.log.error).not.toHaveBeenCalled();
   });
 
   it('should throw an error if the remote doesnt exist', async () => {

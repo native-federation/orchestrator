@@ -102,6 +102,95 @@ describe('claimTable', () => {
     expect(readable(table.claims)).toEqual({ dep: 'dep@1.0.0:r2:share' });
   });
 
+  it('lets a same-tag share row of a claimed name claim nothing, without reporting it as a duplicate', () => {
+    // A dense root beside a flat secondary of the same tag is one shared version, not two; the flat row still
+    // adds no file of its own build beside the root's.
+    const flat = version('share', [copy('r2', ['fw/testing', 'fw/testing/extra'])]);
+    const table = claimTable([
+      ['fw', external(version('share', [copy('r1', ['fw', 'fw/testing'])]))],
+      ['fw/testing', external(flat)],
+    ]);
+
+    expect(table.duplicates.size).toBe(0);
+    expect(readable(table.claims)).toEqual({
+      fw: 'fw@1.0.0:r1:share',
+      'fw/testing': 'fw@1.0.0:r1:share',
+    });
+  });
+
+  describe('with a serving build', () => {
+    const served = (servingBuild: string, ...versions: SharedVersion[]): SharedExternal => ({
+      ...external(...versions),
+      servingBuild,
+    });
+
+    it('claims the serving copy before any share row earlier in record order', () => {
+      const table = claimTable([
+        ['fw/testing', served('r2', version('share', [copy('r1', ['fw/testing'])]))],
+        [
+          'fw',
+          served('r2', version('share', [copy('r1', ['fw']), copy('r2', ['fw', 'fw/testing'])])),
+        ],
+      ]);
+
+      expect(readable(table.claims)).toEqual({
+        fw: 'fw@1.0.0:r2:share',
+        'fw/testing': 'fw@1.0.0:r2:share',
+      });
+      expect(readable(table.shareClaims)).toEqual(readable(table.claims));
+      expect(table.duplicates.size).toBe(0);
+    });
+
+    it('lets a same-tag share row claim nothing the serving copy leaves free', () => {
+      const table = claimTable([
+        ['fw', served('r1', version('share', [copy('r1', ['fw', 'fw/testing'])]))],
+        [
+          'fw/testing',
+          served('r1', version('share', [copy('r2', ['fw/testing', 'fw/testing/extra'])])),
+        ],
+      ]);
+
+      expect(table.duplicates.size).toBe(0);
+      expect(readable(table.claims)).toEqual({
+        fw: 'fw@1.0.0:r1:share',
+        'fw/testing': 'fw@1.0.0:r1:share',
+      });
+    });
+
+    it('leaves what the serving copy does not ship to record order', () => {
+      const table = claimTable([
+        [
+          'fw',
+          served('r2', version('share', [copy('r1', ['fw', 'fw/extra']), copy('r2', ['fw'])])),
+        ],
+      ]);
+
+      expect(readable(table.claims)).toEqual({
+        fw: 'fw@1.0.0:r2:share',
+        'fw/extra': 'fw@1.0.0:r1:share',
+      });
+    });
+
+    it('seeds nothing from a serving copy `publishes` turns down', () => {
+      const table = claimTable(
+        [['fw', served('r2', version('share', [copy('r1', ['fw']), copy('r2', ['fw'])]))]],
+        c => c.name !== 'r2'
+      );
+
+      expect(readable(table.claims)).toEqual({ fw: 'fw@1.0.0:r1:share' });
+    });
+
+    it('still reports a share row at another tag than the serving copy as a duplicate', () => {
+      const other = version('share', [copy('r1', ['fw', 'fw/extra'])], '2.0.0');
+      const table = claimTable([
+        ['fw', served('r2', other, version('share', [copy('r2', ['fw'])]))],
+      ]);
+
+      expect(table.duplicates).toEqual(new Set([other]));
+      expect(readable(table.claims)).toEqual({ fw: 'fw@1.0.0:r2:share' });
+    });
+  });
+
   it('ignores scope rows', () => {
     const table = claimTable([['dep', external(version('scope', [copy('r1', ['dep'])]))]]);
 

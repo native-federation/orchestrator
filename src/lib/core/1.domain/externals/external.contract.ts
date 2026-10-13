@@ -15,6 +15,8 @@ export type SharedExternal = {
   poolName?: string;
   // The build its pool's last election made global; a tied re-election keeps it.
   poolWinner?: RemoteName;
+  // The build every specifier of this external's package is served from in this scope; the same on each of them.
+  servingBuild?: RemoteName;
   versions: SharedVersion[];
 };
 
