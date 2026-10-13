@@ -1,3 +1,4 @@
+import type { AcceptsTag } from './compatibility';
 import type { SharedVersion, SharedVersionAction, VersionName } from './version.contract';
 
 // Newest tag first, as `write()` orders a record. Leaves a tag's rows in their order (`sort` is stable).
@@ -42,4 +43,31 @@ export function findVersionForTag(
     scoped ??= version;
   }
   return scoped;
+}
+
+// Points a row at `tag`: its copies skip to it, and only the strict ones that reject it keep their own build,
+// split off into a `scope` row beside it. Returns the rows that replace `version`, in order; mutates it in place.
+export function redirectRow(
+  version: SharedVersion,
+  tag: VersionName,
+  acceptsTag: AcceptsTag
+): SharedVersion[] {
+  const objecting = new Set(
+    version.remotes.filter(r => r.strictVersion && !acceptsTag(tag, version.tag, r.requiredVersion))
+  );
+
+  if (objecting.size === 0) {
+    version.action = 'skip';
+    return [version];
+  }
+  if (objecting.size === version.remotes.length) {
+    version.action = 'scope';
+    return [version];
+  }
+
+  version.remotes = version.remotes.filter(r => !objecting.has(r));
+  version.action = 'skip';
+  // Beside its source rather than appended: the record stays newest-first, which `write()`
+  // guarantees and a later election reads as "the latest".
+  return [version, { tag: version.tag, host: false, action: 'scope', remotes: [...objecting] }];
 }

@@ -1,6 +1,6 @@
 import type { SharedExternal, SharedVersion, SharedVersionMeta } from 'lib/core/1.domain';
 import { uncoveredEntrypoints, versionEntries } from 'lib/core/1.domain/externals/basis';
-import { mergeRows, rowAt } from 'lib/core/1.domain/externals/rows';
+import { mergeRows, redirectRow, rowAt } from 'lib/core/1.domain/externals/rows';
 import type { AcceptsTag, VersionAcceptance } from 'lib/core/1.domain/externals/compatibility';
 import { NFError } from 'lib/core/native-federation.error';
 import type { LoggingConfig } from '../config/log.contract';
@@ -24,52 +24,22 @@ export function createApplyWinner(config: LoggingConfig & ModeConfig) {
   ): SharedExternal {
     // Every copy accepts its own tag, so a lone version, like the winner, is never redirected or split.
     if (external.versions.length > 1) {
-      const { accepts, objector } = acceptance;
-
       const rebuilt: SharedVersion[] = [];
 
       for (const v of external.versions) {
-        rebuilt.push(v);
+        const objector =
+          config.strict.strictExternalCompatibility && acceptance.objector(v, winner.tag);
 
-        if (accepts(v, winner.tag)) {
-          v.action = 'skip';
-          continue;
-        }
-
-        const strict = objector(v, winner.tag);
-
-        if (config.strict.strictExternalCompatibility && strict) {
+        if (objector) {
           config.log.error(
             3,
-            `[${strict.name}][${externalName}@${v.tag}] Is not compatible with requiredRange '${strict.requiredVersion}' of shared ${externalName}@${winner.tag}.`
+            `[${objector.name}][${externalName}@${v.tag}] Is not compatible with requiredRange '${objector.requiredVersion}' of shared ${externalName}@${winner.tag}.`
           );
 
           throw new NFError(`External ${externalName}@${v.tag} could not be shared.`);
         }
 
-        if (!strict) {
-          v.action = 'skip';
-          continue;
-        }
-
-        // `accepts` aggregates over the whole version because one version is one file served from one
-        // basis — but only the copies that themselves reject the winner have to keep their own build.
-        const objecting = new Set(
-          v.remotes.filter(
-            r => r.strictVersion && !acceptsTag(winner.tag, v.tag, r.requiredVersion)
-          )
-        );
-
-        if (objecting.size === v.remotes.length) {
-          v.action = 'scope';
-          continue;
-        }
-
-        v.remotes = v.remotes.filter(r => !objecting.has(r));
-        v.action = 'skip';
-        // Beside its source rather than appended: the record stays newest-first, which `write()`
-        // guarantees and a later election reads as "the latest".
-        rebuilt.push({ tag: v.tag, host: false, action: 'scope', remotes: [...objecting] });
+        rebuilt.push(...redirectRow(v, winner.tag, acceptsTag));
       }
 
       // One row per (tag, action), which the record keeps: a warm record can already hold a `scope` row at

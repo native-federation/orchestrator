@@ -1,7 +1,8 @@
 import { createVersionCheck } from 'lib/core/3.adapters/checks/version.check';
 import { mockVersionRemote } from 'lib/testing/domain/externals/version.mock';
-import { byTag, findVersionForTag, mergeRows, rowAt } from './rows';
-import type { SharedVersion, SharedVersionAction } from './version.contract';
+import { createAcceptsTag } from './compatibility';
+import { byTag, findVersionForTag, mergeRows, redirectRow, rowAt } from './rows';
+import type { SharedVersion, SharedVersionAction, SharedVersionMeta } from './version.contract';
 
 const row = (tag: string, action: SharedVersionAction, ...remotes: string[]): SharedVersion => ({
   tag,
@@ -86,6 +87,54 @@ describe('rows', () => {
 
       expect(findVersionForTag([scoped], '2.0.0')).toBe(scoped);
       expect(findVersionForTag([scoped], '1.0.0')).toBeUndefined();
+    });
+  });
+
+  describe('redirectRow', () => {
+    const { isCompatible, compare } = createVersionCheck();
+    const acceptsTag = createAcceptsTag(isCompatible, compare);
+    // Every copy of these rows sits at 2.1.0; only its range and strictness differ.
+    const copy = (name: string, requiredVersion: string, strictVersion = true) =>
+      mockVersionRemote(name, 'dep', { requiredVersion, strictVersion });
+    const at = (...remotes: SharedVersionMeta[]): SharedVersion => ({
+      tag: '2.1.0',
+      host: false,
+      action: 'share',
+      remotes,
+    });
+
+    it('skips a row whose copies all accept the tag', () => {
+      const version = at(copy('a', '^2.0.0'), copy('b', '~2.2.0', false));
+
+      const rows = redirectRow(version, '2.2.0', acceptsTag);
+
+      expect(shape(rows)).toEqual(['2.1.0:skip:[a,b]']);
+      expect(rows[0]).toBe(version);
+    });
+
+    it('skips a row whose rejecting copies are all non-strict: they take what is shared', () => {
+      const version = at(copy('a', '~2.1.0', false), copy('b', '~2.1.0', false));
+
+      expect(shape(redirectRow(version, '3.0.0', acceptsTag))).toEqual(['2.1.0:skip:[a,b]']);
+    });
+
+    it('scopes a row whose copies all reject the tag strictly', () => {
+      const version = at(copy('a', '~2.1.0'), copy('b', '^2.0.0'));
+
+      const rows = redirectRow(version, '3.0.0', acceptsTag);
+
+      expect(shape(rows)).toEqual(['2.1.0:scope:[a,b]']);
+      expect(rows[0]).toBe(version);
+    });
+
+    it('splits the strict objectors into a scope row beside the skipped rest', () => {
+      const version = at(copy('a', '~2.1.0'), copy('b', '^2.0.0'), copy('c', '~2.1.0', false));
+
+      const rows = redirectRow(version, '2.2.0', acceptsTag);
+
+      // a rejects 2.2.0 strictly; b accepts it; c rejects it but is not strict.
+      expect(shape(rows)).toEqual(['2.1.0:skip:[b,c]', '2.1.0:scope:[a]']);
+      expect(rows[0]).toBe(version);
     });
   });
 });

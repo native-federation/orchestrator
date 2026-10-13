@@ -19,7 +19,7 @@ export type VersionAcceptance = {
   accepts: (version: SharedVersion, tag: string) => boolean;
   // A representative copy that makes the redirect unsafe: it rejects `tag` while `strictVersion` is set,
   // so it keeps its own build instead of being deduped away. One is enough for the message and the
-  // strict check; `applyWinner` enumerates the rest itself when it splits the version.
+  // strict check; `redirectRow` enumerates the rest itself when it splits the version.
   objector: (version: SharedVersion, tag: string) => SharedVersionMeta | undefined;
 };
 
