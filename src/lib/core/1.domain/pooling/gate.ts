@@ -55,7 +55,6 @@ type Reach = { remote: RemoteName; file: string; chunked: boolean };
 
 type MapPolicy = {
   shareScope: string;
-  selfFill: boolean;
   isChunked: IsChunked;
   scopeUrlOf: (remote: RemoteName) => string | undefined;
 };
@@ -134,14 +133,19 @@ export function judgeRemote(
 
 type Binding = { owner: RemoteName; specifier: Specifier; tag: VersionName };
 
-type CoverResult =
-  { covers: MapCover[] } | { unmapped: RemoteName } | { torn: string } | { bound: Binding };
+export type CoverResult =
+  | { covers: MapCover[] }
+  | { unmapped: RemoteName }
+  | { gap: Specifier }
+  | { torn: string }
+  | { bound: Binding };
 
 // `covered` is per external, but the map serves by specifier: an entrypoint another member ships as a package
 // of its own (flat vs dense) is served all the same. A named scope has no `imports` to inherit, so the remote's
 // own scope maps each such specifier to the file the committed map serves it from, replacing the resolver's
 // override. Covering fails, and the remote serves the pool itself, when it would run a package partly on the
-// map's files and partly on its own chunked ones (`torn`), or reach one specifier at two files (`bound`).
+// map's files and partly on its own chunked ones (`torn`), reach one specifier at two files (`bound`), or
+// take a copy whose package the map serves only in part (`gap`).
 export function coverFromMap(
   remote: RemoteName,
   mine: readonly PoolMember[],
@@ -171,12 +175,29 @@ export function coverFromMap(
   if (torn !== undefined) return { torn };
   const bound = boundByFile(reaches, view);
   if (bound !== undefined) return { bound };
-  return { covers: files.filter(file => covering(file, policy)).map(coverOf) };
+  const servedPackages = new Set([...view.global.keys()].map(packageOf));
+  const gap = files
+    .map(file => gapOf(file, servedPackages))
+    .find(specifier => specifier !== undefined);
+  if (gap !== undefined) return { gap };
+  return { covers: files.filter(covering).map(coverOf) };
 }
 
-function covering({ action, copy, covered }: Coverable, policy: MapPolicy): boolean {
-  const partial = covered.size < Object.keys(copy.entries).length;
-  return action.action === 'skip' || (covered.size > 0 && (!partial || policy.selfFill));
+// The first entrypoint a copy ships that the map lacks, when the map serves another entrypoint of its package.
+function gapOf(
+  { copy, covered }: Coverable,
+  servedPackages: ReadonlySet<string>
+): Specifier | undefined {
+  const entrypoints = Object.keys(copy.entries);
+  const missing = entrypoints.filter(specifier => !covered.has(specifier));
+  if (missing.length < entrypoints.length) return missing[0];
+  return missing.find(specifier => servedPackages.has(packageOf(specifier)));
+}
+
+function covering({ action, copy, covered }: Coverable): boolean {
+  if (action.action === 'skip') return true;
+  const entrypoints = Object.keys(copy.entries);
+  return entrypoints.length > 0 && entrypoints.every(specifier => covered.has(specifier));
 }
 
 function coverOf({ member, action, copy, covered, override }: Coverable): MapCover {
@@ -207,7 +228,7 @@ function reachesOf(
       if (reach) reaches.set(specifier, reach);
     }
   for (const file of files) {
-    const takesMap = covering(file, policy);
+    const takesMap = covering(file);
     const chunked = policy.isChunked(remote, file.copy.bundle);
     for (const [specifier, own] of Object.entries(file.copy.entries)) {
       if (!takesMap || !file.covered.has(specifier))

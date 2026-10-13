@@ -107,9 +107,9 @@ describe('pooling (dynamic)', () => {
     });
   });
   /**
-   * A load that joins a committed share row at its tag serves the entrypoints the row lacks into its own scope
-   * alone: the committed `imports` never gain them. A later load on the same page inherits `imports`, so it must
-   * not be told the map serves them; it serves them itself.
+   * A load that ships an entrypoint the committed map lacks runs its whole family from its own build, in its own
+   * scope: the committed `imports` never gain it. A later load on the same page inherits `imports`, so it must
+   * not be told the map serves it; it runs the family itself too.
    */
   describe('a later load on the same page', () => {
     const fw = (version: string, core: string[]) => [
@@ -124,7 +124,7 @@ describe('pooling (dynamic)', () => {
       },
     });
 
-    it('serves an entrypoint an earlier load served into its own scope alone', async () => {
+    it('runs the family itself when an earlier load served an entrypoint into its own scope alone', async () => {
       await p.runInit([entry('a', ...fw('17.0.1', ['@fw/core']))]);
       await p.runDynamic(entry('l1', ...fw('17.0.1', ['@fw/core', '@fw/core/new'])));
 
@@ -135,12 +135,13 @@ describe('pooling (dynamic)', () => {
       expect(merged.scopes?.['http://l1/']?.['@fw/core/new']).toBe(file('l1', '@fw/core/new'));
       expect(merged.imports['@fw/core/new']).toBeUndefined();
       expect(resolves(merged, 'l2', '@fw/core/new')).toBe(file('l2', '@fw/core/new'));
-      expect(resolves(merged, 'l2', '@fw/core')).toBe(file('a', '@fw/core'));
+      expect(resolves(merged, 'l2', '@fw/core')).toBe(file('l2', '@fw/core'));
+      expect(p.islands()).toEqual({ l1: 'uncovered', l2: 'uncovered' });
     });
 
-    // A shape a property run found: the host shares only secondary entrypoints, so the first
-    // load to ship the roots serves them into its own scope.
-    it('serves the roots an earlier load joined an entrypoint-only host with', async () => {
+    // A shape a property run found: the host shares only secondary entrypoints, so a load that ships the roots
+    // too runs the whole family from its own build, the host's secondary included.
+    it('runs the family itself beside an entrypoint-only host', async () => {
       await p.runInit([entry('a', ...fw('17.0.1', ['@fw/core']).map(entrypointOnly))]);
       await p.runDynamic(entry('l1', ...fw('17.0.1', ['@fw/core', '@fw/core/sub'])));
 
@@ -150,12 +151,12 @@ describe('pooling (dynamic)', () => {
 
       expect(resolves(merged, 'l2', '@fw/core')).toBe(file('l2', '@fw/core'));
       expect(resolves(merged, 'l2', '@fw/common')).toBe(file('l2', '@fw/common'));
-      expect(resolves(merged, 'l2', '@fw/core/sub')).toBe(file('a', '@fw/core/sub'));
+      expect(resolves(merged, 'l2', '@fw/core/sub')).toBe(file('l2', '@fw/core/sub'));
     });
 
-    // A named scope has no `imports` to inherit: the load's own scope gets an override, which may name the
-    // earlier load's file, so a load at another tag still takes the map through a committed build's witness.
-    it('points a named-scope load at the file an earlier load serves', async () => {
+    // A named scope has no `imports` to inherit, but the rule is the same: the committed build lacks
+    // `@fw/core/new`, so each load runs the family from its own build rather than an override naming two.
+    it('runs the family of a named-scope load the map serves only in part from its own build', async () => {
       const team = (infos: DenseSharedInfo[]) => infos.map(i => ({ ...i, shareScope: 'team' }));
       const page = portfolio(
         {},
@@ -168,12 +169,10 @@ describe('pooling (dynamic)', () => {
         entry('l2', ...team(fw('17.0.2', ['@fw/core', '@fw/core/new'])))
       );
 
-      expect(page.islands()).toEqual({});
-      expect(actions['@fw/core']).toMatchObject({
-        action: 'skip',
-        override: { '@fw/core': file('a', '@fw/core'), '@fw/core/new': file('l1', '@fw/core/new') },
-      });
-      expect(resolves(merged, 'l2', '@fw/core/new')).toBe(file('l1', '@fw/core/new'));
+      expect(page.islands()).toEqual({ l1: 'uncovered', l2: 'uncovered' });
+      expect(actions['@fw/core']).toEqual({ action: 'scope' });
+      expect(resolves(merged, 'l2', '@fw/core')).toBe(file('l2', '@fw/core'));
+      expect(resolves(merged, 'l2', '@fw/core/new')).toBe(file('l2', '@fw/core/new'));
     });
   });
 

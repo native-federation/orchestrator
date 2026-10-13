@@ -8,7 +8,7 @@ import {
 } from 'lib/core/1.domain';
 import { NFError } from 'lib/core/native-federation.error';
 import { createAcceptsTag } from 'lib/core/1.domain/externals/compatibility';
-import { owningPackage } from 'lib/core/1.domain/externals/specifier';
+import { owningPackage, packageOf } from 'lib/core/1.domain/externals/specifier';
 import { buildPools } from 'lib/core/1.domain/pooling/membership';
 import { createVersionCheck } from 'lib/core/3.adapters/checks/version.check';
 import * as _path from 'lib/utils/path';
@@ -335,6 +335,8 @@ export function electedTags(importMap: ImportMap, copies: PoolCopy[]): Map<strin
  * elected tags, restated independently of `election.ts`:
  * - `rejects`: a copy's range rejects the elected tag of a specifier it ships (its own tag never);
  * - `missing`: the global map serves no tag for one of its specifiers;
+ * - `partial`: the global map lacks one of its specifiers but serves another of that package, so it runs the
+ *   package from its own build (a package the map lacks entirely it opens instead);
  * - `witnessed`: one build of `builds` shipped every one of its specifiers at the elected tag, a build's package
  *   tag standing in for an entrypoint it does not list (the witness rule the extension applies);
  * - `agrees`: every tag it ships is the elected one, compared through the package where the map lacks the
@@ -356,11 +358,16 @@ export function oracleVerdict(
   const buildTag = (build: string, member: string) =>
     copies.find(c => c.remote === build && c.member === member)?.tag;
 
+  const servedPackages = new Set([...elected.keys()].map(packageOf));
+
   return {
     rejects: own.some(c =>
       c.specifiers.some(s => elected.has(s) && !accepts(elected.get(s)!, c.tag, c.range))
     ),
     missing: own.some(c => c.specifiers.some(s => !elected.has(s))),
+    partial: own.some(c =>
+      c.specifiers.some(s => !elected.has(s) && servedPackages.has(packageOf(s)))
+    ),
     witnessed: builds.some(build =>
       own.every(c => c.specifiers.every(s => buildTag(build, c.member) === elected.get(s)))
     ),

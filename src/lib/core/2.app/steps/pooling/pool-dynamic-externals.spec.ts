@@ -1100,9 +1100,9 @@ describe('createPoolDynamicExternals', () => {
       ]);
     });
 
-    it('skips a share the map serves in part; the rest self-fills', async () => {
-      // mfe ships `@fw/http` 17.0.0 with its root, which nobody serves, so it only reaches a global
-      // verdict by agreeing: F serves its testing entrypoint at the same 17.0.0.
+    it('scopes the family when the map serves a share only in part', async () => {
+      // mfe ships `@fw/http` 17.0.0 with its root, which nobody serves, beside the testing entrypoint F serves
+      // at the same 17.0.0. A cover from the map is whole or nothing, so mfe runs the fw family itself.
       givenCommitted({
         '@fw/core': external(
           row('17.0.0', 'share', copy('F', ['@fw/core'], true), copy('mfe', ['@fw/core']))
@@ -1115,13 +1115,16 @@ describe('createPoolDynamicExternals', () => {
 
       const { actions } = await poolDynamicExternals(load());
 
-      expect(actions['@fw/http']).toEqual({ action: 'skip', covered: ['@fw/http/testing'] });
+      expect(actions).toEqual({ '@fw/core': { action: 'scope' }, '@fw/http': { action: 'scope' } });
+      expect(copies('@fw/http')).toEqual([
+        ['17.0.0:scope', [{ name: 'mfe', cached: true, poolCause: 'uncovered' }]],
+      ]);
     });
 
     // The same load from a chunked build: mfe's own `@fw/http` root imports mfe's http internals, and F's
-    // testing entrypoint F's. Self-filling the root beside the map's testing file would run both, so the
-    // whole family serves itself, as for any family the map can serve only in part.
-    it('scopes the family when a chunked copy would self-fill beside the map', async () => {
+    // testing entrypoint F's. Running the root beside the map's testing file would run both, so the whole
+    // family serves itself, as for any family the map can serve only in part.
+    it('scopes the family when a chunked copy would run beside the map', async () => {
       givenCommitted({
         '@fw/core': external(
           row('17.0.0', 'share', copy('F', ['@fw/core'], true), copy('mfe', ['@fw/core']))
@@ -1144,6 +1147,44 @@ describe('createPoolDynamicExternals', () => {
 
       expect(actions).toEqual({ '@fw/core': { action: 'scope' }, '@fw/http': { action: 'scope' } });
       expect(verdictsWritten()).toEqual(['mfe@@fw/core: uncovered', 'mfe@@fw/http: uncovered']);
+    });
+
+    // mfe opens `@fw/http` alone, so no committed file binds its pool-mates: the map serves only the testing
+    // entrypoint, from F's flat package. Sharing mfe's copy would restate that key from mfe's own build beside
+    // F's, so mfe serves the package itself, from a chunked build as from a flat one.
+    it('scopes a share the map serves only in part, with no pool-mate to bind it', async () => {
+      for (const bundle of [undefined, 'browser-shared']) {
+        vi.clearAllMocks();
+        givenCommitted({
+          '@fw/http/testing': external(
+            row('17.0.0', 'share', copy('F', ['@fw/http/testing'], true))
+          ),
+          '@fw/http': external(
+            row('17.0.0', 'share', {
+              ...copy('mfe', ['@fw/http', '@fw/http/testing'], true),
+              ...(bundle && { bundle }),
+            })
+          ),
+        });
+        adapters.sharedChunksRepo.tryGet = vi.fn((remote: string, b: string) =>
+          remote === 'mfe' && b === bundle
+            ? Optional.of(['_nf-internal_chunk-a.js'])
+            : Optional.empty<string[]>()
+        );
+
+        const { actions } = await poolDynamicExternals({
+          entry: entryWith(shared('@fw/http')),
+          actions: { '@fw/http': { action: 'share' } },
+        });
+
+        expect(actions).toEqual({ '@fw/http': { action: 'scope' } });
+        expect(verdictsWritten()).toEqual(['mfe@@fw/http: uncovered']);
+        expect(config.log.warn).toHaveBeenCalledWith(
+          8,
+          // Wording is pinned in island-warnings.contract.spec.ts alone.
+          expect.stringContaining("gap '@fw/http'")
+        );
+      }
     });
 
     // A named scope under `strictImportMap` refuses a skip-only package with an entrypoint no shared version

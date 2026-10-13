@@ -19,6 +19,7 @@ import { scopeHasPoolState } from 'lib/core/1.domain/pooling/pool-state';
 import {
   committedView,
   coverFromMap,
+  type CoverResult,
   type GateMiss,
   judgeRemote,
 } from 'lib/core/1.domain/pooling/gate';
@@ -70,7 +71,7 @@ export function createPoolDynamicExternals(
     recordOrder: ExternalName[],
     scope: string
   ): Map<ExternalName, CopyMove> {
-    const policy = { shareScope: scope, selfFill: maySelfFill(scope), scopeUrlOf, isChunked };
+    const policy = { shareScope: scope, scopeUrlOf, isChunked };
     const moves = new Map<ExternalName, CopyMove>();
     const selfServe = (members: PoolMember[], cause: PoolCause) => {
       for (const { name } of members) {
@@ -103,13 +104,11 @@ export function createPoolDynamicExternals(
       const cover = coverFromMap(remote, mine, view, actions, policy);
       if (!('covers' in cover)) {
         if ('unmapped' in cover) warnUnmapped(scope, remote, cover.unmapped);
-        else {
-          const miss: SelfServeMiss =
-            'torn' in cover
-              ? { cause: 'uncovered', torn: cover.torn }
-              : { cause: 'uncovered', ...cover.bound };
-          config.log.warn(8, `[${scope}] ${selfServeWarning(remote, miss, specifierCount(own))}`);
-        }
+        else
+          config.log.warn(
+            8,
+            `[${scope}] ${selfServeWarning(remote, coverMiss(cover), specifierCount(own))}`
+          );
         // Half its family on the map's files and half on its own build would tear it.
         selfServe(mine, 'uncovered');
         continue;
@@ -152,12 +151,6 @@ export function createPoolDynamicExternals(
       ports.sharedExternalsRepo.addOrUpdate(name, record, scope);
   }
 
-  // Whether an entrypoint a skip leaves uncovered may come from the remote's own build: the next page of a
-  // named scope refuses it, for a skip-only package, under `strictImportMap`.
-  function maySelfFill(scope: string): boolean {
-    return scope === GLOBAL_SCOPE || !config.strict.strictImportMap;
-  }
-
   function warnUnmapped(scope: string, remote: RemoteName, build: RemoteName): void {
     config.log.warn(
       8,
@@ -185,6 +178,14 @@ function poolableNames(
 }
 
 type SelfServeMiss = GateMiss | { cause: 'uncovered'; torn: string };
+
+function coverMiss(
+  cover: Exclude<CoverResult, { covers: unknown } | { unmapped: unknown }>
+): SelfServeMiss {
+  if ('gap' in cover) return { cause: 'uncovered', specifier: cover.gap };
+  if ('torn' in cover) return { cause: 'uncovered', torn: cover.torn };
+  return { cause: 'uncovered', ...cover.bound };
+}
 
 // Wording is pinned in `island-warnings.contract.spec.ts` alone; tools read islands from the record.
 function selfServeWarning(remote: RemoteName, miss: SelfServeMiss, imports: number): string {

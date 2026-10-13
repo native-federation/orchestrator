@@ -266,40 +266,41 @@ describe('committedView', () => {
 describe('coverFromMap', () => {
   const policy = {
     shareScope: '__GLOBAL__',
-    selfFill: false,
     scopeUrlOf: () => undefined,
     isChunked: () => false,
   };
 
   // Defensive: unreachable under a coherent committed map, where a remote that agrees with the map never has
-  // a resolver-scoped member (jsdev-b-5's probe). A scope the map serves only in part, or not at all, stays a
-  // scope: half its entrypoints on the map's files and half on its own build would tear it.
-  it('leaves a resolver scope the map serves only in part, or not at all, out of the covers', () => {
+  // a resolver-scoped member. A scope whose package the map serves only in part reports the gap, as any copy
+  // that does not skip does: half the package on the map's files and half on its own build would tear it.
+  it('reports the gap of a resolver scope whose package the map serves only in part', () => {
     const scoped = (entries: Record<string, string>) => [
       member('@ng/core', [
         { tag: '22.0.0', action: 'share', copies: [{ remote: 'F' }] },
         { tag: '22.1.0', action: 'scope', copies: [{ remote: 'mfe', entries }] },
       ]),
     ];
-
-    const cases: Record<string, string>[] = [
-      { '@ng/core': 'core.js', '@ng/core/testing': 'testing.js' },
-      { '@ng/core/testing': 'testing.js' },
-    ];
-    for (const entries of cases) {
+    const cover = (entries: Record<string, string>) => {
       const members = scoped(entries);
-      const view = viewOf(members, 'mfe');
-      expect(
-        coverFromMap('mfe', members, view, { '@ng/core': { action: 'scope' } }, policy)
-      ).toEqual({ covers: [] });
-    }
+      return coverFromMap(
+        'mfe',
+        members,
+        viewOf(members, 'mfe'),
+        { '@ng/core': { action: 'scope' } },
+        policy
+      );
+    };
+
+    expect(cover({ '@ng/core': 'core.js', '@ng/core/testing': 'testing.js' })).toEqual({
+      gap: '@ng/core/testing',
+    });
+    expect(cover({ '@ng/core/testing': 'testing.js' })).toEqual({ gap: '@ng/core/testing' });
   });
 
-  // mfe's copy of `@ng/core` ships rxjs-interop, which the map lacks; the map serves its root from F. mfe
-  // would self-fill rxjs-interop from its own build. A flat file binds its
-  // imports through the map, so that is a cover. A chunked one imports mfe's own core internals beside F's
-  // core: the package is torn, and no member is covered.
-  it("reports a package torn when a chunked copy's own entrypoint would run beside the map's files", () => {
+  // mfe's copy of `@ng/core` joined F's share row with rxjs-interop, which the map lacks; the map serves its
+  // root from F. A cover is whole or nothing, so the gap fails covering, from a flat build as from a chunked
+  // one. Only a copy the map serves whole takes F's files.
+  it('reports the gap of a share the map serves only in part', () => {
     const withMfe = (entries?: Record<string, string>) => [
       member('@ng/core', [
         {
@@ -309,25 +310,22 @@ describe('coverFromMap', () => {
         },
       ]),
     ];
-    const actions = { '@ng/core': { action: 'skip' as const, covered: ['@ng/core'] } };
-    const selfFill = { ...policy, selfFill: true };
+    const actions = { '@ng/core': { action: 'share' as const } };
     const cover = (members: PoolMember[], isChunked: (remote: string) => boolean) =>
-      coverFromMap('mfe', members, viewOf(members, 'mfe'), actions, { ...selfFill, isChunked });
-    const rootCovered = {
-      covers: [{ name: '@ng/core', toSkip: false, covered: ['@ng/core'], override: {} }],
-    };
+      coverFromMap('mfe', members, viewOf(members, 'mfe'), actions, { ...policy, isChunked });
 
     const interop = withMfe({ '@ng/core': 'c.js', '@ng/core/rxjs-interop': 'r.js' });
-    expect(cover(interop, () => false)).toEqual(rootCovered);
-    expect(cover(interop, r => r === 'mfe')).toEqual({ torn: '@ng/core' });
-    // Only an entrypoint mfe runs from its own build counts: F's chunked files are the map's, and a copy the
-    // map serves whole runs on them alone.
-    expect(cover(withMfe(), () => true)).toEqual(rootCovered);
+    expect(cover(interop, () => false)).toEqual({ gap: '@ng/core/rxjs-interop' });
+    expect(cover(interop, r => r === 'mfe')).toEqual({ gap: '@ng/core/rxjs-interop' });
+    expect(cover(withMfe(), () => true)).toEqual({
+      covers: [{ name: '@ng/core', toSkip: true, covered: ['@ng/core'], override: {} }],
+    });
   });
 
-  // mfe's flat core inherits the map's file whole (a skip with nothing to cover); its rxjs-interop, a package
-  // of its own the map lacks, it serves itself. From a chunked build that file binds mfe's core internals
-  // beside F's core, though the two are separate externals.
+  // mfe's flat core inherits the map's file whole (a skip with nothing to cover); its rxjs-interop, an external
+  // of its own the map lacks, would open beside F's core: the package is served in part, so the gap fails
+  // covering. From a chunked build that file binds mfe's core internals beside F's core, though the two are
+  // separate externals, which is reported first.
   it('counts a package a copy inherits from the map whole as mapped', () => {
     const members = [
       member('@ng/core', [
@@ -346,13 +344,46 @@ describe('coverFromMap', () => {
       '@ng/core/rxjs-interop': { action: 'share' as const },
     };
     const cover = (isChunked: (remote: string) => boolean) =>
-      coverFromMap('mfe', members, viewOf(members, 'mfe'), actions, {
-        ...policy,
-        selfFill: true,
-        isChunked,
-      });
+      coverFromMap('mfe', members, viewOf(members, 'mfe'), actions, { ...policy, isChunked });
 
-    expect(cover(() => false)).toEqual({ covers: [] });
+    expect(cover(() => false)).toEqual({ gap: '@ng/core/rxjs-interop' });
     expect(cover(r => r === 'mfe')).toEqual({ torn: '@ng/core' });
+  });
+
+  // The host ships only core's testing entrypoint; mfe ships the root, which the map lacks, beside a pool-mate
+  // the map serves whole. Opening or scoping the root alone would run core on two builds, so the gap fails
+  // covering either way.
+  it('reports the gap of a copy whose package the map serves only in part', () => {
+    const members = [
+      member('@ng/core', [
+        {
+          tag: '22.0.0',
+          action: 'share',
+          copies: [{ remote: 'F', entries: { '@ng/core/testing': 't.js' } }],
+        },
+        { tag: '22.1.0', action: 'scope', copies: [{ remote: 'mfe', cached: false }] },
+      ]),
+      member('@ng/common', [
+        {
+          tag: '22.0.0',
+          action: 'share',
+          copies: [{ remote: 'F' }, { remote: 'mfe', cached: false }],
+        },
+      ]),
+    ];
+    const cover = (action: 'share' | 'scope') =>
+      coverFromMap(
+        'mfe',
+        members,
+        viewOf(members, 'mfe'),
+        {
+          '@ng/core': { action },
+          '@ng/common': { action: 'skip', covered: ['@ng/common'] },
+        },
+        policy
+      );
+
+    expect(cover('share')).toEqual({ gap: '@ng/core' });
+    expect(cover('scope')).toEqual({ gap: '@ng/core' });
   });
 });

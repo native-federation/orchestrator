@@ -1547,11 +1547,10 @@ describe('pooling regressions', () => {
         });
     });
 
-    // Flat throughout. l1, loaded first, takes the host's core, fills testing from its own build, as the map
-    // lacks it, and publishes forms, which nobody shared. l2, a copy of l1's build, would take l1's forms and
-    // fill testing itself, at l1's tag but from its own file, while l1's forms resolves testing to l1's: two
-    // instances of one specifier. So l2 serves its whole family itself.
-    it('serves the whole family of a load whose served file binds a pool-mate another file serves it', async () => {
+    // Flat throughout. The host's map serves core but not testing, so l1, loaded first, serves its whole family
+    // itself rather than run the host's core beside its own testing, and publishes nothing. l2, a copy of l1's
+    // build, meets the same map and does the same: no load's file binds another's pool-mate.
+    it('serves the whole family of each load the map serves only in part, publishing none of it', async () => {
       const TESTING = '@fw/core/testing';
       const p = portfolio(
         {},
@@ -1566,8 +1565,12 @@ describe('pooling regressions', () => {
       await p.runInit([entry('host', shared(CORE, { flat: true }))]);
 
       const first = await p.runDynamic(build('l1'));
-      expect(scopeOf(first.merged, 'l1')).toEqual({ [TESTING]: 'http://l1/fw_core_testing.js' });
-      expect(first.merged.imports[FORMS]).toBe('http://l1/fw_forms.js');
+      expect(scopeOf(first.merged, 'l1')).toEqual({
+        [CORE]: 'http://l1/fw_core.js',
+        [TESTING]: 'http://l1/fw_core_testing.js',
+        [FORMS]: 'http://l1/fw_forms.js',
+      });
+      expect(first.merged.imports[FORMS]).toBeUndefined();
 
       const { merged } = await p.runDynamic(build('l2'));
 
@@ -1576,14 +1579,13 @@ describe('pooling regressions', () => {
         [TESTING]: 'http://l2/fw_core_testing.js',
         [FORMS]: 'http://l2/fw_forms.js',
       });
-      expect(p.islands()).toEqual({ l2: 'uncovered' });
+      expect(p.islands()).toEqual({ l1: 'uncovered', l2: 'uncovered' });
     });
 
-    // One hop further. c, loaded first, takes the host's core, fills testing itself and publishes forms; b
-    // takes c's forms and publishes router. l takes b's router and would fill testing itself, but b's router
-    // resolves forms to c's file, which resolves testing to c's own: two testings in l, though no build l
-    // takes a file from directly runs one off the map. So l serves its whole family itself.
-    it('serves the whole family of a load bound one build further in', async () => {
+    // c, loaded first, ships testing beside the host's core, which the map lacks, so it serves its whole family
+    // itself and publishes nothing; b then opens forms and router. l ships testing too: it serves its whole
+    // family itself rather than take b's router, whose forms would bind it to b's build beside its own testing.
+    it('serves the whole family of a load the map serves only in part, beside a build that opened a pool-mate', async () => {
       const TESTING = '@fw/core/testing';
       const ROUTER = '@fw/router';
       const p = portfolio(
@@ -1603,17 +1605,16 @@ describe('pooling regressions', () => {
         [TESTING]: 'http://l/fw_core_testing.js',
         [ROUTER]: 'http://l/fw_router.js',
       });
-      expect(p.islands()).toEqual({ l: 'uncovered' });
-      expect(p.config.log.warn).toHaveBeenCalledWith(
+      expect(p.islands()).toEqual({ c: 'uncovered', l: 'uncovered' });
+      expect(p.config.log.warn).toHaveBeenLastCalledWith(
         8,
-        expect.stringContaining("committed build 'c'")
+        expect.stringContaining("gap '@fw/core/testing'")
       );
     });
 
-    // A remote loaded at runtime whose chunked core needs interop, which the committed map lacks. Self-filling
-    // interop beside the map's core would run two cores, and so would taking the map's forms beside its own
-    // core: the remote serves its whole family itself. From a flat build it binds the map's core and fills
-    // interop itself.
+    // A remote loaded at runtime whose core needs interop, which the committed map lacks. Running its own interop
+    // beside the map's core would run two builds of the package, so the remote serves its whole family itself,
+    // from a flat build as from a chunked one.
     for (const flat of [false, true])
       it(`serves the whole family of a remote it cannot fill from the map (${flat ? 'flat' : 'chunked'})`, async () => {
         const p = portfolio(
@@ -1630,18 +1631,37 @@ describe('pooling regressions', () => {
             entry(remote, shared(CORE, { entrypoints: [INTEROP], flat }), shared(FORMS, { flat }))
           );
 
-          expect(scopeOf(merged, remote)).toEqual(
-            flat
-              ? { [INTEROP]: `http://${remote}/fw_core_interop.js` }
-              : {
-                  [CORE]: `http://${remote}/fw_core.js`,
-                  [INTEROP]: `http://${remote}/fw_core_interop.js`,
-                  [FORMS]: `http://${remote}/fw_forms.js`,
-                }
-          );
+          expect(scopeOf(merged, remote)).toEqual({
+            [CORE]: `http://${remote}/fw_core.js`,
+            [INTEROP]: `http://${remote}/fw_core_interop.js`,
+            [FORMS]: `http://${remote}/fw_forms.js`,
+          });
         }
-        expect(p.islands()).toEqual(flat ? {} : { mfe3: 'uncovered', mfe4: 'uncovered' });
+        expect(p.islands()).toEqual({ mfe3: 'uncovered', mfe4: 'uncovered' });
       });
+
+    // The map serves only a flat secondary of core, from the host; r opens core from a chunked build that lists
+    // the secondary too. Sharing r's copy would restate the host's interop from r's build beside the host's file,
+    // so r serves the whole package itself and the load adds no `imports` key.
+    it('serves the whole package of a load that opens one the map serves only a secondary of', async () => {
+      const p = portfolio(
+        {},
+        { storage: 'nf-regression-open-partial', realRepositories: true, hosts: ['host'] }
+      );
+      await p.runInit([entry('host', shared(INTEROP, { flat: true }))]);
+
+      const { importMap, merged } = await p.runDynamic(
+        entry('r', shared(CORE, { entrypoints: [INTEROP] }))
+      );
+
+      expect(importMap.imports).toEqual({});
+      expect(merged.imports[INTEROP]).toBe('http://host/fw_core_interop.js');
+      expect(scopeOf(merged, 'r')).toEqual({
+        [CORE]: 'http://r/fw_core.js',
+        [INTEROP]: 'http://r/fw_core_interop.js',
+      });
+      expect(p.islands()).toEqual({ r: 'uncovered' });
+    });
   });
 
   /**
