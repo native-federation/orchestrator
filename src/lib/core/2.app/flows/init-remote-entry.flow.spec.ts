@@ -1,5 +1,6 @@
 import { createInitRemoteEntryFlow } from './init-remote-entry.flow';
 import { createInitDrivers } from 'lib/core/5.di/init.factory';
+import { createFederationResult } from 'lib/core/5.di/federation-result.factory';
 import { createChunkRepository } from 'lib/core/3.adapters/storage/chunk.repository';
 import { createRemoteInfoRepository } from 'lib/core/3.adapters/storage/remote-info.repository';
 import { createScopedExternalsRepository } from 'lib/core/3.adapters/storage/scoped-externals.repository';
@@ -12,13 +13,14 @@ import { NFError } from 'lib/core/native-federation.error';
 import type { ConfigContract } from '../config/config.contract';
 import type { DrivingContract } from '../driving-ports/driving.contract';
 import type { InitDriversContract } from '../driver-ports/init/drivers.contract';
-import type { InitRemoteEntryFlow, RemoteRef } from '../driver-ports/init/flow.contract';
+import type { InitRemoteEntryFlow } from '../driver-ports/init/flow.contract';
 import type { DenseSharedInfo, RemoteEntry } from 'lib/core/1.domain';
+import type { LoadRemoteModule } from 'lib/core/init-federation.contract';
 
 // A dynamic load that fails must leave the page as if it never ran, against the real repositories: they
 // live for the whole page, so a half-written failure is what the next load commits, and a remote info
-// written before the failure makes a retry by name skip the fetch. The exported flow runs bare, with no
-// createFederationResult around it: the rollback is the flow's own.
+// written before the failure makes a retry by name skip the fetch. Most cases run the exported flow bare, with
+// no createFederationResult around it: the rollback is the flow's own.
 
 const shared = (
   packageName: string,
@@ -76,6 +78,8 @@ describe('init-remote-entry flow: a failed load', () => {
   let drivers: InitDriversContract;
   let initRemoteEntry: InitRemoteEntryFlow;
   let served: Record<string, () => RemoteEntry>;
+
+  afterEach(() => vi.restoreAllMocks());
 
   beforeEach(async () => {
     storageRef = {};
@@ -237,56 +241,63 @@ describe('init-remote-entry flow: a failed load', () => {
     expect(adapters.remoteInfoRepo.tryGet('r0').get()!.scopeUrl).toBe('http://r0/');
   });
 
-  it("hands beforeRollback the failed load's records, then rolls them back", async () => {
-    const hook = vi.fn((_url: string, _remote?: RemoteRef) => snapshot());
-    const before = snapshot();
-    initRemoteEntry = createInitRemoteEntryFlow({
-      flow: drivers,
-      adapters,
-      config,
-      beforeRollback: hook,
+  const dumps = () =>
+    vi.mocked(config.log.debug).mock.calls.filter(([, msg]) => String(msg).includes('STATE DUMP'));
+
+  // The wiring initFederation uses. The dump runs before the rollback, so it shows what the load wrote.
+  it.each([
+    { strictRemoteEntry: true, outcome: 'rejects' },
+    { strictRemoteEntry: false, outcome: 'resolves' },
+  ] as const)(
+    'dumps the state the load left once, then rolls it back for the next load ($outcome under strictRemoteEntry: $strictRemoteEntry)',
+    async ({ strictRemoteEntry }) => {
+      config.strict.strictRemoteEntry = strictRemoteEntry;
+      vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const result = createFederationResult({
+        config,
+        adapters,
+        loadRemoteModule: vi.fn() as unknown as LoadRemoteModule,
+        initRemoteEntryFlow: initRemoteEntry,
+      });
+      const before = snapshot();
+      served['http://r1/remoteEntry.json'] = refused;
+      served['http://r2/remoteEntry.json'] = () => entry('r2', [shared('a', '1.0.0', '^1.0.0')]);
+
+      const loading = result.initRemoteEntry('http://r1/remoteEntry.json', 'r1');
+      if (strictRemoteEntry) await expect(loading).rejects.toThrow("Could not process remote 'r1'");
+      else await expect(loading).resolves.toBe(result);
+
+      expect(dumps()).toHaveLength(1);
+      expect(dumps()[0]![1]).toBe('[dynamic-init][r1] STATE DUMP');
+      expect((dumps()[0]![2] as { remotes: Record<string, unknown> }).remotes['r1']).toBeDefined();
+      expect(snapshot()).toEqual(before);
+
+      await result.initRemoteEntry('http://r2/remoteEntry.json', 'r2');
+
+      const committed = JSON.stringify(storageRef);
+      expect(committed).toContain('"r2"');
+      expect(committed).not.toContain('r1');
+    }
+  );
+
+  it('rolls back even when the logger throws on the state dump', async () => {
+    vi.mocked(config.log.debug).mockImplementation((_step, msg) => {
+      if (String(msg).includes('STATE DUMP')) throw new Error('logger failed');
     });
+    const before = snapshot();
     served['http://r1/remoteEntry.json'] = refused;
 
     await expect(initRemoteEntry('http://r1/remoteEntry.json', 'r1')).rejects.toThrow();
 
-    expect(hook).toHaveBeenCalledExactlyOnceWith('http://r1/remoteEntry.json', 'r1');
-    expect(hook.mock.results[0]!.value.remotes['r1']).toBeDefined();
     expect(snapshot()).toEqual(before);
   });
 
-  it('never calls beforeRollback when the load succeeds', async () => {
-    const hook = vi.fn();
-    initRemoteEntry = createInitRemoteEntryFlow({
-      flow: drivers,
-      adapters,
-      config,
-      beforeRollback: hook,
-    });
+  it('dumps nothing when the load succeeds', async () => {
     served['http://r1/remoteEntry.json'] = corrected;
 
     await initRemoteEntry('http://r1/remoteEntry.json', 'r1');
 
-    expect(hook).not.toHaveBeenCalled();
+    expect(dumps()).toEqual([]);
     expect(adapters.remoteInfoRepo.contains('r1')).toBe(true);
-  });
-
-  it("rolls back and rejects with the load's error when beforeRollback throws", async () => {
-    const before = snapshot();
-    initRemoteEntry = createInitRemoteEntryFlow({
-      flow: drivers,
-      adapters,
-      config,
-      beforeRollback: () => {
-        throw new Error('hook failed');
-      },
-    });
-    served['http://r1/remoteEntry.json'] = refused;
-
-    await expect(initRemoteEntry('http://r1/remoteEntry.json', 'r1')).rejects.toThrow(
-      "Could not process remote 'r1'"
-    );
-
-    expect(snapshot()).toEqual(before);
   });
 });

@@ -7,19 +7,7 @@ import type {
   NativeFederationResult,
 } from '../init-federation.contract';
 
-export const createStateDump =
-  (config: ConfigContract, adapters: DrivingContract) =>
-  (msg: string): void =>
-    config.log.debug(0, msg, {
-      remotes: { ...adapters.remoteInfoRepo.getAll() },
-      'shared-externals': adapters.sharedExternalsRepo
-        .getScopes({ includeGlobal: true })
-        .reduce(
-          (acc, scope) => ({ ...acc, [scope]: adapters.sharedExternalsRepo.getFromScope(scope) }),
-          {}
-        ),
-      'scoped-externals': adapters.scopedExternalsRepo.getAll(),
-    });
+export { createStateDump } from '../2.app/flows/state-dump';
 
 export const createFederationResult = ({
   config,
