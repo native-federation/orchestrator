@@ -34,16 +34,12 @@ export const createFederationResult = ({
   initRemoteEntryFlow: InitRemoteEntryFlow;
   afterInitRemoteEntry?: () => Promise<unknown>;
 }): NativeFederationResult => {
-  const stateDump = createStateDump(config, adapters);
-
   const initRemoteEntry = async (
     remoteEntryUrl: string,
     remote?: RemoteRef
   ): Promise<NativeFederationResult> => {
-    const remoteName = typeof remote === 'string' ? remote : remote?.name;
     return initRemoteEntryFlow(remoteEntryUrl, remote)
       .catch(e => {
-        stateDump(`[dynamic-init][${remoteName ?? remoteEntryUrl}] STATE DUMP`);
         if (config.strict.strictRemoteEntry) return Promise.reject(e);
         else console.warn('Failed to initialize remote entry, continuing anyway.');
         return Promise.resolve();

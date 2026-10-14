@@ -11,6 +11,7 @@ import { createGetRemoteEntry } from '../2.app/steps/get-remote-entry';
 import { createUpdateCache } from '../2.app/steps/update-cache';
 import { createPoolDynamicExternals } from '../2.app/steps/pooling/pool-dynamic-externals';
 import { createConvertToImportMap } from '../2.app/steps/convert-to-import-map';
+import { createStateDump } from './federation-result.factory';
 import type { DrivingContract } from '../2.app/driving-ports/driving.contract';
 import type { ConfigContract } from '../2.app/config/config.contract';
 
@@ -42,10 +43,15 @@ export const INIT_FLOW_FACTORY = ({
   adapters: DrivingContract;
 }): FLOW_FACTORY<InitDriversContract> => {
   const flow = createInitDrivers({ config, adapters });
+  const stateDump = createStateDump(config, adapters);
 
   return {
     flow,
     adapters,
     config,
+    beforeRollback: (remoteEntryUrl, remote) => {
+      const remoteName = typeof remote === 'string' ? remote : remote?.name;
+      stateDump(`[dynamic-init][${remoteName ?? remoteEntryUrl}] STATE DUMP`);
+    },
   };
 };

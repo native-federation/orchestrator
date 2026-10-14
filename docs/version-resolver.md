@@ -1262,6 +1262,8 @@ Group related MFEs in shared scopes to maximize reuse during dynamic loading:
 
 #### 3. Handle Loading Failures Gracefully
 
+A failed `initRemoteEntry` keeps nothing it wrote: the cache returns to the last successful commit, and a retry by name fetches the remote again.
+
 ```javascript
 try {
   await initRemoteEntry('http://dashboard-team.com/remoteEntry.json', 'dashboard');
