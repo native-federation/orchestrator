@@ -23,9 +23,9 @@ export function memberRecord(
   compare: (a: VersionName, b: VersionName) => number
 ): SharedExternal {
   const { globalTags, placements } = pool;
-  // A package can ship only secondary entrypoints (`material/table` without `material`), so its shared tag
-  // is whatever round 1 serves any of its entrypoints at.
-  let sharedTag: VersionName | undefined;
+  // The external's own specifier fixes its shared tag; a package can ship only secondary entrypoints
+  // (`material/table` without `material`), so failing that it is whatever round 1 serves any of them at.
+  let sharedTag = globalTags.get(member.name);
   for (const version of member.external.versions)
     for (const meta of version.remotes)
       for (const s in meta.entries) sharedTag ??= globalTags.get(s);

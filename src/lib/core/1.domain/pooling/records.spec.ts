@@ -133,7 +133,7 @@ describe('memberRecord of a package whose copies ship different entrypoints', ()
     },
   ];
 
-  it.fails("shares the copy at its own specifier's global tag, not at a secondary's", () => {
+  it("shares the copy at its own specifier's global tag, not at a secondary's", () => {
     const pool = members();
     const election = elect({
       members: pool,

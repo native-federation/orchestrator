@@ -94,8 +94,8 @@ type Case = {
   expectMap?: (map: ImportMap) => void;
   // The oracle's verdict on the fixed map, when a fault is the intended outcome.
   expectFaults?: Record<string, PageFaults>;
-  // While the case still fails: the oracle's verdict on today's map, or what the harness throws on it.
-  known?: Record<string, PageFaults> | string;
+  // While the case still fails: the oracle's verdict on today's map.
+  known?: Record<string, PageFaults>;
 };
 
 let storage = 0;
@@ -145,12 +145,8 @@ const register = (c: Case) => {
     expect(remapped).toEqual((c.dynamic ?? []).map(() => []));
     c.expectMap?.(map);
   });
-  const known = c.known;
-  if (typeof known === 'string') {
-    it(`${c.name}: today throws`, async () => {
-      await expect(run(c)).rejects.toThrow(known);
-    });
-  } else if (known) {
+  if (c.known) {
+    const known = c.known;
     const kinds = [...new Set(Object.values(known).flatMap(Object.keys))].sort().join(', ');
     it(`${c.name}: today ${kinds}`, async () => {
       const { faults } = await run(c);
@@ -760,7 +756,6 @@ describe('a remote that ships a package at two tags', () => {
     // lists only sub. The pool serves both from r2, so the root stays on the map at r2's tag.
     {
       name: 'serves the root of a pooled package beside a dense copy that lists only its secondary',
-      known: 'r2|@y/pkg',
       hosts: ['r2'],
       entries: [
         entry(
