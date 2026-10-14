@@ -29,12 +29,13 @@ es-module-shims deviations are in [runtimes.md](runtimes.md).
 - **Values** must be URL-like and are resolved against the map's **base URL**, never against the scope. For an
   inline map the base URL is the document's (`<base href>` applies). A bare value, a non-string value, or a
   trailing-slash key with a value lacking a trailing slash is stored as `null`, with a console warning
-  (Chromium: `Ignored an import map value of "<key>": ...`).
+  (Chromium: `Ignored an import map value of "<key>": Bare specifier: <v>` or `...: Invalid value type.` for
+  `null`; Firefox: `Addresses need to be strings.`).
 - **Scope keys** are parsed as URLs against the base URL: `"mfe1/"` means `<document dir>/mfe1/`, `"/mfe1/"` means
   the page's origin. A cross-origin remote needs an absolute scope key. An unparsable key is dropped
   (Chromium: `Ignored scope "<key>"`).
-- **Only structural errors reject the whole map** (TypeError at registration): invalid JSON, a non-object top
-  level, `imports` / `scopes` / `integrity` or a scope value that is not an object. Everything else is a warning
+- **Only structural errors reject the whole map**, thrown at registration: invalid JSON (`SyntaxError`), or
+  (`TypeError`) a non-object top level, `imports` / `scopes` / `integrity` or a scope value that is not an object. Everything else is a warning
   and the entry is dropped or nulled. Unknown top-level keys only warn.
 - `src` is not supported: `<script type="importmap" src>` fires `error` and is ignored.
 - Editing a map element's text after insertion does nothing; insert a new element.
@@ -86,8 +87,9 @@ Example. Map on `http://host/index.html`:
 - For an external module script: its **response URL** (after redirects). For an inline module, or `import()` from a
   classic script or event handler: the document's base URL.
 - **Redirects split identity from scoping.** The module map is keyed by the *request* URL, but scopes match the
-  *response* URL. If `http://host/mfe1/entry.js` redirects to `http://cdn/mfe1-v2/entry.js`, its imports should no
-  longer see the `http://host/mfe1/` scope and fall back to `imports` (follows from the spec; not measured).
+  *response* URL. If `http://host/mfe1/entry.js` redirects to `http://cdn/mfe1-v2/entry.js`, its imports no longer
+  see the `http://host/mfe1/` scope and fall back to `imports`, and importing the response URL directly gives a
+  second instance (measured in Chrome 155 and Firefox 150/155).
 - `data:` and `blob:` modules match no http scope (only `imports` applies) and cannot use relative specifiers
   (`Invalid relative url or base scheme isn't hierarchical.`).
 - `import.meta.resolve(s)` runs the same algorithm with the module as referrer and returns what a static import
@@ -108,5 +110,8 @@ Example. Map on `http://host/index.html`:
 
 - Workers and worklets: a module worker importing `@fw/core` throws. es-module-shims in shim mode inside the worker
   is the workaround.
+- Shadow DOM: there is no per-component map. A `<script type="importmap">` appended to a shadow root registers into
+  the window's global map like any other (Chrome 155, Firefox 155), so a web component isolates its dependencies
+  only through a scope keyed by its URL.
 - `<script src>`, `new Worker(url)`, `<link rel=modulepreload href>` take URLs, not specifiers. The `integrity` map
   does apply to preloads.

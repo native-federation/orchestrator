@@ -56,6 +56,27 @@ file from a remote drags that remote's scope onto every consumer.
 
 Full algorithm, redirects, `import.meta.resolve`, workers, integrity: [resolution.md](resolution.md).
 
+## Writing and inserting a map
+
+- **Inline only.** A map is the JSON text of a `<script type="importmap">`. Natively `src` is not supported
+  (only es-module-shims shim mode loads external maps), and editing the element's text after insertion does
+  nothing: to change the page's map, insert another element.
+- **Build it at runtime** as a classic script appended to `document.head`:
+  `Object.assign(document.createElement('script'), { type: 'importmap', nonce, textContent: JSON.stringify(map) })`.
+  Under a nonce-based CSP the map needs the nonce like any inline script (a blocked map fails silently, then every
+  bare import fails); only `'strict-dynamic'` lets a map created by an already trusted script through without one.
+  Under Trusted Types the text goes through a policy. Use absolute URLs for every value and scope key.
+- **Insert it before the loads it is for.** Browsers without multiple-map support take one map, and only before
+  the first module load; boot code that inserts it must therefore be a classic script. Feature test:
+  `HTMLScriptElement.supports?.('importmap')`.
+- **Outdated guidance is common.** Older guidance, MDN included, says a map must precede every module script and
+  that later maps are ignored. That is single-map behaviour; with multiple-map support, maps merge at any time
+  ([runtimes.md](runtimes.md#multiple-and-dynamic-maps-native)). Don't rewrite working code to the old rule, and
+  don't rely on the new one where single-map browsers must work.
+- **One map per window.** A map placed in a shadow root still registers, but into the window's global map, so a
+  web component cannot isolate itself with its own map; workers ignore the page's map. Isolate a remote with a
+  scope keyed by its URL.
+
 ## Gotcha checklist
 
 Run through this when a map misbehaves or before shipping a map generator change:
@@ -64,16 +85,17 @@ Run through this when a map misbehaves or before shipping a map generator change
       scopes, or `imports`)? Check transitive imports, not just the entry specifiers.
 - [ ] Does a scope map only *some* entrypoints of a package? The rest fall through to `imports` and come from
       another build.
-- [ ] Do two URLs on the page serve the same package? Expect two instances.
+- [ ] Do two URLs on the page serve the same package? Expect two instances. That includes URLs that differ only
+      by a cache-busting `?query` or `#hash`.
 - [ ] Do build-internal chunk specifiers (same name, different builds) sit only in their owner's scope?
 - [ ] Do scope keys end in `/`? Without it a key matches one exact URL.
 - [ ] Are all values absolute URLs? Relative ones resolve against the document, not the remote.
 - [ ] Does a later map try to change a key the page already has? It is dropped (native: warning; default
       es-module-shims: `Rejected map override`). Give the newcomer a scope instead.
 - [ ] Is the map inserted before the first module load (needed in browsers without multiple-map support), as an
-      inline script carrying the CSP nonce?
-- [ ] Does a remote URL redirect? Scopes match the *response* URL, so per the spec the remote's scope stops
-      applying to the redirected file.
+      inline script carrying the CSP nonce (unless the policy has `'strict-dynamic'`)?
+- [ ] Does a remote URL redirect? Scopes match the *response* URL, so the remote's scope stops applying to the
+      redirected file, while the module instance stays keyed by the request URL.
 - [ ] Is code running in a worker? Import maps do not apply there.
 - [ ] Is it native or es-module-shims, which mode, with `mapOverrides`? The answer changes merge behaviour.
 
@@ -86,6 +108,8 @@ Run through this when a map misbehaves or before shipping a map generator change
 | `An import map rule for specifier 'x' was removed, as it conflicted with ...` (Chromium warning) | A later map tried to change an existing or already-resolved key | Map order; use a scope for the newcomer |
 | `es-module-shims: Rejected map override "x" from A to B.` | Same, in es-module-shims | Same |
 | Page renders but a framework says it is outside an injection context / two instances | One package loaded from two URLs | Walk the page (below this table) |
+| `Failed to load module script: Expected a JavaScript-or-Wasm module script but the server responded with a MIME type of "text/html"` (Firefox: `Loading module from "<url>" was blocked because of a disallowed MIME type ("text/html")`); the `import()` itself only rejects with `Failed to fetch dynamically imported module: <url>` (Firefox: `error loading dynamically imported module: <url>`) | Resolution worked, but the URL served no JS: usually a 404 page or an SPA fallback to `index.html` | Open the resolved URL; check the value's path and trailing slash |
+| `... has been blocked by CORS policy` on a module | Resolution worked; the cross-origin fetch failed | `Access-Control-Allow-Origin` on the remote's responses |
 | Feature silently never runs | A dynamic `import()` failed and was swallowed | Resolve the specifier from that file's URL |
 
 A static import that fails to resolve fails the whole module graph above it; a failing `import()` only rejects
@@ -93,15 +117,17 @@ its promise. Resolve failures usually log nothing else.
 
 To verify a map, walk the page: resolve each file's imports from that file's URL, transitively, starting from every
 app and remote (method in [shared-dependencies.md](shared-dependencies.md#judging-a-map)). In a running page, prove
-a resolution by importing the specifier from a module served under the referrer's URL and catching the rejection;
-count instances by what was evaluated, not by reading the map.
+a resolution by importing the specifier from a module served under the referrer's URL and catching the rejection,
+or by calling `import.meta.resolve(s)` there, which returns the URL without loading it but natively locks `s`
+against later maps (keep it out of code that runs before maps are added). Count instances by what was evaluated,
+not by reading the map.
 
 ## Reference files
 
 - [resolution.md](resolution.md): the full resolution algorithm, key/value normalization, prefix keys, `null`
   entries, redirects, `data:`/`blob:` referrers, `import.meta.resolve`, workers, integrity.
 - [runtimes.md](runtimes.md): multiple and dynamic maps, merge rules and timing, es-module-shims polyfill vs shim
-  mode and where it differs from native, CSP, error messages, browser support.
+  mode and where it differs from native, CSP, error messages, browser support (with caniuse links).
 - [shared-dependencies.md](shared-dependencies.md): sharing packages between independently built apps through one
   map: mixed builds, chunks, scope leaks, fallback units, the host gap, how to judge a map.
 - [orchestrator.md](orchestrator.md): how nf-orchestrator builds its maps (record, one serving build per

@@ -49,7 +49,8 @@ a map by removing its element and inserting a new one does not work: the new map
   measured). Insert maps before starting the loads they are for.
 - Browsers without multiple-map support accept a single map, only before any module load starts; later maps are
   ignored with a console error. That is why boot code that inserts the map must be a classic script: a
-  `type="module"` boot script is itself a module load.
+  `type="module"` boot script is itself a module load. Older guidance, MDN included, describes this single-map rule
+  as universal.
 
 ## es-module-shims: polyfill mode vs shim mode
 
@@ -104,7 +105,9 @@ passthrough (risk of modules running twice); native maps have no hook.
 
 - An inline import map is checked against `script-src` like any inline script: it needs a nonce, hash or
   `'unsafe-inline'`. A map built at runtime must get `script.nonce`; a blocked map fails silently and then every
-  bare import fails.
+  bare import fails. Exception: with `'strict-dynamic'`, a map inserted by an already trusted script (not
+  parser-inserted) runs without a nonce. Measured in Chrome 155: `script-src 'nonce-x' 'strict-dynamic'` accepts
+  the un-nonced runtime map; `script-src 'nonce-x'` and `script-src 'self' 'nonce-x'` block it.
 - es-module-shims' default build is CSP-safe. It takes the nonce from the first script on the page or its `nonce`
   option. Under Trusted Types allow the policy `es-module-shims`. Workers need its non-CSP wasm build.
 
@@ -119,6 +122,9 @@ passthrough (risk of modules running twice); native maps have no hook.
 | Chromium, map merge (warning) | `... was removed, as it conflicted with already resolved module specifiers.` (also a `scope rule` variant) | later rule would change a resolution that already happened |
 | Chromium, map parse | `Ignored an import map value of "<k>": Bare specifier: <v>` / `Ignored scope "<k>"` / `Failed to parse import map: invalid JSON` | entry nulled / scope dropped / whole map rejected |
 | Firefox | `The specifier "<s>" was a bare specifier, but was not remapped to anything.` | unmapped bare specifier |
+| Firefox | `Resolution of specifier "<s>" was blocked by a null entry.` | entry exists but is `null`/invalid |
+| Firefox (warning) | `Multiple import maps are not allowed.` | a second map in a single-map browser; it is ignored entirely |
+| Chromium / Firefox, map `integrity` | `Failed to find a valid digest in the 'integrity' attribute for resource '<url>' ...` / `None of the "sha384" hashes in the integrity attribute match ...` | hash mismatch; the module is blocked |
 | Safari | `Module name, '<s>' does not resolve to a valid URL.` | unmapped bare specifier |
 | es-module-shims | `Unable to resolve specifier '<s>' imported from <parentUrl>` | unmapped; `parentUrl` is the referrer to inspect |
 | es-module-shims | `es-module-shims: Rejected map override "<k>" from <old> to <new>.` | later map lost (default config) |
@@ -129,8 +135,14 @@ passthrough (risk of modules running twice); native maps have no hook.
 | feature | Chrome | Firefox | Safari |
 | --- | --- | --- | --- |
 | import maps | 89 | 108 | 16.4 |
-| multiple / dynamic maps | 133 | 150 | 18.4 |
+| multiple / dynamic maps | 133 | 150, behind the `dom.multiple_import_maps.enabled` pref (bug 1916277) | 18.4 |
 | `integrity` in the map | 127 | 138 | 18 |
 | `import.meta.resolve` | 105 | 106 | 16.4 |
 
-Feature test: `HTMLScriptElement.supports('importmap')`.
+Feature test: `HTMLScriptElement.supports('importmap')`. No feature test exists for multiple-map support; assume
+a single map unless every supported browser has it. Firefox 150.0.2 and 155 still ignore a second map by default
+(`Multiple import maps are not allowed.`) and merge like Chrome once the pref is on (measured 2026-10).
+
+Check current support before relying on a version: [import maps](https://caniuse.com/import-maps),
+[multiple import maps](https://caniuse.com/mdn-html_elements_script_type_importmap_multiple_import_maps),
+[`integrity`](https://caniuse.com/mdn-html_elements_script_type_importmap_integrity).

@@ -3,6 +3,8 @@
 This file assumes the browser rules in [SKILL.md](SKILL.md): a file resolves through the scope of its own URL, a
 module instance is one URL, and a later map cannot repoint a key.
 
+Paths below are relative to `src/lib/core/`. If a section disagrees with the code, the code wins; fix the section.
+
 ## Contents
 - Vocabulary
 - Two paths: init and dynamic load
@@ -41,7 +43,7 @@ module instance is one URL, and a later map cannot repoint a key.
 
 - **Init** reads every manifest remote, stores it, pools, picks versions, picks serving builds, generates the map
   from the stored record and commits. Commit removes every `<script type="importmap">` (or `importmap-shim`) from
-  the DOM, inserts the new map, then writes storage. Removing an element does not unregister its rules, so this only
+  `document.head` (maps elsewhere stay), appends the new map there, then writes storage. Removing an element does not unregister its rules, so this only
   behaves as a replacement when no map was registered before. Because the map is generated from the record, a reload
   with a warm cache should produce the same map as a cold start.
 - **Dynamic load** (`initRemoteEntry`) decides each package of the newly loaded remote as a whole against the
@@ -49,9 +51,12 @@ module instance is one URL, and a later map cannot repoint a key.
   because the page cannot repoint a key it already has. Use it with es-module-shims: it adds a map after modules
   have run, which browsers without multiple-map support ignore.
 
+Code: `2.app/flows/init.flow.ts`, `2.app/flows/init-remote-entry.flow.ts`; commit in `2.app/steps/commit-changes.ts`
+and `4.config/import-map/replace-in-dom.ts` (`use-default.ts` / `use-import-shim.ts` pick the map type).
+
 ## What the init map contains, in write order
 
-Later writes into the same scope overwrite earlier ones:
+Code: `2.app/steps/generate-import-map.ts`. Later writes into the same scope overwrite earlier ones:
 
 1. `singleton: false` externals → `scopes[remoteScopeUrl][specifier] = remoteScopeUrl + file`.
 2. Named share scopes (`strict` included) → consumer scopes. These overwrite a remote's own private mapping of
@@ -73,7 +78,7 @@ Each package's serving build publishes every specifier it ships into `imports`; 
 specifier of that package there. A share row of the package at another tag is a duplicate: it publishes nothing
 and warns `Singleton external X has multiple shared versions.` (throws `Could not create ImportMap.` under
 `strict.strictImportMap`). Ties in choosing the serving build are broken by remote name (code-unit order), so the
-map does not depend on registration order.
+map does not depend on registration order. Code: `2.app/steps/determine-shared-externals.ts`.
 
 ## One serving build per package
 
@@ -118,6 +123,9 @@ Init logs nothing for a host gap: it cannot see what files import, so a warning 
 coverage miss. Build-time causes and detection: [shared-dependencies.md](shared-dependencies.md#the-host-gap).
 
 ## Pooling: families, subpools, islands
+
+Code: `2.app/steps/pooling/pool-shared-externals.ts` (init) and `pool-dynamic-externals.ts` (dynamic), over
+`1.domain/pooling/` (`election.ts`, `gate.ts`, `plan.ts`, `records.ts`).
 
 Pooling elects labelled externals **as one family**: every remote takes the whole family from one build that
 shipped it together (the elected one, another remote's, or its own). How rows land in the map:
@@ -166,6 +174,8 @@ candidate is judged only on the entrypoints its own build ships; no build borrow
 
 ## The dynamic path
 
+Code: `2.app/steps/update-cache.ts` decides the rows, `2.app/steps/convert-to-import-map.ts` emits the delta.
+
 Per package of the loaded remote (a dense root and its flat secondaries together), per share scope, against what
 the committed map serves of it:
 
@@ -198,6 +208,8 @@ load mfe3 (react 17.0.2, ~17.0.0 strict):
 
 ## Module Federation (`getShared`)
 
+Code: `src/lib/module-federation/get-shared.ts`.
+
 `getShared` hands Module Federation the files the import map serves: per specifier, the copy that claims it, so a
 package's root and secondaries come from one build. The `strict` scope offers every shared version, each from its
 basis copy. A change to what the map publishes must keep `getShared` in step, or a Module Federation consumer loads
@@ -224,6 +236,9 @@ The general ones (mixed builds, chunks, partial scopes, scope leaks, family fall
   record but not the page, and a failed dynamic load can leave stored copies no map ever published.
 - **Warm vs cold.** A warm init only fetches manifest remotes; stored state (removed remotes, a stale `cached`
   flag) can make a reload's map differ from a cold start. Compare both.
+- **CSP.** `replace-in-dom.ts` routes the map through a Trusted Types policy but sets no `nonce`. Under a
+  nonce-based `script-src` without `'strict-dynamic'` (or `'unsafe-inline'`) the map is blocked silently and every
+  bare import fails; with `'strict-dynamic'` it is allowed because a trusted script inserted it.
 - **Nested scope URLs.** A remote at `http://host/mfe1/` under a host scoped at `http://host/` falls through to
   the host's scope before `imports`. Nothing guards against it.
 
