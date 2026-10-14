@@ -80,7 +80,8 @@ const entry = (name: string, ...sharedInfo: DenseSharedInfo[]): RemoteEntry => {
 type Case = {
   name: string;
   entries: RemoteEntry[];
-  dynamic?: RemoteEntry[];
+  // `'reload'` opens a new page that runs a warm init over the stored record before the next load.
+  dynamic?: (RemoteEntry | 'reload')[];
   // After the loads, a new page runs a warm init over the stored record; that page's map is judged.
   reload?: boolean;
   // `strict.strictExternalCompatibility`.
@@ -114,6 +115,12 @@ const run = async (c: Case) => {
   // Per load, the `imports` keys its delta re-declares: a browser rejects each one.
   const remapped: string[][] = [];
   for (const d of c.dynamic ?? []) {
+    if (d === 'reload') {
+      p.reload();
+      map = await p.runInit();
+      remapped.push([]);
+      continue;
+    }
     const { committed, importMap, merged } = await p.runDynamic(d);
     remapped.push(Object.keys(importMap.imports).filter(key => key in committed.imports));
     map = merged;
@@ -124,7 +131,7 @@ const run = async (c: Case) => {
   }
   const faults = pageFaults({
     importMap: map,
-    entries: [...c.entries, ...(c.dynamic ?? [])],
+    entries: [...c.entries, ...(c.dynamic ?? []).filter(d => d !== 'reload')],
     hosts: c.hosts,
     importsOf: importsFrom(c.deps ?? {}),
   });
@@ -621,4 +628,158 @@ describe('the host never borrows an entrypoint', () => {
   );
 
   for (const c of [...cases, ...rootGap, ...rootGapBesideFamily, ...unpooledRootGap]) register(c);
+});
+
+// One build ships two specifiers the name rule groups into one package, at two tags: sharedMappings with versions
+// of their own, or an npm package whose secondary the builder stamps with another version than its root. No
+// other build serves both tags, so such a remote runs the whole package from its own build; a host serves all
+// its tags itself.
+describe('a remote that ships a package at two tags', () => {
+  const UI = '@org/shared/ui';
+  const UTIL = '@org/shared/util';
+  const TABLE = '@m/material/table';
+  const BUTTON = '@m/material/button';
+  const LIB = '@x/lib';
+  const FEATURE = '@x/lib/feature';
+
+  const loose = (packageName: string, version: string, range = `^${version}`) =>
+    shared(packageName, { pool: false, version, range });
+  const strictTilde = (packageName: string, version: string) =>
+    shared(packageName, { pool: false, ...at(version), strict: true });
+  const mappings = (name: string, util = '2.0.0') =>
+    entry(name, loose(UI, '1.0.0'), loose(UTIL, util, '^2.0.0'));
+  // What the builder emits for a dense build whose secondary carries the stripped range's version.
+  const denseTwoTags = (name: string) =>
+    entry(
+      name,
+      { ...loose(LIB, '17.1.1', '^17.1.0'), entries: { [LIB]: file(LIB) } },
+      { ...loose(LIB, '17.1.0', '^17.1.0'), entries: { [FEATURE]: file(FEATURE) } }
+    );
+
+  // For `known`: the remote's files of `from` leave `missing` unresolved.
+  const unresolved = (remote: string, from: string, missing: string) => ({
+    [remote]: {
+      unresolved: [
+        `http://${remote}/ -> ${missing}`,
+        `http://${remote}/${file(from)} -> ${missing}`,
+      ],
+    },
+  });
+  const sharedMappingsGap = unresolved('r1', UI, UTIL);
+  const expectDenseHost = (map: ImportMap) => {
+    expect(map.imports[LIB]).toBe('http://r1/x_lib.js');
+    expect(map.imports[FEATURE]).toBe('http://r1/x_lib_feature.js');
+  };
+
+  const cases: Case[] = [
+    {
+      name: 'runs sharedMappings at two tags from its own build when it is the only remote',
+      known: sharedMappingsGap,
+      entries: [mappings('r1')],
+    },
+    {
+      name: 'runs an npm root and its secondary at two tags from its own build when it is the only remote',
+      known: unresolved('r1', CORE, TESTING),
+      entries: [entry('r1', loose(CORE, '17.0.0'), loose(TESTING, '17.0.1', '^17.0.0'))],
+    },
+    {
+      name: 'runs two secondaries of a root-less package at two tags from its own build',
+      known: unresolved('r1', TABLE, BUTTON),
+      entries: [entry('r1', loose(TABLE, '17.0.0'), loose(BUTTON, '17.0.1', '^17.0.0'))],
+    },
+    // r2's util 2.1.0 serves the package; r1 runs ui and util from its own build.
+    ...[true, false].map((twoTagsFirst): Case => {
+      const r2 = entry('r2', loose(UTIL, '2.1.0', '^2.0.0'));
+      return {
+        name: `runs sharedMappings at two tags from its own build beside a remote that ships one of them (two tags first=${twoTagsFirst})`,
+        known: sharedMappingsGap,
+        entries: twoTagsFirst ? [mappings('r1'), r2] : [r2, mappings('r1')],
+      };
+    }),
+    // No build ships the package at one tag, so none serves it and each remote runs its own.
+    ...['2.0.0', '2.1.0'].map((util): Case => ({
+      name: `runs sharedMappings from its own build when every remote ships them at two tags (second util ${util})`,
+      known: sharedMappingsGap,
+      entries: [mappings('r1'), mappings('r2', util)],
+    })),
+    // r1's core is the only root row, so no remote that ships the root can serve the package.
+    {
+      name: 'runs an npm root and its secondary at two tags from its own build when it ships the only root',
+      known: unresolved('r1', CORE, TESTING),
+      entries: [
+        entry('r1', loose(CORE, '17.0.0'), loose(TESTING, '17.0.1', '^17.0.0')),
+        entry('r2', loose(TESTING, '17.1.0', '^17.0.0')),
+      ],
+    },
+    // Both remotes ship the package at two tags, and the strict `~` ranges reject each other's ui.
+    {
+      name: 'runs strict sharedMappings at two tags from its own build',
+      known: unresolved('r1', UTIL, UI),
+      entries: [
+        entry('r1', strictTilde(UI, '1.0.0'), strictTilde(UTIL, '2.0.0')),
+        entry('r2', strictTilde(UI, '1.0.1'), strictTilde(UTIL, '2.0.0')),
+      ],
+    },
+    {
+      name: 'runs a dense build that lists a package at two tags from its own build',
+      known: unresolved('r1', LIB, FEATURE),
+      entries: [denseTwoTags('r1')],
+    },
+    // The load itself maps both of r1's copies; the next page's warm init decides the package again.
+    {
+      name: 'runs a two-tag remote from its own build on the page after its load',
+      known: sharedMappingsGap,
+      entries: [],
+      dynamic: [mappings('r1'), 'reload', entry('r2', loose(UTIL, '2.1.0', '^2.0.0'))],
+    },
+    // r3's `>=1.9.0` accepts r1's util 2.0.0, so r3's copy skips to r1's row and is no candidate itself.
+    {
+      name: 'runs a remote whose only copy follows a two-tag build from its own build',
+      known: {
+        ...unresolved('r1', UTIL, UI),
+        r3: { unresolved: [`http://r1/${file(UTIL)} -> ${UI}`] },
+      },
+      entries: [mappings('r1'), entry('r3', loose(UTIL, '1.9.0', '>=1.9.0'))],
+    },
+    // r2's util accepts the host's 2.0.0 and follows it.
+    {
+      name: 'serves both tags of the host globally',
+      known: {
+        ...unresolved('r1', UTIL, UI),
+        r2: { unresolved: [`http://r1/${file(UTIL)} -> ${UI}`] },
+      },
+      hosts: ['r1'],
+      entries: [mappings('r1'), entry('r2', loose(UTIL, '2.1.0', '^2.0.0'))],
+      expectMap: map => {
+        expect(map.imports[UI]).toBe('http://r1/org_shared_ui.js');
+        expect(map.imports[UTIL]).toBe('http://r1/org_shared_util.js');
+        expect(resolve(map, UTIL, 'http://r2/expose.js')).toBe('http://r1/org_shared_util.js');
+      },
+    },
+    {
+      name: 'serves both tags of a dense host globally',
+      known: unresolved('r1', LIB, FEATURE),
+      hosts: ['r1'],
+      entries: [denseTwoTags('r1')],
+      expectMap: expectDenseHost,
+    },
+    {
+      name: 'serves both tags of a dense host globally beside a remote that ships the package at one',
+      known: unresolved('r1', LIB, FEATURE),
+      hosts: ['r1'],
+      entries: [
+        denseTwoTags('r1'),
+        entry(
+          'r2',
+          shared(LIB, { pool: false, version: '17.1.1', range: '^17.1.0', entrypoints: [FEATURE] })
+        ),
+      ],
+      expectMap: map => {
+        expectDenseHost(map);
+        expect(resolve(map, FEATURE, 'http://r2/expose.js')).toBe('http://r1/x_lib_feature.js');
+      },
+    },
+  ];
+
+  for (const c of cases) register(c);
 });

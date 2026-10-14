@@ -180,6 +180,22 @@ describe('claimTable', () => {
       expect(table.duplicates).toEqual(new Set([other]));
       expect(readable(table.claims)).toEqual({ fw: 'fw@1.0.0:r2' });
     });
+
+    it.fails(
+      'publishes both share rows of a serving host that ships the package at two tags',
+      () => {
+        const host = (entry: string, tag: string) => ({
+          ...version('share', [copy('r1', [entry])], tag),
+          host: true,
+        });
+        const table = claimTable([
+          ['fw', served('r1', host('fw', '1.0.0'), host('fw/extra', '2.0.0'))],
+        ]);
+
+        expect(table.duplicates.size).toBe(0);
+        expect(readable(table.claims)).toEqual({ fw: 'fw@1.0.0:r1', 'fw/extra': 'fw@2.0.0:r1' });
+      }
+    );
   });
 
   it('ignores scope rows', () => {
