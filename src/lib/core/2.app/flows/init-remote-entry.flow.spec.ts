@@ -260,7 +260,7 @@ describe('init-remote-entry flow: a failed load', () => {
     expect(adapters.browser.setImportMapFn).not.toHaveBeenCalled();
     expect(config.log.warn).toHaveBeenCalledWith(
       7,
-      "[r0] Remote is already initialized, omitting 'http://r0-v2/remoteEntry.json'. Request it by name to override it."
+      "[r0] Already initialized from 'http://r0/remoteEntry.json', ignoring 'http://r0-v2/remoteEntry.json'."
     );
   });
 

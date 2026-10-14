@@ -230,6 +230,9 @@ describe('createGetRemoteEntry', () => {
         config.profile.overrideCachedRemotes = 'always';
         config.profile.overrideCachedRemotesIfURLMatches = true;
         adapters.remoteInfoRepo.contains = vi.fn(() => true);
+        adapters.remoteInfoRepo.tryGet = vi.fn(() =>
+          Optional.of<RemoteInfo>({ scopeUrl: mockScopeUrl_MFE1({ folder: 'v1' }), exposes: [] })
+        );
 
         const result = await getRemoteEntry(
           mockScopeUrl_MFE1({ folder: 'v2', file: 'remoteEntry.json' }),
@@ -240,7 +243,7 @@ describe('createGetRemoteEntry', () => {
         expect(result.isPresent()).toEqual(false);
         expect(config.log.warn).toHaveBeenCalledWith(
           7,
-          `[team/mfe1] Remote is already initialized, omitting '${mockScopeUrl_MFE1({ folder: 'v2', file: 'remoteEntry.json' })}'. Request it by name to override it.`
+          `[team/mfe1] Already initialized from '${mockScopeUrl_MFE1({ folder: 'v1', file: 'remoteEntry.json' })}', ignoring '${mockScopeUrl_MFE1({ folder: 'v2', file: 'remoteEntry.json' })}'.`
         );
       }
     );
@@ -277,6 +280,11 @@ describe('createGetRemoteEntry', () => {
     it('should omit a fetched remote that is already initialized under another name than requested', async () => {
       config.profile.overrideCachedRemotes = 'always';
       adapters.remoteInfoRepo.contains = vi.fn(name => name === 'team/mfe1');
+      adapters.remoteInfoRepo.tryGet = vi.fn((name: string) =>
+        name === 'team/mfe1'
+          ? Optional.of<RemoteInfo>({ scopeUrl: mockScopeUrl_MFE1({ folder: 'v1' }), exposes: [] })
+          : Optional.empty<RemoteInfo>()
+      );
 
       const result = await getRemoteEntry(
         mockScopeUrl_MFE1({ folder: 'v2', file: 'remoteEntry.json' }),
@@ -286,7 +294,7 @@ describe('createGetRemoteEntry', () => {
       expect(result.isPresent()).toEqual(false);
       expect(config.log.warn).toHaveBeenCalledWith(
         7,
-        expect.stringContaining('[team/mfe1] Remote is already initialized')
+        `[team/mfe1] Already initialized from '${mockScopeUrl_MFE1({ folder: 'v1', file: 'remoteEntry.json' })}', ignoring '${mockScopeUrl_MFE1({ folder: 'v2', file: 'remoteEntry.json' })}'.`
       );
     });
 

@@ -59,9 +59,13 @@ export function createGetRemoteEntry(
       if (ports.remoteInfoRepo.contains(remoteEntry.name)) {
         // Only a remote requested by name has passed the overrideCachedRemotes check above.
         if (remoteEntry.name !== remoteName) {
+          const initializedFrom = ports.remoteInfoRepo
+            .tryGet(remoteEntry.name)
+            .map(info => _path.join(info.scopeUrl, 'remoteEntry.json'))
+            .get();
           config.log.warn(
             7,
-            `[${remoteEntry.name}] Remote is already initialized, omitting '${remoteEntryUrl}'. Request it by name to override it.`
+            `[${remoteEntry.name}] Already initialized from '${initializedFrom}', ignoring '${remoteEntryUrl}'.`
           );
           return Optional.empty<RemoteEntry>();
         }
