@@ -257,15 +257,16 @@ stores the loaded remote as its serving build, as an election would (see
   entrypoints across the package's externals, then the name that sorts first), and it has no serving build only
   when no such copy is left.
 - An **unpooled** package ranks the copies that publish their own files in its primary's share rows, or in
-  every share row of its externals when the primary has none (a package can ship secondary entrypoints only):
+  every share row of its externals when the primary has none (a package can ship secondary entrypoints only),
+  leaving out a remote that ships the package at two tags unless it is the host:
   1. **host** — the shell's build.
   2. **fewest extra downloads** — one for the build itself unless its copies of the package are all cached,
      plus one for every other remote that would run its own build of the package (a copy in a `scope` row, a
      `strictVersion` copy whose range rejects the tag, or a fallback, key 3) unless that remote's copies are all
      cached.
   3. **fewest fallbacks** — the remotes that ship a specifier of the package outside the candidate's copies at
-     its tag, or that would run one external of the package from a `scope` row and another from the map; each
-     runs the whole package from its own build (see
+     its tag, that would run one external of the package from a `scope` row and another from the map, or that
+     ship the package at two tags; each runs the whole package from its own build (see
      [Entrypoint coverage and tearing](#entrypoint-coverage-and-tearing)).
   4. **primary's basis** — the basis of the primary's share row.
   5. **name** — code-unit order, so the choice never depends on the order remotes register in.
@@ -281,6 +282,16 @@ the serving tag, once the remotes the serving build does not cover have moved to
 `skip`, and a `strictVersion` copy whose range rejects the tag is scoped, or fails init under
 [`strict.strictExternalCompatibility`](./config.md#modeConfig), as in
 [Determine Shared Versions](#determine-shared-versions). A pooled package keeps the rows its election placed.
+
+A remote can ship one package at two tags: sharedMappings that carry versions of their own (`@org/shared/ui` 1.0.0
+beside `@org/shared/util` 2.0.0), or npm secondaries that a wildcard export stamps with the range's version beside
+the installed root (`17.1.0` beside `17.1.1`). Its build cannot serve both tags as one, so in an unpooled package
+such a remote is no candidate and never follows another build: it runs the whole package from its own build. When
+that leaves no candidate, nothing serves the package globally and every remote with a copy of it on the map runs
+its own build. The host is the exception whenever it is a candidate (it has a copy in the primary's share rows, or
+the primary has none): it serves every tag it ships, globally, and is never scoped. Its share rows at other tags
+stay shared, and a remote whose specifiers its copies cover follows it. A `strictVersion` copy that would take a
+host file at a tag other than the serving tag and its own runs the package from its own build instead.
 
 #### Copies of one version
 
@@ -884,8 +895,9 @@ Each member is rebuilt with one version (a **row**) per `(tag, action)`, newest 
 `share`, `skip`, `scope`:
 
 - **`share`** — the tag round 1 publishes the member at. Its first copy (`remotes[0]`, the basis) is the
-  winner's; every copy resolving globally at that tag joins it. The tag is read from any of the member's
-  entrypoints, because a package can be shipped entrypoint-only (`material/table` without `material`).
+  winner's; every copy resolving globally at that tag joins it. The tag is the one round 1 serves the member's
+  own specifier at, or, when it serves none (a package can ship entrypoint-only, `material/table` without
+  `material`), the one it serves any of the member's entrypoints at.
 - **`skip`** — copies resolving globally at another tag their range accepts; a subpool's copies with
   `servedBy: <its build>`, the build's own copies naming itself.
 - **`scope`** — copies of a remote serving itself, with their `poolCause`.
