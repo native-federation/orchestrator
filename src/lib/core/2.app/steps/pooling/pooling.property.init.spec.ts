@@ -29,7 +29,8 @@ import {
 import * as _path from 'lib/utils/path';
 import { copiesByRemote } from 'lib/core/1.domain/pooling/builds';
 import { committedView } from 'lib/core/1.domain/pooling/gate';
-import { pageFaults, resolve } from 'lib/testing/pooling/page-graph';
+import { pageFaults, pageTears, resolve } from 'lib/testing/pooling/page-graph';
+import { NFError } from 'lib/core/native-federation.error';
 
 /**
  * Pooling invariants over generated portfolios (`generate-portfolio.ts`), through the real init steps with
@@ -46,6 +47,16 @@ import { pageFaults, resolve } from 'lib/testing/pooling/page-graph';
  *
  * A deeper local search: POOLING_PROPERTY_SEED=<n> POOLING_PROPERTY_SCALE=<factor> (CI uses the defaults).
  */
+
+const UNPOOLED_REFUSALS = [
+  /^Could not determine shared externals in scope /,
+  /^External \S+ could not be shared\.$/,
+];
+
+const unpooled = (entry: RemoteEntry): RemoteEntry => ({
+  ...entry,
+  shared: entry.shared.map(({ pool: _, ...info }) => info),
+});
 
 // A page's pools: the records that carry a pool name, and the map's files for the specifiers they ship.
 const pooledPart = ({ importMap, record }: { importMap: ImportMap; record: shareScope }) => {
@@ -172,6 +183,53 @@ describe('pooling properties: init (generated portfolios)', { timeout: TIMEOUT }
               importsOf: generatedImports(init.entries),
             })
           ).toEqual({});
+        }
+      ));
+
+  // The page portfolios with every pool label dropped, so each package (flat secondaries included) is unpooled:
+  // no remote's own specifiers of one package resolve to two builds. Leaks (another package's file binding a
+  // second build through its scope) are not counted. A strict refusal is not judged for soundness here, only
+  // recognized: unpooled, a strict copy can also fail sharing outright, which the pooled refusals do not list.
+  for (const [offset, shareScope] of [
+    [42, undefined],
+    [43, 'team'],
+  ] as const)
+    it(`page: no unpooled remote resolves its own specifiers of a package to two builds, ${shareScope ?? 'global'} share scope`, () =>
+      run(
+        offset,
+        portfolioArbitrary({ flat: true, chunks: true, ...(shareScope && { shareScope }) }),
+        300,
+        async spec => {
+          const entries = toRemoteEntries(spec).map(unpooled);
+          const host = hostOf(spec);
+          const rig = openPortfolio({
+            strict: spec.strict,
+            host,
+            scope: spec.shareScope,
+            latestSharedExternal: spec.latestSharedExternal,
+          });
+          let importMap: ImportMap;
+          try {
+            ({ importMap } = await rig.init(entries));
+          } catch (error) {
+            const refused =
+              spec.strict &&
+              error instanceof NFError &&
+              UNPOOLED_REFUSALS.some(refusal => refusal.test(error.message));
+            if (!refused) throw error;
+            return;
+          }
+          const split = pageTears({
+            importMap,
+            entries,
+            hosts: host === undefined ? [] : [host],
+            importsOf: generatedImports(entries),
+          }).flatMap(({ remote, causes }) =>
+            Object.entries(causes)
+              .filter(([, how]) => how.includes('direct'))
+              .map(([pkg]) => `${remote}: ${pkg}`)
+          );
+          expect(split).toEqual([]);
         }
       ));
 
