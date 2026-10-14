@@ -11,10 +11,10 @@ import { globalThisStorageEntry } from 'lib/core/4.config/storage/global-this.st
 import { createProcessRemoteEntries } from './process-remote-entries';
 
 /**
- * A warm init commits every remote it processes back onto the stored record. The pool's name and winner are
- * what the coming re-election reads (`poolWinner` breaks a tie), so a commit must carry them over.
+ * A warm init writes every remote it processes back onto the stored record. The pool's name and winner are
+ * what the coming re-election reads (`poolWinner` breaks a tie), so a write must carry them over.
  */
-describe('store-remote-entry: pool results on commit', () => {
+describe('store-remote-entry: pool results on write', () => {
   const SCOPE = { 'team/mfe-a': 'http://mfe-a/', 'team/mfe-b': 'http://mfe-b/' } as const;
 
   let config: ConfigContract;
@@ -50,7 +50,7 @@ describe('store-remote-entry: pool results on commit', () => {
       ],
     }) as RemoteEntry;
 
-  it('keeps poolName and poolWinner when another remote is committed onto the record', async () => {
+  it('keeps poolName and poolWinner when another remote is written onto the record', async () => {
     await createProcessRemoteEntries(config, adapters)([entry('team/mfe-a')]);
     const stored = adapters.sharedExternalsRepo.getFromScope(undefined)['@fam/core']!;
     adapters.sharedExternalsRepo.addOrUpdate(
@@ -67,9 +67,9 @@ describe('store-remote-entry: pool results on commit', () => {
     expect(record.poolWinner).toBe('team/mfe-a');
   });
 
-  // The commit spreads the cached record, so a field added to SharedExternal later is carried over without
-  // touching the commit; listing fields one by one would drop it silently.
-  it('keeps a field it does not know about when another remote is committed onto the record', async () => {
+  // The write spreads the cached record, so a field added to SharedExternal later is carried over without
+  // touching the write; listing fields one by one would drop it silently.
+  it('keeps a field it does not know about when another remote is written onto the record', async () => {
     await createProcessRemoteEntries(config, adapters)([entry('team/mfe-a')]);
     const stored = adapters.sharedExternalsRepo.getFromScope(undefined)['@fam/core']!;
     adapters.sharedExternalsRepo.addOrUpdate(

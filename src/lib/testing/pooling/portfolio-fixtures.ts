@@ -41,7 +41,7 @@ export const version = (
 });
 
 /**
- * A record as storage would hold it: newest first, as `commit()` sorts it, so a fixture reads in whatever
+ * A record as storage would hold it: newest first, as `write()` sorts it, so a fixture reads in whatever
  * order is clearest without seeding an order production could never hand to determine. A scoped package
  * gets its npm-scope pool label, as the build adds by default; an explicit `pool` wins.
  */

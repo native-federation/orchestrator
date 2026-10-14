@@ -12,7 +12,7 @@ import { createProcessRemoteEntries } from './process-remote-entries';
 import { createUpdateCache } from './update-cache';
 
 /**
- * The contract `commit()` provides and `determine-shared-externals` silently assumes: a committed
+ * The contract `write()` provides and `determine-shared-externals` silently assumes: a stored
  * external's versions are descending by `versionCheck.compare`, whatever order the remotes arrived in.
  *
  * `determine` reads `versions[0]` as "the latest" for `profile.latestSharedExternal`, and keeps the
@@ -20,7 +20,7 @@ import { createUpdateCache } from './update-cache';
  * here is what keeps that assumption checked rather than implied; hand-seeded fixtures reproduce it
  * through the `newestFirst` helper in `lib/testing/domain/externals/version.mock.ts`.
  */
-describe('store-remote-entry: committed version order', () => {
+describe('store-remote-entry: written version order', () => {
   const SCOPE = {
     'team/mfe-a': 'http://mfe-a/',
     'team/mfe-b': 'http://mfe-b/',
@@ -77,7 +77,7 @@ describe('store-remote-entry: committed version order', () => {
   describe('init path (process-remote-entries)', () => {
     const init = (entries: RemoteEntry[]) => createProcessRemoteEntries(config, adapters)(entries);
 
-    it('commits versions newest-first when remotes arrive oldest-first', async () => {
+    it('writes versions newest-first when remotes arrive oldest-first', async () => {
       await init([
         entry('team/mfe-a', [dep('2.1.2')]),
         entry('team/mfe-b', [dep('2.1.3')]),
@@ -88,7 +88,7 @@ describe('store-remote-entry: committed version order', () => {
       expectDescendingEverywhere();
     });
 
-    it('commits versions newest-first when remotes arrive newest-first', async () => {
+    it('writes versions newest-first when remotes arrive newest-first', async () => {
       await init([
         entry('team/mfe-c', [dep('2.2.0')]),
         entry('team/mfe-b', [dep('2.1.3')]),

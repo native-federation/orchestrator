@@ -56,7 +56,7 @@ export type SharedExternalContext = {
   cached: SharedExternal;
   scopeType: 'global' | 'strict' | 'shareScope';
   assertSameVersionCompatibility: (matchingVersion: SharedVersion) => void;
-  commit: () => void;
+  write: () => void;
 };
 
 /**
@@ -204,7 +204,7 @@ export function createStoreRemoteEntry(
         }
         config.log.warn(logStep, errorMsg);
       },
-      commit(): void {
+      write(): void {
         ports.sharedExternalsRepo.addOrUpdate(
           sharedInfo.packageName,
           {

@@ -82,14 +82,7 @@ export function createUpdateCache(
   function resolveSharedExternal(
     remoteEntry: RemoteEntry,
     sharedInfo: DenseSharedInfo,
-    {
-      tag,
-      remote,
-      cached,
-      scopeType,
-      assertSameVersionCompatibility,
-      commit,
-    }: SharedExternalContext
+    { tag, remote, cached, scopeType, assertSameVersionCompatibility, write }: SharedExternalContext
   ): {
     action: SharedVersionAction;
     provided?: Map<string, SharedVersionMeta>;
@@ -165,7 +158,7 @@ export function createUpdateCache(
       cached.versions.push({ tag, action, host: false, remotes: [remote] });
     }
 
-    commit();
+    write();
     return { action, provided, sameVersion };
   }
 
