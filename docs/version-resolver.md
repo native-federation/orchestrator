@@ -1530,7 +1530,7 @@ When a remote is already present in the cache, the orchestrator will skip the re
 
 ### Override Flag Detection
 
-The orchestrator checks when a remote should be overridden or skipped by comparing the provided remoteName with the cached remoteName. If they match, the requested `remoteEntry.json` URL will be compared with the cached `remoteEntry.json` URL. By default, on initialization, the remote will be skipped if the URLs match and overridden if the URLs differ. Except for the dynamic init which will always skip by default. A dynamic init only overrides a remote that is requested by name. Without a name, a URL a remote was already initialized from is not fetched again, and a fetched remote that is already initialized under another URL is omitted with a warning.
+The orchestrator checks when a remote should be overridden or skipped by comparing the provided remoteName with the cached remoteName. If they match, the requested `remoteEntry.json` URL will be compared with the cached `remoteEntry.json` URL. By default, on initialization, the remote will be skipped if the URLs match and overridden if the URLs differ. A dynamic init (`initRemoteEntry`) never overrides a remote that is already initialized, since the committed import map cannot drop that remote's imports: a URL the remote was initialized from is not fetched again, and another URL for it is omitted with a warning.
 
 ### Skip Cached Remotes Configuration
 
@@ -1541,7 +1541,7 @@ await initFederation(manifest, {
   profile: {
     overrideCachedRemotes: 'never', // Do not override cached remotes
     overrideCachedRemotes: 'init-only', // Override only during the first initialization (default)
-    overrideCachedRemotes: 'always', // Override all cached remotes
+    overrideCachedRemotes: 'always', // Deprecated: same as 'init-only', a dynamic init never overrides a cached remote
   },
 });
 ```
@@ -1553,7 +1553,7 @@ The `overrideCachedRemotesIfURLMatches` setting provides additional control. Nor
 ```javascript
 await initFederation(manifest, {
   profile: {
-    overrideCachedRemotes: 'always',
+    overrideCachedRemotes: 'init-only',
     overrideCachedRemotesIfURLMatches: true,
   },
 });

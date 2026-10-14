@@ -45,7 +45,8 @@ describe('createProcessDynamicRemoteEntry', () => {
   });
 
   describe('cleaning up before processing', () => {
-    it('should remove the previous cached version if remoteEntry is marked as override', async () => {
+    // A dynamic init never replaces a known remote (get-remote-entry omits it), so the flag evicts nothing here.
+    it('should not remove the previous cached version even if remoteEntry is marked as override', async () => {
       const remoteEntry = mockRemoteEntry_MFE1({
         override: true,
         shared: [mockSharedInfoA.v2_1_1(), mockSharedInfoB.v2_1_2()],
@@ -54,12 +55,10 @@ describe('createProcessDynamicRemoteEntry', () => {
 
       await updateCache(remoteEntry);
 
-      expect(adapters.remoteInfoRepo.remove).toHaveBeenCalledWith('team/mfe1');
-      expect(adapters.scopedExternalsRepo.remove).toHaveBeenCalledWith('team/mfe1');
-      expect(adapters.sharedChunksRepo.remove).toHaveBeenCalledWith('team/mfe1');
-      expect(adapters.sharedExternalsRepo.removeFromAllScopes).toHaveBeenCalledWith(
-        new Set(['team/mfe1'])
-      );
+      expect(adapters.remoteInfoRepo.remove).not.toHaveBeenCalled();
+      expect(adapters.scopedExternalsRepo.remove).not.toHaveBeenCalled();
+      expect(adapters.sharedChunksRepo.remove).not.toHaveBeenCalled();
+      expect(adapters.sharedExternalsRepo.removeFromAllScopes).not.toHaveBeenCalled();
     });
 
     it('should not remove the old version if the remoteEntry is not marked as override', async () => {

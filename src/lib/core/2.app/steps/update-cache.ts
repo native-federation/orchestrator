@@ -19,11 +19,7 @@ import type { LoggingConfig } from '../config/log.contract';
 import * as _path from 'lib/utils/path';
 import { NFError } from 'lib/core/native-federation.error';
 import type { ModeConfig } from 'lib/core/2.app/config/mode.contract';
-import {
-  createRemoveCachedRemoteEntries,
-  createStoreRemoteEntry,
-  type SharedExternalContext,
-} from './store-remote-entry';
+import { createStoreRemoteEntry, type SharedExternalContext } from './store-remote-entry';
 
 export function createUpdateCache(
   config: LoggingConfig & ModeConfig,
@@ -37,7 +33,6 @@ export function createUpdateCache(
   >
 ): ForUpdatingCache {
   const storeRemoteEntry = createStoreRemoteEntry(config, ports, 8);
-  const removeCachedRemoteEntries = createRemoveCachedRemoteEntries(ports);
   // Read per call so a port swapped after wiring is honoured.
   const accepts = createAcceptsTag(
     (tag, range) => ports.versionCheck.isCompatible(tag, range),
@@ -52,8 +47,6 @@ export function createUpdateCache(
   return remoteEntry => {
     try {
       const actions: SharedInfoActions = {};
-
-      if (remoteEntry?.override) removeCachedRemoteEntries(new Set([remoteEntry.name]));
 
       storeRemoteEntry(remoteEntry, (entry, external, ctx) => {
         const { action, provided, sameVersion } = resolveSharedExternal(entry, external, ctx);

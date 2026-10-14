@@ -50,26 +50,6 @@ describe('createGetRemoteEntry', () => {
       ).rejects.toThrow('Could not fetch remoteEntry.');
     });
 
-    it('should skip fetching remote if it exists in repository and overrideCachedRemotes is never', async () => {
-      config.profile.overrideCachedRemotes = 'never';
-      adapters.remoteInfoRepo.tryGet = vi.fn(() =>
-        Optional.of<RemoteInfo>({
-          scopeUrl: mockScopeUrl_MFE1(),
-          exposes: [],
-        })
-      );
-
-      const result = await getRemoteEntry(
-        mockScopeUrl_MFE1({ file: 'remoteEntry.json' }),
-        'team/mfe1'
-      );
-      expect(adapters.remoteInfoRepo.tryGet).toHaveBeenCalledWith('team/mfe1');
-
-      expect(adapters.remoteEntryProvider.provide).not.toHaveBeenCalled();
-
-      expect(result.isPresent()).toBe(false);
-    });
-
     it('should log a warning if fetched remote name does not match requested name', async () => {
       const result = await getRemoteEntry(
         mockScopeUrl_MFE1({ file: 'remoteEntry.json' }),
@@ -104,210 +84,86 @@ describe('createGetRemoteEntry', () => {
     });
   });
 
-  describe('overriding cached remotes', () => {
-    it('should override fetching remote if it exists in repository and overrideCachedRemotes is always', async () => {
-      config.profile.overrideCachedRemotes = 'always';
-      adapters.remoteInfoRepo.tryGet = vi.fn(() =>
-        Optional.of<RemoteInfo>({
-          scopeUrl: mockScopeUrl_MFE1({ folder: 'v1' }),
-          exposes: [],
-        })
-      );
+  // The committed import map cannot drop a remote's imports, so a dynamic init never replaces a known remote,
+  // whatever overrideCachedRemotes says: that setting only applies to initFederation.
+  describe('a remote that is already initialized', () => {
+    const url = (folder: string) => mockScopeUrl_MFE1({ folder, file: 'remoteEntry.json' });
+    const ignored = (folder: string) =>
+      `[team/mfe1] Already initialized from '${url('v1')}', ignoring '${url(folder)}'.`;
 
-      const result = await getRemoteEntry(
-        mockScopeUrl_MFE1({ folder: 'v2', file: 'remoteEntry.json' }),
-        'team/mfe1'
+    beforeEach(() => {
+      const info: RemoteInfo = { scopeUrl: mockScopeUrl_MFE1({ folder: 'v1' }), exposes: [] };
+      adapters.remoteInfoRepo.contains = vi.fn(name => name === 'team/mfe1');
+      adapters.remoteInfoRepo.tryGet = vi.fn((name: string) =>
+        name === 'team/mfe1' ? Optional.of(info) : Optional.empty<RemoteInfo>()
       );
-      expect(adapters.remoteInfoRepo.tryGet).toHaveBeenCalledWith('team/mfe1');
-
-      expect(adapters.remoteEntryProvider.provide).toHaveBeenCalledWith(
-        mockScopeUrl_MFE1({ folder: 'v2', file: 'remoteEntry.json' })
-      );
-
-      expect(result.isPresent()).toEqual(true);
+      adapters.remoteInfoRepo.getAll = vi.fn(() => ({ 'team/mfe1': info }));
     });
 
-    it('should not override fetching remote if it exists in repository and overrideCachedRemotes is init-only', async () => {
-      config.profile.overrideCachedRemotes = 'init-only';
-      adapters.remoteInfoRepo.tryGet = vi.fn(() =>
-        Optional.of<RemoteInfo>({
-          scopeUrl: mockScopeUrl_MFE1({ folder: 'v1' }),
-          exposes: [],
-        })
+    const settings = [
+      { overrideCachedRemotes: 'never', overrideCachedRemotesIfURLMatches: false },
+      { overrideCachedRemotes: 'init-only', overrideCachedRemotesIfURLMatches: false },
+      { overrideCachedRemotes: 'always', overrideCachedRemotesIfURLMatches: false },
+      { overrideCachedRemotes: 'always', overrideCachedRemotesIfURLMatches: true },
+    ] as const;
+    const refs = [
+      { ref: 'team/mfe1', label: 'its name' },
+      { ref: undefined, label: 'no ref' },
+      { ref: { integrity: 'sha384-AAA' }, label: 'an integrity-only ref' },
+    ];
+
+    // A repeated load is the lazy-route pattern, not an attempt to replace the remote: no fetch, no warning.
+    describe.each(settings)('under %o', profile => {
+      beforeEach(() => Object.assign(config.profile, profile));
+
+      it.each(refs)(
+        'should omit the fetch of the URL it is initialized from given $label',
+        async ({ ref }) => {
+          const result = await getRemoteEntry(url('v1'), ref);
+
+          expect(adapters.remoteEntryProvider.provide).not.toHaveBeenCalled();
+          expect(result.isPresent()).toBe(false);
+          expect(config.log.warn).not.toHaveBeenCalled();
+          expect(config.log.debug).toHaveBeenCalledWith(
+            7,
+            `Found remote 'team/mfe1' at '${url('v1')}' in storage, omitting fetch.`
+          );
+        }
       );
 
-      const result = await getRemoteEntry(
-        mockScopeUrl_MFE1({ folder: 'v2', file: 'remoteEntry.json' }),
-        'team/mfe1'
-      );
-      expect(adapters.remoteInfoRepo.tryGet).toHaveBeenCalledWith('team/mfe1');
+      it('should warn and omit another URL requested by its name, without fetching it', async () => {
+        const result = await getRemoteEntry(url('v2'), 'team/mfe1');
 
-      expect(adapters.remoteEntryProvider.provide).not.toHaveBeenCalled();
+        expect(adapters.remoteEntryProvider.provide).not.toHaveBeenCalled();
+        expect(result.isPresent()).toBe(false);
+        expect(config.log.warn).toHaveBeenCalledWith(7, ignored('v2'));
+      });
 
-      expect(result.isPresent()).toEqual(false);
-    });
+      // Without its name the remote is only known once its entry is fetched.
+      it.each(refs.slice(1))('should warn and omit another URL given $label', async ({ ref }) => {
+        const result = await getRemoteEntry(url('v2'), ref);
 
-    it('should not override fetching remote if it exists in repository and overrideCachedRemotes is never', async () => {
-      config.profile.overrideCachedRemotes = 'never';
-      adapters.remoteInfoRepo.tryGet = vi.fn(() =>
-        Optional.of<RemoteInfo>({
-          scopeUrl: mockScopeUrl_MFE1({ folder: 'v1' }),
-          exposes: [],
-        })
-      );
-
-      const result = await getRemoteEntry(
-        mockScopeUrl_MFE1({ folder: 'v2', file: 'remoteEntry.json' }),
-        'team/mfe1'
-      );
-      expect(adapters.remoteInfoRepo.tryGet).toHaveBeenCalledWith('team/mfe1');
-
-      expect(adapters.remoteEntryProvider.provide).not.toHaveBeenCalled();
-
-      expect(result.isPresent()).toEqual(false);
-    });
-
-    it('should skip fetching remote if URL matches cached remote info', async () => {
-      config.profile.overrideCachedRemotes = 'always';
-      config.profile.overrideCachedRemotesIfURLMatches = false;
-
-      adapters.remoteInfoRepo.tryGet = vi.fn(() =>
-        Optional.of<RemoteInfo>({
-          scopeUrl: mockScopeUrl_MFE1({ folder: 'v1' }),
-          exposes: [],
-        })
-      );
-
-      const result = await getRemoteEntry(
-        mockScopeUrl_MFE1({ folder: 'v1', file: 'remoteEntry.json' }),
-        'team/mfe1'
-      );
-      expect(adapters.remoteInfoRepo.tryGet).toHaveBeenCalledWith('team/mfe1');
-
-      expect(adapters.remoteEntryProvider.provide).not.toHaveBeenCalled();
-
-      expect(result.isPresent()).toEqual(false);
-    });
-
-    it('should override remote if URL matches cached remote info and enabled in config', async () => {
-      config.profile.overrideCachedRemotes = 'always';
-      config.profile.overrideCachedRemotesIfURLMatches = true;
-      adapters.remoteInfoRepo.contains = vi.fn(() => true);
-
-      adapters.remoteInfoRepo.tryGet = vi.fn(() =>
-        Optional.of<RemoteInfo>({
-          scopeUrl: mockScopeUrl_MFE1({ folder: 'v1' }),
-          exposes: [],
-        })
-      );
-
-      const result = await getRemoteEntry(
-        mockScopeUrl_MFE1({ folder: 'v1', file: 'remoteEntry.json' }),
-        'team/mfe1'
-      );
-      expect(adapters.remoteInfoRepo.tryGet).toHaveBeenCalledWith('team/mfe1');
-
-      expect(adapters.remoteEntryProvider.provide).toHaveBeenCalledWith(
-        mockScopeUrl_MFE1({ folder: 'v1', file: 'remoteEntry.json' })
-      );
-
-      expect(result.isPresent()).toEqual(true);
-      expect(result.get()).toEqual({
-        ...mockRemoteEntry_MFE1(),
-        url: mockScopeUrl_MFE1({ folder: 'v1', file: 'remoteEntry.json' }),
-        override: true,
+        expect(adapters.remoteEntryProvider.provide).toHaveBeenCalled();
+        expect(result.isPresent()).toBe(false);
+        expect(config.log.warn).toHaveBeenCalledWith(7, ignored('v2'));
       });
     });
 
-    // Without a name the overrideCachedRemotes check cannot run before the fetch, so even 'always' only
-    // replaces a remote that is requested by name.
-    it.each([
-      { ref: undefined, label: 'no ref' },
-      { ref: { integrity: 'sha384-AAA' }, label: 'an integrity-only ref' },
-    ])(
-      'should warn and omit a fetched remote that is already initialized when given $label',
-      async ({ ref }) => {
-        config.profile.overrideCachedRemotes = 'always';
-        config.profile.overrideCachedRemotesIfURLMatches = true;
-        adapters.remoteInfoRepo.contains = vi.fn(() => true);
-        adapters.remoteInfoRepo.tryGet = vi.fn(() =>
-          Optional.of<RemoteInfo>({ scopeUrl: mockScopeUrl_MFE1({ folder: 'v1' }), exposes: [] })
-        );
+    it('should warn and omit a fetched remote that is initialized under another name than requested', async () => {
+      const result = await getRemoteEntry(url('v2'), 'team/mfe2');
 
-        const result = await getRemoteEntry(
-          mockScopeUrl_MFE1({ folder: 'v2', file: 'remoteEntry.json' }),
-          ref
-        );
+      expect(result.isPresent()).toBe(false);
+      expect(config.log.warn).toHaveBeenCalledWith(7, ignored('v2'));
+    });
+  });
 
-        expect(adapters.remoteEntryProvider.provide).toHaveBeenCalled();
-        expect(result.isPresent()).toEqual(false);
-        expect(config.log.warn).toHaveBeenCalledWith(
-          7,
-          `[team/mfe1] Already initialized from '${mockScopeUrl_MFE1({ folder: 'v1', file: 'remoteEntry.json' })}', ignoring '${mockScopeUrl_MFE1({ folder: 'v2', file: 'remoteEntry.json' })}'.`
-        );
-      }
+  it('should return a fetched remote that is not initialized when given no name', async () => {
+    const result = await getRemoteEntry(
+      mockScopeUrl_MFE1({ folder: 'v2', file: 'remoteEntry.json' })
     );
 
-    // A repeated unnamed load is the lazy-route pattern, not an attempt to replace the remote: no fetch, no warning.
-    it.each([
-      { ref: undefined, label: 'no ref' },
-      { ref: { integrity: 'sha384-AAA' }, label: 'an integrity-only ref' },
-    ])(
-      'should omit the fetch of a URL a remote is already initialized from when given $label',
-      async ({ ref }) => {
-        config.profile.overrideCachedRemotes = 'always';
-        config.profile.overrideCachedRemotesIfURLMatches = true;
-        adapters.remoteInfoRepo.getAll = vi.fn(() => ({
-          'team/mfe1': { scopeUrl: mockScopeUrl_MFE1({ folder: 'v1' }), exposes: [] },
-        }));
-
-        const result = await getRemoteEntry(
-          mockScopeUrl_MFE1({ folder: 'v1', file: 'remoteEntry.json' }),
-          ref
-        );
-
-        expect(adapters.remoteEntryProvider.provide).not.toHaveBeenCalled();
-        expect(result.isPresent()).toEqual(false);
-        expect(config.log.warn).not.toHaveBeenCalled();
-        expect(config.log.debug).toHaveBeenCalledWith(
-          7,
-          `Found remote 'team/mfe1' at '${mockScopeUrl_MFE1({ folder: 'v1', file: 'remoteEntry.json' })}' in storage, omitting fetch.`
-        );
-      }
-    );
-
-    // The requested name passed the check, but the fetched entry is another remote that is already initialized.
-    it('should omit a fetched remote that is already initialized under another name than requested', async () => {
-      config.profile.overrideCachedRemotes = 'always';
-      adapters.remoteInfoRepo.contains = vi.fn(name => name === 'team/mfe1');
-      adapters.remoteInfoRepo.tryGet = vi.fn((name: string) =>
-        name === 'team/mfe1'
-          ? Optional.of<RemoteInfo>({ scopeUrl: mockScopeUrl_MFE1({ folder: 'v1' }), exposes: [] })
-          : Optional.empty<RemoteInfo>()
-      );
-
-      const result = await getRemoteEntry(
-        mockScopeUrl_MFE1({ folder: 'v2', file: 'remoteEntry.json' }),
-        'team/mfe2'
-      );
-
-      expect(result.isPresent()).toEqual(false);
-      expect(config.log.warn).toHaveBeenCalledWith(
-        7,
-        `[team/mfe1] Already initialized from '${mockScopeUrl_MFE1({ folder: 'v1', file: 'remoteEntry.json' })}', ignoring '${mockScopeUrl_MFE1({ folder: 'v2', file: 'remoteEntry.json' })}'.`
-      );
-    });
-
-    it('should still return a fetched remote that is not initialized when given no name', async () => {
-      adapters.remoteInfoRepo.contains = vi.fn(() => false);
-
-      const result = await getRemoteEntry(
-        mockScopeUrl_MFE1({ folder: 'v2', file: 'remoteEntry.json' })
-      );
-
-      expect(result.isPresent()).toEqual(true);
-      expect(result.get().override).toBeUndefined();
-    });
+    expect(result.isPresent()).toBe(true);
+    expect(result.get().override).toBeUndefined();
   });
 
   describe('integrity', () => {

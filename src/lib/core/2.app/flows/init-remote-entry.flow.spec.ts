@@ -221,48 +221,34 @@ describe('init-remote-entry flow: a failed load', () => {
     expect(adapters.browser.setImportMapFn).not.toHaveBeenCalled();
   });
 
-  // r2 keeps 'b' shared at 1.0.0 once r0's previous copy is evicted, so the reload's 2.0.0 is still refused.
-  it('keeps the previous copy of a remote when an overriding reload is refused', async () => {
-    served['http://r2/remoteEntry.json'] = () =>
-      entry('r2', [shared('a', '1.0.0', '^1.0.0'), shared('b', '1.0.0', '^1.0.0')]);
-    await initRemoteEntry('http://r2/remoteEntry.json', 'r2');
-    config.profile.overrideCachedRemotes = 'always';
-    const before = snapshot();
-    served['http://r0-v2/remoteEntry.json'] = () =>
-      entry('r0', [shared('a', '1.0.0', '^1.0.0'), shared('b', '2.0.0', '^2.0.0')], {
-        url: 'http://r0-v2/remoteEntry.json',
-      });
+  // Not a failed load, but the same promise: the page is left as it was. The committed map keeps serving r0's
+  // previous build, so even under 'always' a reload of r0 from another URL replaces nothing, by name or without.
+  it.each([
+    { ref: 'r0', label: 'by name' },
+    { ref: undefined, label: 'without a name' },
+  ])(
+    'leaves the page untouched when a remote that is already initialized is reloaded $label',
+    async ({ ref }) => {
+      config.profile.overrideCachedRemotes = 'always';
+      vi.mocked(adapters.browser.setImportMapFn).mockClear();
+      const before = snapshot();
+      const persisted = stored();
+      served['http://r0-v2/remoteEntry.json'] = () =>
+        entry('r0', [shared('a', '1.0.0', '^1.0.0'), shared('b', '2.0.0', '^2.0.0')], {
+          url: 'http://r0-v2/remoteEntry.json',
+        });
 
-    await expect(initRemoteEntry('http://r0-v2/remoteEntry.json', 'r0')).rejects.toThrow(
-      "Could not process remote 'r0'"
-    );
+      await expect(initRemoteEntry('http://r0-v2/remoteEntry.json', ref)).resolves.toBeUndefined();
 
-    expect(snapshot()).toEqual(before);
-    expect(adapters.remoteInfoRepo.tryGet('r0').get()!.scopeUrl).toBe('http://r0/');
-  });
-
-  // Not a failed load, but the same promise: the page is left as it was. Even under 'always' only a reload by
-  // name replaces a remote.
-  it('leaves the page untouched when a remote that is already initialized is reloaded without a name', async () => {
-    config.profile.overrideCachedRemotes = 'always';
-    vi.mocked(adapters.browser.setImportMapFn).mockClear();
-    const before = snapshot();
-    const persisted = stored();
-    served['http://r0-v2/remoteEntry.json'] = () =>
-      entry('r0', [shared('a', '1.0.0', '^1.0.0'), shared('b', '2.0.0', '^2.0.0')], {
-        url: 'http://r0-v2/remoteEntry.json',
-      });
-
-    await expect(initRemoteEntry('http://r0-v2/remoteEntry.json')).resolves.toBeUndefined();
-
-    expect(snapshot()).toEqual(before);
-    expect(stored()).toEqual(persisted);
-    expect(adapters.browser.setImportMapFn).not.toHaveBeenCalled();
-    expect(config.log.warn).toHaveBeenCalledWith(
-      7,
-      "[r0] Already initialized from 'http://r0/remoteEntry.json', ignoring 'http://r0-v2/remoteEntry.json'."
-    );
-  });
+      expect(snapshot()).toEqual(before);
+      expect(stored()).toEqual(persisted);
+      expect(adapters.browser.setImportMapFn).not.toHaveBeenCalled();
+      expect(config.log.warn).toHaveBeenCalledWith(
+        7,
+        "[r0] Already initialized from 'http://r0/remoteEntry.json', ignoring 'http://r0-v2/remoteEntry.json'."
+      );
+    }
+  );
 
   it('neither fetches nor warns when a remote is reloaded without a name from the URL it was initialized from', async () => {
     vi.mocked(adapters.browser.setImportMapFn).mockClear();
