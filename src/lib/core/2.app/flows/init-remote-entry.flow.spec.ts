@@ -241,6 +241,41 @@ describe('init-remote-entry flow: a failed load', () => {
     expect(adapters.remoteInfoRepo.tryGet('r0').get()!.scopeUrl).toBe('http://r0/');
   });
 
+  // Not a failed load, but the same promise: the page is left as it was. Even under 'always' only a reload by
+  // name replaces a remote.
+  it('leaves the page untouched when a remote that is already initialized is reloaded without a name', async () => {
+    config.profile.overrideCachedRemotes = 'always';
+    vi.mocked(adapters.browser.setImportMapFn).mockClear();
+    const before = snapshot();
+    const persisted = stored();
+    served['http://r0-v2/remoteEntry.json'] = () =>
+      entry('r0', [shared('a', '1.0.0', '^1.0.0'), shared('b', '2.0.0', '^2.0.0')], {
+        url: 'http://r0-v2/remoteEntry.json',
+      });
+
+    await expect(initRemoteEntry('http://r0-v2/remoteEntry.json')).resolves.toBeUndefined();
+
+    expect(snapshot()).toEqual(before);
+    expect(stored()).toEqual(persisted);
+    expect(adapters.browser.setImportMapFn).not.toHaveBeenCalled();
+    expect(config.log.warn).toHaveBeenCalledWith(
+      7,
+      "[r0] Remote is already initialized, omitting 'http://r0-v2/remoteEntry.json'. Request it by name to override it."
+    );
+  });
+
+  it('neither fetches nor warns when a remote is reloaded without a name from the URL it was initialized from', async () => {
+    vi.mocked(adapters.browser.setImportMapFn).mockClear();
+    const before = snapshot();
+
+    await expect(initRemoteEntry('http://r0/remoteEntry.json')).resolves.toBeUndefined();
+
+    expect(adapters.remoteEntryProvider.provide).not.toHaveBeenCalled();
+    expect(config.log.warn).not.toHaveBeenCalled();
+    expect(snapshot()).toEqual(before);
+    expect(adapters.browser.setImportMapFn).not.toHaveBeenCalled();
+  });
+
   const dumps = () =>
     vi.mocked(config.log.debug).mock.calls.filter(([, msg]) => String(msg).includes('STATE DUMP'));
 

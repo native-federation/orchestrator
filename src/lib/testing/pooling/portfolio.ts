@@ -309,12 +309,13 @@ export const portfolio = (
   // The dynamic flow for one remote entry, fetched by URL, over the map this page holds: its init's plus every
   // earlier load's delta. Regenerating it from the record would publish earlier loads' copies in `imports` and
   // mark them `cached`, which no real page does. A page that ran no init (seeded) generates it once.
-  const runDynamic = async (entry: RemoteEntry): Promise<DynamicLoad> => {
+  // A name opts the load into overrideCachedRemotes; an unnamed load of a known remote is omitted.
+  const runDynamic = async (entry: RemoteEntry, remoteName?: RemoteName): Promise<DynamicLoad> => {
     publish(entry);
     const committed = page ?? (await drivers.generateImportMap());
     installed = undefined;
     actions = undefined;
-    await createInitRemoteEntryFlow({ flow: drivers, adapters, config })(entry.url);
+    await createInitRemoteEntryFlow({ flow: drivers, adapters, config })(entry.url, remoteName);
     if (!installed || !actions) throw new Error(`'${entry.name}' was not loaded.`);
     const importMap: ImportMap = installed;
     const merged = addToImportMap(committed, importMap);

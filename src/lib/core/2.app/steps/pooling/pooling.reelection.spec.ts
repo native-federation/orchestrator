@@ -419,7 +419,7 @@ describe('pooling re-election', () => {
         await q.runInit([remote('R', sharedIn('x', 'a', '2.0.0', '^2.0.0')), ...others]);
         expect(q.record('b').poolName).toBe('x');
 
-        await q.runDynamic(R2);
+        await q.runDynamic(R2, 'R');
         expect(q.record('a').dirty).toBe(true);
 
         q.reload();

@@ -28,6 +28,15 @@ export function createGetRemoteEntry(
       return Optional.empty<RemoteEntry>();
     }
 
+    const knownAtUrl = remoteName ? undefined : findCachedRemoteAt(remoteEntryUrl);
+    if (knownAtUrl) {
+      config.log.debug(
+        7,
+        `Found remote '${knownAtUrl}' at '${remoteEntryUrl}' in storage, omitting fetch.`
+      );
+      return Optional.empty<RemoteEntry>();
+    }
+
     try {
       const remoteEntry = integrity
         ? await ports.remoteEntryProvider.provide(remoteEntryUrl, { integrity })
@@ -48,6 +57,14 @@ export function createGetRemoteEntry(
       }
 
       if (ports.remoteInfoRepo.contains(remoteEntry.name)) {
+        // Only a remote requested by name has passed the overrideCachedRemotes check above.
+        if (remoteEntry.name !== remoteName) {
+          config.log.warn(
+            7,
+            `[${remoteEntry.name}] Remote is already initialized, omitting '${remoteEntryUrl}'. Request it by name to override it.`
+          );
+          return Optional.empty<RemoteEntry>();
+        }
         remoteEntry.override = true;
         config.log.debug(7, `Overriding existing remote '${remoteName}' with '${remoteEntryUrl}'.`);
       }
@@ -74,6 +91,12 @@ export function createGetRemoteEntry(
             remoteEntryUrl === _path.join(cachedRemoteInfo.scopeUrl, 'remoteEntry.json'))
       )
       .orElse(false);
+  }
+
+  function findCachedRemoteAt(remoteEntryUrl: string): RemoteName | undefined {
+    return Object.entries(ports.remoteInfoRepo.getAll()).find(
+      ([, info]) => _path.join(info.scopeUrl, 'remoteEntry.json') === remoteEntryUrl
+    )?.[0];
   }
 
   function checkForSSE(entry: RemoteEntry): RemoteEntry {
