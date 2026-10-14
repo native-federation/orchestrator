@@ -101,15 +101,6 @@ describe('evicting an overridden remote', () => {
       expect(importMap.scopes?.[scopeOf('team/mfe1')]).toBeUndefined();
     });
 
-    it('drops the chunks of the replaced build on the dynamic path', async () => {
-      const { processRemoteEntries, updateCache, convertToImportMap } = setup();
-
-      await processRemoteEntries([withChunk()]);
-      const importMap = await convertToImportMap(await updateCache(withoutChunk()));
-
-      expect(importMap.scopes?.[scopeOf('team/mfe1')]).toBeUndefined();
-    });
-
     it('keeps the chunks a remote no override touched', async () => {
       const { processRemoteEntries, generateImportMap } = setup();
 

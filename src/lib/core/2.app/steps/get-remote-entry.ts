@@ -23,10 +23,17 @@ export function createGetRemoteEntry(
   return async (remoteEntryUrl: RemoteEntryUrl, remote?: RemoteRef) => {
     const { name: remoteName, integrity } = normalizeRemoteRef(remote);
 
-    if (!!remoteName && shouldSkipCachedRemote(remoteEntryUrl, remoteName)) {
-      config.log.debug(7, `Found remote '${remoteName}' in storage, omitting fetch.`);
+    // The committed import map cannot drop a remote's imports, so a dynamic init never replaces a known remote.
+    const knownAtUrl = findCachedRemoteAt(remoteEntryUrl);
+    if (knownAtUrl) {
+      config.log.debug(
+        7,
+        `Found remote '${knownAtUrl}' at '${remoteEntryUrl}' in storage, omitting fetch.`
+      );
       return Optional.empty<RemoteEntry>();
     }
+    if (!!remoteName && ports.remoteInfoRepo.contains(remoteName))
+      return warnInitialized(remoteName, remoteEntryUrl);
 
     try {
       const remoteEntry = integrity
@@ -47,10 +54,8 @@ export function createGetRemoteEntry(
         config.log.warn(7, errorMsg + ' Omitting expected name.');
       }
 
-      if (ports.remoteInfoRepo.contains(remoteEntry.name)) {
-        remoteEntry.override = true;
-        config.log.debug(7, `Overriding existing remote '${remoteName}' with '${remoteEntryUrl}'.`);
-      }
+      if (ports.remoteInfoRepo.contains(remoteEntry.name))
+        return warnInitialized(remoteEntry.name, remoteEntryUrl);
       return Optional.of(checkForSSE(remoteEntry));
     } catch (error) {
       config.log.error(
@@ -64,16 +69,22 @@ export function createGetRemoteEntry(
     }
   };
 
-  function shouldSkipCachedRemote(remoteEntryUrl: string, remoteName: RemoteName): boolean {
-    return ports.remoteInfoRepo
-      .tryGet(remoteName)
-      .map(
-        cachedRemoteInfo =>
-          config.profile.overrideCachedRemotes !== 'always' ||
-          (!config.profile.overrideCachedRemotesIfURLMatches &&
-            remoteEntryUrl === _path.join(cachedRemoteInfo.scopeUrl, 'remoteEntry.json'))
-      )
-      .orElse(false);
+  function warnInitialized(name: RemoteName, remoteEntryUrl: string): Optional<RemoteEntry> {
+    const initializedFrom = ports.remoteInfoRepo
+      .tryGet(name)
+      .map(info => _path.join(info.scopeUrl, 'remoteEntry.json'))
+      .get();
+    config.log.warn(
+      7,
+      `[${name}] Already initialized from '${initializedFrom}', ignoring '${remoteEntryUrl}'.`
+    );
+    return Optional.empty<RemoteEntry>();
+  }
+
+  function findCachedRemoteAt(remoteEntryUrl: string): RemoteName | undefined {
+    return Object.entries(ports.remoteInfoRepo.getAll()).find(
+      ([, info]) => _path.join(info.scopeUrl, 'remoteEntry.json') === remoteEntryUrl
+    )?.[0];
   }
 
   function checkForSSE(entry: RemoteEntry): RemoteEntry {
