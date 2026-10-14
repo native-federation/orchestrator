@@ -9,4 +9,5 @@ export const mockScopedExternalsRepository = (): Mocked<ForScopedExternalsStorag
   remove: vi.fn(),
   tryGet: vi.fn(_remote => Optional.empty<ScopedExternal>()),
   commit: vi.fn(),
+  rollback: vi.fn(),
 });

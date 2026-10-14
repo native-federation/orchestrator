@@ -303,4 +303,71 @@ describe('createScopedExternalsRepository', () => {
       expect(entry.set).toHaveBeenCalledTimes(1);
     });
   });
+
+  // A failed load hands its edits back: the cache returns to what storage last received.
+  describe('rollback', () => {
+    it('should restore the last commit after an uncommitted write', () => {
+      const { externalsRepo } = setupWithCache({ 'team/mfe1': mockExternal_E() });
+      externalsRepo.addExternal('team/mfe2', 'dep-f', mockVersion.scoped('1.2.4', 'dep-f'));
+      externalsRepo.commit();
+
+      externalsRepo.addExternal('team/mfe1', 'dep-x', mockVersion.scoped('9.9.9', 'dep-x'));
+      externalsRepo.addExternal('team/mfe3', 'dep-x', mockVersion.scoped('9.9.9', 'dep-x'));
+      externalsRepo.rollback();
+
+      expect(externalsRepo.getAll()).toEqual({
+        'team/mfe1': mockExternal_E(),
+        'team/mfe2': { 'dep-f': mockVersion.scoped('1.2.4', 'dep-f') },
+      });
+    });
+
+    it('should restore the last commit after an uncommitted remove', () => {
+      const { externalsRepo } = setupWithCache({ 'team/mfe1': mockExternal_E() });
+
+      externalsRepo.remove('team/mfe1');
+      externalsRepo.rollback();
+
+      expect(externalsRepo.tryGet('team/mfe1').get()).toEqual(mockExternal_E());
+    });
+
+    it('should fall back to an empty cache when nothing was committed', () => {
+      const { externalsRepo } = setupWithCache(undefined);
+
+      externalsRepo.addExternal('team/mfe1', 'dep-x', mockVersion.scoped('9.9.9', 'dep-x'));
+      externalsRepo.rollback();
+
+      expect(externalsRepo.getAll()).toEqual({});
+    });
+
+    it('should not persist the dropped edit on the next commit', () => {
+      const { externalsRepo, entry } = setupWithCache({});
+
+      externalsRepo.addExternal('team/mfe1', 'dep-x', mockVersion.scoped('9.9.9', 'dep-x'));
+      externalsRepo.rollback();
+      externalsRepo.commit();
+
+      expect(entry.set).not.toHaveBeenCalled();
+    });
+
+    it('should persist a write made after the rollback once it is committed', () => {
+      const { externalsRepo, mockStorage } = setupWithCache({});
+
+      externalsRepo.addExternal('team/mfe1', 'dep-x', mockVersion.scoped('9.9.9', 'dep-x'));
+      externalsRepo.rollback();
+      externalsRepo.addExternal('team/mfe2', 'dep-f', mockVersion.scoped('1.2.4', 'dep-f'));
+
+      expect(mockStorage['scoped-externals']).toEqual({});
+
+      externalsRepo.commit();
+
+      expect(mockStorage['scoped-externals']).toEqual({
+        'team/mfe2': { 'dep-f': mockVersion.scoped('1.2.4', 'dep-f') },
+      });
+    });
+
+    it('should return the repository instance for chaining', () => {
+      const { externalsRepo } = setupWithCache({});
+      expect(externalsRepo.rollback()).toBe(externalsRepo);
+    });
+  });
 });

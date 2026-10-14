@@ -6,5 +6,6 @@ export const mockChunkRepository = (): Mocked<ForSharedChunksStorage> => ({
   addOrReplace: vi.fn(),
   remove: vi.fn(),
   commit: vi.fn(),
+  rollback: vi.fn(),
   tryGet: vi.fn((_a, _b) => Optional.empty<string[]>()),
 });

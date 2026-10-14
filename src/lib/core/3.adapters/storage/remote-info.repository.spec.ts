@@ -289,4 +289,77 @@ describe('createRemoteInfoRepository', () => {
       expect(entry.set).toHaveBeenCalledTimes(1);
     });
   });
+
+  // A failed load hands its edits back: the cache returns to what storage last received.
+  describe('rollback', () => {
+    it('should restore the last commit after an uncommitted write', () => {
+      const { remoteInfoRepo } = setupWithCache({ 'team/mfe1': mockRemoteInfo_MFE1() });
+      remoteInfoRepo.addOrUpdate('team/mfe2', mockRemoteInfo_MFE2());
+      remoteInfoRepo.commit();
+
+      remoteInfoRepo.addOrUpdate('team/mfe3', mockRemoteInfo_MFE1());
+      remoteInfoRepo.rollback();
+
+      expect(remoteInfoRepo.getAll()).toEqual({
+        'team/mfe1': mockRemoteInfo_MFE1(),
+        'team/mfe2': mockRemoteInfo_MFE2(),
+      });
+    });
+
+    it('should restore the last commit after an uncommitted remove', () => {
+      const { remoteInfoRepo } = setupWithCache({ 'team/mfe1': mockRemoteInfo_MFE1() });
+
+      remoteInfoRepo.remove('team/mfe1');
+      remoteInfoRepo.rollback();
+
+      expect(remoteInfoRepo.tryGet('team/mfe1').get()).toEqual(mockRemoteInfo_MFE1());
+    });
+
+    it('should restore a record changed in place through tryGet', () => {
+      const { remoteInfoRepo } = setupWithCache({ 'team/mfe1': mockRemoteInfo_MFE1() });
+
+      remoteInfoRepo.tryGet('team/mfe1').get()!.exposes.push({ moduleName: './X', file: 'x.js' });
+      remoteInfoRepo.rollback();
+
+      expect(remoteInfoRepo.tryGet('team/mfe1').get()).toEqual(mockRemoteInfo_MFE1());
+    });
+
+    it('should fall back to an empty cache when nothing was committed', () => {
+      const { remoteInfoRepo } = setupWithCache(undefined);
+
+      remoteInfoRepo.addOrUpdate('team/mfe1', mockRemoteInfo_MFE1());
+      remoteInfoRepo.rollback();
+
+      expect(remoteInfoRepo.getAll()).toEqual({});
+    });
+
+    it('should not persist the dropped edit on the next commit', () => {
+      const { remoteInfoRepo, entry } = setupWithCache({});
+
+      remoteInfoRepo.addOrUpdate('team/mfe1', mockRemoteInfo_MFE1());
+      remoteInfoRepo.rollback();
+      remoteInfoRepo.commit();
+
+      expect(entry.set).not.toHaveBeenCalled();
+    });
+
+    it('should persist a write made after the rollback once it is committed', () => {
+      const { remoteInfoRepo, mockStorage } = setupWithCache({});
+
+      remoteInfoRepo.addOrUpdate('team/mfe1', mockRemoteInfo_MFE1());
+      remoteInfoRepo.rollback();
+      remoteInfoRepo.addOrUpdate('team/mfe2', mockRemoteInfo_MFE2());
+
+      expect(mockStorage['remotes']).toEqual({});
+
+      remoteInfoRepo.commit();
+
+      expect(mockStorage['remotes']).toEqual({ 'team/mfe2': mockRemoteInfo_MFE2() });
+    });
+
+    it('should return the repository instance for chaining', () => {
+      const { remoteInfoRepo } = setupWithCache({});
+      expect(remoteInfoRepo.rollback()).toBe(remoteInfoRepo);
+    });
+  });
 });

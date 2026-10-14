@@ -13,7 +13,7 @@ const createScopedExternalsRepository = (config: StorageConfig): ForScopedExtern
 
   if (config.clearStorage) STORAGE.clear();
 
-  const _cache: ScopedExternals = STORAGE.get() ?? {};
+  let _cache: ScopedExternals = STORAGE.get() ?? {};
 
   let _dirty = false;
 
@@ -40,6 +40,11 @@ const createScopedExternalsRepository = (config: StorageConfig): ForScopedExtern
     commit: function () {
       if (!_dirty) return this;
       STORAGE.set(_cache);
+      _dirty = false;
+      return this;
+    },
+    rollback: function () {
+      _cache = STORAGE.get() ?? {};
       _dirty = false;
       return this;
     },

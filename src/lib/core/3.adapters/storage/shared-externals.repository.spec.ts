@@ -683,4 +683,104 @@ describe('createSharedExternalsRepository', () => {
       expect(entry.set).toHaveBeenCalledTimes(1);
     });
   });
+
+  // A failed load hands its edits back: the cache returns to what storage last received.
+  describe('rollback', () => {
+    it('should restore the last commit after an uncommitted write', () => {
+      const { externalsRepo } = setupWithCache({ [GLOBAL_SCOPE]: { 'dep-a': mockExternal_A() } });
+      externalsRepo.addOrUpdate('dep-b', mockExternal_B());
+      externalsRepo.commit();
+
+      externalsRepo.addOrUpdate('dep-c', mockExternal_A(), 'custom-scope');
+      externalsRepo.rollback();
+
+      expect(externalsRepo.getScopes()).toEqual([GLOBAL_SCOPE]);
+      expect(externalsRepo.getFromScope()).toEqual({
+        'dep-a': mockExternal_A(),
+        'dep-b': mockExternal_B(),
+      });
+    });
+
+    // update-cache and determine edit the record tryGet returns before writing it back.
+    it('should restore a record changed in place through tryGet', () => {
+      const { externalsRepo } = setupWithCache({ [GLOBAL_SCOPE]: { 'dep-a': mockExternal_A() } });
+
+      const record = externalsRepo.tryGet('dep-a').get()!;
+      record.dirty = true;
+      record.versions.push(mockVersion.shared(v2_2_1, 'dep-a', { remotes: ['team/mfe9'] }));
+      externalsRepo.addOrUpdate('dep-a', record);
+      externalsRepo.rollback();
+
+      expect(externalsRepo.tryGet('dep-a').get()).toEqual(mockExternal_A());
+    });
+
+    it('should restore what removeFromAllScopes evicted', () => {
+      const stored = {
+        [GLOBAL_SCOPE]: {
+          'dep-a': {
+            dirty: false,
+            versions: [
+              mockVersion.shared(v2_1_2, 'dep-a', { remotes: ['team/mfe1'] }),
+              mockVersion.shared(v2_1_1, 'dep-a', { remotes: ['team/mfe2'] }),
+            ],
+          },
+          'dep-d': {
+            dirty: false,
+            versions: [mockVersion.shared(v2_1_2, 'dep-d', { remotes: ['team/mfe1'] })],
+          },
+        },
+      };
+      const { externalsRepo } = setupWithCache(structuredClone(stored));
+
+      externalsRepo.removeFromAllScopes(new Set(['team/mfe1']));
+      externalsRepo.rollback();
+
+      expect(externalsRepo.getFromScope()).toEqual(stored[GLOBAL_SCOPE]);
+    });
+
+    it('should fall back to an empty global scope when nothing was committed', () => {
+      const mockStorageEntry = createStorageHandlerMock({});
+      const externalsRepo = createSharedExternalsRepository({
+        storage: mockStorageEntry,
+        clearStorage: false,
+      });
+
+      externalsRepo.addOrUpdate('dep-a', mockExternal_A(), 'custom-scope');
+      externalsRepo.rollback();
+
+      expect(externalsRepo.getScopes()).toEqual([GLOBAL_SCOPE]);
+      expect(externalsRepo.getFromScope()).toEqual({});
+    });
+
+    it('should not persist the dropped edit on the next commit', () => {
+      const { externalsRepo, entry } = setupWithCache({ [GLOBAL_SCOPE]: {} });
+
+      externalsRepo.addOrUpdate('dep-a', mockExternal_A());
+      externalsRepo.rollback();
+      externalsRepo.commit();
+
+      expect(entry.set).not.toHaveBeenCalled();
+    });
+
+    it('should persist a write made after the rollback once it is committed', () => {
+      const { externalsRepo, mockStorage } = setupWithCache({ [GLOBAL_SCOPE]: {} });
+
+      externalsRepo.addOrUpdate('dep-a', mockExternal_A());
+      externalsRepo.rollback();
+      externalsRepo.addOrUpdate('dep-b', mockExternal_B());
+
+      expect(mockStorage['shared-externals']).toEqual({ [GLOBAL_SCOPE]: {} });
+
+      externalsRepo.commit();
+
+      expect(mockStorage['shared-externals']).toEqual({
+        [GLOBAL_SCOPE]: { 'dep-b': mockExternal_B() },
+      });
+    });
+
+    it('should return the repository instance for chaining', () => {
+      const { externalsRepo } = setupWithCache({ [GLOBAL_SCOPE]: {} });
+      expect(externalsRepo.rollback()).toBe(externalsRepo);
+    });
+  });
 });

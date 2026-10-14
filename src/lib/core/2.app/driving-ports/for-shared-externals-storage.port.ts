@@ -13,4 +13,5 @@ export type ForSharedExternalsStorage = {
     shareScope?: string
   ) => ForSharedExternalsStorage;
   commit: () => ForSharedExternalsStorage;
+  rollback: () => ForSharedExternalsStorage;
 };

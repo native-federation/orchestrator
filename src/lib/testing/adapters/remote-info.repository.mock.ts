@@ -9,4 +9,5 @@ export const mockRemoteInfoRepository = (): Mocked<ForRemoteInfoStorage> => ({
   tryGet: vi.fn(),
   getAll: vi.fn(),
   commit: vi.fn(),
+  rollback: vi.fn(),
 });
