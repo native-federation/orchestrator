@@ -406,6 +406,38 @@ describe('servingBuildOf', () => {
 
       expect(result).toEqual<ServingBuild>({ remote: 'b', tag: '1.0.0' });
     });
+
+    it('never counts a candidate as its own fallback or prices its own build twice', () => {
+      // b itself splits fw/testing off the map. Serving b costs b's build alone and leaves a whole; serving a
+      // also costs b's, which falls back. Counted against itself, b would tie a and lose as the second copy.
+      const externals: [ExternalName, SharedExternal][] = [
+        ['fw', external(version('share', [copy('a', ['fw']), copy('b', ['fw'])]))],
+        ['fw/testing', external(version('scope', [copy('b', ['fw/testing'])]))],
+      ];
+
+      expect(fallbacksOf(externals, { remote: 'b', tag: '1.0.0' })).toEqual([]);
+      expect(fallbacksOf(externals, { remote: 'a', tag: '1.0.0' })).toEqual(['b']);
+      expect(serving(...externals)).toEqual<ServingBuild>({ remote: 'b', tag: '1.0.0' });
+    });
+  });
+
+  // Copies at one tag that ship the same specifiers cost the same, so host, root basis and name decide.
+  it('ranks copies of one tag and surface by host, root basis, then name', () => {
+    const row = (host: boolean, ...remotes: SharedVersionMeta[]) =>
+      serving(['fw', external(version('share', remotes, '1.0.0', host))]);
+
+    expect(row(true, copy('h', ['fw']), copy('a', ['fw']))).toEqual<ServingBuild>({
+      remote: 'h',
+      tag: '1.0.0',
+    });
+    expect(row(false, copy('c', ['fw']), copy('a', ['fw']))).toEqual<ServingBuild>({
+      remote: 'c',
+      tag: '1.0.0',
+    });
+    // The basis is pooling's, so it is no candidate: neither of the rest is the basis, and the name decides.
+    expect(
+      row(false, copy('p', ['fw'], { servedBy: 'x' }), copy('m', ['fw']), copy('k', ['fw']))
+    ).toEqual<ServingBuild>({ remote: 'k', tag: '1.0.0' });
   });
 
   it('breaks an equal rank by name, not by record order', () => {

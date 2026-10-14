@@ -4,7 +4,7 @@ import type { RemoteName } from '../remote/remote-info.contract';
 import type { AcceptsTag } from './compatibility';
 import type { ExternalName, SharedExternal, shareScope } from './external.contract';
 import { mergeRows, redirectRow, rowAt } from './rows';
-import { packageOf } from './specifier';
+import { packageOf, type Specifier } from './specifier';
 import type { SharedVersion, SharedVersionMeta, VersionName } from './version.contract';
 
 export type ServingBuild = { remote: RemoteName; tag: VersionName };
@@ -106,19 +106,17 @@ function candidatesOf(
   accepts: AcceptsTag
 ): ServingCandidate[] {
   const candidates = new Map<string, ServingCandidate>();
+  const costOf = costTable(consumers, accepts);
   for (const row of rows)
     for (const copy of row.remotes) {
       const key = `${row.tag}|${copy.name}`;
       if (copy.servedBy || candidates.has(key)) continue;
       const basis = copy === row.remotes[0];
-      const build = { remote: copy.name, tag: row.tag };
-      const fallbacks = fallbacksFrom(consumers, build);
       candidates.set(key, {
         remote: copy.name,
         tag: row.tag,
         host: basis && row.host,
-        downloads: downloadsOf(build, fallbacks, consumers, accepts),
-        fallbacks: fallbacks.length,
+        ...costOf({ remote: copy.name, tag: row.tag }),
         rootBasis: basis && rootRows.includes(row),
       });
     }
@@ -158,25 +156,48 @@ function consumersOf(externals: PackageExternals): Map<RemoteName, Placed[]> {
   return consumers;
 }
 
-// One per build of the package the page would load beyond what it already has: a cached copy costs nothing.
-function downloadsOf(
-  serving: ServingBuild,
-  fallbacks: RemoteName[],
+type Cost = Pick<ServingCandidate, 'downloads' | 'fallbacks'>;
+// The remotes that fall back and those that download their own build; a cached copy costs nothing.
+type Toll = { fallbacks: Set<RemoteName>; downloads: Set<RemoteName> };
+
+// Builds at one tag that ship the same specifiers there cost the same but for their own remote, so each such
+// surface is tolled once.
+function costTable(
   consumers: Map<RemoteName, Placed[]>,
   accepts: AcceptsTag
-): number {
-  let downloads = 0;
-  for (const [remote, placed] of consumers) {
-    if (placed.every(({ copy }) => copy.cached)) continue;
-    if (
-      remote === serving.remote ||
-      fallbacks.includes(remote) ||
-      runsOffMap(placed, serving.tag, accepts)
-    )
-      downloads++;
-  }
-  return downloads;
+): (build: ServingBuild) => Cost {
+  const tolls = new Map<string, Toll>();
+  return build => {
+    const surface = surfaceOf(consumers, build);
+    const key = [build.tag, ...[...surface].sort()].join('\n');
+    let toll = tolls.get(key);
+    if (!toll) tolls.set(key, (toll = tollOf(consumers, surface, build.tag, accepts)));
+    const others = (remotes: Set<RemoteName>) => remotes.size - Number(remotes.has(build.remote));
+    // The serving remote never falls back, and downloads its own build unless cached.
+    return {
+      downloads: others(toll.downloads) + Number(!allCached(consumers.get(build.remote) ?? [])),
+      fallbacks: others(toll.fallbacks),
+    };
+  };
 }
+
+function tollOf(
+  consumers: Map<RemoteName, Placed[]>,
+  surface: Set<Specifier>,
+  tag: VersionName,
+  accepts: AcceptsTag
+): Toll {
+  const toll: Toll = { fallbacks: new Set(), downloads: new Set() };
+  for (const [remote, placed] of consumers) {
+    const fallback = splitsPackage(placed, surface);
+    if (fallback) toll.fallbacks.add(remote);
+    if (!allCached(placed) && (fallback || runsOffMap(placed, tag, accepts)))
+      toll.downloads.add(remote);
+  }
+  return toll;
+}
+
+const allCached = (placed: Placed[]): boolean => placed.every(({ copy }) => copy.cached);
 
 // The remotes that run part of the package off the map and part on it, or ship a specifier outside the serving
 // build's copies at its tag. Each serves the whole package from its own build instead, so none of its files
@@ -186,19 +207,26 @@ export function fallbacksOf(externals: PackageExternals, serving: ServingBuild):
 }
 
 function fallbacksFrom(consumers: Map<RemoteName, Placed[]>, serving: ServingBuild): RemoteName[] {
-  const surface = new Set(
+  const surface = surfaceOf(consumers, serving);
+  return [...consumers]
+    .filter(([remote, placed]) => remote !== serving.remote && splitsPackage(placed, surface))
+    .map(([remote]) => remote);
+}
+
+function surfaceOf(consumers: Map<RemoteName, Placed[]>, serving: ServingBuild): Set<Specifier> {
+  return new Set(
     (consumers.get(serving.remote) ?? [])
-      .filter(({ row }) => row.tag === serving.tag && row.action !== 'scope')
+      .filter(p => p.row.tag === serving.tag && onMap(p))
       .flatMap(({ copy }) => Object.keys(copy.entries))
   );
-  const onMap = ({ row }: Placed) => row.action !== 'scope';
+}
+
+const onMap = ({ row }: Placed): boolean => row.action !== 'scope';
+
+// A remote with no copy on the map already runs the package wholly from its own build.
+function splitsPackage(placed: Placed[], surface: Set<Specifier>): boolean {
   const uncovered = ({ copy }: Placed) => Object.keys(copy.entries).some(s => !surface.has(s));
-  // A remote with no copy on the map already runs the package wholly from its own build.
-  const splitsPackage = (placed: Placed[]) =>
-    placed.some(onMap) && placed.some(p => !onMap(p) || uncovered(p));
-  return [...consumers]
-    .filter(([remote, placed]) => remote !== serving.remote && splitsPackage(placed))
-    .map(([remote]) => remote);
+  return placed.some(onMap) && placed.some(p => !onMap(p) || uncovered(p));
 }
 
 function runsOffMap(placed: Placed[], tag: VersionName, accepts: AcceptsTag): boolean {
