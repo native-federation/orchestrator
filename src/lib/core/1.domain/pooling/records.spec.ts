@@ -94,6 +94,61 @@ describe('memberRecord', () => {
   });
 });
 
+describe('memberRecord of a package whose copies ship different entrypoints', () => {
+  // The host r2 ships the root at 17.2.0 and sub at 17.2.1; r7's dense copy of the root, listed first, ships
+  // only sub.
+  const remote = (name: string, entries: string[]) => ({
+    ...mockVersionRemote(name, '@y/pkg', { requiredVersion: '*' }),
+    entries: Object.fromEntries(entries.map(e => [e, `${e.slice(1).replace(/\//g, '_')}.js`])),
+  });
+  const row = (
+    tag: string,
+    host: boolean,
+    ...remotes: SharedVersion['remotes']
+  ): SharedVersion => ({
+    tag,
+    host,
+    action: 'share',
+    remotes,
+  });
+  const members = (): PoolMember[] => [
+    {
+      name: '@y/pkg',
+      external: {
+        dirty: true,
+        poolName: 'y',
+        versions: [
+          row('18.0.1', false, remote('r7', ['@y/pkg/sub'])),
+          row('17.2.0', true, remote('r2', ['@y/pkg'])),
+        ],
+      },
+    },
+    {
+      name: '@y/pkg/sub',
+      external: {
+        dirty: true,
+        poolName: 'y',
+        versions: [row('17.2.1', true, remote('r2', ['@y/pkg/sub']))],
+      },
+    },
+  ];
+
+  it.fails("shares the copy at its own specifier's global tag, not at a secondary's", () => {
+    const pool = members();
+    const election = elect({
+      members: pool,
+      acceptsTag: createAcceptsTag(isCompatible, compare),
+      compare,
+      latestFirst: false,
+      isChunked: () => false,
+    });
+
+    const record = memberRecord(pool[0]!, { ...election, poolName: 'y' }, compare);
+
+    expect(record.versions.find(v => v.action === 'share')?.tag).toBe('17.2.0');
+  });
+});
+
 describe('renamedRecords', () => {
   const pooled = (poolName?: string): SharedExternal => ({
     dirty: false,

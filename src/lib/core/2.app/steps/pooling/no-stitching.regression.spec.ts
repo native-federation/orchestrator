@@ -94,8 +94,8 @@ type Case = {
   expectMap?: (map: ImportMap) => void;
   // The oracle's verdict on the fixed map, when a fault is the intended outcome.
   expectFaults?: Record<string, PageFaults>;
-  // While the case still fails: the oracle's verdict on today's map.
-  known?: Record<string, PageFaults>;
+  // While the case still fails: the oracle's verdict on today's map, or what the harness throws on it.
+  known?: Record<string, PageFaults> | string;
 };
 
 let storage = 0;
@@ -145,8 +145,12 @@ const register = (c: Case) => {
     expect(remapped).toEqual((c.dynamic ?? []).map(() => []));
     c.expectMap?.(map);
   });
-  if (c.known) {
-    const known = c.known;
+  const known = c.known;
+  if (typeof known === 'string') {
+    it(`${c.name}: today throws`, async () => {
+      await expect(run(c)).rejects.toThrow(known);
+    });
+  } else if (known) {
     const kinds = [...new Set(Object.values(known).flatMap(Object.keys))].sort().join(', ');
     it(`${c.name}: today ${kinds}`, async () => {
       const { faults } = await run(c);
@@ -641,6 +645,8 @@ describe('a remote that ships a package at two tags', () => {
   const BUTTON = '@m/material/button';
   const LIB = '@x/lib';
   const FEATURE = '@x/lib/feature';
+  const PKG = '@y/pkg';
+  const PKG_SUB = '@y/pkg/sub';
 
   const loose = (packageName: string, version: string, range = `^${version}`) =>
     shared(packageName, { pool: false, version, range });
@@ -749,6 +755,25 @@ describe('a remote that ships a package at two tags', () => {
         expectDenseHost(map);
         expect(resolve(map, FEATURE, 'http://r2/expose.js')).toBe('http://r1/x_lib_feature.js');
       },
+    },
+    // Pooled: the host r2 ships the root at 17.2.0-rc.0 and sub at 17.2.1-rc.0; r7's dense copy of the root
+    // lists only sub. The pool serves both from r2, so the root stays on the map at r2's tag.
+    {
+      name: 'serves the root of a pooled package beside a dense copy that lists only its secondary',
+      known: 'r2|@y/pkg',
+      hosts: ['r2'],
+      entries: [
+        entry(
+          'r2',
+          shared(PKG, { version: '17.2.0-rc.0', range: '*' }),
+          shared(PKG_SUB, { version: '17.2.1-rc.0', range: '*' })
+        ),
+        entry('r7', {
+          ...shared(PKG, { version: '18.0.1', range: '*' }),
+          entries: { [PKG_SUB]: file(PKG_SUB) },
+        }),
+      ],
+      expectMap: map => expect(map.imports[PKG]).toBe('http://r2/y_pkg.js'),
     },
   ];
 
