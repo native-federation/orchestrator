@@ -1,0 +1,70 @@
+{
+  "skill_name": "import-maps",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Our shell boots nf-orchestrator from a classic script, which inserts the import map. Later, when the user opens the reports page, we call initRemoteEntry('https://reports.example.com/remoteEntry.json') and the orchestrator appends a second <script type=\"importmap\">. A colleague read on MDN that an import map must come before any module script and that later ones are ignored, and wants to refactor so every remote is in the first map. Is that right, and what should we do?",
+      "expected_output": "Says the 'must come first / later maps ignored' rule only holds in browsers without multiple-map support; Chrome/Edge 133+ and Safari 18.4+ merge later maps (Firefox 150+ only behind the dom.multiple_import_maps.enabled pref). Explains merge semantics: a later map can add keys and scopes but never repoint an existing or already-resolved key. Recommends keeping the dynamic delta and using es-module-shims for single-map browsers, rather than blindly refactoring.",
+      "files": [],
+      "expectations": [
+        "Says the 'map must come first / later maps ignored' rule only applies to browsers without multiple-map support",
+        "Names multiple-map support versions (Chrome/Edge 133+ or Safari 18.4+) or calls the MDN guidance outdated",
+        "Explains a later map can add keys/scopes but cannot repoint an existing or already-resolved key",
+        "Recommends es-module-shims (or equivalent fallback) for browsers without multiple-map support",
+        "Advises against folding every remote into the first map (keeps the dynamic delta approach)"
+      ]
+    },
+    {
+      "id": 2,
+      "prompt": "Page has this committed import map: {\"imports\":{\"react\":\"http://mfe1/react.js\",\"react-dom\":\"http://mfe1/react-dom.js\"}} (react 18.2). Then I load mfe3 dynamically, which ships react 17 with requiredVersion ~17.0.0 strictVersion true, and my code appends {\"imports\":{\"react\":\"http://mfe3/react.js\",\"react-dom\":\"http://mfe3/react-dom.js\",\"mfe3/./App\":\"http://mfe3/App.js\"}}. Chrome logs \"An import map rule for specifier 'react' was removed, as it conflicted with an existing rule.\" and mfe3 crashes on a React 17 API. What's going on and how should the delta look?",
+      "expected_output": "Explains first-wins merging: the later map cannot repoint 'react'/'react-dom', so mfe3 runs mfe1's React 18. The delta must put react and react-dom (the whole package/family) in scopes['http://mfe3/'] pointing to mfe3's files, keep only new keys like 'mfe3/./App' in imports, with absolute URLs. Mentions that es-module-shims with mapOverrides would hide this in tests.",
+      "files": [],
+      "expectations": [
+        "Explains first-wins merging: the appended 'react'/'react-dom' imports keys lose to the committed ones",
+        "Says mfe3 therefore runs mfe1's React 18 files",
+        "Proposes a delta with react and react-dom under scopes['http://mfe3/'] pointing at mfe3's files",
+        "Keeps only new keys (e.g. 'mfe3/./App') in the delta's imports",
+        "Scopes react and react-dom together (whole package/family), not just react"
+      ]
+    },
+    {
+      "id": 3,
+      "prompt": "Shell is served at http://host/shell/index.html. Our generated map has \"scopes\": {\"http://mfe1/\": {\"ui-kit\": \"./ui-kit.js\"}} and mfe1 lives at http://mfe1/. mfe1 now fails with: Failed to load module script: Expected a JavaScript-or-Wasm module script but the server responded with a MIME type of \"text/html\". The file http://mfe1/ui-kit.js definitely exists. Why?",
+      "expected_output": "Identifies that relative values resolve against the map's base URL (the document), not the scope, so ui-kit maps to http://host/shell/ui-kit.js; that URL doesn't exist and the SPA fallback/404 page returns HTML, hence the MIME error. Fix: generate absolute URLs (http://mfe1/ui-kit.js).",
+      "files": [],
+      "expectations": [
+        "Says relative map values resolve against the map's base URL (the document), not the scope or remote",
+        "Computes the resolved URL as http://host/shell/ui-kit.js",
+        "Explains the text/html MIME error as a 404 / SPA fallback page served for that URL",
+        "Recommends absolute URLs (http://mfe1/ui-kit.js) in the generated map"
+      ]
+    },
+    {
+      "id": 4,
+      "prompt": "Angular micro-frontends with native federation. Host (http://host/) ships @angular/core and @angular/common 17. mfe1 (http://mfe1/) is on Angular 18, so we added a scope: {\"imports\":{\"@angular/core\":\"http://host/core.js\",\"@angular/common\":\"http://host/common.js\",\"@angular/common/http\":\"http://host/common-http.js\"},\"scopes\":{\"http://mfe1/\":{\"@angular/core\":\"http://mfe1/core.js\"}}}. mfe1 now throws NG0203 inject() must be called from an injection context. What's wrong with the map?",
+      "expected_output": "Explains the partial scope: mfe1 gets its own core but falls through to the host's @angular/common and @angular/common/http, whose files resolve @angular/core from the host's URL (imports) -> two cores on the page. Fix: scope the whole Angular family (core, common, common/http, and its chunks) from mfe1's own build in http://mfe1/, with absolute URLs; check chunk specifiers live only in their owner's scope.",
+      "files": [],
+      "expectations": [
+        "Identifies the scope as partial: only @angular/core is scoped for mfe1",
+        "Explains mfe1 falls through to the host's @angular/common and @angular/common/http",
+        "Explains those host files resolve @angular/core from the host's URL, so two Angular cores run on the page",
+        "Recommends scoping the whole Angular family (core, common, common/http, ...) from mfe1's own build",
+        "Mentions build-internal chunks (@nf-internal/...) must also be mapped in mfe1's scope"
+      ]
+    },
+    {
+      "id": 5,
+      "prompt": "We just turned on a strict CSP in the host: Content-Security-Policy: script-src 'self' 'nonce-r4nd0m'. Our index.html scripts all carry the nonce. Since then the nf-orchestrator shell is blank and the console only shows Failed to resolve module specifier \"@angular/core\". Without CSP everything works. Look at how nf-orchestrator inserts its import map and tell me what's going on and what to change.",
+      "expected_output": "Finds that src/lib/core/4.config/import-map/replace-in-dom.ts creates the map script via a Trusted Types policy but sets no nonce, so CSP blocks the inline map silently and every bare specifier fails. Proposes passing/propagating a nonce (e.g. config option or reading it from the current script) and setting script.nonce before appending. Notes that 'strict-dynamic' would have let the script-inserted map through without a nonce.",
+      "files": [],
+      "expectations": [
+        "Points to src/lib/core/4.config/import-map/replace-in-dom.ts as where the map is inserted",
+        "States the inserted map script gets no nonce",
+        "Explains CSP blocks the inline import map silently, so every bare specifier fails to resolve",
+        "Proposes setting script.nonce on the map element (via config or reading it from an existing script)",
+        "Does not blame Trusted Types as the root cause (the code already uses a policy)",
+        "Notes that adding 'strict-dynamic' would also let the script-inserted map run without a nonce"
+      ]
+    }
+  ]
+}
