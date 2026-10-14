@@ -473,6 +473,46 @@ describe('a remote runs every specifier of a package from one build', () => {
         };
       })
     ),
+    // Unpooled, c ships core and core/sub at 17.1.0 as flat externals under a strict `^17.1.0`. s's strict sub
+    // 18.1.1 and c's strict sub 17.1.0 reject each other, so each sub is scoped to its own remote; c's core accepts
+    // a's 17.1.1, and a's build serves the package without a sub. c runs both from its own build, not its sub
+    // beside a's core.
+    ...[true, false].map((consumerFirst): Case => {
+      const a = entry('a', shared(CORE, { pool: false, version: '17.1.1', range: '^17.1.1' }));
+      const s = entry('s', shared(SUB, { pool: false, ...at('18.1.1'), strict: true }));
+      const c = entry(
+        'c',
+        shared(CORE, { pool: false, version: '17.1.0', range: '^17.1.0', strict: true }),
+        shared(SUB, { pool: false, version: '17.1.0', range: '^17.1.0', strict: true })
+      );
+      return {
+        name: `runs a package wholly from its own build when its flat secondary is scoped and the serving build lacks it (consumer first=${consumerFirst})`,
+        entries: consumerFirst ? [c, a, s] : [a, s, c],
+        known: { c: { stitched: ['@fw/core: a c'] } },
+      };
+    }),
+    // d serves core{core, core/sub} at c's own tag, so it covers c's sub; but s's strict sub 17.2.0 and c's
+    // strict sub 17.1.0 reject each other, so each sub is scoped to its own remote. c runs both from its own build,
+    // not its own sub beside d's core.
+    ...[true, false].map((consumerFirst): Case => {
+      const d = entry('d', shared(CORE, { pool: false, ...at('17.1.0'), entrypoints: [SUB] }));
+      const s = entry('s', shared(SUB, { pool: false, ...at('17.2.0'), strict: true }));
+      const c = entry(
+        'c',
+        shared(CORE, { pool: false, ...at('17.1.0'), strict: true }),
+        shared(SUB, { pool: false, ...at('17.1.0'), strict: true })
+      );
+      return {
+        name: `runs a package wholly from its own build when its flat secondary is scoped and the serving build covers it (consumer first=${consumerFirst})`,
+        entries: consumerFirst ? [c, d, s] : [d, s, c],
+        known: {
+          c: {
+            stitched: ['@fw/core: c d'],
+            twice: ['@fw/core/sub: http://c/fw_core_sub.js http://d/fw_core_sub.js'],
+          },
+        },
+      };
+    }),
     // r, loaded at runtime under strict compatibility, ships core/sub without core; a's build has no sub. The load
     // runs r's sub from r's own scope, and the next page's warm init keeps it there instead of publishing it beside
     // a's core. r's sub still imports a's core, the one stitch a cold init of the same portfolio has too.
