@@ -10,7 +10,7 @@ import {
   followServingBuild,
   packagesOf,
   servingBuildOf,
-  shareServingCopy,
+  shareServingCopies,
   type ServingBuild,
   type ServingCandidate,
 } from './serving';
@@ -424,7 +424,7 @@ describe('servingBuildOf', () => {
       version(action, [copy('r1', [entry])], tag);
     const r2 = (entry: string) => version('share', [copy('r2', [entry])], '2.1.0');
 
-    it.fails('is no serving candidate', () => {
+    it('is no serving candidate', () => {
       // Both cost the same, so only the guard keeps r1, which sorts first, from serving.
       const result = serving(
         ['fw/a', external(r1('share', 'fw/a', '1.0.0'))],
@@ -434,7 +434,7 @@ describe('servingBuildOf', () => {
       expect(result).toEqual<ServingBuild>({ remote: 'r2', tag: '2.1.0' });
     });
 
-    it.fails('falls back although the serving build covers every specifier it ships', () => {
+    it('falls back although the serving build covers every specifier it ships', () => {
       const externals: [ExternalName, SharedExternal][] = [
         ['fw/a', external(r2('fw/a'), r1('skip', 'fw/a', '1.0.0'))],
         ['fw/b', external(r2('fw/b'), r1('skip', 'fw/b', '2.0.0'))],
@@ -443,13 +443,41 @@ describe('servingBuildOf', () => {
       expect(fallbacksOf(externals, { remote: 'r2', tag: '2.1.0' })).toEqual(['r1']);
     });
 
-    it.fails('leaves the package without a serving build when no other remote ships it', () => {
+    it('leaves the package without a serving build when no other remote ships it', () => {
       const result = serving(
         ['fw/a', external(r1('share', 'fw/a', '1.0.0'))],
         ['fw/b', external(r1('share', 'fw/b', '2.0.0'))]
       );
 
       expect(result).toBeUndefined();
+    });
+  });
+
+  // The host serves fw at 1.0.0 and fw/sub at 2.0.0; r1's dense copy ships both at 1.0.0, so the host covers
+  // its fw/sub only at the host's other tag.
+  describe("a copy that a two-tag host covers only at the host's other tag", () => {
+    const externals = (strictVersion: boolean): [ExternalName, SharedExternal][] => [
+      [
+        'fw',
+        external(
+          version(
+            'share',
+            [copy('host', ['fw']), copy('r1', ['fw', 'fw/sub'], { strictVersion })],
+            '1.0.0',
+            true
+          )
+        ),
+      ],
+      ['fw/sub', external(version('share', [copy('host', ['fw/sub'])], '2.0.0', true))],
+    ];
+    const host: ServingBuild = { remote: 'host', tag: '1.0.0' };
+
+    it('falls back when it is strict, as a runtime load of it does', () => {
+      expect(fallbacksOf(externals(true), host)).toEqual(['r1']);
+    });
+
+    it('follows the host when it is loose', () => {
+      expect(fallbacksOf(externals(false), host)).toEqual([]);
     });
   });
 
@@ -587,7 +615,7 @@ describe('servingBuildOf', () => {
   });
 });
 
-describe('shareServingCopy', () => {
+describe('shareServingCopies', () => {
   const toServing: ServingBuild = { remote: 'serving', tag: '2.0.0' };
   const shape = (e: SharedExternal) =>
     e.versions.map(v => `${v.tag}:${v.action}:[${v.remotes.map(r => r.name)}]`);
@@ -603,22 +631,35 @@ describe('shareServingCopy', () => {
       )
     );
 
-    shareServingCopy(testing, toServing);
+    shareServingCopies(testing, toServing);
 
     expect(shape(testing)).toEqual(['1.0.0:share:[old]', '2.0.0:share:[serving,other]']);
     // The host no longer leads the row.
     expect(testing.versions[1]!.host).toBe(false);
   });
 
-  it('leaves an external with a share row at the serving tag, or without the copy there, alone', () => {
-    const shared = external(version('share', [copy('other', ['fw/testing'])], '2.0.0'));
-    const elsewhere = external(version('skip', [copy('serving', ['fw/testing'])], '1.0.0'));
-    const before = structuredClone([shared, elsewhere]);
+  // A host that ships the package at two tags serves both.
+  it("shares the serving build's skipped copy at another tag too, and the host keeps leading it", () => {
+    const elsewhere = external(version('skip', [copy('serving', ['fw/testing'])], '1.0.0', true));
 
-    shareServingCopy(shared, toServing);
-    shareServingCopy(elsewhere, toServing);
+    shareServingCopies(elsewhere, toServing);
 
-    expect([shared, elsewhere]).toEqual(before);
+    expect(shape(elsewhere)).toEqual(['1.0.0:share:[serving]']);
+    expect(elsewhere.versions[0]!.host).toBe(true);
+  });
+
+  it('leaves a skipped copy at a tag with a share row, and an external without the copy, alone', () => {
+    const shared = external(
+      version('share', [copy('other', ['fw/testing'])], '2.0.0'),
+      version('skip', [copy('serving', ['fw/testing'])], '2.0.0')
+    );
+    const without = external(version('skip', [copy('other', ['fw/testing'])], '1.0.0'));
+    const before = structuredClone([shared, without]);
+
+    shareServingCopies(shared, toServing);
+    shareServingCopies(without, toServing);
+
+    expect([shared, without]).toEqual(before);
   });
 });
 
@@ -703,7 +744,7 @@ describe('followServingBuild', () => {
   });
 
   // A host that ships the package at two tags serves both.
-  it.fails('leaves a share row the serving build leads at another tag untouched', () => {
+  it('leaves a share row the serving build leads at another tag untouched', () => {
     const own = external(version('share', [copy('serving', ['fw/testing'])], '1.0.0', true));
     const before = structuredClone(own);
 

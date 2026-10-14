@@ -656,16 +656,6 @@ describe('a remote that ships a package at two tags', () => {
       { ...loose(LIB, '17.1.0', '^17.1.0'), entries: { [FEATURE]: file(FEATURE) } }
     );
 
-  // For `known`: the remote's files of `from` leave `missing` unresolved.
-  const unresolved = (remote: string, from: string, missing: string) => ({
-    [remote]: {
-      unresolved: [
-        `http://${remote}/ -> ${missing}`,
-        `http://${remote}/${file(from)} -> ${missing}`,
-      ],
-    },
-  });
-  const sharedMappingsGap = unresolved('r1', UI, UTIL);
   const expectDenseHost = (map: ImportMap) => {
     expect(map.imports[LIB]).toBe('http://r1/x_lib.js');
     expect(map.imports[FEATURE]).toBe('http://r1/x_lib_feature.js');
@@ -674,17 +664,14 @@ describe('a remote that ships a package at two tags', () => {
   const cases: Case[] = [
     {
       name: 'runs sharedMappings at two tags from its own build when it is the only remote',
-      known: sharedMappingsGap,
       entries: [mappings('r1')],
     },
     {
       name: 'runs an npm root and its secondary at two tags from its own build when it is the only remote',
-      known: unresolved('r1', CORE, TESTING),
       entries: [entry('r1', loose(CORE, '17.0.0'), loose(TESTING, '17.0.1', '^17.0.0'))],
     },
     {
       name: 'runs two secondaries of a root-less package at two tags from its own build',
-      known: unresolved('r1', TABLE, BUTTON),
       entries: [entry('r1', loose(TABLE, '17.0.0'), loose(BUTTON, '17.0.1', '^17.0.0'))],
     },
     // r2's util 2.1.0 serves the package; r1 runs ui and util from its own build.
@@ -692,20 +679,17 @@ describe('a remote that ships a package at two tags', () => {
       const r2 = entry('r2', loose(UTIL, '2.1.0', '^2.0.0'));
       return {
         name: `runs sharedMappings at two tags from its own build beside a remote that ships one of them (two tags first=${twoTagsFirst})`,
-        known: sharedMappingsGap,
         entries: twoTagsFirst ? [mappings('r1'), r2] : [r2, mappings('r1')],
       };
     }),
     // No build ships the package at one tag, so none serves it and each remote runs its own.
     ...['2.0.0', '2.1.0'].map((util): Case => ({
       name: `runs sharedMappings from its own build when every remote ships them at two tags (second util ${util})`,
-      known: sharedMappingsGap,
       entries: [mappings('r1'), mappings('r2', util)],
     })),
     // r1's core is the only root row, so no remote that ships the root can serve the package.
     {
       name: 'runs an npm root and its secondary at two tags from its own build when it ships the only root',
-      known: unresolved('r1', CORE, TESTING),
       entries: [
         entry('r1', loose(CORE, '17.0.0'), loose(TESTING, '17.0.1', '^17.0.0')),
         entry('r2', loose(TESTING, '17.1.0', '^17.0.0')),
@@ -714,7 +698,6 @@ describe('a remote that ships a package at two tags', () => {
     // Both remotes ship the package at two tags, and the strict `~` ranges reject each other's ui.
     {
       name: 'runs strict sharedMappings at two tags from its own build',
-      known: unresolved('r1', UTIL, UI),
       entries: [
         entry('r1', strictTilde(UI, '1.0.0'), strictTilde(UTIL, '2.0.0')),
         entry('r2', strictTilde(UI, '1.0.1'), strictTilde(UTIL, '2.0.0')),
@@ -722,32 +705,22 @@ describe('a remote that ships a package at two tags', () => {
     },
     {
       name: 'runs a dense build that lists a package at two tags from its own build',
-      known: unresolved('r1', LIB, FEATURE),
       entries: [denseTwoTags('r1')],
     },
     // The load itself maps both of r1's copies; the next page's warm init decides the package again.
     {
       name: 'runs a two-tag remote from its own build on the page after its load',
-      known: sharedMappingsGap,
       entries: [],
       dynamic: [mappings('r1'), 'reload', entry('r2', loose(UTIL, '2.1.0', '^2.0.0'))],
     },
     // r3's `>=1.9.0` accepts r1's util 2.0.0, so r3's copy skips to r1's row and is no candidate itself.
     {
       name: 'runs a remote whose only copy follows a two-tag build from its own build',
-      known: {
-        ...unresolved('r1', UTIL, UI),
-        r3: { unresolved: [`http://r1/${file(UTIL)} -> ${UI}`] },
-      },
       entries: [mappings('r1'), entry('r3', loose(UTIL, '1.9.0', '>=1.9.0'))],
     },
     // r2's util accepts the host's 2.0.0 and follows it.
     {
       name: 'serves both tags of the host globally',
-      known: {
-        ...unresolved('r1', UTIL, UI),
-        r2: { unresolved: [`http://r1/${file(UTIL)} -> ${UI}`] },
-      },
       hosts: ['r1'],
       entries: [mappings('r1'), entry('r2', loose(UTIL, '2.1.0', '^2.0.0'))],
       expectMap: map => {
@@ -758,14 +731,12 @@ describe('a remote that ships a package at two tags', () => {
     },
     {
       name: 'serves both tags of a dense host globally',
-      known: unresolved('r1', LIB, FEATURE),
       hosts: ['r1'],
       entries: [denseTwoTags('r1')],
       expectMap: expectDenseHost,
     },
     {
       name: 'serves both tags of a dense host globally beside a remote that ships the package at one',
-      known: unresolved('r1', LIB, FEATURE),
       hosts: ['r1'],
       entries: [
         denseTwoTags('r1'),

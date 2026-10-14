@@ -56,7 +56,9 @@ export function claimTable(
   ) => {
     const prior = table.claims.get(name);
     const duplicate = prior !== undefined && prior.tag !== version.tag;
-    if (duplicate) table.duplicates.add(version);
+    // A row the serving host leads is never a duplicate: it ships that tag beside the one claimed first.
+    if (duplicate && !(version.host && version.remotes[0]!.name === external.servingBuild))
+      table.duplicates.add(version);
     // The seed already claimed an external with a serving build.
     if (external.servingBuild) return;
     claim(table.shareClaims, name, version);
