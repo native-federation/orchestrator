@@ -20,7 +20,7 @@ import type { LoadRemoteModule } from 'lib/core/init-federation.contract';
 // A dynamic load that fails must leave the page as if it never ran, against the real repositories: they
 // live for the whole page, so a half-written failure is what the next load commits, and a remote info
 // written before the failure makes a retry by name skip the fetch. Most cases run the exported flow bare, with
-// no createFederationResult around it: the rollback is the flow's own.
+// no createFederationResult around it: the flow rolls back through its own rollbackChanges step.
 
 const shared = (
   packageName: string,
@@ -287,7 +287,10 @@ describe('init-remote-entry flow: a failed load', () => {
     const before = snapshot();
     served['http://r1/remoteEntry.json'] = refused;
 
-    await expect(initRemoteEntry('http://r1/remoteEntry.json', 'r1')).rejects.toThrow();
+    // The logger's error replaces the load's: the rollback still ran, but the dump failed loudly.
+    await expect(initRemoteEntry('http://r1/remoteEntry.json', 'r1')).rejects.toThrow(
+      'logger failed'
+    );
 
     expect(snapshot()).toEqual(before);
   });
@@ -299,5 +302,42 @@ describe('init-remote-entry flow: a failed load', () => {
 
     expect(dumps()).toEqual([]);
     expect(adapters.remoteInfoRepo.contains('r1')).toBe(true);
+  });
+});
+
+// The flow's side of the contract with the step, with the step stubbed: what it is called with, and that the
+// load's own error survives it.
+describe('init-remote-entry flow: rollbackChanges', () => {
+  const drivers = (getRemoteEntry: InitDriversContract['getRemoteEntry']) =>
+    ({
+      getRemoteEntry,
+      rollbackChanges: vi.fn(() => Promise.resolve()),
+    }) as unknown as InitDriversContract;
+  const factory = (flow: InitDriversContract) => ({
+    flow,
+    adapters: mockAdapters(),
+    config: mockConfig() as unknown as ConfigContract,
+  });
+
+  it('rolls back once, labelled with the remote name, and rethrows the load error', async () => {
+    const error = new NFError('fetch failed');
+    const flow = drivers(vi.fn(() => Promise.reject(error)));
+
+    await expect(
+      createInitRemoteEntryFlow(factory(flow))('http://r1/remoteEntry.json', 'r1')
+    ).rejects.toBe(error);
+
+    expect(flow.rollbackChanges).toHaveBeenCalledTimes(1);
+    expect(flow.rollbackChanges).toHaveBeenCalledWith('[dynamic-init][r1]');
+  });
+
+  it('labels the rollback with the url when no remote name is given', async () => {
+    const flow = drivers(vi.fn(() => Promise.reject(new NFError('fetch failed'))));
+
+    await expect(
+      createInitRemoteEntryFlow(factory(flow))('http://r1/remoteEntry.json')
+    ).rejects.toThrow();
+
+    expect(flow.rollbackChanges).toHaveBeenCalledWith('[dynamic-init][http://r1/remoteEntry.json]');
   });
 });

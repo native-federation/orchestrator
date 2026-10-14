@@ -24,8 +24,8 @@ export function createCommitChanges(
    * inserted into the HTML DOM.
    *
    * This step only runs if all previous steps were successful to prevent the persistence of
-   * erroneous changes into storage which can corrupt other pages/routes of the host. When a
-   * dynamic load fails instead, its flow rolls the in-memory caches back to the last commit.
+   * erroneous changes into storage which can corrupt other pages/routes of the host. A failed
+   * dynamic load is undone by `rollbackChanges` instead.
    */
   return (importMap: ImportMap, opts: CommitOptions = {}) =>
     Promise.resolve(importMap)

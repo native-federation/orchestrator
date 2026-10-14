@@ -6,6 +6,7 @@ import { createDetermineSharedExternals } from '../2.app/steps/determine-shared-
 import { createPoolSharedExternals } from '../2.app/steps/pooling/pool-shared-externals';
 import { createGenerateImportMap } from '../2.app/steps/generate-import-map';
 import { createCommitChanges } from '../2.app/steps/commit-changes';
+import { createRollbackChanges } from '../2.app/steps/rollback-changes';
 import { createExposeModuleLoader } from '../2.app/steps/expose-module-loader';
 import { createGetRemoteEntry } from '../2.app/steps/get-remote-entry';
 import { createUpdateCache } from '../2.app/steps/update-cache';
@@ -27,6 +28,7 @@ export const createInitDrivers = ({
   poolSharedExternals: createPoolSharedExternals(config, adapters),
   generateImportMap: createGenerateImportMap(config, adapters),
   commitChanges: createCommitChanges(config, adapters),
+  rollbackChanges: createRollbackChanges(config, adapters),
   exposeModuleLoader: createExposeModuleLoader(config, adapters),
   getRemoteEntry: createGetRemoteEntry(config, adapters),
   updateCache: createUpdateCache(config, adapters),

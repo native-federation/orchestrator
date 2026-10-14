@@ -589,7 +589,7 @@ core/
   1.domain/            Pure domain contracts, their invariants and pure policy (remote entries, externals, import maps, pooling)
   2.app/               Application logic
     flows/               The pipelines: which steps run in which order (init, initRemoteEntry)
-    steps/               The pipeline steps (1-6 run during init, 7-9 back initRemoteEntry)
+    steps/               The pipeline steps (1-6 run during init, 7-9 and rollbackChanges back initRemoteEntry)
     driver-ports/        Contracts the steps fulfil (composed by the flows, driven by the entry points)
     driving-ports/       Contracts the steps consume (fulfilled by adapters)
     config/              Configuration contracts
@@ -642,6 +642,6 @@ Enforced by ESLint (`no-restricted-imports` in `eslint.config.js`):
 | Mapping a subpool's copies onto its build (`servedBy`)                                 | `2.app/steps/generate-import-map.ts`                                                          |
 | Marking a pool's other members dirty when removing a remote empties a member           | `3.adapters/storage/shared-externals.repository.ts`                                           |
 
-The two pipelines stay separate. Init runs `processRemoteEntries → poolSharedExternals → determineSharedExternals → generateImportMap → commitChanges` and re-elects every pool of a scope with a dirty external; pooling runs before `determine`, which leaves pooled externals alone. `initRemoteEntry` runs `updateCache → poolDynamicExternals → convertToImportMap → commitChanges`: a committed import map cannot change, so it elects nothing and only judges the loaded remote against the committed record (see [Scope and dynamic init](./version-resolver.md#scope-and-dynamic-init)).
+The two pipelines stay separate. Init runs `processRemoteEntries → poolSharedExternals → determineSharedExternals → generateImportMap → commitChanges` and re-elects every pool of a scope with a dirty external; pooling runs before `determine`, which leaves pooled externals alone. `initRemoteEntry` runs `updateCache → poolDynamicExternals → convertToImportMap → commitChanges`, or `rollbackChanges` when a step fails: a committed import map cannot change, so it elects nothing and only judges the loaded remote against the committed record (see [Scope and dynamic init](./version-resolver.md#scope-and-dynamic-init)).
 
 Adding a new flow means adding a new folder under `src/lib/`, a `<name>.index.ts` barrel next to the existing ones, and one bundle entry in `build.js`.

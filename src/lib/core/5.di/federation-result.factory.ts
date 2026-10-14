@@ -7,7 +7,7 @@ import type {
   NativeFederationResult,
 } from '../init-federation.contract';
 
-export { createStateDump } from '../2.app/flows/state-dump';
+export { createStateDump } from '../2.app/steps/rollback-changes';
 
 export const createFederationResult = ({
   config,
