@@ -453,6 +453,40 @@ test.describe('lifecycle: the dynamic path', () => {
       expect(await nf.resolve('@angular/forms', SCOPE.mfe1)).toContain('UNRESOLVED');
     });
   });
+
+  test('keeps nothing of a refused remote for the next load or the reload to persist', async ({
+    nf,
+  }) => {
+    // mfe3 is refused on its last external (strictExternalCompatibility), after its first one was
+    // written; the good load that follows commits whatever the cache then holds.
+    const host = () => [
+      remote('team/mfe1', SCOPE.mfe1, [dep('@angular/core', '17.0.0', { req: '^17.0.0' })]),
+    ];
+    const refused = remote('team/mfe3', SCOPE.mfe3, [
+      dep('@angular/common', '17.0.0', { req: '^17.0.0' }),
+      dep('@angular/core', '18.0.0', { req: '^18.0.0' }),
+    ]);
+    const good = remote('team/mfe4', SCOPE.mfe4, [
+      dep('@angular/core', '17.0.0', { req: '^17.0.0' }),
+    ]);
+    const opts = { unlisted: [refused, good], strict: { strictExternalCompatibility: true } };
+    await nf.init(host(), opts);
+
+    await nf.initRemoteEntry(refused.url);
+    await nf.initRemoteEntry(good.url);
+
+    const holders = async () =>
+      Object.values(await nf.store()).flatMap(scope =>
+        Object.values(scope).flatMap(ext => ext.versions.flatMap(v => v.remotes.map(r => r.name)))
+      );
+    expect(await holders()).toContain('team/mfe4');
+    expect(await holders()).not.toContain('team/mfe3');
+    expect((await nf.load('team/mfe4')).seen['@angular/core']).toBe('mfe1|@angular/core@17.0.0');
+
+    await nf.init(host(), opts);
+    expect(await holders()).not.toContain('team/mfe3');
+    await expect(nf.load('team/mfe3')).rejects.toThrow();
+  });
 });
 
 /**

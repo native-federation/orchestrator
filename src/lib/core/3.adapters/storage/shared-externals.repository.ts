@@ -20,7 +20,7 @@ const createSharedExternalsRepository = (config: StorageConfig): ForSharedExtern
 
   if (config.clearStorage) STORAGE.clear();
 
-  const _cache: SharedExternals = STORAGE.get() ?? { [GLOBAL_SCOPE]: {} };
+  let _cache: SharedExternals = STORAGE.get() ?? { [GLOBAL_SCOPE]: {} };
 
   let _dirty = false;
 
@@ -114,6 +114,11 @@ const createSharedExternalsRepository = (config: StorageConfig): ForSharedExtern
     commit: function () {
       if (!_dirty) return this;
       STORAGE.set(_cache);
+      _dirty = false;
+      return this;
+    },
+    rollback: function () {
+      _cache = STORAGE.get() ?? { [GLOBAL_SCOPE]: {} };
       _dirty = false;
       return this;
     },

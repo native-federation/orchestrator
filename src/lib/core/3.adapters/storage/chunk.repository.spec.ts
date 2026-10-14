@@ -232,4 +232,74 @@ describe('createChunkRepository', () => {
       expect(actual.isPresent()).toBe(false);
     });
   });
+
+  // A failed load hands its edits back: the cache returns to what storage last received.
+  describe('rollback', () => {
+    it('should restore the last commit after an uncommitted write', () => {
+      const { chunksRepo } = setupWithCache({
+        'team/mfe1': { 'shared-browser': ['chunk-ABC.js'] },
+      });
+      chunksRepo.addOrReplace('team/mfe2', 'shared-browser', ['chunk-DEF.js']);
+      chunksRepo.commit();
+
+      chunksRepo.addOrReplace('team/mfe1', 'shared-browser', ['chunk-GHI.js']);
+      chunksRepo.addOrReplace('team/mfe3', 'shared-browser', ['chunk-GHI.js']);
+      chunksRepo.rollback();
+
+      expect(chunksRepo.tryGet('team/mfe1', 'shared-browser').get()).toEqual(['chunk-ABC.js']);
+      expect(chunksRepo.tryGet('team/mfe2', 'shared-browser').get()).toEqual(['chunk-DEF.js']);
+      expect(chunksRepo.tryGet('team/mfe3', 'shared-browser').isPresent()).toBe(false);
+    });
+
+    it('should restore the last commit after an uncommitted remove', () => {
+      const { chunksRepo } = setupWithCache({
+        'team/mfe1': { 'shared-browser': ['chunk-ABC.js'] },
+      });
+
+      chunksRepo.remove('team/mfe1');
+      chunksRepo.rollback();
+
+      expect(chunksRepo.tryGet('team/mfe1', 'shared-browser').get()).toEqual(['chunk-ABC.js']);
+    });
+
+    it('should fall back to an empty cache when nothing was committed', () => {
+      const { chunksRepo } = setupWithCache(undefined);
+
+      chunksRepo.addOrReplace('team/mfe1', 'shared-browser', ['chunk-ABC.js']);
+      chunksRepo.rollback();
+
+      expect(chunksRepo.tryGet('team/mfe1', 'shared-browser').isPresent()).toBe(false);
+    });
+
+    it('should not persist the dropped edit on the next commit', () => {
+      const { chunksRepo, entry } = setupWithCache({});
+
+      chunksRepo.addOrReplace('team/mfe1', 'shared-browser', ['chunk-ABC.js']);
+      chunksRepo.rollback();
+      chunksRepo.commit();
+
+      expect(entry.set).not.toHaveBeenCalled();
+    });
+
+    it('should persist a write made after the rollback once it is committed', () => {
+      const { chunksRepo, mockStorage } = setupWithCache({});
+
+      chunksRepo.addOrReplace('team/mfe1', 'shared-browser', ['chunk-ABC.js']);
+      chunksRepo.rollback();
+      chunksRepo.addOrReplace('team/mfe2', 'shared-browser', ['chunk-DEF.js']);
+
+      expect(mockStorage['shared-chunks']).toEqual({});
+
+      chunksRepo.commit();
+
+      expect(mockStorage['shared-chunks']).toEqual({
+        'team/mfe2': { 'shared-browser': ['chunk-DEF.js'] },
+      });
+    });
+
+    it('should return the repository instance for chaining', () => {
+      const { chunksRepo } = setupWithCache({});
+      expect(chunksRepo.rollback()).toBe(chunksRepo);
+    });
+  });
 });

@@ -6,6 +6,7 @@ export const mockSharedExternalsRepository = (): Mocked<ForSharedExternalsStorag
   addOrUpdate: vi.fn(),
   getFromScope: vi.fn(),
   commit: vi.fn(),
+  rollback: vi.fn(),
   removeFromAllScopes: vi.fn(),
   scopeType: vi.fn(),
   getScopes: vi.fn((o = { includeGlobal: true }) => (o.includeGlobal ? [GLOBAL_SCOPE] : [])),

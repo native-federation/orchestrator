@@ -12,7 +12,7 @@ const createRemoteInfoRepository = (config: StorageConfig): ForRemoteInfoStorage
   const STORAGE: StorageEntry<Remotes> = config.storage(STORAGE_KEYS.remotes, {});
   if (config.clearStorage) STORAGE.clear();
 
-  const _cache: Remotes = STORAGE.get() ?? {};
+  let _cache: Remotes = STORAGE.get() ?? {};
 
   let _dirty = false;
 
@@ -46,6 +46,11 @@ const createRemoteInfoRepository = (config: StorageConfig): ForRemoteInfoStorage
     commit: function () {
       if (!_dirty) return this;
       STORAGE.set(_cache);
+      _dirty = false;
+      return this;
+    },
+    rollback: function () {
+      _cache = STORAGE.get() ?? {};
       _dirty = false;
       return this;
     },

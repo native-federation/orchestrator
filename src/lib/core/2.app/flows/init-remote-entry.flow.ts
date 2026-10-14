@@ -17,5 +17,11 @@ export const createInitRemoteEntryFlow = ({
     flow
       .getRemoteEntry(remoteEntryUrl, remote)
       .then(entry => entry.map(processDynamicRemoteEntry).orElse(Promise.resolve()))
-      .then(() => undefined);
+      .then(() => undefined)
+      .catch((error: unknown) => {
+        const remoteName = typeof remote === 'string' ? remote : remote?.name;
+        return flow
+          .rollbackChanges(`[dynamic-init][${remoteName ?? remoteEntryUrl}]`)
+          .then(() => Promise.reject(error));
+      });
 };

@@ -73,14 +73,7 @@ export function createProcessRemoteEntries(
   function addSharedExternal(
     remoteEntry: RemoteEntry,
     _sharedInfo: DenseSharedInfo,
-    {
-      tag,
-      remote,
-      cached,
-      scopeType,
-      assertSameVersionCompatibility,
-      commit,
-    }: SharedExternalContext
+    { tag, remote, cached, scopeType, assertSameVersionCompatibility, write }: SharedExternalContext
   ): void {
     // Resolution is a function of the whole remote set, not of the tag list: a remote joining an
     // existing version can take the basis slot (changing what the version serves) and always adds
@@ -101,6 +94,6 @@ export function createProcessRemoteEntries(
       });
     }
 
-    commit();
+    write();
   }
 }

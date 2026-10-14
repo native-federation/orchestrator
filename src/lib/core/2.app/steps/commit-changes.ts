@@ -23,10 +23,9 @@ export function createCommitChanges(
    * The changes made to the storage/cache are persisted to storage, and the importmap is
    * inserted into the HTML DOM.
    *
-   * This step only runs if all previous steps were succesful to prevent the persistence of
-   * erroneous changes into storage which can corrupt other pages/routes of the host.
-   *
-   * @param adapters
+   * This step only runs if all previous steps were successful to prevent the persistence of
+   * erroneous changes into storage which can corrupt other pages/routes of the host. A failed
+   * dynamic load is undone by `rollbackChanges` instead.
    */
   return (importMap: ImportMap, opts: CommitOptions = {}) =>
     Promise.resolve(importMap)

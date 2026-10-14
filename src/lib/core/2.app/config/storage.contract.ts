@@ -1,3 +1,4 @@
+// `set` stores a copy and `get` returns a fresh one: a repository's uncommitted edits must never reach storage.
 type StorageEntry<TValue> = {
   set: (value: TValue) => StorageEntry<TValue>;
   get: () => TValue | undefined;

@@ -13,4 +13,5 @@ export type ForRemoteInfoStorage = {
   addOrUpdate: (remoteName: string, remote: RemoteInfo) => ForRemoteInfoStorage;
   getAll: () => Remotes;
   commit: () => ForRemoteInfoStorage;
+  rollback: () => ForRemoteInfoStorage;
 };

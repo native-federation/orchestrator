@@ -16,4 +16,5 @@ export type ForScopedExternalsStorage = {
   tryGet: (remoteName: string) => Optional<ScopedExternal>;
   getAll: () => ScopedExternals;
   commit: () => ForScopedExternalsStorage;
+  rollback: () => ForScopedExternalsStorage;
 };

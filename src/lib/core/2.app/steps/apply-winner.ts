@@ -67,7 +67,7 @@ export function createApplyWinner(config: LoggingConfig & ModeConfig) {
 
         v.remotes = v.remotes.filter(r => !objecting.has(r));
         v.action = 'skip';
-        // Beside its source rather than appended: the record stays newest-first, which `commit()`
+        // Beside its source rather than appended: the record stays newest-first, which `write()`
         // guarantees and a later election reads as "the latest".
         rebuilt.push({ tag: v.tag, host: false, action: 'scope', remotes: [...objecting] });
       }

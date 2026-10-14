@@ -1,4 +1,5 @@
 import type { ForCommittingChanges } from './for-committing-changes.port';
+import type { ForRollingBackChanges } from './for-rolling-back-changes.port';
 import type { ForDeterminingSharedExternals } from './for-determining-shared-externals.port';
 import type { ForPoolingSharedExternals } from './for-pooling-shared-externals.port';
 import type { ForPoolingDynamicExternals } from './for-pooling-dynamic-externals.port';
@@ -19,6 +20,7 @@ export type InitDriversContract = {
   poolSharedExternals: ForPoolingSharedExternals;
   generateImportMap: ForGeneratingImportMap;
   commitChanges: ForCommittingChanges;
+  rollbackChanges: ForRollingBackChanges;
   exposeModuleLoader: ForExposingModuleLoader;
   getRemoteEntry: ForGettingRemoteEntry;
   updateCache: ForUpdatingCache;

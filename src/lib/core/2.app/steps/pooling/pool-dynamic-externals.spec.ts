@@ -21,7 +21,7 @@ import { createVersionCheck } from 'lib/core/3.adapters/checks/version.check';
 // A committed external: the first version is the `share` one, i.e. `remotes[0]` of it is the build
 // serving that member. Later versions are copies other builds hold.
 //
-// `update-cache` runs before this step and commits the loaded remote's own copies too, so a fixture that
+// `update-cache` runs before this step and writes the loaded remote's own copies too, so a fixture that
 // leaves `mfe` out of the record models a state production cannot reach — and the gate reads what the
 // remote imports off exactly those copies. Every portfolio below that expects a verdict lists `mfe`.
 //

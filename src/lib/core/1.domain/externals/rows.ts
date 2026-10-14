@@ -1,6 +1,6 @@
 import type { SharedVersion, SharedVersionAction, VersionName } from './version.contract';
 
-// Newest tag first, as `commit()` orders a record. Leaves a tag's rows in their order (`sort` is stable).
+// Newest tag first, as `write()` orders a record. Leaves a tag's rows in their order (`sort` is stable).
 export const byTag =
   (compare: (a: VersionName, b: VersionName) => number) =>
   (a: SharedVersion, b: SharedVersion): number =>

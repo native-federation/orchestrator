@@ -146,8 +146,8 @@ test.describe('incremental: a label-formed pool on a warm cache', () => {
 });
 
 test.describe('incremental: the stored version order survives pooling', () => {
-  // `commit()` guarantees versions are semver-descending and `determine` reads `versions[0]` as "the
-  // latest" for `profile.latestSharedExternal`, keeping the FIRST candidate of equal cost. `commit()`
+  // `write()` guarantees versions are semver-descending and `determine` reads `versions[0]` as "the
+  // latest" for `profile.latestSharedExternal`, keeping the FIRST candidate of equal cost. `write()`
   // only re-sorts externals a *fetched* entry touched, so once a pool is re-elected off storage the
   // order pooling wrote is the order the election sees.
   test('rebuilds a member in descending tag order', async ({ nf }) => {
