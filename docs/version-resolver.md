@@ -264,7 +264,8 @@ stores the loaded remote as its serving build, as an election would (see
      `strictVersion` copy whose range rejects the tag, or a fallback, key 3) unless that remote's copies are all
      cached.
   3. **fewest fallbacks** — the remotes that ship a specifier of the package outside the candidate's copies at
-     its tag; each runs the whole package from its own build (see
+     its tag, or that would run one external of the package from a `scope` row and another from the map; each
+     runs the whole package from its own build (see
      [Entrypoint coverage and tearing](#entrypoint-coverage-and-tearing)).
   4. **primary's basis** — the basis of the primary's share row.
   5. **name** — code-unit order, so the choice never depends on the order remotes register in.
@@ -321,7 +322,9 @@ host whose build ships a secondary entrypoint without its root (see
 [When the host's build lacks an entrypoint](#when-the-hosts-build-lacks-an-entrypoint)).
 mfe-b above runs both specifiers from its own build: its copies move to `scope` rows at 20.1.0, and mfe-a's build
 keeps serving everyone else. The same holds within one version: a copy of the shared tag that ships an
-entrypoint the serving copy lacks runs its package from its own build too. A shared file of another package can
+entrypoint the serving copy lacks runs its package from its own build too. So does a remote whose flat
+secondary external is scoped, say because its `strictVersion` range rejects that external's tag: it runs the
+primary from its own build as well, even where the serving build ships both. A shared file of another package can
 still bind the shared copy of a package the remote runs from its own build (see
 [Declare the coupling you actually have](#declare-the-coupling-you-actually-have)).
 
