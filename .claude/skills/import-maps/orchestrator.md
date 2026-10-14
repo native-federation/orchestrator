@@ -13,6 +13,7 @@ module instance is one URL, and a later map cannot repoint a key.
 - Pooling: families, subpools, islands
 - Named share scopes and the `strict` scope
 - The dynamic path
+- Module Federation (`getShared`)
 - Hazards to check when changing map code
 - Verifying a map
 
@@ -43,7 +44,7 @@ module instance is one URL, and a later map cannot repoint a key.
   the DOM, inserts the new map, then writes storage. Removing an element does not unregister its rules, so this only
   behaves as a replacement when no map was registered before. Because the map is generated from the record, a reload
   with a warm cache should produce the same map as a cold start.
-- **Dynamic load** (`initRemoteEntry`) decides one action per external of the newly loaded remote against the
+- **Dynamic load** (`initRemoteEntry`) decides each package of the newly loaded remote as a whole against the
   committed record and emits a **delta** map that is *appended*. It never rebuilds or edits the committed map,
   because the page cannot repoint a key it already has. Use it with es-module-shims: it adds a map after modules
   have run, which browsers without multiple-map support ignore.
@@ -160,46 +161,63 @@ candidate is judged only on the entrypoints its own build ships; no build borrow
 - A `skip` row redirects to the scope's first `share` row; with none it serves the copy's own build (throws under
   `strict.strictImportMap`). As in the global scope, a consumer the serving build does not cover runs the whole
   package from its own build.
-- `strict` is a named scope whose rows start as `share` with exact ranges, but serving builds still apply: copies
-  with `strictVersion: false` collapse onto the serving build. Only `strictVersion: true` copies keep their own file.
+- `strict` is a named scope whose rows start as `share` with exact ranges. It has no serving build: each tag is
+  shared on its own row, side by side, from that row's basis copy.
 
 ## The dynamic path
 
-Per external of the loaded remote, against the committed record:
+Per package of the loaded remote (a dense root and its flat secondaries together), per share scope, against what
+the committed map serves of it:
 
 | situation | action | delta map |
 | --- | --- | --- |
-| no `share` row in that scope yet | `share` | global: `imports[spec] = own file`; named: own scope |
-| compatible with the shared tag | `skip` | global: uses the committed `imports` for what the map serves; named: scope entries to the provider |
-| incompatible, strict | `scope` (throws under `strictExternalCompatibility`) | own files in own scope |
-| incompatible, not strict | `skip` + warning | as compatible |
+| the map serves none of it | `share`; the remote becomes its serving build | global: `imports[spec] = own file`; named: own scope |
+| one build serves every entrypoint the remote ships of it, at a tag no `strictVersion` range of the remote rejects | `skip`, in a `skip` row of its tag | nothing new in `imports`; named: scope entries to every file that build serves of the package |
+| the map lacks an entrypoint the remote ships, or serves the package from two builds | `scope` | the whole package from its own files, in its own scope |
+| a `strictVersion` range rejects the map's tag | `scope` + warning (throws under `strictExternalCompatibility`) | as above |
 | `singleton: false` | — | own scope |
 
-Pools on the dynamic path pass a gate, judged per file: the remote resolves globally only if no range rejects a
-tag the map serves, every committed file it would reach resolves each specifier to the file it would itself use,
-and no chunked copy would run part of a package beside the map's files of it. Otherwise it serves its whole family
-in its own scope. The dynamic path holds no election; the next init re-elects.
+A range without `strictVersion` follows the map's tag without a warning. A remote that scopes a package because
+the map serves it only in part opens no other package globally: an opened package's files resolve through the
+loader's scope, so their consumers would reach the loader's build too. The `strict` scope shares every version side
+by side. So a load never maps a key the committed map already has.
+
+Pools on the dynamic path pass a gate: the remote resolves globally only if no range rejects a tag the map serves,
+every committed file it would reach resolves each specifier to the file it would itself use, no chunked copy would
+run part of a package beside the map's files of it, and the map serves each package wholly or not at all for it.
+Otherwise it serves its whole family in its own scope. The dynamic path holds no election and never repoints a
+committed build; the next init re-elects. A cold init may therefore pick other builds than a page that loaded
+remotes one by one.
 
 ```
-committed: imports { "react": "http://mfe1/react.js" }
+committed: imports { "react": "http://mfe1/react.js" }   (react 18.2.0)
 load mfe3 (react 17.0.2, ~17.0.0 strict):
   delta: { "imports": { "mfe3/./App": "http://mfe3/App.js" },
            "scopes":  { "http://mfe3/": { "react": "http://mfe3/react.js" } } }
 ```
+
+## Module Federation (`getShared`)
+
+`getShared` hands Module Federation the files the import map serves: per specifier, the copy that claims it, so a
+package's root and secondaries come from one build. The `strict` scope offers every shared version, each from its
+basis copy. A change to what the map publishes must keep `getShared` in step, or a Module Federation consumer loads
+a second instance of a package the page already runs.
 
 ## Hazards to check when changing map code
 
 The general ones (mixed builds, chunks, partial scopes, scope leaks, family fallback) are in
 [shared-dependencies.md](shared-dependencies.md). Specific to this code:
 
-- **A delta that restates a committed `imports` key is dropped by the browser.** The dynamic `share` check looks
-  for an existing share row of the same external *name*, so a specifier another external published (flat vs
-  dense) is missed: the delta maps `@fw/core/x` again, the page keeps the old file, the remote silently runs a
-  tag outside its range, and the record claims otherwise. A late remote needing a different file
-  for a mapped specifier must get it through its own scope.
+- **A delta must never restate a committed `imports` key.** The browser keeps the first mapping, natively and in
+  es-module-shims without `mapOverrides`, so the remote would silently run the page's file and the record would
+  claim otherwise. The dynamic path decides per *package*, not per external name, precisely so a specifier another
+  external published (flat vs dense) is seen. A late remote needing a different file for a mapped specifier gets it
+  through its own scope. Keep the e2e spec that loads with `mapOverrides` off passing.
 - **Init cannot see what files import.** It only knows what `remoteEntry.json` declares, so scope leaks through
   served files cannot be fully ruled out, and the fallback family is whatever `pool` labels declare. Swapping the
-  serving build swaps the scope that comes with it.
+  serving build swaps the scope that comes with it. On the dynamic path, an unpooled remote that runs one package
+  itself but takes another package's file from a committed build can load the first package twice through that
+  file; a `pool` label covering both packages prevents it.
 - **Order dependence.** Anything decided by row order rather than by name can change with manifest order or with
   a redeploy. Test both registration orders.
 - **Record vs page drift.** A loaded module cannot be unloaded: overriding an already-loaded remote changes the
