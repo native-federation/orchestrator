@@ -178,8 +178,9 @@ function downloadsOf(
   return downloads;
 }
 
-// The remotes that ship a specifier of the package outside the serving build's own copies at its tag. Each
-// serves the whole package from its own build instead, so none of its files imports another build's.
+// The remotes that run part of the package off the map and part on it, or ship a specifier outside the serving
+// build's copies at its tag. Each serves the whole package from its own build instead, so none of its files
+// imports another build's.
 export function fallbacksOf(externals: PackageExternals, serving: ServingBuild): RemoteName[] {
   return fallbacksFrom(consumersOf(externals), serving);
 }
@@ -190,10 +191,13 @@ function fallbacksFrom(consumers: Map<RemoteName, Placed[]>, serving: ServingBui
       .filter(({ row }) => row.tag === serving.tag && row.action !== 'scope')
       .flatMap(({ copy }) => Object.keys(copy.entries))
   );
-  const uncovered = ({ row, copy }: Placed) =>
-    row.action !== 'scope' && Object.keys(copy.entries).some(s => !surface.has(s));
+  const onMap = ({ row }: Placed) => row.action !== 'scope';
+  const uncovered = ({ copy }: Placed) => Object.keys(copy.entries).some(s => !surface.has(s));
+  // A remote with no copy on the map already runs the package wholly from its own build.
+  const splitsPackage = (placed: Placed[]) =>
+    placed.some(onMap) && placed.some(p => !onMap(p) || uncovered(p));
   return [...consumers]
-    .filter(([remote, placed]) => remote !== serving.remote && placed.some(uncovered))
+    .filter(([remote, placed]) => remote !== serving.remote && splitsPackage(placed))
     .map(([remote]) => remote);
 }
 

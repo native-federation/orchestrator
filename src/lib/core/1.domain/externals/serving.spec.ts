@@ -362,6 +362,52 @@ describe('servingBuildOf', () => {
     });
   });
 
+  // b's own fw/testing election left its copy on a scope row, while its fw follows the map.
+  describe('a remote that runs part of the package off the map and part on it', () => {
+    it('falls back while its root would follow the serving build', () => {
+      const externals: [ExternalName, SharedExternal][] = [
+        [
+          'fw',
+          external(
+            version('share', [copy('a', ['fw'])], '2.0.0'),
+            version('skip', [copy('b', ['fw'])])
+          ),
+        ],
+        ['fw/testing', external(version('scope', [copy('b', ['fw/testing'])]))],
+      ];
+
+      expect(fallbacksOf(externals, { remote: 'a', tag: '2.0.0' })).toEqual(['b']);
+    });
+
+    it('falls back although the serving build covers the secondary', () => {
+      const externals: [ExternalName, SharedExternal][] = [
+        ['fw', external(version('share', [copy('a', ['fw', 'fw/testing']), copy('b', ['fw'])]))],
+        ['fw/testing', external(version('scope', [copy('b', ['fw/testing'])]))],
+      ];
+
+      expect(fallbacksOf(externals, { remote: 'a', tag: '1.0.0' })).toEqual(['b']);
+    });
+
+    it('ranks the build that keeps it whole first when the downloads tie', () => {
+      // All cached: serving a makes b a fallback, serving b leaves a whole. Uncounted, a would win as the root
+      // basis.
+      const result = serving(
+        [
+          'fw',
+          external(
+            version('share', [
+              copy('a', ['fw'], { cached: true }),
+              copy('b', ['fw'], { cached: true }),
+            ])
+          ),
+        ],
+        ['fw/testing', external(version('scope', [copy('b', ['fw/testing'], { cached: true })]))]
+      );
+
+      expect(result).toEqual<ServingBuild>({ remote: 'b', tag: '1.0.0' });
+    });
+  });
+
   it('breaks an equal rank by name, not by record order', () => {
     const tie = (first: string, second: string) =>
       serving(

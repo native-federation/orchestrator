@@ -488,7 +488,6 @@ describe('a remote runs every specifier of a package from one build', () => {
       return {
         name: `runs a package wholly from its own build when its flat secondary is scoped and the serving build lacks it (consumer first=${consumerFirst})`,
         entries: consumerFirst ? [c, a, s] : [a, s, c],
-        known: { c: { stitched: ['@fw/core: a c'] } },
       };
     }),
     // d serves core{core, core/sub} at c's own tag, so it covers c's sub; but s's strict sub 17.2.0 and c's
@@ -505,12 +504,6 @@ describe('a remote runs every specifier of a package from one build', () => {
       return {
         name: `runs a package wholly from its own build when its flat secondary is scoped and the serving build covers it (consumer first=${consumerFirst})`,
         entries: consumerFirst ? [c, d, s] : [d, s, c],
-        known: {
-          c: {
-            stitched: ['@fw/core: c d'],
-            twice: ['@fw/core/sub: http://c/fw_core_sub.js http://d/fw_core_sub.js'],
-          },
-        },
       };
     }),
     // r, loaded at runtime under strict compatibility, ships core/sub without core; a's build has no sub. The load
