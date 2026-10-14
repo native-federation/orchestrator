@@ -7,8 +7,9 @@ export const createStorageHandlerMock = (storageRef: any) =>
         const raw = storageRef[key] ?? fallback;
         return raw === undefined ? undefined : JSON.parse(JSON.stringify(raw));
       }),
+      // A copy, as the StorageEntry contract requires.
       set: vi.fn(value => {
-        storageRef[key] = value;
+        storageRef[key] = JSON.parse(JSON.stringify(value));
         return mockStorageEntry;
       }),
       clear: vi.fn(() => {
