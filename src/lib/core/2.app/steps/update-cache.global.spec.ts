@@ -236,7 +236,7 @@ describe('createProcessDynamicRemoteEntry - scoped', () => {
     await expect(updateCache(remoteEntry)).rejects.toThrow(`Could not process remote 'team/mfe1'`);
     expect(config.log.error).toHaveBeenCalledWith(
       8,
-      "[__GLOBAL__][team/mfe1] dep-b@2.1.1 Is not compatible with existing dep-b@2.2.2 requiredRange '~2.2.0'"
+      "[__GLOBAL__][team/mfe1] dep-b@2.1.1 Is not compatible with existing dep-b@2.2.2 requiredRange '~2.1.0'"
     );
   });
 

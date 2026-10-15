@@ -24,7 +24,7 @@ type Pending = { external: DenseSharedInfo; ctx: SharedExternalContext };
 
 type Served = Map<Specifier, Claim>;
 
-type Rejection = { item: Pending; claim: Claim };
+type Rejection = { item: Pending; specifier: Specifier; claim: Claim };
 
 // share: the remote's build opens the package; skip: it runs the build the map serves it from; scope: its own
 // build beside the map (partlyServed: the map serves some of it).
@@ -161,7 +161,7 @@ export function createUpdateCache(
     return Object.keys(external.entries).flatMap(specifier => {
       const claim = served.get(specifier);
       return claim && !accepts(claim.tag, ctx.tag, ctx.remote.requiredVersion)
-        ? [{ item, claim }]
+        ? [{ item, specifier, claim }]
         : [];
     });
   }
@@ -197,12 +197,15 @@ export function createUpdateCache(
     return isPooled(Object.entries(record).filter(([name]) => packageOf(name) === pkg));
   }
 
-  function reportIncompatible(remoteEntry: RemoteEntry, { item: { external }, claim }: Rejection) {
-    const errorMsg = `[${external.shareScope ?? GLOBAL_SCOPE}][${remoteEntry.name}] ${
-      external.packageName
-    }@${external.version} Is not compatible with existing ${external.packageName}@${
-      claim.tag
-    } requiredRange '${claim.copy.requiredVersion}'`;
+  function reportIncompatible(
+    remoteEntry: RemoteEntry,
+    { item: { external, ctx }, specifier, claim }: Rejection
+  ) {
+    const errorMsg = `[${external.shareScope ?? GLOBAL_SCOPE}][${remoteEntry.name}] ${specifier}@${
+      ctx.tag
+    } Is not compatible with existing ${specifier}@${claim.tag} requiredRange '${
+      ctx.remote.requiredVersion
+    }'`;
 
     if (config.strict.strictExternalCompatibility) {
       config.log.error(8, errorMsg);

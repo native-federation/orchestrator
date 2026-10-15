@@ -1134,4 +1134,34 @@ describe('a strict runtime load refuses only what a cold init refuses', () => {
       expect(await cold(c, true)).toEqual({ threw: expect.stringContaining('NFError') });
       expect(await loaded(c, true)).toEqual({ threw: "NFError: Could not process remote 'r1'" });
     });
+
+  // A pooled dense copy rejected on its secondary: the old text named the copy's package and the host's range.
+  it("names the rejected specifier at the tag the map serves it and the loading copy's range", async () => {
+    const p = portfolio(
+      {},
+      {
+        storage: `nf-no-stitching-${storage++}`,
+        realRepositories: true,
+        assertNoTear: false,
+        hosts: ['h'],
+      }
+    );
+    await p.runInit([
+      entry(
+        'h',
+        shared(CORE, { version: '1.0.0', range: '^1.0.0' }),
+        shared(SUB, { version: '2.0.0', range: '^2.0.0' })
+      ),
+    ]);
+    await p.runDynamic(
+      entry(
+        'r1',
+        shared(CORE, { version: '1.0.0', range: '~1.0.0', strict: true, entrypoints: [SUB] })
+      )
+    );
+    expect(p.config.log.warn).toHaveBeenCalledWith(
+      8,
+      "[__GLOBAL__][r1] @fw/core/sub@1.0.0 Is not compatible with existing @fw/core/sub@2.0.0 requiredRange '~1.0.0'"
+    );
+  });
 });
