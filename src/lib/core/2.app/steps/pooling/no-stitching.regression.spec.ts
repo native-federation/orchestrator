@@ -535,6 +535,56 @@ describe('a remote runs every specifier of a package from one build', () => {
         expect(resolve(map, SUB, 'http://r/expose.js')).toBe('http://r/fw_core_sub.js');
       },
     },
+    // A package that ships entrypoints only, like Material: w labels `core/a` (with forms), x ships `core/b`
+    // unlabelled. Both entrypoints join the pool through their package, so `core/b` never takes w's build as its
+    // serving build, which ships no `core/b`, and x runs it from its own.
+    ...[undefined, 'custom'].flatMap(shareScope =>
+      [true, false].map((labelledFirst): Case => {
+        const w = entry('w', shared(A, { shareScope }), shared(FORMS, { shareScope }));
+        const x = entry('x', shared(B, { pool: false, shareScope }));
+        return {
+          name: `maps an unlabelled entrypoint of a package whose sibling is pooled (labelled first=${labelledFirst}, scope=${shareScope ?? 'global'})`,
+          scope: shareScope,
+          entries: labelledFirst ? [w, x] : [x, w],
+          expectMap: map => {
+            expect(resolve(map, A, 'http://w/expose.js')).toBe('http://w/fw_core_a.js');
+            expect(resolve(map, B, 'http://x/expose.js')).toBe('http://x/fw_core_b.js');
+          },
+        };
+      })
+    ),
+    // As above with `core/b` labelled into another pool: the package's entrypoints merge the two pools.
+    {
+      name: 'maps both entrypoints of a package whose entrypoints are labelled into two pools',
+      entries: [
+        entry('w', shared(A), shared(FORMS)),
+        entry('x', shared(B, { pool: 'ui' }), shared('@ui/kit', { pool: 'ui' })),
+      ],
+      expectMap: map => {
+        expect(resolve(map, A, 'http://w/expose.js')).toBe('http://w/fw_core_a.js');
+        expect(resolve(map, B, 'http://x/expose.js')).toBe('http://x/fw_core_b.js');
+      },
+    },
+    // w labels `core/a` and ships `core/b` unlabelled at 1.0.0; x ships `core/b` at 2.0.0. The pool elects one
+    // build for both entrypoints: x's newer build, which w's `~1.0.0` rejects, so w runs its whole family from its
+    // own build and never runs its `core/a` beside x's `core/b`.
+    {
+      name: 'runs a labelled and an unlabelled entrypoint of one package from one build',
+      entries: [
+        entry(
+          'w',
+          shared(A, at('1.0.0')),
+          shared(B, { pool: false, ...at('1.0.0') }),
+          shared(FORMS, at('1.0.0'))
+        ),
+        entry('x', shared(B, { pool: false, ...at('2.0.0') })),
+      ],
+      expectMap: map => {
+        expect(resolve(map, A, 'http://w/expose.js')).toBe('http://w/fw_core_a.js');
+        expect(resolve(map, B, 'http://w/expose.js')).toBe('http://w/fw_core_b.js');
+        expect(resolve(map, B, 'http://x/expose.js')).toBe('http://x/fw_core_b.js');
+      },
+    },
   ];
 
   for (const c of cases) register(c);

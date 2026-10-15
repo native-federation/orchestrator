@@ -62,9 +62,10 @@ export function buildPools(sharedExternals: DeepReadonly<shareScope>): Membershi
 
   // An entrypoint follows its package into whatever pool the package joins, labelled or not: a flat build
   // that labels only the package would otherwise leave its entrypoints out — measured as a torn package.
+  // The package's node needs no root external, so a package that ships only entrypoints stays one unit too.
   for (const name of labelsOf.keys()) {
     const owner = owningPackage(name);
-    if (owner !== undefined && labelsOf.has(owner)) union(extNode(name), extNode(owner));
+    if (owner !== undefined) union(extNode(name), extNode(owner));
   }
 
   const byComponent = new Map<string, PoolMember[]>();

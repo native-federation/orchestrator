@@ -144,6 +144,31 @@ describe('buildPools', () => {
       expect(shape(pools)).toEqual([['rx', ['rxjs', 'rxjs/operators']]]);
     });
 
+    // A package can ship entrypoints only (`@m/material/table`, no root external): its entrypoints still join
+    // through the package, or a labelled one would pool while its unlabelled sibling stays out, and the two
+    // externals of one package would get two serving builds.
+    it('pools the entrypoints of a package that has no root external', () => {
+      const { pools } = buildPools(
+        scope({
+          '@m/material/table': [{ remote: 'w', pool: 'ng' }],
+          '@ng/forms': [{ remote: 'w', pool: 'ng' }],
+          '@m/material/button': [{ remote: 'x' }],
+        })
+      );
+      expect(shape(pools)).toEqual([
+        ['ng', ['@m/material/button', '@m/material/table', '@ng/forms']],
+      ]);
+    });
+
+    // The package's node is no label: unlabelled entrypoints of a root-less package form no pool either.
+    it('forms no pool from unlabelled entrypoints of a root-less package', () => {
+      const { pools, labelledAlone } = buildPools(
+        scope({ '@m/material/table': [{ remote: 'w' }], '@m/material/button': [{ remote: 'x' }] })
+      );
+      expect(pools.size).toBe(0);
+      expect(labelledAlone).toEqual([]);
+    });
+
     // An entrypoint edge is not itself a reason to pool.
     it('forms no pool from a package and its entrypoint when nothing is labelled', () => {
       const { pools } = buildPools(
