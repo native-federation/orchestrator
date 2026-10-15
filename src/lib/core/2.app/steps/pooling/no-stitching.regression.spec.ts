@@ -20,6 +20,7 @@ const TESTING = '@fw/core/testing';
 const SUB = '@fw/core/sub';
 const A = '@fw/core/a';
 const B = '@fw/core/b';
+const X = '@fw/core/x';
 const FORMS = '@fw/forms';
 const RXJS = 'rxjs';
 
@@ -513,6 +514,74 @@ describe('a remote runs every specifier of a package from one build', () => {
         entries: consumerFirst ? [c, d, s] : [d, s, c],
       };
     }),
+    // Unpooled. r1 serves core at 1.0.0 with `core/a`; r3's `core/a` 2.1.0 wins its own election and r2's strict
+    // `^2.0.0` copy skips onto it, then that row follows r1's tag. r2 runs `core/a` from its own build rather than
+    // r1's 1.0.0, which its range rejects. In a named share scope and in the global one.
+    ...[undefined, 'custom'].map((shareScope): Case => {
+      const u = (version: string, opts: SharedOpts = {}) => ({
+        pool: false as const,
+        shareScope,
+        ...at(version),
+        ...opts,
+      });
+      return {
+        name: `runs a strict secondary whose skip row follows a serving tag its range rejects from its own build (scope=${shareScope ?? 'global'})`,
+        scope: shareScope,
+        entries: [
+          entry('r1', shared(CORE, u('1.0.0')), shared(A, u('1.0.0'))),
+          entry('r2', shared(A, u('2.0.0', { range: '^2.0.0', strict: true }))),
+          entry('r3', shared(A, u('2.1.0'))),
+        ],
+        expectMap: map =>
+          expect(resolve(map, A, 'http://r2/expose.js')).toBe('http://r2/fw_core_a.js'),
+      };
+    }),
+    // As above under strictExternalCompatibility, with r2 also shipping `core/x`, which r1 lacks: r2 runs the
+    // package from its own build for coverage, so its strict range refuses nothing, and the warm page's decide
+    // reads r2's stored scope rows the same way.
+    {
+      name: 'refuses no strict copy on a warm init whose remote fell back for coverage',
+      strict: true,
+      reload: true,
+      entries: [
+        entry(
+          'r1',
+          shared(CORE, { pool: false, ...at('1.0.0') }),
+          shared(A, { pool: false, ...at('1.0.0') })
+        ),
+        entry(
+          'r2',
+          shared(A, { pool: false, version: '2.0.0', range: '^2.0.0', strict: true }),
+          shared(X, { pool: false, ...at('2.0.0') })
+        ),
+        entry('r3', shared(A, { pool: false, ...at('2.1.0') })),
+      ],
+      expectMap: map => {
+        expect(resolve(map, A, 'http://r2/expose.js')).toBe('http://r2/fw_core_a.js');
+        expect(resolve(map, X, 'http://r2/expose.js')).toBe('http://r2/fw_core_x.js');
+      },
+    },
+    // As above with r2 shipping core too, at 2.1.0 and lenient, so it would follow r1's core: its strict `core/a`
+    // rejects r1's 1.0.0, so r2 runs both from its own build, not its `core/a` beside r1's core.
+    {
+      name: 'runs a package wholly from its own build when its strict secondary rejects the serving tag',
+      entries: [
+        entry(
+          'r1',
+          shared(CORE, { pool: false, ...at('1.0.0'), strict: true }),
+          shared(A, { pool: false, ...at('1.0.0') })
+        ),
+        entry(
+          'r2',
+          shared(CORE, { pool: false, ...at('2.1.0') }),
+          shared(A, { pool: false, version: '2.1.0', range: '^2.1.0', strict: true })
+        ),
+      ],
+      expectMap: map => {
+        expect(resolve(map, CORE, 'http://r2/expose.js')).toBe('http://r2/fw_core.js');
+        expect(resolve(map, A, 'http://r2/expose.js')).toBe('http://r2/fw_core_a.js');
+      },
+    },
     // r, loaded at runtime under strict compatibility, ships core/sub without core; a's build has no sub. The load
     // runs r's sub from r's own scope, and the next page's warm init keeps it there instead of publishing it beside
     // a's core. r's sub still imports a's core, the one stitch a cold init of the same portfolio has too.

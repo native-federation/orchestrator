@@ -154,6 +154,49 @@ describe('createDecideServingBuilds', () => {
     });
   });
 
+  // A flat package served by a@1.0.0. b and d each skipped onto their secondary's newer share row (c, e), which
+  // their strict ranges accept; once those rows follow the serving tag, neither range accepts what serves them.
+  describe('a strict skip copy whose range rejects the serving tag', () => {
+    const skipsOntoNewer = () =>
+      seed({
+        fw: [row('fw', '1.0.0', 'share', [{ remote: 'a' }])],
+        'fw/a': [
+          row('fw/a', '2.1.0', 'share', [{ remote: 'c' }]),
+          row('fw/a', '2.0.0', 'skip', [{ remote: 'b', req: '^2.0.0', strict: true }]),
+          row('fw/a', '1.0.0', 'skip', [{ remote: 'a' }]),
+        ],
+        'fw/b': [
+          row('fw/b', '3.1.0', 'share', [{ remote: 'e' }]),
+          row('fw/b', '3.0.0', 'skip', [{ remote: 'd', req: '^3.0.0', strict: true }]),
+          row('fw/b', '1.0.0', 'skip', [{ remote: 'a' }]),
+        ],
+      });
+
+    it('runs each such remote from its own build', async () => {
+      skipsOntoNewer();
+
+      await decide();
+
+      expect(rowsOf('fw/a')).toEqual(['2.1.0:skip:[c]', '2.0.0:scope:[b]', '1.0.0:share:[a]']);
+      expect(rowsOf('fw/b')).toEqual(['3.1.0:skip:[e]', '3.0.0:scope:[d]', '1.0.0:share:[a]']);
+      expect(config.log.error).not.toHaveBeenCalled();
+    });
+
+    it('throws for the first such copy in record order under strictExternalCompatibility', async () => {
+      config.strict.strictExternalCompatibility = true;
+      skipsOntoNewer();
+
+      await expect(decide()).rejects.toEqual(
+        new NFError('External fw/a@2.0.0 could not be shared.')
+      );
+      expect(config.log.error).toHaveBeenCalledTimes(1);
+      expect(config.log.error).toHaveBeenCalledWith(
+        3,
+        "[b][fw/a@2.0.0] Is not compatible with requiredRange '^2.0.0' of shared fw@1.0.0."
+      );
+    });
+  });
+
   describe('a pooled package', () => {
     const versions = {
       fw: [row('fw', '2.0.0', 'share', [shipsAll])],

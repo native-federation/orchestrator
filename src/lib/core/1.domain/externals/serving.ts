@@ -194,7 +194,7 @@ function tollOf(
 ): Toll {
   const toll: Toll = { fallbacks: new Set(), downloads: new Set() };
   for (const [remote, placed] of consumers) {
-    const fallback = splitsPackage(placed, surface, tag);
+    const fallback = fallsBack(placed, surface, tag, accepts);
     if (fallback) toll.fallbacks.add(remote);
     if (!allCached(placed) && (fallback || runsOffMap(placed, tag, accepts)))
       toll.downloads.add(remote);
@@ -207,18 +207,40 @@ const allCached = (placed: Placed[]): boolean => placed.every(({ copy }) => copy
 // The remotes that run part of the package off the map and part on it, ship a specifier outside the copies the
 // serving build publishes, or ship the package at two tags; without a serving build, every remote with a copy on
 // the map. Each serves the whole package from its own build instead, so none of its files imports another build's.
-export function fallbacksOf(externals: PackageExternals, serving?: ServingBuild): RemoteName[] {
-  return fallbacksFrom(consumersOf(externals), serving);
-}
-
-function fallbacksFrom(consumers: Map<RemoteName, Placed[]>, serving?: ServingBuild): RemoteName[] {
+export function fallbacksOf(
+  externals: PackageExternals,
+  serving: ServingBuild | undefined,
+  accepts: AcceptsTag
+): RemoteName[] {
+  const consumers = consumersOf(externals);
   const surface: Surface = serving ? surfaceOf(consumers, serving) : new Map();
   return [...consumers]
     .filter(
       ([remote, placed]) =>
-        remote !== serving?.remote && splitsPackage(placed, surface, serving?.tag)
+        remote !== serving?.remote && fallsBack(placed, surface, serving?.tag, accepts)
     )
     .map(([remote]) => remote);
+}
+
+// The first copy, in record order, that `rejectsServingTag` while its remote's coverage alone (`splitsPackage`)
+// would keep it on the map: a remote its coverage already sends to its own build never refuses.
+export function strictObjectorOf(
+  externals: PackageExternals,
+  serving: ServingBuild,
+  accepts: AcceptsTag
+): (ServingObjector & { external: ExternalName }) | undefined {
+  const consumers = consumersOf(externals);
+  const surface = surfaceOf(consumers, serving);
+  for (const [name, external] of externals)
+    for (const row of external.versions)
+      for (const copy of row.remotes)
+        if (
+          copy.name !== serving.remote &&
+          rejectsServingTag({ row, copy }, surface, serving.tag, accepts) &&
+          !splitsPackage(consumers.get(copy.name)!, surface, serving.tag)
+        )
+          return { external: name, copy, tag: row.tag };
+  return undefined;
 }
 
 // Each specifier the serving build publishes, at the tag of the row it publishes it from.
@@ -253,14 +275,41 @@ function splitsPackage(placed: Placed[], surface: Surface, tag?: VersionName): b
   );
 }
 
+function fallsBack(
+  placed: Placed[],
+  surface: Surface,
+  tag: VersionName | undefined,
+  accepts: AcceptsTag
+): boolean {
+  return (
+    splitsPackage(placed, surface, tag) ||
+    (tag !== undefined && placed.some(p => rejectsServingTag(p, surface, tag, accepts)))
+  );
+}
+
+// A strict copy on the map whose range rejects the serving tag, where the serving build publishes one of its
+// files. A scoped copy already runs its own build, so it never objects.
+function rejectsServingTag(
+  p: Placed,
+  surface: Surface,
+  tag: VersionName,
+  accepts: AcceptsTag
+): boolean {
+  return (
+    onMap(p) &&
+    rejectsTag(p, tag, accepts) &&
+    Object.keys(p.copy.entries).some(s => surface.get(s) === tag)
+  );
+}
+
+const rejectsTag = ({ row, copy }: Placed, tag: VersionName, accepts: AcceptsTag): boolean =>
+  copy.strictVersion && !accepts(tag, row.tag, copy.requiredVersion);
+
 // The host serves every tag it ships; any other remote shipping two tags has no one build to serve or follow.
 const shipsTwoTags = (placed: Placed[]): boolean =>
   !placed.some(p => p.row.host && p.row.remotes[0] === p.copy) &&
   placed.some(p => p.row.tag !== placed[0]!.row.tag);
 
 function runsOffMap(placed: Placed[], tag: VersionName, accepts: AcceptsTag): boolean {
-  return placed.some(
-    ({ row, copy }) =>
-      row.action === 'scope' || (copy.strictVersion && !accepts(tag, row.tag, copy.requiredVersion))
-  );
+  return placed.some(p => !onMap(p) || rejectsTag(p, tag, accepts));
 }

@@ -9,6 +9,7 @@ import {
   packagesOf,
   servingBuildOf,
   shareServingCopies,
+  strictObjectorOf,
   type ServingBuild,
 } from 'lib/core/1.domain/externals/serving';
 import type { DrivingContract } from '../driving-ports/driving.contract';
@@ -53,7 +54,7 @@ export function createDecideServingBuilds(
     // The election already placed a pooled package's rows.
     const pooled = isPooled(externals);
     const toFollow = pooled ? undefined : serving;
-    if (!pooled) fallBack(externals, serving);
+    if (!pooled) fallBack(pkg, externals, accepts, serving);
 
     externals.forEach(([name, external], i) => {
       const decided = withServingBuild(
@@ -77,19 +78,35 @@ export function createDecideServingBuilds(
       rejectIncompatible(config, objector.copy, `${name}@${objector.tag}`, `${pkg}@${serving.tag}`);
     return followed;
   }
+
+  // The serving copy publishes first, so a remote it covers stays; one it does not runs the package from its own
+  // build.
+  function fallBack(
+    pkg: ExternalName,
+    externals: StoredPackage,
+    accepts: AcceptsTag,
+    serving?: ServingBuild
+  ): void {
+    if (serving) {
+      for (const [, external] of externals) shareServingCopies(external, serving);
+      const objector =
+        config.strict.strictExternalCompatibility && strictObjectorOf(externals, serving, accepts);
+      if (objector)
+        rejectIncompatible(
+          config,
+          objector.copy,
+          `${objector.external}@${objector.tag}`,
+          `${pkg}@${serving.tag}`
+        );
+    }
+    for (const remote of fallbacksOf(externals, serving, accepts))
+      for (const [, external] of externals)
+        external.versions = scopeRemote(external.versions, remote);
+  }
 }
 
 function withServingBuild(external: SharedExternal, servingBuild?: RemoteName): SharedExternal {
   if (external.servingBuild === servingBuild) return external;
   const { servingBuild: _, ...rest } = external;
   return servingBuild ? { ...rest, servingBuild } : rest;
-}
-
-// The serving copy publishes first, so a remote it covers stays; one it does not runs the package from its own
-// build.
-function fallBack(externals: StoredPackage, serving?: ServingBuild): void {
-  if (serving) for (const [, external] of externals) shareServingCopies(external, serving);
-  for (const remote of fallbacksOf(externals, serving))
-    for (const [, external] of externals)
-      external.versions = scopeRemote(external.versions, remote);
 }

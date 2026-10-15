@@ -11,6 +11,7 @@ import {
   packagesOf,
   servingBuildOf,
   shareServingCopies,
+  strictObjectorOf,
   type ServingBuild,
   type ServingCandidate,
 } from './serving';
@@ -245,7 +246,7 @@ describe('servingBuildOf', () => {
 
     expect(build).toEqual<ServingBuild>({ remote: 'remote', tag: '2.0.0' });
     // The root's build covers the host's copy, so the host runs the whole package from it.
-    expect(fallbacksOf(externals, build)).toEqual([]);
+    expect(fallbacksOf(externals, build, accepts)).toEqual([]);
     expect(claimTable(externals).claims.get('fw/testing')?.copy.name).toBe('remote');
   });
 
@@ -314,8 +315,8 @@ describe('servingBuildOf', () => {
     });
 
     it("falls back for a specifier outside the serving build's copies at the serving tag", () => {
-      expect(fallbacksOf(uncovered(), { remote: 'a', tag: '1.0.0' })).toEqual(['b']);
-      expect(fallbacksOf(uncovered(), { remote: 'b', tag: '1.0.0' })).toEqual([]);
+      expect(fallbacksOf(uncovered(), { remote: 'a', tag: '1.0.0' }, accepts)).toEqual(['b']);
+      expect(fallbacksOf(uncovered(), { remote: 'b', tag: '1.0.0' }, accepts)).toEqual([]);
     });
 
     it("counts only the serving build's copies at the serving tag as covering", () => {
@@ -330,7 +331,7 @@ describe('servingBuildOf', () => {
         ],
       ];
 
-      expect(fallbacksOf(externals, { remote: 'a', tag: '2.0.0' })).toEqual(['b']);
+      expect(fallbacksOf(externals, { remote: 'a', tag: '2.0.0' }, accepts)).toEqual(['b']);
     });
 
     // The global map never publishes the serving build's scope copy: B maps it in its own scope only.
@@ -346,7 +347,7 @@ describe('servingBuildOf', () => {
         ],
       ];
 
-      expect(fallbacksOf(externals, { remote: 'a', tag: '1.0.0' })).toEqual(['b']);
+      expect(fallbacksOf(externals, { remote: 'a', tag: '1.0.0' }, accepts)).toEqual(['b']);
     });
 
     it('leaves a copy that already runs from a scope row out', () => {
@@ -355,7 +356,7 @@ describe('servingBuildOf', () => {
         ['fw/testing', external(version('scope', [copy('b', ['fw/testing'])], '0.9.0'))],
       ];
 
-      expect(fallbacksOf(externals, { remote: 'a', tag: '1.0.0' })).toEqual([]);
+      expect(fallbacksOf(externals, { remote: 'a', tag: '1.0.0' }, accepts)).toEqual([]);
     });
   });
 
@@ -373,7 +374,7 @@ describe('servingBuildOf', () => {
         ['fw/testing', external(version('scope', [copy('b', ['fw/testing'])]))],
       ];
 
-      expect(fallbacksOf(externals, { remote: 'a', tag: '2.0.0' })).toEqual(['b']);
+      expect(fallbacksOf(externals, { remote: 'a', tag: '2.0.0' }, accepts)).toEqual(['b']);
     });
 
     it('falls back although the serving build covers the secondary', () => {
@@ -382,7 +383,7 @@ describe('servingBuildOf', () => {
         ['fw/testing', external(version('scope', [copy('b', ['fw/testing'])]))],
       ];
 
-      expect(fallbacksOf(externals, { remote: 'a', tag: '1.0.0' })).toEqual(['b']);
+      expect(fallbacksOf(externals, { remote: 'a', tag: '1.0.0' }, accepts)).toEqual(['b']);
     });
 
     it('ranks the build that keeps it whole first when the downloads tie', () => {
@@ -412,8 +413,8 @@ describe('servingBuildOf', () => {
         ['fw/testing', external(version('scope', [copy('b', ['fw/testing'])]))],
       ];
 
-      expect(fallbacksOf(externals, { remote: 'b', tag: '1.0.0' })).toEqual([]);
-      expect(fallbacksOf(externals, { remote: 'a', tag: '1.0.0' })).toEqual(['b']);
+      expect(fallbacksOf(externals, { remote: 'b', tag: '1.0.0' }, accepts)).toEqual([]);
+      expect(fallbacksOf(externals, { remote: 'a', tag: '1.0.0' }, accepts)).toEqual(['b']);
       expect(serving(...externals)).toEqual<ServingBuild>({ remote: 'b', tag: '1.0.0' });
     });
   });
@@ -440,7 +441,7 @@ describe('servingBuildOf', () => {
         ['fw/b', external(r2('fw/b'), r1('skip', 'fw/b', '2.0.0'))],
       ];
 
-      expect(fallbacksOf(externals, { remote: 'r2', tag: '2.1.0' })).toEqual(['r1']);
+      expect(fallbacksOf(externals, { remote: 'r2', tag: '2.1.0' }, accepts)).toEqual(['r1']);
     });
 
     it('leaves the package without a serving build when no other remote ships it', () => {
@@ -473,11 +474,64 @@ describe('servingBuildOf', () => {
     const host: ServingBuild = { remote: 'host', tag: '1.0.0' };
 
     it('falls back when it is strict, as a runtime load of it does', () => {
-      expect(fallbacksOf(externals(true), host)).toEqual(['r1']);
+      expect(fallbacksOf(externals(true), host, accepts)).toEqual(['r1']);
     });
 
     it('follows the host when it is loose', () => {
-      expect(fallbacksOf(externals(false), host)).toEqual([]);
+      expect(fallbacksOf(externals(false), host, accepts)).toEqual([]);
+    });
+  });
+
+  // a serves fw at 1.0.0; b skipped onto c's fw/a 2.1.0, which its `^2.0.0` accepts, but a's fw/a 1.0.0 is
+  // what serves it once that row follows the serving tag.
+  describe('a strict copy whose range rejects the serving tag', () => {
+    const externals = (b: SharedVersionMeta): [ExternalName, SharedExternal][] => [
+      ['fw', external(version('share', [copy('a', ['fw'])]))],
+      [
+        'fw/a',
+        external(
+          version('share', [copy('c', ['fw/a'], { requiredVersion: '^2.0.0' })], '2.1.0'),
+          version('skip', [b], '2.0.0'),
+          version('share', [copy('a', ['fw/a'])])
+        ),
+      ],
+    ];
+    const strict = (entries: string[]) =>
+      copy('b', entries, { requiredVersion: '^2.0.0', strictVersion: true });
+    const a: ServingBuild = { remote: 'a', tag: '1.0.0' };
+
+    it('falls back from a skip row, and is the objector', () => {
+      const record = externals(strict(['fw/a']));
+
+      expect(fallbacksOf(record, a, accepts)).toEqual(['b']);
+      expect(strictObjectorOf(record, a, accepts)).toEqual({
+        external: 'fw/a',
+        copy: strict(['fw/a']),
+        tag: '2.0.0',
+      });
+    });
+
+    it('follows when it is loose', () => {
+      const record = externals(copy('b', ['fw/a'], { requiredVersion: '^2.0.0' }));
+
+      expect(fallbacksOf(record, a, accepts)).toEqual([]);
+      expect(strictObjectorOf(record, a, accepts)).toBeUndefined();
+    });
+
+    // A warm init reads b's copies in the scope rows an earlier run stored: they already run b's own build.
+    it('is no objector once its copies are scoped', () => {
+      const record = externals(strict(['fw/a']));
+      record[1]![1].versions[1]!.action = 'scope';
+
+      expect(strictObjectorOf(record, a, accepts)).toBeUndefined();
+    });
+
+    // b also ships fw/x, which a lacks: it falls back for coverage, so its range objects to nothing.
+    it('is no objector when its remote falls back for coverage', () => {
+      const record = externals(strict(['fw/a', 'fw/x']));
+
+      expect(fallbacksOf(record, a, accepts)).toEqual(['b']);
+      expect(strictObjectorOf(record, a, accepts)).toBeUndefined();
     });
   });
 
