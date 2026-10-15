@@ -435,8 +435,10 @@ export function toRemoteEntry(
       const to = spec.relabel!.to;
       return to === 'alias' ? `p${p}-alias` : `p${to % spec.pools.length}`;
     };
-    members.forEach((shape, m) => {
-      if (shape === null) return;
+    members.forEach((drawn, m) => {
+      if (drawn === null) return;
+      // A flat secondary without its package's root is a broken build: a flat remote ships the root beside it.
+      const shape = spec.flat && drawn === 'sub' ? 'root+sub' : drawn;
       const pkg = memberName(p, m);
       const entries: Record<string, string> = {};
       if (shape !== 'sub') entries[pkg] = `${pkg.slice(1).replace('/', '_')}.js`;

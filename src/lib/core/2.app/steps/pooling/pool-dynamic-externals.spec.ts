@@ -971,8 +971,10 @@ describe('createPoolDynamicExternals', () => {
       );
     };
 
-    // mfe's `@fw/http` ships only `@fw/http/testing` (plus `extra` when given). Nobody shares a package
-    // `@fw/http`, so `update-cache` opened a share row for mfe's copy, as it does for a package it introduces.
+    // mfe's `@fw/http` ships only `@fw/http/testing` (plus `extra` when given), with a share row for its copy.
+    // A real load never hands the gate this `share`: `update-cache` decides the package as a whole and already
+    // skips it onto the map's `@fw/http/testing` (or scopes it when `extra` adds a root the map lacks). These
+    // specs pin how the gate would treat it all the same.
     const givenHttp = (o: { tag?: string; extra?: string[]; skipOnly?: string } = {}) =>
       givenCommitted({
         '@fw/core': external(

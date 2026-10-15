@@ -152,7 +152,9 @@ function walk(
   const queue: Url[] = [];
   const reach = (specifier: Specifier, referrer: Url, via: PageFile | undefined) => {
     const hit = resolveHit(specifier, referrer);
-    if (hit === undefined) return void unresolved.add(`${referrer} -> ${specifier}`);
+    // A URL no build publishes is a 404 on the page, as much as a specifier the map lacks.
+    if (hit === undefined || !page.files.has(hit.url))
+      return void unresolved.add(`${referrer} -> ${specifier}`);
     edges.push({ specifier, hit, file: page.files.get(hit.url), via });
     if (seen.has(hit.url)) return;
     seen.add(hit.url);

@@ -199,8 +199,20 @@ describe('pageFaults', () => {
     const importMap = { imports: { p: 'http://cdn/r/p.js' } };
 
     expect(pageFaults({ importMap, entries: [r], scopeUrls: { r: 'http://cdn/r/' } })).toEqual({});
-    expect(pageFaults({ importMap, entries: [r] })).toEqual({});
-    expect(pageTears({ importMap, entries: [r] })).toEqual([]);
+    // Without it r's files live at http://r/, so the map's URL is no file r publishes.
+    expect(pageFaults({ importMap, entries: [r] })).toEqual({
+      r: { unresolved: ['http://r/ -> p'] },
+    });
+  });
+
+  // The map sends p/sub to a file h does not ship: the page gets a 404 for h's own import and for p's.
+  it('reads a mapped URL no build publishes as unresolved', () => {
+    const h = entry('h', [info('p', ['p', 'p/sub'])]);
+    const importMap = { imports: { p: 'http://h/p.js', 'p/sub': 'http://h/nope.js' } };
+
+    expect(pageFaults({ importMap, entries: [h] })).toEqual({
+      h: { unresolved: ['http://h/ -> p/sub', 'http://h/p.js -> p/sub'] },
+    });
   });
   // A winner- or consumer-scope leak is a separate defect from a package running from two builds, so
   // specs see it only on request; a leak from a stitched importer stays in.
