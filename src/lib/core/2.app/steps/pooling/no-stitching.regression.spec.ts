@@ -770,11 +770,16 @@ describe('a remote that ships a package at two tags', () => {
   const mappings = (name: string, util = '2.0.0') =>
     entry(name, loose(UI, '1.0.0'), loose(UTIL, util, '^2.0.0'));
   // What the builder emits for a dense build whose secondary carries the stripped range's version.
-  const denseTwoTags = (name: string) =>
+  const denseTwoTags = (name: string, shareScope?: string) =>
     entry(
       name,
-      { ...loose(LIB, '17.1.1', '^17.1.0'), entries: { [LIB]: file(LIB) } },
-      { ...loose(LIB, '17.1.0', '^17.1.0'), entries: { [FEATURE]: file(FEATURE) } }
+      { ...loose(LIB, '17.1.1', '^17.1.0'), entries: { [LIB]: file(LIB) }, shareScope },
+      { ...loose(LIB, '17.1.0', '^17.1.0'), entries: { [FEATURE]: file(FEATURE) }, shareScope }
+    );
+  const denseLib = (name: string, version: string, range: string, shareScope?: string) =>
+    entry(
+      name,
+      shared(LIB, { pool: false, version, range, shareScope, entrypoints: [FEATURE] })
     );
 
   const expectDenseHost = (map: ImportMap) => {
@@ -892,4 +897,66 @@ describe('a remote that ships a package at two tags', () => {
   ];
 
   for (const c of cases) register(c);
+
+  // A runtime load decides every copy before it stores any, so both of r1's externals of `@x/lib` reach the
+  // record: with no record yet for the package, and with r0's record already holding it.
+  describe('a runtime load of a dense two-tag build', () => {
+    const rowsOf = (p: ReturnType<typeof portfolio>, remote: string) =>
+      (p.stored()[LIB]?.versions ?? [])
+        .filter(v => v.remotes.some(r => r.name === remote))
+        .map(v => v.tag);
+
+    for (const shareScope of [undefined, 'sc'])
+      for (const known of [false, true])
+        it(`stores both of its rows (scope=${shareScope ?? 'global'}, known package=${known})`, async () => {
+          const h = entry('h', shared(PKG, { pool: false, shareScope }));
+          const r0 = denseLib('r0', '17.1.1', '^17.1.0', shareScope);
+          const r1 = denseTwoTags('r1', shareScope);
+          const p = portfolio(
+            {},
+            {
+              storage: `nf-no-stitching-${storage++}`,
+              realRepositories: true,
+              assertNoTear: false,
+              hosts: ['h'],
+              ...(shareScope && { scope: shareScope }),
+            }
+          );
+          const entries = known ? [h, r0] : [h];
+          await p.runInit(entries);
+          await p.runDynamic(r1);
+          expect(rowsOf(p, 'r1')).toEqual(['17.1.1', '17.1.0']);
+
+          p.reload();
+          const map = await p.runInit();
+          const faults = pageFaults({
+            importMap: map,
+            entries: [...entries, r1],
+            hosts: ['h'],
+            importsOf: importsFrom({}),
+          });
+          expect(faults).toEqual({});
+        });
+
+    // r1's feature copy is strict at `~17.1.0` while r0's 17.1.0 row was stored at `^17.1.0`, so storing it
+    // throws after the 17.1.1 copy was stored.
+    it('rolls back the copy it stored before a later copy is refused', async () => {
+      const r0 = denseLib('r0', '17.1.0', '^17.1.0');
+      const r1 = entry(
+        'r1',
+        { ...loose(LIB, '17.1.1', '^17.1.0'), entries: { [LIB]: file(LIB) } },
+        { ...strictTilde(LIB, '17.1.0'), entries: { [FEATURE]: file(FEATURE) } }
+      );
+      const p = portfolio(
+        {},
+        { storage: `nf-no-stitching-${storage++}`, realRepositories: true, assertNoTear: false }
+      );
+      await p.runInit([r0]);
+      p.config.strict.strictExternalSameVersionCompatibility = true;
+
+      await expect(p.runDynamic(r1)).rejects.toThrow("Could not process remote 'r1'");
+      expect(rowsOf(p, 'r1')).toEqual([]);
+      expect(rowsOf(p, 'r0')).toEqual(['17.1.0']);
+    });
+  });
 });

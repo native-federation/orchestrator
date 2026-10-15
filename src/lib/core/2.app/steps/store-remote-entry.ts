@@ -179,14 +179,20 @@ export function createStoreRemoteEntry(
       entries: sharedInfo.entries,
     };
 
-    const cached: SharedExternal = ports.sharedExternalsRepo
-      .tryGet(sharedInfo.packageName, sharedInfo.shareScope)
-      .get() ?? { dirty: false, versions: [] };
+    // Read on first use: a runtime load stores its copies only after deciding them all, and an entry may list
+    // one external twice (one row per tag).
+    let stored: SharedExternal | undefined;
+    const readRecord = (): SharedExternal =>
+      (stored ??= ports.sharedExternalsRepo
+        .tryGet(sharedInfo.packageName, sharedInfo.shareScope)
+        .get() ?? { dirty: false, versions: [] });
 
     return {
       tag,
       remote,
-      cached,
+      get cached() {
+        return readRecord();
+      },
       scopeType,
       assertSameVersionCompatibility(matchingVersion: SharedVersion): void {
         if (!remote.strictVersion) return;
@@ -208,8 +214,8 @@ export function createStoreRemoteEntry(
         ports.sharedExternalsRepo.addOrUpdate(
           sharedInfo.packageName,
           {
-            ...cached,
-            versions: cached.versions.sort((a, b) => ports.versionCheck.compare(b.tag, a.tag)),
+            ...readRecord(),
+            versions: readRecord().versions.sort((a, b) => ports.versionCheck.compare(b.tag, a.tag)),
           },
           sharedInfo.shareScope
         );
