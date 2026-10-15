@@ -1082,9 +1082,12 @@ it in that scope, read as the map was generated (the serving build's copy, see
   `strictVersion` range rejects its tag: the remote runs the whole package from its own build (`scope`).
 
 A rejecting range warns, and under `strictExternalCompatibility` fails the load, only where a cold init of the
-same remotes refuses it: the rejected file is of the copy's own external, the package is pooled, or the file is at
-the serving tag of a package the map would otherwise serve the remote wholly from one build. Any other rejection
-runs the package from the remote's own build silently, as the cold init's fallback does.
+same remotes refuses it: the package is pooled, the file is at the serving tag of a package the map would otherwise
+serve the remote wholly from one build, or the file is of the copy's own external at the tag that external's own
+election would keep with the remote in it (a host's row, or under `latestSharedExternal` the newest tag), or of
+the copy's own external where no tag pleases every strict copy of it. A file the map serves at the serving build's
+tag rather than at its external's own election is not enough. Any other rejection runs the package from the
+remote's own build silently, as the cold init's fallback does.
 
 A remote that runs a package from its own build because the map lacks an entrypoint it ships, or serves the
 package from two builds, opens no other package: an opened package's files resolve through the loader's scope,
@@ -1124,8 +1127,8 @@ it. In order:
    `'<build>' is not in the cache, so its files cannot be mapped.` Both file checks serve its whole family, never
    a part: half its family on the map's files and half on its own build would tear it.
 
-Under `strictExternalCompatibility` a load whose `strictVersion` copy rejects its external's shared version is
-refused before pooling runs (`Could not process remote '<remote>'`, as for any external). The gate itself never
+Under `strictExternalCompatibility` a load that a cold init of the same remotes would refuse, as above, is refused
+before pooling runs (`Could not process remote '<remote>'`, as for any external). The gate itself never
 throws: a range that rejects a tag the map serves islands the family as `incompatible`. A strict page keeps the
 load's verdicts on the next page (see below): a re-election could refuse a pool the gate accepted.
 

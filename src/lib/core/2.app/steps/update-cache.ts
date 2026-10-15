@@ -182,12 +182,30 @@ export function createUpdateCache(
 
     const first = new Map<Pending, Rejection>();
     for (const rejection of rejections)
-      if (
-        !first.has(rejection.item) &&
-        (pooled || !splits || rejection.claim.external === rejection.item.external.packageName)
-      )
+      if (!first.has(rejection.item) && (pooled || !splits || electionKeeps(rejection)))
         first.set(rejection.item, rejection);
     return [...first.values()];
+  }
+
+  // A cold election with the loader refuses the claimed tag where no tag pleases every strict copy, and otherwise
+  // keeps it only on a host row, or the newest with latestSharedExternal.
+  function electionKeeps({ item: { external, ctx }, claim }: Rejection): boolean {
+    if (claim.external !== external.packageName) return false;
+    const versions =
+      ports.sharedExternalsRepo.getFromScope(external.shareScope)[claim.external]?.versions ?? [];
+    const strict = [
+      { tag: ctx.tag, copy: ctx.remote },
+      ...versions.flatMap(v =>
+        v.remotes.filter(r => r.strictVersion).map(copy => ({ tag: v.tag, copy }))
+      ),
+    ];
+    const tags = [ctx.tag, ...versions.map(v => v.tag)];
+    if (!tags.some(tag => strict.every(s => accepts(tag, s.tag, s.copy.requiredVersion))))
+      return true;
+    const host = versions.find(v => v.host);
+    if (host) return host.tag === claim.tag;
+    if (!config.profile.latestSharedExternal) return false;
+    return tags.every(tag => ports.versionCheck.compare(claim.tag, tag) >= 0);
   }
 
   // Pool membership is decided across every copy, so a label on any copy or a pool on the record counts.

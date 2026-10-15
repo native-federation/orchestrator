@@ -1012,7 +1012,8 @@ describe('a strict runtime load refuses only what a cold init refuses', () => {
     init: RemoteEntry[],
     load: RemoteEntry | undefined,
     strict: boolean,
-    hosts: string[]
+    hosts: string[],
+    latestSharedExternal = false
   ) => {
     const p = portfolio(
       {},
@@ -1022,6 +1023,7 @@ describe('a strict runtime load refuses only what a cold init refuses', () => {
         assertNoTear: false,
         hosts,
         strict,
+        latestSharedExternal,
       }
     );
     try {
@@ -1042,11 +1044,11 @@ describe('a strict runtime load refuses only what a cold init refuses', () => {
     }
   };
   const cold = (c: Shape, strict: boolean): Promise<Outcome> =>
-    attempt([...c.init, c.load], undefined, strict, c.hosts);
+    attempt([...c.init, c.load], undefined, strict, c.hosts, c.latest);
   const loaded = (c: Shape, strict: boolean): Promise<Outcome> =>
-    attempt(c.init, c.load, strict, c.hosts);
+    attempt(c.init, c.load, strict, c.hosts, c.latest);
 
-  type Shape = { init: RemoteEntry[]; load: RemoteEntry; hosts: string[] };
+  type Shape = { init: RemoteEntry[]; load: RemoteEntry; hosts: string[]; latest?: boolean };
 
   // a and b build 17.1.1 (`^17.1.1`, loose) with different secondaries, c builds 17.0.0 strictly with b's. Every
   // range accepts 17.1.1, so the init shares it, and a strict d at 17.1.1 loads over it as a cold init takes it.
@@ -1105,6 +1107,30 @@ describe('a strict runtime load refuses only what a cold init refuses', () => {
       hosts: ['h'],
       own: [PX, PZ],
     },
+    // The map serves p/x from its own external at a's 2.0.0, which r1 rejects, but r1 also ships p/y, which a lacks.
+    // A cold init elects r1's 1.0.0 for p/x (a's range follows it), then sends r1 to its own build for coverage.
+    'a rejected file of its own external, with no host, beside a specifier the map lacks': {
+      init: [entry('a', flat(P, '2.0.0', '^2.0.0'), flat(PX, '2.0.0', '^2.0.0'))],
+      load: entry('r1', flat(PX, '1.0.0', '~1.0.0', { strict: true }), flat(PY, '1.0.0', '~1.0.0')),
+      hosts: [],
+      own: [PX, PY],
+    },
+    // As above, but the map serves p/x at 1.0.0, the tag a's root sets as serving build: p/x's own election would
+    // pick b's 2.1.0, which r1's `^2.0.0` accepts.
+    "a rejected file of its own external at the serving build's tag, beside a specifier the map lacks":
+      {
+        init: [
+          entry('a', flat(P, '1.0.0', '~1.0.0'), flat(PX, '1.0.0', '~1.0.0')),
+          entry('b', flat(PX, '2.1.0', '~2.1.0')),
+        ],
+        load: entry(
+          'r1',
+          flat(PX, '2.0.0', '^2.0.0', { strict: true }),
+          flat(PY, '2.0.0', '~2.0.0')
+        ),
+        hosts: [],
+        own: [PX, PY],
+      },
   };
   for (const [name, c] of Object.entries(loads))
     for (const strict of [true, false])
@@ -1136,6 +1162,20 @@ describe('a strict runtime load refuses only what a cold init refuses', () => {
       init: [entry('h', flat(P, '2.0.0', '^2.0.0', { with: [PX] }))],
       load: entry('r1', flat(PX, '1.0.0', '~1.0.0', { strict: true })),
       hosts: ['h'],
+    },
+    // determine elects the newest tag for p/x, which r1 rejects, whatever r1 ships beside it.
+    'a rejected file of its own external at the newest tag, under latestSharedExternal': {
+      init: [entry('a', flat(P, '2.0.0', '^2.0.0'), flat(PX, '2.0.0', '^2.0.0'))],
+      load: entry('r1', flat(PX, '1.0.0', '~1.0.0', { strict: true }), flat(PY, '1.0.0', '~1.0.0')),
+      hosts: [],
+      latest: true,
+    },
+    // No host and two strict copies that reject each other's tag: determine refuses whichever tag it elects,
+    // although r1 ships p/x, which a lacks (tester-b-4, a real Angular page).
+    'a rejected file of its own external where no tag pleases every strict copy': {
+      init: [entry('a', flat(P, '2.2.0', '~2.2.0', { strict: true }))],
+      load: entry('r1', flat(P, '2.1.0', '~2.1.0', { strict: true, with: [PX] })),
+      hosts: [],
     },
     // The pool refuses any strict rejection.
     'a pooled copy, at a tag other than the serving tag': {
