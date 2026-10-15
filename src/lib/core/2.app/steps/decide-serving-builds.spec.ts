@@ -33,7 +33,13 @@ describe('createDecideServingBuilds', () => {
     });
   });
 
-  type Copy = { remote: string; req?: string; strict?: boolean; ships?: string[] };
+  type Copy = {
+    remote: string;
+    req?: string;
+    strict?: boolean;
+    ships?: string[];
+    cached?: boolean;
+  };
 
   // Each copy ships the external it sits in, or what `ships` lists.
   const row = (
@@ -49,6 +55,7 @@ describe('createDecideServingBuilds', () => {
       mockVersionRemote(c.remote, external, {
         requiredVersion: c.req ?? `~${tag}`,
         strictVersion: c.strict ?? false,
+        cached: c.cached,
         ...(c.ships ? { entries: Object.fromEntries(c.ships.map(e => [e, `${e}.js`])) } : {}),
       })
     ),
@@ -193,6 +200,48 @@ describe('createDecideServingBuilds', () => {
       expect(config.log.error).toHaveBeenCalledWith(
         3,
         "[b][fw/a@2.0.0] Is not compatible with requiredRange '^2.0.0' of shared fw@1.0.0."
+      );
+    });
+  });
+
+  // The npm two-tag host: h ships the root at 2.0.0 and a wildcard secondary stamped 1.0.0 (one external, two
+  // rows); r ships that secondary flat at 1.0.0 under a strict `~1.0.0`. All cached (a warm page), so no tag costs
+  // a download and h serves at its newest tag. The host publishes `fw/a` at 1.0.0, so r is covered and does not
+  // fall back, yet its own `fw/a` share row sits at another tag than the serving one and follows it: the one place
+  // the follow path still meets a strict copy that rejects the serving tag. Today's behaviour, pinned; r would
+  // accept the host's 1.0.0 file it is covered by.
+  describe("a strict copy covered by a host's file at the host's other tag", () => {
+    const twoTagHost = () =>
+      seed({
+        'fw/a': [row('fw/a', '1.0.0', 'share', [{ remote: 'r', strict: true, cached: true }])],
+        fw: [
+          { ...row('fw', '2.0.0', 'share', [{ remote: 'h', cached: true }]), host: true },
+          {
+            ...row('fw', '1.0.0', 'share', [{ remote: 'h', ships: ['fw/a'], cached: true }]),
+            host: true,
+          },
+        ],
+      });
+
+    it('scopes it on following the serving tag', async () => {
+      twoTagHost();
+
+      await decide();
+
+      expect(rowsOf('fw/a')).toEqual(['1.0.0:scope:[r]']);
+      expect(config.log.error).not.toHaveBeenCalled();
+    });
+
+    it('throws for it under strictExternalCompatibility', async () => {
+      config.strict.strictExternalCompatibility = true;
+      twoTagHost();
+
+      await expect(decide()).rejects.toEqual(
+        new NFError('External fw/a@1.0.0 could not be shared.')
+      );
+      expect(config.log.error).toHaveBeenCalledWith(
+        3,
+        "[r][fw/a@1.0.0] Is not compatible with requiredRange '~1.0.0' of shared fw@2.0.0."
       );
     });
   });
