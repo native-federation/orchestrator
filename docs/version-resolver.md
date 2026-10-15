@@ -1089,9 +1089,11 @@ the copy's own external where no tag pleases every strict copy of it. A file the
 tag rather than at its external's own election is not enough. Any other rejection runs the package from the
 remote's own build silently, as the cold init's fallback does.
 
-A remote that runs a package from its own build because the map lacks an entrypoint it ships, or serves the
-package from two builds, opens no other package: an opened package's files resolve through the loader's scope,
-so their consumers would reach the loader's own build of that package. The `strict` scope shares every version
+A remote whose ranges accept the map's tags but that runs a package from its own build because the map lacks an
+entrypoint it ships, or serves the package from two builds, opens no other package: an opened package's files
+resolve through the loader's scope, so their consumers would reach the loader's own build of that package. A
+package a `strictVersion` range runs from its own build, or a family the pooling gate serves itself, does not stop
+the remote opening others. The `strict` scope shares every version
 side by side, as at init. So a load never maps an `imports` key the committed map already has: a browser keeps
 the first mapping of a key.
 
@@ -1201,7 +1203,7 @@ the package (a dense root and its flat secondaries) in that scope:
 | --------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **SKIP**  | The committed map serves every entrypoint the remote ships of the package, from one build: the remote follows that build wholly. In a shareScope its override maps every file that build serves of the package. |
 | **SHARE** | The committed map serves none of the package in this scope: the remote's build opens it and becomes its serving build. In the `strict` scope every version is shared side by side. |
-| **SCOPE** | Otherwise (the map lacks an entrypoint the remote ships, serves the package from two builds, or a `strictVersion` range rejects its tag): the remote runs the whole package from its own build. A remote that scopes a package because the map lacks an entrypoint it ships, or serves it from two builds, scopes every package it would otherwise open too. |
+| **SCOPE** | Otherwise (the map lacks an entrypoint the remote ships, serves the package from two builds, or a `strictVersion` range rejects its tag): the remote runs the whole package from its own build. A remote that scopes a package because the map lacks an entrypoint it ships, or serves it from two builds, while its ranges accept the map's tags, scopes every package it would otherwise open too. |
 
 ### Example: Dynamic Loading Scenario
 
