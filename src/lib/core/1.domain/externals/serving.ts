@@ -54,9 +54,15 @@ export function servingBuildOf(
   // The election already chose the global build; ranking again per package could split a pool.
   if (isPooled(externals)) return pooledBuild(externals, rows);
 
-  const ranked = candidatesOf(rows, rootRows, consumersOf(externals), accepts).sort(byServingRank);
-  const best = ranked[0];
-  return best && { remote: best.remote, tag: best.tag };
+  const consumers = consumersOf(externals);
+  const builds = buildsOf(rows, rootRows, consumers);
+  // A host build outranks every other at any cost: only two or more of the builds left need pricing.
+  const hosts = builds.filter(b => b.host);
+  const field = hosts.length > 0 ? hosts : builds;
+  if (field.length <= 1) return field[0] && { remote: field[0].remote, tag: field[0].tag };
+  const costOf = costTable(consumers, accepts);
+  const best = field.map(b => ({ ...b, ...costOf(b) })).sort(byServingRank)[0]!;
+  return { remote: best.remote, tag: best.tag };
 }
 
 // The serving build's copies publish even where that external's own election skipped them, so every specifier
@@ -104,14 +110,12 @@ function shareRows(external: DeepReadonly<SharedExternal> | undefined): Row[] {
 }
 
 // Keyed by tag and remote rather than the first row per remote, so record order never decides.
-function candidatesOf(
+function buildsOf(
   rows: Row[],
   rootRows: Row[],
-  consumers: Map<RemoteName, Placed[]>,
-  accepts: AcceptsTag
-): ServingCandidate[] {
-  const candidates = new Map<string, ServingCandidate>();
-  const costOf = costTable(consumers, accepts);
+  consumers: Map<RemoteName, Placed[]>
+): Omit<ServingCandidate, keyof Cost>[] {
+  const candidates = new Map<string, Omit<ServingCandidate, keyof Cost>>();
   for (const row of rows)
     for (const copy of row.remotes) {
       const key = `${row.tag}|${copy.name}`;
@@ -121,7 +125,6 @@ function candidatesOf(
         remote: copy.name,
         tag: row.tag,
         host: basis && row.host,
-        ...costOf({ remote: copy.name, tag: row.tag }),
         rootBasis: basis && rootRows.includes(row),
       });
     }

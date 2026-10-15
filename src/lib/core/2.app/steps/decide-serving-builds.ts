@@ -48,9 +48,12 @@ export function createDecideServingBuilds(
     externals: StoredPackage,
     accepts: AcceptsTag
   ): void {
-    // Taken first: falling back and following the serving build rewrite the stored externals in place.
-    const before = externals.map(([, external]) => JSON.stringify(external));
     const serving = servingBuildOf(externals, accepts);
+    // Taken before falling back and following rewrite the stored externals in place. A changed serving build
+    // always rewrites, so only an external that keeps its own needs comparing.
+    const before = externals.map(([, external]) =>
+      external.servingBuild === serving?.remote ? JSON.stringify(external) : undefined
+    );
     // The election already placed a pooled package's rows.
     const pooled = isPooled(externals);
     const toFollow = pooled ? undefined : serving;
@@ -61,7 +64,7 @@ export function createDecideServingBuilds(
         toFollow ? follow(pkg, name, external, toFollow, accepts) : external,
         serving?.remote
       );
-      if (JSON.stringify(decided) !== before[i])
+      if (before[i] === undefined || JSON.stringify(decided) !== before[i])
         ports.sharedExternalsRepo.addOrUpdate(name, decided, shareScope);
     });
   }

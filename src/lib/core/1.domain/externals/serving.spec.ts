@@ -238,6 +238,24 @@ describe('servingBuildOf', () => {
     expect(result).toEqual<ServingBuild>({ remote: 'host', tag: '1.0.0' });
   });
 
+  // The host's copy lacks fw/x, so serving it sends a and b to their own builds: two more downloads and two
+  // fallbacks than serving a. The host still wins, so the other candidates need no pricing.
+  it('serves the host over a build that costs fewer downloads and fallbacks', () => {
+    const result = serving([
+      'fw',
+      external(
+        version(
+          'share',
+          [copy('host', ['fw']), copy('a', ['fw', 'fw/x']), copy('b', ['fw', 'fw/x'])],
+          '1.0.0',
+          true
+        )
+      ),
+    ]);
+
+    expect(result).toEqual<ServingBuild>({ remote: 'host', tag: '1.0.0' });
+  });
+
   it("takes the package from the root's build for a host shipping only a flat secondary beside a remote's dense root", () => {
     const externals: [ExternalName, SharedExternal][] = [
       ['fw', external(version('share', [copy('remote', ['fw', 'fw/testing'])], '2.0.0'))],
