@@ -17,9 +17,10 @@ import { openPortfolio, rangeViolations, scopeUrlsOf, torn } from './property-ha
  *   specifier resolves, ranges accept, one build shipped the tags T runs together (`witness`), every
  *   map-served specifier maps the committed file (`iv`), and R's cause is not `incompatible` (`rejected`).
  * - T in a subpool => `subpool`: runtime subpool joining, which dynamic pooling does not do.
- * Only pooled specifiers are compared (an unpooled self-fill is not pooling's), and a case whose R tears in the
- * committed map is skipped. Each global off R's placement is tagged with its shape: KB (R ran its own build as
- * a subpool build), AG-i (R self), SG (R a subpool member), PUB (T runs its own file from a share row it opened).
+ * Only pooled specifiers are compared (an unpooled package a remote runs from its own build is not pooling's),
+ * and a case whose R tears in the committed map is skipped. Each global off R's placement is tagged with its
+ * shape: KB (R ran its own build as a subpool build), AG-i (R self), SG (R a subpool member), PUB (T runs its own
+ * file from a share row it opened).
  */
 
 type TwinRed = {

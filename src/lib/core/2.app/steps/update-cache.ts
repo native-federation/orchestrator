@@ -27,7 +27,7 @@ type Served = Map<Specifier, Claim>;
 type Rejection = { item: Pending; specifier: Specifier; claim: Claim };
 
 // share: the remote's build opens the package; skip: it runs the build the map serves it from; scope: its own
-// build beside the map (partlyServed: the map serves some of it).
+// build beside the map (partlyServed: the map serves some of it, or all of it from two builds).
 type Decision =
   | { action: 'share' }
   | { action: 'scope'; partlyServed: boolean }

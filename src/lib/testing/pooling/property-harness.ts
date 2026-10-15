@@ -60,7 +60,7 @@ export function pools(record: shareScope): Map<string, shareScope> {
 
 // The oracle per pool, as the labels make it rather than as the record names it; the strict scope, never
 // pooled, is read as stored. Unpooled packages are left out on purpose, as pooling makes no promise about
-// them. At init a remote falls back one package at a time, and a dynamic load can self-fill one
+// them. At init a remote falls back one package at a time, and a dynamic load can run one from its own build
 // (docs/version-resolver.md §"Entrypoint coverage and tearing").
 export function poolTears(
   importMap: ImportMap,
