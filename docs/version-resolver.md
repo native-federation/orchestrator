@@ -291,7 +291,8 @@ that leaves no candidate, nothing serves the package globally and every remote w
 its own build. The host is the exception whenever it is a candidate (it has a copy in the primary's share rows, or
 the primary has none): it serves every tag it ships, globally, and is never scoped. Its share rows at other tags
 stay shared, and a remote whose specifiers its copies cover follows it. A `strictVersion` copy whose range rejects
-a host file it would take at a tag other than the serving tag runs the package from its own build instead.
+a host file it would take at a tag other than the serving tag runs the package from its own build instead, as a
+runtime load of it does.
 
 #### Copies of one version
 
@@ -1078,6 +1079,11 @@ it in that scope, read as the map was generated (the serving build's copy, see
   the package. A range without `strictVersion` follows the map's tag, as at init.
 - **Otherwise** — the map lacks an entrypoint the remote ships, serves the package from two builds, or a
   `strictVersion` range rejects its tag: the remote runs the whole package from its own build (`scope`).
+
+A rejecting range warns, and under `strictExternalCompatibility` fails the load, only where a cold init of the
+same remotes refuses it: the rejected file is of the copy's own external, the package is pooled, or the file is at
+the serving tag of a package the map would otherwise serve the remote wholly from one build. Any other rejection
+runs the package from the remote's own build silently, as the cold init's fallback does.
 
 A remote that runs a package from its own build because the map lacks an entrypoint it ships, or serves the
 package from two builds, opens no other package: an opened package's files resolve through the loader's scope,

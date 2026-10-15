@@ -279,6 +279,28 @@ function splitsPackage(
   );
 }
 
+// Whether a runtime load's copies split the package over the claims the committed map serves of it, as
+// `splitsPackage` judges a remote at init.
+export function loadSplitsPackage(
+  copies: readonly { tag: VersionName; copy: SharedVersionMeta }[],
+  claims: readonly (readonly [Specifier, { tag: VersionName }])[],
+  accepts: AcceptsTag
+): boolean {
+  const root = claims.find(([specifier]) => specifier === packageOf(specifier))?.[1];
+  // Without a root claim the serving tag is unknown: every claim counts as at it, so only a gap or two tags
+  // split.
+  const servingTag = root?.tag ?? claims[0]![1].tag;
+  const surface: Surface = new Map(
+    claims.map(([specifier, { tag }]) => [specifier, root ? tag : servingTag])
+  );
+  // Each loaded copy as the share row it would join; a loader is never the host.
+  const placed: Placed[] = copies.map(({ tag, copy }) => ({
+    row: { tag, action: 'share', host: false, remotes: [copy] },
+    copy,
+  }));
+  return splitsPackage(placed, surface, servingTag, accepts);
+}
+
 function fallsBack(
   placed: Placed[],
   surface: Surface,

@@ -989,3 +989,149 @@ describe('a remote that ships a package at two tags', () => {
     });
   });
 });
+
+// A runtime load refuses a strict copy exactly where a cold init of the same remotes refuses it: in the copy's own
+// external (determine), at the serving tag of a remote that otherwise runs the package whole from one build
+// (decide-serving-builds), or in a pool. Every other rejection runs the package from the remote's own build, as
+// the cold init's fallback does, and logs nothing.
+describe('a strict runtime load refuses only what a cold init refuses', () => {
+  const P = 'p';
+  const PX = 'p/x';
+  const PY = 'p/y';
+  const PZ = 'p/z';
+  const flat = (
+    name: string,
+    version: string,
+    range: string,
+    o: { strict?: boolean; with?: string[] } = {}
+  ) => shared(name, { pool: false, version, range, strict: o.strict, entrypoints: o.with });
+
+  type Outcome =
+    { threw: string } | { map: ImportMap; faults: Record<string, PageFaults>; logged: string[] };
+  const attempt = async (
+    init: RemoteEntry[],
+    load: RemoteEntry | undefined,
+    strict: boolean,
+    hosts: string[]
+  ) => {
+    const p = portfolio(
+      {},
+      {
+        storage: `nf-no-stitching-${storage++}`,
+        realRepositories: true,
+        assertNoTear: false,
+        hosts,
+        strict,
+      }
+    );
+    try {
+      let map = await p.runInit(init);
+      if (load) map = (await p.runDynamic(load)).merged;
+      const entries = load ? [...init, load] : init;
+      const logged = [
+        ...vi.mocked(p.config.log.warn).mock.calls,
+        ...vi.mocked(p.config.log.error).mock.calls,
+      ].map(([, message]) => String(message));
+      return {
+        map,
+        faults: pageFaults({ importMap: map, entries, hosts, importsOf: importsFrom({}) }),
+        logged,
+      };
+    } catch (e) {
+      return { threw: String(e) };
+    }
+  };
+  const cold = (c: Shape, strict: boolean): Promise<Outcome> =>
+    attempt([...c.init, c.load], undefined, strict, c.hosts);
+  const loaded = (c: Shape, strict: boolean): Promise<Outcome> =>
+    attempt(c.init, c.load, strict, c.hosts);
+
+  type Shape = { init: RemoteEntry[]; load: RemoteEntry; hosts: string[] };
+  // `r1` is the remote that runs the package from its own build: its scope maps every specifier it ships.
+  const ownBuild = (map: ImportMap, specifiers: string[]) =>
+    expect(map.scopes?.['http://r1/']).toEqual(
+      Object.fromEntries(specifiers.map(s => [s, `http://r1/${file(s)}`]))
+    );
+
+  const loads: Record<string, Shape & { own: string[] }> = {
+    // The host serves fw/sub only at its other tag (a two-tag build), which r1's `~1.0.0` rejects.
+    'a rejected file at a tag other than the serving tag': {
+      init: [entry('h', flat(CORE, '1.0.0', '^1.0.0'), flat(SUB, '2.0.0', '^2.0.0'))],
+      load: entry('r1', flat(CORE, '1.0.0', '~1.0.0', { strict: true, with: [SUB] })),
+      hosts: ['h'],
+      own: [CORE, SUB],
+    },
+    // One tag per build: h's dense p@2 serves p/x, which r1's flat copy rejects; r1 also ships p/y, which h lacks.
+    'a rejected file at the serving tag of a remote that ships a specifier the map lacks': {
+      init: [entry('h', flat(P, '2.0.0', '^2.0.0', { with: [PX] }))],
+      load: entry('r1', flat(PX, '1.0.0', '~1.0.0', { strict: true }), flat(PY, '1.0.0', '~1.0.0')),
+      hosts: ['h'],
+      own: [PX, PY],
+    },
+    'a rejected file at the serving tag, with no host': {
+      init: [entry('a', flat(P, '2.0.0', '^2.0.0', { with: [PX] }))],
+      load: entry('r1', flat(PX, '1.0.0', '~1.0.0', { strict: true }), flat(PY, '1.0.0', '~1.0.0')),
+      hosts: [],
+      own: [PX, PY],
+    },
+    // r1's flat secondaries are at two tags, so no one build serves it all at its tags.
+    'a rejected file at the serving tag of a remote that ships the package at two tags': {
+      init: [entry('h', flat(P, '2.0.0', '^2.0.0', { with: [PX, PZ] }))],
+      load: entry('r1', flat(PX, '1.0.0', '~1.0.0', { strict: true }), flat(PZ, '1.1.0', '^1.0.0')),
+      hosts: ['h'],
+      own: [PX, PZ],
+    },
+  };
+  for (const [name, c] of Object.entries(loads))
+    for (const strict of [true, false])
+      it(`runs ${name} from its own build, silently, as a cold init does (strict: ${strict})`, async () => {
+        const [atInit, atLoad] = [await cold(c, strict), await loaded(c, strict)];
+        for (const outcome of [atInit, atLoad]) {
+          if ('threw' in outcome) throw new Error(outcome.threw);
+          ownBuild(outcome.map, c.own);
+          expect(outcome.faults).toEqual({});
+          expect(outcome.logged).toEqual([]);
+        }
+      });
+
+  const refusals: Record<string, Shape> = {
+    // determine refuses these at init: the rejected file is in the strict copy's own external.
+    'a dense copy whose root the map serves at a tag it rejects, though it ships a specifier the map lacks':
+      {
+        init: [entry('h', flat(P, '1.0.0', '^1.0.0'))],
+        load: entry('r1', flat(P, '1.1.0', '~1.1.0', { strict: true, with: [PX] })),
+        hosts: ['h'],
+      },
+    'a flat secondary the map serves at a tag it rejects': {
+      init: [entry('h', flat(P, '1.0.0', '^1.0.0'), flat(PX, '1.0.0', '^1.0.0'))],
+      load: entry('r1', flat(P, '1.0.0', '^1.0.0'), flat(PX, '2.0.0', '^2.0.0', { strict: true })),
+      hosts: ['h'],
+    },
+    // decide-serving-builds refuses it: r1 would otherwise run p/x from h, at the serving tag.
+    'a rejected file at the serving tag of a remote the map otherwise serves whole': {
+      init: [entry('h', flat(P, '2.0.0', '^2.0.0', { with: [PX] }))],
+      load: entry('r1', flat(PX, '1.0.0', '~1.0.0', { strict: true })),
+      hosts: ['h'],
+    },
+    // The pool refuses any strict rejection.
+    'a pooled copy, at a tag other than the serving tag': {
+      init: [
+        entry(
+          'h',
+          shared(CORE, { version: '1.0.0', range: '^1.0.0' }),
+          shared(SUB, { version: '2.0.0', range: '^2.0.0' })
+        ),
+      ],
+      load: entry(
+        'r1',
+        shared(CORE, { version: '1.0.0', range: '~1.0.0', strict: true, entrypoints: [SUB] })
+      ),
+      hosts: ['h'],
+    },
+  };
+  for (const [name, c] of Object.entries(refusals))
+    it(`refuses ${name}, as a cold init does`, async () => {
+      expect(await cold(c, true)).toEqual({ threw: expect.stringContaining('NFError') });
+      expect(await loaded(c, true)).toEqual({ threw: "NFError: Could not process remote 'r1'" });
+    });
+});

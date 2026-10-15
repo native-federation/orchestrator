@@ -10,6 +10,7 @@ import {
 import type { LoadActions } from 'lib/core/1.domain/remote-entry/load-actions.contract';
 import { createAcceptsTag } from 'lib/core/1.domain/externals/compatibility';
 import { addRemoteToVersion } from 'lib/core/1.domain/externals/basis';
+import { isPooled, loadSplitsPackage } from 'lib/core/1.domain/externals/serving';
 import { type Claim, committedClaims } from 'lib/core/1.domain/externals/claims';
 import { packageOf, type Specifier } from 'lib/core/1.domain/externals/specifier';
 import type { DrivingContract } from '../driving-ports/driving.contract';
@@ -22,6 +23,8 @@ import { createStoreRemoteEntry, type SharedExternalContext } from './store-remo
 type Pending = { external: DenseSharedInfo; ctx: SharedExternalContext };
 
 type Served = Map<Specifier, Claim>;
+
+type Rejection = { item: Pending; claim: Claim };
 
 // share: the remote's build opens the package; skip: it runs the build the map serves it from; scope: its own
 // build beside the map (partlyServed: the map serves some of it).
@@ -121,15 +124,20 @@ export function createUpdateCache(
     if (![...served.keys()].some(specifier => packageOf(specifier) === pkg))
       return { action: 'share' };
 
-    // Every copy is checked, so each one the map's tag rejects is reported.
-    const rejected = group.filter(item => rejectsServed(remoteEntry, item, served)).length > 0;
-    if (rejected) return { action: 'scope', partlyServed: false };
-
     const specifiers = group.flatMap(({ external }) => Object.keys(external.entries));
-    if (specifiers.some(specifier => !served.has(specifier)))
-      return { action: 'scope', partlyServed: true };
-    const builds = new Set(specifiers.map(specifier => served.get(specifier)!.copy.name));
-    if (builds.size > 1) return { action: 'scope', partlyServed: true };
+    const builds = specifiers.every(specifier => served.has(specifier))
+      ? new Set(specifiers.map(specifier => served.get(specifier)!.copy.name))
+      : undefined;
+
+    const rejections = group.flatMap(item => rejectionsOf(item, served));
+    if (rejections.length > 0) {
+      const fromTwoBuilds = builds !== undefined && builds.size > 1;
+      for (const rejection of refused(group, rejections, fromTwoBuilds, served))
+        reportIncompatible(remoteEntry, rejection);
+      return { action: 'scope', partlyServed: false };
+    }
+
+    if (!builds || builds.size > 1) return { action: 'scope', partlyServed: true };
     return { action: 'skip', files: servingFiles(served, pkg, builds) };
   }
 
@@ -147,22 +155,49 @@ export function createUpdateCache(
   }
 
   // A non-strict range follows the map's tag all the same, as at init.
-  function rejectsServed(
-    remoteEntry: RemoteEntry,
-    { external, ctx: { tag, remote } }: Pending,
-    served: Served
-  ): boolean {
-    if (!remote.strictVersion) return false;
-    for (const specifier in external.entries) {
+  function rejectionsOf(item: Pending, served: Served): Rejection[] {
+    const { external, ctx } = item;
+    if (!ctx.remote.strictVersion) return [];
+    return Object.keys(external.entries).flatMap(specifier => {
       const claim = served.get(specifier);
-      if (!claim || accepts(claim.tag, tag, remote.requiredVersion)) continue;
-      reportIncompatible(remoteEntry, external, claim);
-      return true;
-    }
-    return false;
+      return claim && !accepts(claim.tag, ctx.tag, ctx.remote.requiredVersion)
+        ? [{ item, claim }]
+        : [];
+    });
   }
 
-  function reportIncompatible(remoteEntry: RemoteEntry, external: DenseSharedInfo, claim: Claim) {
+  // The first rejection of each copy that a cold init of the same remotes refuses too; see
+  // docs/version-resolver.md §"Scope and dynamic init".
+  function refused(
+    group: Pending[],
+    rejections: Rejection[],
+    fromTwoBuilds: boolean,
+    served: Served
+  ): Rejection[] {
+    const pkg = packageOf(group[0]!.external.packageName);
+    const pooled = isPooledPackage(group, pkg);
+    const claims = [...served].filter(([specifier]) => packageOf(specifier) === pkg);
+    const copies = group.map(({ ctx }) => ({ tag: ctx.tag, copy: ctx.remote }));
+    const splits = fromTwoBuilds || loadSplitsPackage(copies, claims, accepts);
+
+    const first = new Map<Pending, Rejection>();
+    for (const rejection of rejections)
+      if (
+        !first.has(rejection.item) &&
+        (pooled || !splits || rejection.claim.external === rejection.item.external.packageName)
+      )
+        first.set(rejection.item, rejection);
+    return [...first.values()];
+  }
+
+  // Pool membership is decided across every copy, so a label on any copy or a pool on the record counts.
+  function isPooledPackage(group: Pending[], pkg: string): boolean {
+    if (group.some(({ ctx }) => ctx.remote.pool?.trim())) return true;
+    const record = ports.sharedExternalsRepo.getFromScope(group[0]!.external.shareScope);
+    return isPooled(Object.entries(record).filter(([name]) => packageOf(name) === pkg));
+  }
+
+  function reportIncompatible(remoteEntry: RemoteEntry, { item: { external }, claim }: Rejection) {
     const errorMsg = `[${external.shareScope ?? GLOBAL_SCOPE}][${remoteEntry.name}] ${
       external.packageName
     }@${external.version} Is not compatible with existing ${external.packageName}@${
