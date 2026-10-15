@@ -294,12 +294,12 @@ describe('determine: splitting a version on election', () => {
       expect(rows()).toEqual(['2.3.0:share:[team/a1]', '2.1.0:skip:[team/b1,team/b2]']);
     });
 
-    // The serving build is decided after the election, so a candidate is priced on its basis copy, which
-    // stands in for the copy that will serve it. 2.1.0's basis is cached b1 (cached outranks coverage), which
-    // lacks dep-a/x: electing it leaves a1's dep-a/x uncovered, as electing 2.2.0 leaves b1's dep-a/y. Equal
-    // downloads (all non-strict) and equal tears, so the newer version wins. Priced on the union of 2.1.0's
-    // copies (b2 adds dep-a/x) it would cover a1 fully and win.
-    it("prices a candidate on its basis copy's entrypoints, not every copy's", async () => {
+    // The serving build is decided after the election and may be any copy of the elected tag, so a candidate is
+    // priced on the union of its copies. 2.1.0's copies (b1's dep-a/y, b2's dep-a/x) cover a1 fully, while
+    // electing 2.2.0 leaves b1's dep-a/y uncovered. Equal downloads (all non-strict), fewer tears: 2.1.0 wins,
+    // a tag every range accepts. Priced on its basis copy b1 alone (cached outranks coverage) the two would tie
+    // and the newer version would win.
+    it("prices a candidate on every copy's entrypoints, not its basis copy's alone", async () => {
       seed([
         version('2.2.0', [
           {
@@ -328,7 +328,36 @@ describe('determine: splitting a version on election', () => {
 
       await createDetermineSharedExternals(config, adapters)();
 
-      expect(rows()).toEqual(['2.2.0:share:[team/a1]', '2.1.0:skip:[team/b1,team/b2]']);
+      expect(rows()).toEqual(['2.2.0:skip:[team/a1]', '2.1.0:share:[team/b1,team/b2]']);
+    });
+
+    // Priced on its basis copy a1 alone, 17.1.1 left c1's dep-a/y uncovered, while 17.0.0, which the 17.1.1
+    // copies reject, counted none of them: 17.0.0 won and b1 ran a tag its `^17.1.1` rejects. b1 ships
+    // dep-a/y at 17.1.1, so 17.1.1 covers c1, ties on tears and wins as the newer version.
+    it('never shares a tag the newer copies reject for a tear another copy of the newer tag covers', async () => {
+      seed([
+        version('17.1.1', [
+          {
+            remote: 'a1',
+            req: '^17.1.1',
+            strict: false,
+            entries: { 'dep-a': 'a.js', 'dep-a/x': 'x.js' },
+          },
+          {
+            remote: 'b1',
+            req: '^17.1.1',
+            strict: false,
+            entries: { 'dep-a': 'a.js', 'dep-a/y': 'y.js' },
+          },
+        ]),
+        version('17.0.0', [
+          { remote: 'c1', req: '^17.0.0', entries: { 'dep-a': 'a.js', 'dep-a/y': 'y.js' } },
+        ]),
+      ]);
+
+      await createDetermineSharedExternals(config, adapters)();
+
+      expect(rows()).toEqual(['17.1.1:share:[a1,b1]', '17.0.0:skip:[c1]']);
     });
   });
 

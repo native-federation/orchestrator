@@ -1,6 +1,6 @@
 import type { ForDeterminingSharedExternals } from '../driver-ports/init/for-determining-shared-externals.port';
 import { GLOBAL_SCOPE, type SharedExternal, type SharedVersion } from 'lib/core/1.domain';
-import { countUncoveredEntrypoints } from 'lib/core/1.domain/externals/basis';
+import { countUncoveredEntrypoints, forEachVersionEntry } from 'lib/core/1.domain/externals/basis';
 import {
   type AcceptsTag,
   createAcceptsTag,
@@ -77,14 +77,15 @@ export function createDetermineSharedExternals(
     return Promise.resolve();
   };
 
-  // Entrypoints declared by the versions `winner` would skip that its basis copy can't serve.
+  // Entrypoints declared by the versions `winner` would skip that none of its copies can serve. Every copy counts:
+  // the serving build is decided later and may be any of them.
   function uncoveredTears(
     external: SharedExternal,
     winner: SharedVersion,
     accepts: (version: SharedVersion, tag: string) => boolean
   ): number {
-    const basis = winner.remotes.find(r => !r.servedBy);
-    const covered = new Set(Object.keys(basis?.entries ?? {}));
+    const covered = new Set<string>();
+    forEachVersionEntry(winner, undefined, entrypoint => covered.add(entrypoint));
     return external.versions.reduce((sum, v) => {
       if (v === winner) return sum;
       if (!accepts(v, winner.tag)) return sum;

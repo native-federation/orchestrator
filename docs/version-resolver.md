@@ -364,7 +364,8 @@ of a version's copies: a specifier only a sibling copy ships is not on the map, 
 
 To minimise tears the resolver also uses coverage as a **tiebreaker** when choosing
 the shared version: among candidates that tie on the extra-downloads heuristic, it prefers the one whose
-basis copy leaves the fewest specifiers uncovered across the versions it would skip. A decisive
+copies together leave the fewest specifiers uncovered across the versions it would skip. It counts every copy of
+the candidate's tag, as the serving build is decided later and may be any of them. A decisive
 extra-downloads winner is never overridden, and an exact tie still keeps the highest version.
 
 #### When the host's build lacks an entrypoint

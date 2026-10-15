@@ -1047,6 +1047,30 @@ describe('a strict runtime load refuses only what a cold init refuses', () => {
     attempt(c.init, c.load, strict, c.hosts);
 
   type Shape = { init: RemoteEntry[]; load: RemoteEntry; hosts: string[] };
+
+  // a and b build 17.1.1 (`^17.1.1`, loose) with different secondaries, c builds 17.0.0 strictly with b's. Every
+  // range accepts 17.1.1, so the init shares it, and a strict d at 17.1.1 loads over it as a cold init takes it.
+  it('loads a strict remote at the tag the init shares when an older strict copy shares a secondary', async () => {
+    const at = (version: string, range: string, strict: boolean, sub: string) =>
+      shared(CORE, { pool: false, version, range, strict, entrypoints: [sub] });
+    const shape: Shape = {
+      init: [
+        entry('a', at('17.1.1', '^17.1.1', false, A)),
+        entry('b', at('17.1.1', '^17.1.1', false, B)),
+        entry('c', at('17.0.0', '^17.0.0', true, B)),
+      ],
+      load: entry('d', at('17.1.1', '^17.1.1', true, B)),
+      hosts: [],
+    };
+
+    const runtime = await loaded(shape, true);
+    expect(runtime).not.toHaveProperty('threw');
+    expect(resolve((runtime as { map: ImportMap }).map, CORE, 'http://b/')).toMatch(
+      /^http:\/\/[abd]\//
+    );
+    expect(await cold(shape, true)).not.toHaveProperty('threw');
+  });
+
   // `r1` is the remote that runs the package from its own build: its scope maps every specifier it ships.
   const ownBuild = (map: ImportMap, specifiers: string[]) =>
     expect(map.scopes?.['http://r1/']).toEqual(
