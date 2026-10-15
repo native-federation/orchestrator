@@ -205,6 +205,51 @@ describe('subpool rounds', () => {
   });
 });
 
+describe('a tie cycle', () => {
+  /**
+   * a, b and c tie on every key: each serves itself and f, nobody else agrees with them. Only `newer` and the
+   * name are left, and they form a cycle: c beats a on p's tag, while b shares no member at another tag with
+   * either, so the name puts a before b and b before c. Sorting such a cycle elects whoever the input order
+   * favours; found by the init property's "order independence" (POOLING_PROPERTY_SEED=202, SCALE=4).
+   */
+  const q = { q: { tag: '1.0.0', req: '1.0.0', specifiers: ['q'] } };
+  const cycle: Build[] = [
+    { name: 'a', copies: { p: { tag: '1.0.0', req: '1.0.0', specifiers: ['p'] }, ...q } },
+    { name: 'b', copies: { 'p/x': { tag: '3.0.0', req: '3.0.0', specifiers: ['p/x'] }, ...q } },
+    { name: 'c', copies: { p: { tag: '2.0.0', req: '2.0.0', specifiers: ['p'] }, ...q } },
+    { name: 'f', copies: { q: { tag: '1.0.0', req: '^1.0.0', specifiers: ['q'] } } },
+  ];
+  const recordOrders = (builds: Build[]): Build[][] =>
+    builds.length <= 1
+      ? [builds]
+      : builds.flatMap((build, i) =>
+          recordOrders(builds.filter((_, j) => j !== i)).map(rest => [build, ...rest])
+        );
+
+  // Which of a, b and c wins is arbitrary within the cycle; that it is the same one in every order is not.
+  it('elects one round-1 winner in every record order', () => {
+    const winners = recordOrders(cycle).map(builds => electFrom(builds).winner);
+
+    expect(new Set(winners)).toEqual(new Set([winners[0]]));
+  });
+
+  // w0-w4 win round 1 at q@9.0.0, which no build of the cycle accepts, so the cycle meets again for
+  // f's subpool.
+  it('gives f one subpool owner in every record order', () => {
+    const winners = Array.from({ length: 5 }, (_, i): Build => ({
+      name: `w${i}`,
+      copies: { q: { tag: '9.0.0', req: '^9.0.0', specifiers: ['q'] } },
+    }));
+    const owners = recordOrders(cycle).map(builds => {
+      const placement = electFrom([...winners, ...builds]).placements.get('f');
+      return placement?.kind === 'subpool' ? placement.owner : placement?.kind;
+    });
+
+    expect(new Set(owners)).toEqual(new Set([owners[0]]));
+    expect(['a', 'b', 'c']).toContain(owners[0]);
+  });
+});
+
 describe('chunked copies', () => {
   const at = (tag: string, ...specifiers: string[]) => ({ tag, req: `^${tag}`, specifiers });
 

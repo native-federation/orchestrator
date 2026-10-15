@@ -107,9 +107,12 @@ function newer(pool: Pool, a: Build, b: Build): number {
   return 0;
 }
 
-// What the keys and the newer build leave tied goes to the name that sorts first, never to record order.
+// What the keys leave tied goes to the newer build, then to the name that sorts first. `newer` ties unrelated
+// builds, so three can still rank in a cycle; presorting by name keeps record order out of that too.
 function rank<C extends { build: Build }>(pool: Pool, candidates: C[], keys: ((c: C) => number)[]) {
-  const scored = candidates.map(c => ({ c, k: keys.map(key => key(c)) }));
+  const scored = [...candidates]
+    .sort((a, b) => compareStrings(a.build.owner, b.build.owner))
+    .map(c => ({ c, k: keys.map(key => key(c)) }));
   scored.sort((a, b) => {
     for (let i = 0; i < keys.length; i++) {
       const d = b.k[i]! - a.k[i]!;
