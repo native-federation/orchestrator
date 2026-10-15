@@ -290,8 +290,8 @@ such a remote is no candidate and never follows another build: it runs the whole
 that leaves no candidate, nothing serves the package globally and every remote with a copy of it on the map runs
 its own build. The host is the exception whenever it is a candidate (it has a copy in the primary's share rows, or
 the primary has none): it serves every tag it ships, globally, and is never scoped. Its share rows at other tags
-stay shared, and a remote whose specifiers its copies cover follows it. A `strictVersion` copy that would take a
-host file at a tag other than the serving tag and its own runs the package from its own build instead.
+stay shared, and a remote whose specifiers its copies cover follows it. A `strictVersion` copy whose range rejects
+a host file it would take at a tag other than the serving tag runs the package from its own build instead.
 
 #### Copies of one version
 

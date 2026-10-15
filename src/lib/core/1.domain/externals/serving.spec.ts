@@ -36,9 +36,11 @@ const version = (
 
 const external = (...versions: SharedVersion[]): SharedExternal => ({ dirty: false, versions });
 
-// Same major, or the copy's own tag: enough semver for these fixtures.
+// Same major, any tag for `*`, or the copy's own tag: enough semver for these fixtures.
 const accepts: AcceptsTag = (offered, ownTag, requiredVersion) =>
-  offered === ownTag || offered.split('.')[0] === requiredVersion.replace(/^\^/, '').split('.')[0];
+  offered === ownTag ||
+  requiredVersion === '*' ||
+  offered.split('.')[0] === requiredVersion.replace(/^\^/, '').split('.')[0];
 
 const serving = (...externals: [ExternalName, SharedExternal][]) =>
   servingBuildOf(externals, accepts);
@@ -457,13 +459,19 @@ describe('servingBuildOf', () => {
   // The host serves fw at 1.0.0 and fw/sub at 2.0.0; r1's dense copy ships both at 1.0.0, so the host covers
   // its fw/sub only at the host's other tag.
   describe("a copy that a two-tag host covers only at the host's other tag", () => {
-    const externals = (strictVersion: boolean): [ExternalName, SharedExternal][] => [
+    const externals = (
+      strictVersion: boolean,
+      requiredVersion = '^1.0.0'
+    ): [ExternalName, SharedExternal][] => [
       [
         'fw',
         external(
           version(
             'share',
-            [copy('host', ['fw']), copy('r1', ['fw', 'fw/sub'], { strictVersion })],
+            [
+              copy('host', ['fw']),
+              copy('r1', ['fw', 'fw/sub'], { strictVersion, requiredVersion }),
+            ],
             '1.0.0',
             true
           )
@@ -479,6 +487,12 @@ describe('servingBuildOf', () => {
 
     it('follows the host when it is loose', () => {
       expect(fallbacksOf(externals(false), host, accepts)).toEqual([]);
+    });
+
+    // r1's `*` accepts the host's fw/sub at 2.0.0, so it runs the host's files as a runtime load of it does.
+    it("follows the host when it is strict and its range accepts the host's other tag", () => {
+      expect(fallbacksOf(externals(true, '*'), host, accepts)).toEqual([]);
+      expect(strictObjectorOf(externals(true, '*'), host, accepts)).toBeUndefined();
     });
   });
 

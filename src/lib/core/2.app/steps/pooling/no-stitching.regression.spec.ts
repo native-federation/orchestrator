@@ -876,6 +876,35 @@ describe('a remote that ships a package at two tags', () => {
         expect(resolve(map, FEATURE, 'http://r2/expose.js')).toBe('http://r1/x_lib_feature.js');
       },
     },
+    // h ships fw at 1.0.0 and a flat fw/sub at 2.0.0; r1's dense strict copy ships both at 1.0.0. A range that
+    // accepts h's fw/sub runs h's files, on a cold init as on a runtime load; one that rejects it runs r1's own.
+    ...[
+      { range: '>=1.0.0', dynamic: false, follows: true, verdict: 'accepts it and follows h' },
+      { range: '>=1.0.0', dynamic: true, follows: true, verdict: 'accepts it and follows h' },
+      { range: '~1.0.0', dynamic: false, follows: false, verdict: 'rejects it and runs its own' },
+    ].map(({ range, dynamic, follows, verdict }): Case => {
+      const h = entry(
+        'h',
+        shared(CORE, { pool: false, version: '1.0.0', range: '^1.0.0' }),
+        shared(SUB, { pool: false, version: '2.0.0', range: '^2.0.0' })
+      );
+      const r1 = entry(
+        'r1',
+        shared(CORE, { pool: false, version: '1.0.0', range, strict: true, entrypoints: [SUB] })
+      );
+      const runs = follows ? 'http://h/' : 'http://r1/';
+      return {
+        name: `a strict copy beside a host's file at its other tag ${verdict} (range=${range}, dynamic=${dynamic})`,
+        hosts: ['h'],
+        strict: true,
+        entries: dynamic ? [h] : [h, r1],
+        ...(dynamic && { dynamic: [r1] }),
+        expectMap: map => {
+          expect(resolve(map, CORE, 'http://r1/expose.js')).toBe(`${runs}fw_core.js`);
+          expect(resolve(map, SUB, 'http://r1/expose.js')).toBe(`${runs}fw_core_sub.js`);
+        },
+      };
+    }),
     // Pooled: the host r2 ships the root at 17.2.0-rc.0 and sub at 17.2.1-rc.0; r7's dense copy of the root
     // lists only sub. The pool serves both from r2, so the root stays on the map at r2's tag.
     {

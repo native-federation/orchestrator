@@ -237,7 +237,7 @@ export function strictObjectorOf(
         if (
           copy.name !== serving.remote &&
           rejectsServingTag({ row, copy }, surface, serving.tag, accepts) &&
-          !splitsPackage(consumers.get(copy.name)!, surface, serving.tag)
+          !splitsPackage(consumers.get(copy.name)!, surface, serving.tag, accepts)
         )
           return { external: name, copy, tag: row.tag };
   return undefined;
@@ -261,14 +261,18 @@ const leadsShareRow = ({ row, copy }: Placed): boolean =>
 const onMap = ({ row }: Placed): boolean => row.action !== 'scope';
 
 // A remote with no copy on the map already runs the package wholly from its own build.
-function splitsPackage(placed: Placed[], surface: Surface, tag?: VersionName): boolean {
-  const uncovered = ({ row, copy }: Placed) =>
-    Object.keys(copy.entries).some(s => {
+function splitsPackage(
+  placed: Placed[],
+  surface: Surface,
+  tag: VersionName | undefined,
+  accepts: AcceptsTag
+): boolean {
+  const uncovered = (p: Placed) =>
+    Object.keys(p.copy.entries).some(s => {
       const servedAt = surface.get(s);
-      // A strict copy never takes a host's file at a tag other than the serving tag or its own.
-      return (
-        servedAt === undefined || (copy.strictVersion && servedAt !== tag && servedAt !== row.tag)
-      );
+      // A strict copy takes a host's file at another tag only where its range accepts it; the serving tag is
+      // `rejectsServingTag`'s to judge.
+      return servedAt === undefined || (servedAt !== tag && rejectsTag(p, servedAt, accepts));
     });
   return (
     placed.some(onMap) && (shipsTwoTags(placed) || placed.some(p => !onMap(p) || uncovered(p)))
@@ -282,7 +286,7 @@ function fallsBack(
   accepts: AcceptsTag
 ): boolean {
   return (
-    splitsPackage(placed, surface, tag) ||
+    splitsPackage(placed, surface, tag, accepts) ||
     (tag !== undefined && placed.some(p => rejectsServingTag(p, surface, tag, accepts)))
   );
 }
