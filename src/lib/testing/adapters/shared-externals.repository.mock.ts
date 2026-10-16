@@ -12,6 +12,7 @@ export const mockSharedExternalsRepository = (): Mocked<ForSharedExternalsStorag
   scopeType: vi.fn(),
   getScopes: vi.fn((o = { includeGlobal: true }) => (o.includeGlobal ? [GLOBAL_SCOPE] : [])),
   tryGet: vi.fn(),
+  uncommittedScopes: vi.fn(() => []),
 });
 
 // Specs mock `tryGet` per external; a step that reads a whole scope sees what `tryGet` holds for each external

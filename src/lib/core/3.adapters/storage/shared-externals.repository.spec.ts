@@ -783,4 +783,70 @@ describe('createSharedExternalsRepository', () => {
       expect(externalsRepo.rollback()).toBe(externalsRepo);
     });
   });
+
+  // The serving-build step skips a scope nothing wrote; this is how it knows what this page wrote.
+  describe('uncommittedScopes', () => {
+    const version = (remotes: string[]) => mockVersion.shared(v2_1_2, 'dep-a', { remotes });
+
+    it('should mark only the scope a write lands in', () => {
+      const { externalsRepo } = setupWithCache({ [GLOBAL_SCOPE]: {}, team: {} });
+
+      externalsRepo.addOrUpdate('dep-a', mockExternal_A(), 'team');
+
+      expect(externalsRepo.uncommittedScopes()).toEqual(['team']);
+    });
+
+    it('should mark the global scope for a write without one', () => {
+      const { externalsRepo } = setupWithCache({ [GLOBAL_SCOPE]: {}, team: {} });
+
+      externalsRepo.addOrUpdate('dep-a', mockExternal_A());
+
+      expect(externalsRepo.uncommittedScopes()).toEqual([GLOBAL_SCOPE]);
+    });
+
+    it('should mark each scope a removal trims, and no other', () => {
+      const { externalsRepo } = setupWithCache({
+        [GLOBAL_SCOPE]: { 'dep-a': { dirty: false, versions: [version(['mfe2'])] } },
+        team: { 'dep-a': { dirty: false, versions: [version(['mfe1', 'mfe2'])] } },
+        other: { 'dep-a': { dirty: false, versions: [version(['mfe2'])] } },
+      });
+
+      externalsRepo.removeFromAllScopes(new Set(['mfe1']));
+
+      expect(externalsRepo.uncommittedScopes()).toEqual(['team']);
+    });
+
+    // The external is gone, so nothing is left in the scope to say it changed.
+    it('should mark the scope of an external a removal deletes', () => {
+      const { externalsRepo } = setupWithCache({
+        [GLOBAL_SCOPE]: {},
+        team: { 'dep-a': { dirty: false, versions: [version(['mfe1'])] } },
+      });
+
+      externalsRepo.removeFromAllScopes(new Set(['mfe1']));
+
+      expect(externalsRepo.getFromScope('team')).toEqual({});
+      expect(externalsRepo.uncommittedScopes()).toEqual(['team']);
+    });
+
+    it('should mark nothing for a removal that finds no copy', () => {
+      const { externalsRepo } = setupWithCache({
+        [GLOBAL_SCOPE]: { 'dep-a': { dirty: false, versions: [version(['mfe2'])] } },
+      });
+
+      externalsRepo.removeFromAllScopes(new Set(['mfe1']));
+
+      expect(externalsRepo.uncommittedScopes()).toEqual([]);
+    });
+
+    it.each(['commit', 'rollback'] as const)('should clear every mark on %s', action => {
+      const { externalsRepo } = setupWithCache({ [GLOBAL_SCOPE]: {} });
+      externalsRepo.addOrUpdate('dep-a', mockExternal_A());
+      externalsRepo.addOrUpdate('dep-b', mockExternal_B(), 'team');
+
+      externalsRepo[action]();
+
+      expect(externalsRepo.uncommittedScopes()).toEqual([]);
+    });
+  });
 });

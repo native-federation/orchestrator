@@ -22,7 +22,7 @@ const createSharedExternalsRepository = (config: StorageConfig): ForSharedExtern
 
   let _cache: SharedExternals = STORAGE.get() ?? { [GLOBAL_SCOPE]: {} };
 
-  let _dirty = false;
+  const _uncommitted = new Set<string>();
 
   return {
     getFromScope: function (shareScope?: string) {
@@ -31,7 +31,7 @@ const createSharedExternalsRepository = (config: StorageConfig): ForSharedExtern
     addOrUpdate: function (externalName: string, external: SharedExternal, shareScope?: string) {
       if (!_cache[shareScope ?? GLOBAL_SCOPE]) _cache[shareScope ?? GLOBAL_SCOPE] = {};
       _cache[shareScope ?? GLOBAL_SCOPE]![externalName] = external;
-      _dirty = true;
+      _uncommitted.add(shareScope ?? GLOBAL_SCOPE);
       return this;
     },
     getScopes: function (o = { includeGlobal: true }) {
@@ -42,7 +42,7 @@ const createSharedExternalsRepository = (config: StorageConfig): ForSharedExtern
     removeFromAllScopes: function (remoteNames: ReadonlySet<string>) {
       if (remoteNames.size === 0) return;
 
-      Object.values(_cache).forEach(scope => {
+      Object.entries(_cache).forEach(([scopeName, scope]) => {
         const removeExternals: string[] = [];
 
         Object.entries(scope).forEach(([name, external]) => {
@@ -62,14 +62,14 @@ const createSharedExternalsRepository = (config: StorageConfig): ForSharedExtern
             if (keep !== remotes.length) {
               remotes.length = keep;
               removedCopy = true;
-              _dirty = true;
+              _uncommitted.add(scopeName);
               // Or `determine` keeps granting host precedence to a tag the host has left.
               if (host !== undefined && remoteNames.has(host)) version.host = false;
             }
 
             if (remotes.length === 0) {
               external.versions.splice(i, 1);
-              _dirty = true;
+              _uncommitted.add(scopeName);
             }
           }
 
@@ -111,15 +111,18 @@ const createSharedExternalsRepository = (config: StorageConfig): ForSharedExtern
     tryGet: function (external: string, shareScope?: string) {
       return Optional.of(_cache[shareScope ?? GLOBAL_SCOPE]?.[external]);
     },
+    uncommittedScopes: function () {
+      return [..._uncommitted];
+    },
     commit: function () {
-      if (!_dirty) return this;
+      if (_uncommitted.size === 0) return this;
       STORAGE.set(_cache);
-      _dirty = false;
+      _uncommitted.clear();
       return this;
     },
     rollback: function () {
       _cache = STORAGE.get() ?? { [GLOBAL_SCOPE]: {} };
-      _dirty = false;
+      _uncommitted.clear();
       return this;
     },
   };

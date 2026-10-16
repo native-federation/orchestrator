@@ -12,6 +12,9 @@ export type ForSharedExternalsStorage = {
     external: SharedExternal,
     shareScope?: string
   ) => ForSharedExternalsStorage;
+  // The scopes written since the last commit or rollback. Exact only while every write goes through `addOrUpdate`
+  // or `removeFromAllScopes`: an external edited in place and never written back marks nothing.
+  uncommittedScopes: () => string[];
   commit: () => ForSharedExternalsStorage;
   rollback: () => ForSharedExternalsStorage;
 };
