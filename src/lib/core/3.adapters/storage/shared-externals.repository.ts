@@ -135,12 +135,15 @@ const createSharedExternalsRepository = (config: StorageConfig): ForSharedExtern
     markDecided: function (shareScope: string) {
       if (_undecided.delete(shareScope)) _undecidedChanged = true;
     },
+    // Records before marks: should their write throw, the stored marks still send the next init to decide them. A
+    // failed cache-state write after the records loses only this load's marks.
     commit: function () {
+      if (_uncommitted.size > 0) {
+        STORAGE.set(_cache);
+        _uncommitted.clear();
+      }
       if (_undecidedChanged) cacheState.update({ undecidedScopes: [..._undecided] });
       _undecidedChanged = false;
-      if (_uncommitted.size === 0) return this;
-      STORAGE.set(_cache);
-      _uncommitted.clear();
       return this;
     },
     rollback: function () {

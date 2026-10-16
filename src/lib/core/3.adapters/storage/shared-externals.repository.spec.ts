@@ -926,6 +926,20 @@ describe('createSharedExternalsRepository', () => {
       expect(mockStorage['cache-state']).toEqual({ version: STAMP, undecidedScopes: ['team'] });
     });
 
+    // A cleared mark stored over stale records would send the next init past them undecided.
+    it('should leave the stored scopes as they were when the records fail to store', () => {
+      const { externalsRepo, mockStorage, externals } = setup(['team']);
+      vi.mocked(externals.set).mockImplementation(() => {
+        throw new Error('QuotaExceededError');
+      });
+
+      externalsRepo.addOrUpdate('dep-a', mockExternal_A(), 'team');
+      externalsRepo.markDecided('team');
+
+      expect(() => externalsRepo.commit()).toThrow('QuotaExceededError');
+      expect(mockStorage['cache-state']).toEqual({ version: STAMP, undecidedScopes: ['team'] });
+    });
+
     // The stamp and the marks have different writers: neither write may drop the other's field.
     it('should keep a version stamped between two commits', () => {
       const { externalsRepo, mockStorage } = setup();

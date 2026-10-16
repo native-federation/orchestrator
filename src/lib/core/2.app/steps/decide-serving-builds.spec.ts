@@ -609,6 +609,74 @@ describe('createDecideServingBuilds', () => {
     });
   });
 
+  // `sameShape` compares copies by identity, which holds only while no helper edits a copy's fields. A copy
+  // frozen before deciding makes any such write throw (specs run in strict mode), so each fixture below runs
+  // frozen and unfrozen and must decide the same. Together they reach every rewrite: following and redirecting
+  // (`redirectRow`), sharing the serving build's skipped copy (`shareServingCopies`), falling back
+  // (`scopeRemote`), and merging rows (`mergeRows`).
+  describe('never edits a copy', () => {
+    const fixtures: Record<string, () => Record<string, SharedVersion[]>> = {
+      'split package': () => ({
+        fw: [row('fw', '2.0.0', 'share', [shipsAll])],
+        'fw/testing': [row('fw/testing', '1.0.0', 'share', [{ remote: 'b', strict: true }])],
+        'fw/other': [row('fw/other', '1.5.0', 'share', [{ remote: 'c' }])],
+      }),
+      'strict skips onto newer rows': () => ({
+        fw: [row('fw', '1.0.0', 'share', [{ remote: 'a' }])],
+        'fw/a': [
+          row('fw/a', '2.1.0', 'share', [{ remote: 'c' }]),
+          row('fw/a', '2.0.0', 'skip', [{ remote: 'b', req: '^2.0.0', strict: true }]),
+          row('fw/a', '1.0.0', 'skip', [{ remote: 'a' }]),
+        ],
+      }),
+      "the serving build's skipped copy": () => ({
+        fw: [row('fw', '2.0.0', 'share', [{ remote: 'b', ships: ['fw', 'fw/x'] }])],
+        'fw/x': [
+          row('fw/x', '3.0.0', 'share', [{ remote: 'r' }]),
+          row('fw/x', '2.0.0', 'skip', [{ remote: 'b' }]),
+        ],
+      }),
+      'a share row redirected onto a skip row': () => ({
+        fw: [row('fw', '2.0.0', 'share', [{ remote: 'a', ships: ['fw', 'fw/testing'] }])],
+        'fw/testing': [
+          row('fw/testing', '2.0.0', 'share', [{ remote: 'e' }]),
+          row('fw/testing', '1.0.0', 'share', [{ remote: 'b' }]),
+          row('fw/testing', '1.0.0', 'skip', [{ remote: 'f' }]),
+        ],
+      }),
+      'a fallback to scope rows': () => ({
+        fw: [
+          row('fw', '2.0.0', 'share', [
+            { remote: 'a', ships: ['fw', 'fw/other'] },
+            { remote: 'b' },
+          ]),
+        ],
+        'fw/testing': [row('fw/testing', '1.0.0', 'share', [{ remote: 'b' }])],
+      }),
+    };
+
+    const decideOver = async (versions: Record<string, SharedVersion[]>, frozen: boolean) => {
+      adapters.sharedExternalsRepo = createSharedExternalsRepository({
+        storage: globalThisStorageEntry(`nf-decide-frozen-${frozen}`),
+        clearStorage: true,
+      });
+      seed(versions);
+      if (frozen)
+        for (const external of Object.values(stored()))
+          for (const version of external.versions) version.remotes.forEach(Object.freeze);
+      await createDecideServingBuilds(config, adapters)();
+      return JSON.stringify(stored());
+    };
+
+    it.each(Object.keys(fixtures))('%s', async name => {
+      const unfrozen = await decideOver(fixtures[name]!(), false);
+      const frozen = await decideOver(fixtures[name]!(), true);
+
+      expect(frozen).toEqual(unfrozen);
+      expect(frozen).not.toEqual(JSON.stringify({}));
+    });
+  });
+
   // A scope decides the same again unless something wrote to it: this page before deciding, or a runtime load
   // since its last decide (stored as undecided).
   describe('which scopes it decides', () => {
