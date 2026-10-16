@@ -244,7 +244,7 @@ type StorageOptions = {
 | Option              | Default                   | Description                                                                                                                                                                                                                                                                                                                        |
 | ------------------- | ------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | storage             | `globalThisStorageEntry`  | Allows the provision of a custom storage implementation. A custom storage must store a copy on `set` and return a fresh copy from `get`, as the built-in storages do.                                                                                                                                                              |
-| clearStorage        | `false`                   | When enabled, the initFederation function will clear the current cache/storage before initializing the remoteEntries. The cache is also cleared once, automatically, when it was written by another orchestrator version: the storage carries a `version` stamp next to its keys, and any other stamp, or none, drops every entry. |
+| clearStorage        | `false`                   | When enabled, the initFederation function will clear the current cache/storage before initializing the remoteEntries. The cache is also cleared once, automatically, when it was written by another orchestrator version: the `cache-state` key carries a `version` stamp next to the other keys, and any other stamp, or none, drops every entry. |
 | storageNamespace    | `"__NATIVE_FEDERATION__"` | The namespace under which the cache will be stored. e.g. remotes will be stored under `__NATIVE_FEDERATION__.remotes` in localStorage                                                                                                                                                                                              |
 | exposeStorageGetter | `true`                    | Publishes a read-only `get(key)` on [`globalThis.__NF_ORCHESTRATOR__`](#discovering-the-storage-from-tools). Set to `false` to keep the state of a custom storage unreadable for page scripts.                                                                                                                                     |
 
@@ -285,7 +285,7 @@ globalThis.__NF_ORCHESTRATOR__ = {
       version: 'x.y.z', // the orchestrator that published this namespace
       type: 'localStorage', // 'globalThis' | 'localStorage' | 'sessionStorage' | 'custom'
       namespace: '__NATIVE_FEDERATION__',
-      keys: ['remotes', 'shared-externals', 'scoped-externals', 'shared-chunks'],
+      keys: ['remotes', 'shared-externals', 'scoped-externals', 'shared-chunks', 'cache-state'],
       get: key => {}, // a copy of the stored value; absent when exposeStorageGetter is false
     },
   },
@@ -304,6 +304,6 @@ There are two ways to read the state:
 | `sessionStorage` | `sessionStorage.getItem(\`${namespace}.${key}\`)` (JSON) |
 | `custom`         | Not directly readable; use `get(key)`                    |
 
-Each namespace carries its own `version`, because separate orchestrator bundles on one page can publish side by side. Publishing never fails `initFederation`: if the global can't be written, the descriptor is simply missing.
+`cache-state` holds `{ version, undecidedScopes }`: the orchestrator version that wrote the cache, and the share scopes a runtime load wrote since their serving builds were last decided (see [One build per package](./version-resolver.md#one-build-per-package)). Each namespace carries its own `version`, because separate orchestrator bundles on one page can publish side by side. Publishing never fails `initFederation`: if the global can't be written, the descriptor is simply missing.
 
 A custom `StorageEntryCreator` reports `'custom'` unless you tag it with a `type` property (e.g. `myStorage.type = 'localStorage'` when it wraps localStorage with the same key layout). The published object is typed as `NFOrchestratorGlobal` (exported from `@softarc/native-federation-orchestrator/options`).

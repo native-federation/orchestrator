@@ -11,6 +11,7 @@ export const createInitRemoteEntryFlow = ({
       .updateCache(remoteEntry)
       .then(flow.poolDynamicExternals)
       .then(flow.convertToImportMap)
+      .then(flow.markUndecidedScopes)
       .then(flow.commitChanges);
 
   return (remoteEntryUrl, remote) =>

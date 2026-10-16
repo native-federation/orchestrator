@@ -10,6 +10,7 @@ import {
   type StorageEntry,
 } from 'lib/core/2.app/config/storage.contract';
 import type { ForSharedExternalsStorage } from 'lib/core/2.app/driving-ports/for-shared-externals-storage.port';
+import { createCacheState } from './cache-state';
 import { Optional } from 'lib/utils/optional';
 
 const createSharedExternalsRepository = (config: StorageConfig): ForSharedExternalsStorage => {
@@ -18,11 +19,20 @@ const createSharedExternalsRepository = (config: StorageConfig): ForSharedExtern
     { [GLOBAL_SCOPE]: {} }
   );
 
-  if (config.clearStorage) STORAGE.clear();
+  const cacheState = createCacheState(config.storage);
+  const storedUndecided = () => new Set(cacheState.read().undecidedScopes);
+
+  if (config.clearStorage) {
+    STORAGE.clear();
+    cacheState.update({ undecidedScopes: [] });
+  }
 
   let _cache: SharedExternals = STORAGE.get() ?? { [GLOBAL_SCOPE]: {} };
 
   const _uncommitted = new Set<string>();
+
+  let _undecided = storedUndecided();
+  let _undecidedChanged = false;
 
   return {
     getFromScope: function (shareScope?: string) {
@@ -114,7 +124,20 @@ const createSharedExternalsRepository = (config: StorageConfig): ForSharedExtern
     uncommittedScopes: function () {
       return [..._uncommitted];
     },
+    markUndecided: function (shareScope: string) {
+      if (_undecided.has(shareScope)) return;
+      _undecided.add(shareScope);
+      _undecidedChanged = true;
+    },
+    isUndecided: function (shareScope: string) {
+      return _undecided.has(shareScope);
+    },
+    markDecided: function (shareScope: string) {
+      if (_undecided.delete(shareScope)) _undecidedChanged = true;
+    },
     commit: function () {
+      if (_undecidedChanged) cacheState.update({ undecidedScopes: [..._undecided] });
+      _undecidedChanged = false;
       if (_uncommitted.size === 0) return this;
       STORAGE.set(_cache);
       _uncommitted.clear();
@@ -123,6 +146,8 @@ const createSharedExternalsRepository = (config: StorageConfig): ForSharedExtern
     rollback: function () {
       _cache = STORAGE.get() ?? { [GLOBAL_SCOPE]: {} };
       _uncommitted.clear();
+      _undecided = storedUndecided();
+      _undecidedChanged = false;
       return this;
     },
   };

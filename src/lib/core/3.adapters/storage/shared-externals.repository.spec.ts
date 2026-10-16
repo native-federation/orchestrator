@@ -849,4 +849,120 @@ describe('createSharedExternalsRepository', () => {
       expect(externalsRepo.uncommittedScopes()).toEqual([]);
     });
   });
+
+  // A runtime load decides no serving build; these scopes tell the next page's init where to decide one. They
+  // share `cache-state` with the version stamp the storage config writes.
+  describe('undecided scopes', () => {
+    const STAMP = '4.8.0';
+    const setup = (undecidedScopes?: string[]) => {
+      const mockStorage: Record<string, unknown> = {
+        'shared-externals': { [GLOBAL_SCOPE]: {} },
+        'cache-state': { version: STAMP, ...(undecidedScopes ? { undecidedScopes } : {}) },
+      };
+      const handler = createStorageHandlerMock(mockStorage);
+      const externalsRepo = createSharedExternalsRepository({
+        storage: handler,
+        clearStorage: false,
+      });
+      const [externals, cacheState] = handler.mock.results.map(r => r.value);
+      return { mockStorage, externalsRepo, externals, cacheState };
+    };
+
+    it('should read the scopes an earlier page stored', () => {
+      const { externalsRepo } = setup(['team']);
+
+      expect(externalsRepo.isUndecided('team')).toBe(true);
+      expect(externalsRepo.isUndecided(GLOBAL_SCOPE)).toBe(false);
+    });
+
+    it('should store marked scopes on commit and keep the version stamp', () => {
+      const { externalsRepo, mockStorage } = setup();
+
+      externalsRepo.markUndecided(GLOBAL_SCOPE);
+      externalsRepo.markUndecided('team');
+      expect(mockStorage['cache-state']).toEqual({ version: STAMP });
+      externalsRepo.commit();
+
+      expect(mockStorage['cache-state']).toEqual({
+        version: STAMP,
+        undecidedScopes: [GLOBAL_SCOPE, 'team'],
+      });
+    });
+
+    it('should store a decided scope as unmarked, without rewriting the externals', () => {
+      const { externalsRepo, mockStorage, externals } = setup([GLOBAL_SCOPE, 'team']);
+
+      externalsRepo.markDecided('team');
+      externalsRepo.commit();
+
+      expect(mockStorage['cache-state']).toEqual({
+        version: STAMP,
+        undecidedScopes: [GLOBAL_SCOPE],
+      });
+      expect(externals.set).not.toHaveBeenCalled();
+    });
+
+    it('should not write the scopes when nothing changed them', () => {
+      const { externalsRepo, cacheState } = setup(['team']);
+
+      externalsRepo.markUndecided('team');
+      externalsRepo.markDecided(GLOBAL_SCOPE);
+      externalsRepo.addOrUpdate('dep-a', mockExternal_A());
+      externalsRepo.commit();
+
+      expect(cacheState.set).not.toHaveBeenCalled();
+    });
+
+    it('should restore only the stored scopes on rollback, leaving the version stamp', () => {
+      const { externalsRepo, mockStorage } = setup(['team']);
+
+      externalsRepo.markUndecided(GLOBAL_SCOPE);
+      externalsRepo.markDecided('team');
+      externalsRepo.rollback();
+      externalsRepo.commit();
+
+      expect(externalsRepo.isUndecided(GLOBAL_SCOPE)).toBe(false);
+      expect(externalsRepo.isUndecided('team')).toBe(true);
+      expect(mockStorage['cache-state']).toEqual({ version: STAMP, undecidedScopes: ['team'] });
+    });
+
+    // The stamp and the marks have different writers: neither write may drop the other's field.
+    it('should keep a version stamped between two commits', () => {
+      const { externalsRepo, mockStorage } = setup();
+      externalsRepo.markUndecided('team');
+      externalsRepo.commit();
+
+      mockStorage['cache-state'] = { ...(mockStorage['cache-state'] as object), version: '4.8.1' };
+      externalsRepo.markUndecided(GLOBAL_SCOPE);
+      externalsRepo.commit();
+
+      expect(mockStorage['cache-state']).toEqual({
+        version: '4.8.1',
+        undecidedScopes: ['team', GLOBAL_SCOPE],
+      });
+    });
+
+    it('should read a malformed cache state as no marks', () => {
+      const mockStorage: Record<string, unknown> = { 'cache-state': 'garbage' };
+      const externalsRepo = createSharedExternalsRepository({
+        storage: createStorageHandlerMock(mockStorage),
+        clearStorage: false,
+      });
+
+      expect(externalsRepo.isUndecided(GLOBAL_SCOPE)).toBe(false);
+    });
+
+    it('should clear the stored scopes with the externals and keep the version stamp', () => {
+      const mockStorage: Record<string, unknown> = {
+        'cache-state': { version: STAMP, undecidedScopes: ['team'] },
+      };
+      const externalsRepo = createSharedExternalsRepository({
+        storage: createStorageHandlerMock(mockStorage),
+        clearStorage: true,
+      });
+
+      expect(externalsRepo.isUndecided('team')).toBe(false);
+      expect(mockStorage['cache-state']).toEqual({ version: STAMP, undecidedScopes: [] });
+    });
+  });
 });
