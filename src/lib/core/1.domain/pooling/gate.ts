@@ -77,13 +77,35 @@ export function committedView(
   for (const [owner, copies] of shipped)
     if (owner !== without) builds.set(owner, buildOf(owner, copies));
 
-  const fileOf = new Map<RemoteName, Record<Specifier, string>>();
+  const fileOf = subpoolFilesOf(members);
+  return { builds, global, runsOffMap: runsOffMapOf(members, global, builds, fileOf) };
+}
+
+function subpoolFilesOf(members: PoolMember[]): Map<RemoteName, Map<Specifier, string>> {
+  const subpoolOwners = new Set<RemoteName>();
   for (const member of members)
     for (const version of member.external.versions)
-      for (const { name, entries } of version.remotes)
-        // The first row wins, as in `copiesByRemote`.
-        fileOf.set(name, { ...entries, ...fileOf.get(name) });
+      for (const { servedBy } of version.remotes) if (servedBy) subpoolOwners.add(servedBy);
+  const fileOf = new Map<RemoteName, Map<Specifier, string>>();
+  for (const member of members)
+    for (const version of member.external.versions)
+      for (const { name, entries } of version.remotes) {
+        if (!subpoolOwners.has(name)) continue;
+        let files = fileOf.get(name);
+        if (!files) fileOf.set(name, (files = new Map()));
+        // Per specifier, earlier rows first.
+        for (const specifier in entries)
+          if (!files.has(specifier)) files.set(specifier, entries[specifier]!);
+      }
+  return fileOf;
+}
 
+function runsOffMapOf(
+  members: PoolMember[],
+  global: CommittedView['global'],
+  builds: CommittedView['builds'],
+  fileOf: ReadonlyMap<RemoteName, ReadonlyMap<Specifier, string>>
+): CommittedView['runsOffMap'] {
   const runsOffMap: CommittedView['runsOffMap'] = new Map();
   for (const member of members)
     for (const version of member.external.versions)
@@ -99,7 +121,7 @@ export function committedView(
           // A subpool member's copy keeps its own tag in the record but runs its build's files.
           const tag =
             (servedBy ? builds.get(servedBy)?.tags.pinnedTag(specifier) : undefined) ?? version.tag;
-          const file = servedBy && fileOf.get(servedBy)?.[specifier];
+          const file = servedBy && fileOf.get(servedBy)?.get(specifier);
           runs.set(
             specifier,
             file
@@ -108,8 +130,7 @@ export function committedView(
           );
         }
       }
-
-  return { builds, global, runsOffMap };
+  return runsOffMap;
 }
 
 // See docs/version-resolver.md §"Scope and dynamic init", step 1. A resolver scope needs no rule of its own:

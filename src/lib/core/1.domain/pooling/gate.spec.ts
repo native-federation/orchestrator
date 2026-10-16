@@ -261,6 +261,143 @@ describe('committedView', () => {
         ).toEqual({ tag: '22.0.8', remote: 'dense', file: 't.js' });
       });
   });
+
+  // A subpool member's copy keeps its own tag in the record, but the map points its scope at the subpool
+  // build's files, so that is what it runs: the build's file at the tag the build pins.
+  describe('what a build runs off the map', () => {
+    // `sub` ships core at 22.0.9 but is served by `x`, which committed core at 22.0.8.
+    const subpool = (subEntries: Record<string, string> = { '@ng/core': 'sub-core.js' }) => [
+      member('@ng/core', [
+        {
+          tag: '22.0.9',
+          copies: [{ remote: 'sub', servedBy: 'x', entries: subEntries }],
+        },
+        {
+          tag: '22.0.8',
+          action: 'share',
+          copies: [{ remote: 'x', entries: { '@ng/core': 'x-core.js' } }],
+        },
+      ]),
+    ];
+
+    it("runs a served copy's specifier from its build's file, at the build's tag", () => {
+      expect(viewOf(subpool()).runsOffMap.get('sub')?.get('@ng/core')).toEqual({
+        tag: '22.0.8',
+        remote: 'x',
+        file: 'x-core.js',
+      });
+    });
+
+    // A corrupt record: `x` lists core in two rows with different files. The first row wins, as in
+    // `copiesByRemote`, so the file and the tag come from one row.
+    it("takes the build's file from its first row", () => {
+      const members = subpool();
+      members[0]!.external.versions.push({
+        tag: '22.0.7',
+        host: false,
+        action: 'skip',
+        remotes: [
+          mockVersionRemote('x', '@ng/core', {
+            requiredVersion: '^22.0.0',
+            entries: { '@ng/core': 'x-core-old.js' },
+          }),
+        ],
+      });
+
+      expect(viewOf(members).runsOffMap.get('sub')?.get('@ng/core')).toMatchObject({
+        remote: 'x',
+        file: 'x-core.js',
+      });
+    });
+
+    // Flat vs dense: `x` ships core/testing as a package of its own, so its file is in a later member's row.
+    it("takes a specifier the build ships in a later row from that row's file", () => {
+      const members = [
+        ...subpool({ '@ng/core': 'sub-core.js', '@ng/core/testing': 'sub-t.js' }),
+        member('@ng/core/testing', [
+          {
+            tag: '22.0.8',
+            action: 'share',
+            copies: [{ remote: 'x', entries: { '@ng/core/testing': 'x-t.js' } }],
+          },
+        ]),
+      ];
+
+      expect(viewOf(members).runsOffMap.get('sub')?.get('@ng/core/testing')).toEqual({
+        tag: '22.0.8',
+        remote: 'x',
+        file: 'x-t.js',
+      });
+    });
+
+    // Specifiers are package names from the remote entry, so one may well name an Object.prototype member.
+    it('resolves a specifier named like an object property to the build file', () => {
+      const tricky = { constructor: 'ctor.js', ['__proto__']: 'proto.js' };
+      const members = [
+        member('@ng/core', [
+          { tag: '22.0.9', copies: [{ remote: 'sub', servedBy: 'x', entries: tricky }] },
+          {
+            tag: '22.0.8',
+            action: 'share',
+            copies: [
+              { remote: 'x', entries: { constructor: 'x-ctor.js', ['__proto__']: 'x-proto.js' } },
+            ],
+          },
+        ]),
+      ];
+      const runs = viewOf(members).runsOffMap.get('sub');
+
+      expect(runs?.get('constructor')).toMatchObject({ remote: 'x', file: 'x-ctor.js' });
+      expect(runs?.get('__proto__')).toMatchObject({ remote: 'x', file: 'x-proto.js' });
+    });
+
+    it('falls back on a specifier named like an object property the build lacks', () => {
+      const runs = viewOf(
+        subpool({ '@ng/core': 'sub-core.js', constructor: 'ctor.js', ['__proto__']: 'proto.js' })
+      ).runsOffMap.get('sub');
+
+      expect(runs?.get('constructor')).toMatchObject({ remote: 'sub', file: 'ctor.js' });
+      expect(runs?.get('__proto__')).toMatchObject({ remote: 'sub', file: 'proto.js' });
+    });
+
+    // The tag is still the build's: it pins the specifier's package, so its other entrypoints run at that tag.
+    it("falls back to the copy's own file where the build has none", () => {
+      const runs = viewOf(
+        subpool({ '@ng/core': 'sub-core.js', '@ng/core/extra': 'sub-extra.js' })
+      ).runsOffMap.get('sub');
+
+      expect(runs?.get('@ng/core/extra')).toEqual({
+        tag: '22.0.8',
+        remote: 'sub',
+        file: 'sub-extra.js',
+      });
+    });
+
+    // Without a subpool every copy runs its own files: a skip copy only the entrypoints the map lacks, a
+    // share copy nothing off the map.
+    it('runs every copy from its own files when no copy is served by another build', () => {
+      const members = [
+        member('@ng/core', [
+          {
+            tag: '22.0.8',
+            action: 'share',
+            copies: [{ remote: 'mfe5', entries: { '@ng/core': 'c.js' } }],
+          },
+          {
+            tag: '22.0.7',
+            copies: [{ remote: 'mfe2', entries: { '@ng/core': 'c2.js', '@ng/core/t': 't2.js' } }],
+          },
+          { tag: '21.2.0', action: 'scope', copies: [{ remote: 'old', req: '^21.0.0' }] },
+        ]),
+      ];
+      const { runsOffMap } = viewOf(members);
+
+      expect([...runsOffMap].map(([remote, runs]) => [remote, [...runs]])).toEqual([
+        ['mfe2', [['@ng/core/t', { tag: '22.0.7', remote: 'mfe2', file: 't2.js' }]]],
+        ['old', [['@ng/core', { tag: '21.2.0', remote: 'old', file: '@ng/core.js' }]]],
+      ]);
+    });
+  });
 });
 
 describe('coverFromMap', () => {

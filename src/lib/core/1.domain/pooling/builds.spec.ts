@@ -64,6 +64,30 @@ describe('a build read from the record', () => {
     expect(build.tags.has('x/extra')).toBe(false);
   });
 
+  // The same corrupt record across two members: the duplicate in y's rows must not drop x's copy, nor add a
+  // second one for y.
+  it('keeps one copy per member, from its first row, when a later member lists the remote twice', () => {
+    const members = [
+      member('x', [{ tag: '1.0.0', copies: [{ remote: 'b', entries: { x: 'x.js' } }] }]),
+      member('y', [
+        { tag: '2.0.1', copies: [{ remote: 'b', req: '^2.0.0', entries: { y: 'y.js' } }] },
+        {
+          tag: '2.0.0',
+          copies: [{ remote: 'b', req: '^2.0.0', entries: { y: 'y-200.js', 'y/extra': 'e.js' } }],
+        },
+      ]),
+    ];
+
+    expect(
+      copiesByRemote(members, () => false)
+        .get('b')!
+        .map(({ member, tag, specifiers }) => ({ member, tag, specifiers }))
+    ).toEqual([
+      { member: 'x', tag: '1.0.0', specifiers: ['x'] },
+      { member: 'y', tag: '2.0.1', specifiers: ['y'] },
+    ]);
+  });
+
   // Flat and dense in one build: `x/sub` is an entry of r's dense `x` at 1.0.0 and r's own flat package at
   // 2.0.0. The build reads its tag from the first copy in pool order.
   it.each([
