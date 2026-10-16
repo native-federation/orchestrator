@@ -608,4 +608,98 @@ describe('createDecideServingBuilds', () => {
       expect(stored()).toEqual(first);
     });
   });
+
+  // A scope decides the same again unless something wrote to it: this page before deciding, or a runtime load
+  // since its last decide (stored as undecided).
+  describe('which scopes it decides', () => {
+    // The step bare: the audit reads every scope itself.
+    const decidedScopes = async () => {
+      const getFromScope = vi.spyOn(adapters.sharedExternalsRepo, 'getFromScope');
+      await createDecideServingBuilds(config, adapters)();
+      const read = getFromScope.mock.calls.map(([scope]) => scope);
+      getFromScope.mockRestore();
+      return read;
+    };
+
+    beforeEach(() => {
+      seed({ fw: [row('fw', '2.0.0', 'share', [{ remote: 'a' }])] });
+      seed({ fw: [row('fw', '1.0.0', 'share', [{ remote: 'b' }])] }, 'team');
+    });
+
+    it('decides every scope written since the last commit', async () => {
+      expect(await decidedScopes()).toEqual([GLOBAL_SCOPE, 'team']);
+      expect(stored().fw!.servingBuild).toBe('a');
+    });
+
+    it('never reads a scope nothing wrote since it was decided', async () => {
+      adapters.sharedExternalsRepo.commit();
+
+      expect(await decidedScopes()).toEqual([]);
+    });
+
+    it('decides a scope a runtime load left undecided, and stores it as decided', async () => {
+      adapters.sharedExternalsRepo.commit();
+      adapters.sharedExternalsRepo.markUndecided('team');
+
+      expect(await decidedScopes()).toEqual(['team']);
+      expect(stored('team').fw!.servingBuild).toBe('b');
+      expect(adapters.sharedExternalsRepo.isUndecided('team')).toBe(false);
+    });
+
+    it('decides only the scope this page wrote', async () => {
+      adapters.sharedExternalsRepo.commit();
+      seed({ fw: [row('fw', '1.0.0', 'share', [{ remote: 'c' }])] }, 'team');
+
+      expect(await decidedScopes()).toEqual(['team']);
+      expect(stored('team').fw!.servingBuild).toBe('c');
+    });
+
+    // Pins the current design choice, not a settled rule: like pooling's skip of a clean scope, a skipped scope
+    // is not checked again (docs/version-resolver.md §"One build per package").
+    it('refuses nothing in a skipped scope when strictExternalCompatibility is switched on later', async () => {
+      seed({
+        fw: [row('fw', '2.0.0', 'share', [shipsAll])],
+        'fw/testing': [row('fw/testing', '1.0.0', 'share', [{ remote: 'b', strict: true }])],
+      });
+      adapters.sharedExternalsRepo.commit();
+      config.strict.strictExternalCompatibility = true;
+
+      await expect(decide()).resolves.toBeUndefined();
+      adapters.sharedExternalsRepo.markUndecided(GLOBAL_SCOPE);
+      await expect(decide()).rejects.toThrow(NFError);
+    });
+  });
+
+  // The init right after a cold one finds nothing to decide: the cold init committed, and the import-map step's
+  // `cached` writes after deciding are committed with it.
+  it('decides nothing on the first warm init after a cold one', async () => {
+    const p = portfolio({}, { storage: 'nf-dsb-first-warm', realRepositories: true });
+    const pkg = (name: string, version: string): DenseSharedInfo =>
+      ({
+        packageName: name,
+        version,
+        requiredVersion: `^${version}`,
+        singleton: true,
+        strictVersion: false,
+        entries: { [name]: `${name}.js` },
+      }) as DenseSharedInfo;
+    const entries = ['a', 'b'].map(
+      (name, i) =>
+        ({
+          name,
+          url: `http://${name}/remoteEntry.json`,
+          exposes: [],
+          shared: [pkg('fw', `2.${i}.0`), pkg('fw/x', `2.${i}.0`)],
+        }) as unknown as RemoteEntry
+    );
+    await p.runInit(entries);
+    p.reload();
+
+    // A decided scope is always marked decided, so no call means no scope was decided.
+    const markDecided = vi.spyOn(p.adapters.sharedExternalsRepo, 'markDecided');
+    await p.runInit(entries);
+
+    expect(markDecided).not.toHaveBeenCalled();
+    expect(p.writes()).toBe(0);
+  });
 });

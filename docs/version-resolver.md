@@ -294,6 +294,16 @@ stay shared, and a remote whose specifiers its copies cover follows it. A `stric
 a host file it would take at a tag other than the serving tag runs the package from its own build instead, as a
 runtime load of it does.
 
+Deciding the serving build is the second election stage, after the version election: `dirty` marks an external
+the version election must take again, and `undecidedScopes` (in the `cache-state` storage key) marks a share scope
+the serving-build election must take again. An init decides serving builds only in a share scope that changed: one
+it wrote before deciding (a fetched or evicted remote, a re-election), or one a runtime load wrote since the scope
+was last decided. A load decides none itself; it marks the scopes it wrote, and the next init decides them and
+clears the mark. A
+warm init that changes no remote decides nothing. Like pooling, which skips a scope with no dirty external, it
+therefore checks nothing again in a skipped scope: switching on `strict.strictExternalCompatibility` over a warm
+cache refuses nothing until a remote in that scope changes.
+
 #### Copies of one version
 
 Copies of one version build the same tag, so a specifier two of them ship is the same published code, and one

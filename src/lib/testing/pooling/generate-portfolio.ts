@@ -49,6 +49,8 @@ export type RemoteSpec = {
   extra: number | null;
   // Its range: `~1.<minor>.0` (the default) rejects the other minor, `^1.0.0` accepts both.
   extraRange?: 'tilde' | 'caret';
+  // The named share scope this remote declares its shared externals in, over the portfolio's (`mixedScope`).
+  shareScope?: string;
 };
 
 export type PortfolioSpec = {
@@ -126,7 +128,8 @@ const freshRemoteArbitrary = (poolSizes: number[]): fc.Arbitrary<RemoteSpec> =>
  * straggler's build of its own, which keeps ragged one-off families in the mix. `labelNoise` has one remote
  * in five mislabel a member (`Relabel`); off, the portfolios are the ones the seeds have always produced.
  * `flat` has each remote ship flat or dense at random; `shareScope` puts every shared external in that named
- * scope. Both draw nothing when absent, so the default stream is unchanged. `latestSharedExternal` turns the
+ * scope, and `mixedScope` puts each remote in that named scope or the global one at random. All three draw
+ * nothing when absent, so the default stream is unchanged. `latestSharedExternal` turns the
  * profile flag on or off at random, drawn last, so the portfolio itself is the one the seed draws without it.
  */
 export const portfolioArbitrary = (
@@ -137,6 +140,7 @@ export const portfolioArbitrary = (
     flat?: boolean;
     chunks?: boolean;
     shareScope?: string;
+    mixedScope?: string;
     latestSharedExternal?: boolean;
   } = {}
 ): fc.Arbitrary<PortfolioSpec> =>
@@ -192,6 +196,9 @@ export const portfolioArbitrary = (
               ...(o.chunks
                 ? { chunks: fc.constantFrom<RemoteSpec['chunks']>(undefined, 'dense', 'flat') }
                 : {}),
+              ...(o.mixedScope === undefined
+                ? {}
+                : { shareScope: fc.constantFrom<string | undefined>(undefined, o.mixedScope) }),
             }),
             { minLength: o.minRemotes ?? 1, maxLength: o.maxRemotes ?? 20 }
           ),
@@ -212,8 +219,9 @@ export const portfolioArbitrary = (
           host,
           ...(o.shareScope === undefined ? {} : { shareScope: o.shareScope }),
           ...(latest === undefined ? {} : { latestSharedExternal: latest }),
-          remotes: remotes.map(remote => ({
+          remotes: remotes.map(({ shareScope, ...remote }) => ({
             ...remote,
+            ...(shareScope === undefined ? {} : { shareScope }),
             pools: remote.pools.map((pick, p) => {
               if (pick === null) return null;
               const builds = templates[p]!;
@@ -414,9 +422,10 @@ export function toRemoteEntry(
   spec: RemoteSpec,
   index: number,
   deploy = 0,
-  shareScope?: string
+  portfolioScope?: string
 ): RemoteEntry {
   const name = remoteName(index);
+  const shareScope = spec.shareScope ?? portfolioScope;
   const shared: DenseSharedInfo[] = [];
   const shipped = spec.pools.flatMap((pool, p) => (pool ? [p] : []));
   const relabelled =

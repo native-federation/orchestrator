@@ -67,6 +67,11 @@ export type PortfolioOptions = {
    * default. Remote entries carry their own `shareScope`.
    */
   scope?: string;
+  /**
+   * Reports every share scope as left undecided, so the serving-build step decides each one on every init: the
+   * reference the decide gate is compared against.
+   */
+  decideEveryScope?: boolean;
 };
 
 export type DynamicLoad = {
@@ -89,6 +94,7 @@ export const portfolio = (
     latestSharedExternal = false,
     realRepositories = false,
     scope = GLOBAL_SCOPE,
+    decideEveryScope = false,
   }: PortfolioOptions = {}
 ) => {
   // What the flows fetch: remote entries by URL, handed out as fresh copies the way a fetch parses them.
@@ -113,6 +119,7 @@ export const portfolio = (
     const storageConfig = { storage: globalThisStorageEntry(storage), clearStorage };
     adapters.versionCheck = createVersionCheck();
     adapters.sharedExternalsRepo = createSharedExternalsRepository(storageConfig);
+    if (decideEveryScope) adapters.sharedExternalsRepo.isUndecided = () => true;
 
     if (realRepositories) {
       adapters.remoteInfoRepo = createRemoteInfoRepository(storageConfig);
@@ -271,6 +278,16 @@ export const portfolio = (
     expect(unresolved).toEqual([]);
   };
 
+  // A commit stores the record the page holds. A step that edits a stored external in place without writing it
+  // back leaves the two apart, and the next page runs another record than this one did.
+  const assertStoredAsHeld = () => {
+    const repo = adapters.sharedExternalsRepo;
+    const namespace = (globalThis as unknown as Record<string, Record<string, unknown>>)[storage];
+    expect(namespace?.['shared-externals']).toEqual(
+      Object.fromEntries(repo.getScopes().map(s => [s, repo.getFromScope(s)]))
+    );
+  };
+
   /**
    * The init flow, start to commit. `entries` are served as the manifest's remotes, a host among them
    * appended last as get-remote-entries appends the configured host; a remote this page already has
@@ -286,6 +303,7 @@ export const portfolio = (
 
     installed = undefined;
     await createInitFlow({ flow: drivers, adapters, config })(manifest);
+    assertStoredAsHeld();
     const importMap = installed!;
     assertNoTear(importMap);
     assertResolves(importMap);
@@ -317,6 +335,7 @@ export const portfolio = (
     installed = undefined;
     actions = undefined;
     await createInitRemoteEntryFlow({ flow: drivers, adapters, config })(entry.url);
+    assertStoredAsHeld();
     if (!installed || !actions) throw new Error(`'${entry.name}' was not loaded.`);
     const importMap: ImportMap = installed;
     const merged = addToImportMap(committed, importMap);
@@ -326,14 +345,15 @@ export const portfolio = (
     return { actions, committed, importMap, merged };
   };
 
-  // Commits this page and opens the next one over the same storage: a warm page that has refetched nothing.
-  const reload = (): void => {
+  // Commits this page and opens the next one over the same storage: a warm page that has refetched nothing, or
+  // with `clearStorage` the page a startup that found the cache outdated opens.
+  const reload = (clearStorage = false): void => {
     if (!realRepositories) throw new Error('reload() needs realRepositories.');
     adapters.remoteInfoRepo.commit();
     adapters.scopedExternalsRepo.commit();
     adapters.sharedExternalsRepo.commit();
     adapters.sharedChunksRepo.commit();
-    ({ config, adapters, drivers } = wire(false));
+    ({ config, adapters, drivers } = wire(clearStorage));
     writes = 0;
     page = undefined;
   };

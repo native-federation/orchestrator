@@ -26,15 +26,21 @@ export function createDecideServingBuilds(
 ): ForDecidingServingBuilds {
   return () => {
     const accepts = createAcceptsTag(ports.versionCheck.isCompatible, ports.versionCheck.compare);
+    const repo = ports.sharedExternalsRepo;
+    // Taken before deciding writes. A scope nothing wrote since its last decide would decide the same again.
+    const written = new Set(repo.uncommittedScopes());
+    const needsDeciding = (shareScope: string) =>
+      written.has(shareScope) || repo.isUndecided(shareScope);
 
     try {
-      for (const shareScope of ports.sharedExternalsRepo.getScopes()) {
-        if (ports.sharedExternalsRepo.scopeType(shareScope) === 'strict') continue;
-        const sharedExternals = ports.sharedExternalsRepo.getFromScope(shareScope);
+      for (const shareScope of repo.getScopes()) {
+        if (repo.scopeType(shareScope) === 'strict' || !needsDeciding(shareScope)) continue;
+        const sharedExternals = repo.getFromScope(shareScope);
         for (const [pkg, names] of packagesOf(sharedExternals)) {
           const externals = names.map(name => [name, sharedExternals[name]!] as const);
           decidePackage(shareScope, pkg, externals, accepts);
         }
+        repo.markDecided(shareScope);
       }
       return Promise.resolve();
     } catch (e) {
