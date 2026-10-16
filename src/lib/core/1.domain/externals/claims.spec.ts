@@ -1,4 +1,4 @@
-import { claimTable, committedClaims, versionClaims, type Claim } from './claims';
+import { claimTable, claimsByPackage, committedClaims, versionClaims, type Claim } from './claims';
 import { GLOBAL_SCOPE, type SharedExternal } from './external.contract';
 import type { SharedVersion, SharedVersionAction, SharedVersionMeta } from './version.contract';
 
@@ -241,5 +241,62 @@ describe('versionClaims', () => {
 
   it('claims every copy in record order without a serving build', () => {
     expect(names(versionClaims(row(), undefined))).toEqual({ fw: 'r1', 'fw/extra': 'r1' });
+  });
+});
+
+describe('claimsByPackage', () => {
+  // Package -> its specifiers in bucket order, each with the tag it is claimed at.
+  const buckets = (claims: Map<string, Claim>) =>
+    Object.fromEntries(
+      [...claimsByPackage(claims)].map(([pkg, bucket]) => [
+        pkg,
+        bucket.map(([s, c]) => `${s}@${c.tag}`),
+      ])
+    );
+
+  it('keeps table order inside a package, with a deep entrypoint beside its root', () => {
+    // fw/testing's own share row comes first in the record, so its claim precedes the root's.
+    const table = claimTable([
+      ['fw/testing', external(version('share', [copy('r1', ['fw/testing', 'fw/testing/deep'])]))],
+      ['rxjs', external(version('share', [copy('r1', ['rxjs'])]))],
+      ['fw', external(version('share', [copy('r1', ['fw'])]))],
+    ]);
+
+    expect(buckets(table.claims)).toEqual({
+      fw: ['fw/testing@1.0.0', 'fw/testing/deep@1.0.0', 'fw@1.0.0'],
+      rxjs: ['rxjs@1.0.0'],
+    });
+  });
+
+  it('keeps a scoped package apart from one whose name it prefixes', () => {
+    const table = claimTable([
+      ['@a/b', external(version('share', [copy('r1', ['@a/b', '@a/b/x'])]))],
+      ['@a/bc', external(version('share', [copy('r1', ['@a/bc'])]))],
+    ]);
+
+    expect(buckets(table.claims)).toEqual({
+      '@a/b': ['@a/b@1.0.0', '@a/b/x@1.0.0'],
+      '@a/bc': ['@a/bc@1.0.0'],
+    });
+  });
+
+  // A host can ship a package's entrypoints at two tags with no root; the first claim sets a root-less load's
+  // serving tag, so the bucket must keep the table's order across tags.
+  it('keeps table order across tags in a root-less package', () => {
+    const table = claimTable([
+      ['@x/a/s2', external(version('share', [copy('h', ['@x/a/s2'])], '2.0.0'))],
+      ['@x/a/s1', external(version('share', [copy('h', ['@x/a/s1'])], '1.0.0'))],
+      ['@x/a/s3', external(version('share', [copy('h', ['@x/a/s3'])], '2.0.0'))],
+    ]);
+
+    expect(buckets(table.claims)).toEqual({
+      '@x/a': ['@x/a/s2@2.0.0', '@x/a/s1@1.0.0', '@x/a/s3@2.0.0'],
+    });
+  });
+
+  it('hands back the table entries themselves', () => {
+    const table = claimTable([['fw', external(version('share', [copy('r1', ['fw'])]))]]);
+
+    expect(claimsByPackage(table.claims).get('fw')![0]![1]).toBe(table.claims.get('fw'));
   });
 });

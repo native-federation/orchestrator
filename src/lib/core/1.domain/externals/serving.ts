@@ -4,7 +4,7 @@ import type { RemoteName } from '../remote/remote-info.contract';
 import type { AcceptsTag } from './compatibility';
 import type { ExternalName, SharedExternal, shareScope } from './external.contract';
 import { mergeRows, redirectRow, rowAt } from './rows';
-import { packageOf, type Specifier } from './specifier';
+import { groupByPackage, packageOf, type Specifier } from './specifier';
 import type { SharedVersion, SharedVersionMeta, VersionName } from './version.contract';
 
 export type ServingBuild = { remote: RemoteName; tag: VersionName };
@@ -27,16 +27,8 @@ export const byServingRank = (a: ServingCandidate, b: ServingCandidate): number 
   Number(b.rootBasis) - Number(a.rootBasis) ||
   compareStrings(a.remote, b.remote);
 
-export function packagesOf(scope: DeepReadonly<shareScope>): Map<ExternalName, ExternalName[]> {
-  const packages = new Map<ExternalName, ExternalName[]>();
-  for (const name of Object.keys(scope)) {
-    const pkg = packageOf(name);
-    const names = packages.get(pkg);
-    if (names) names.push(name);
-    else packages.set(pkg, [name]);
-  }
-  return packages;
-}
+export const packagesOf = (scope: DeepReadonly<shareScope>): Map<ExternalName, ExternalName[]> =>
+  groupByPackage(Object.keys(scope), name => name);
 
 export const isPooled = (externals: PackageExternals): boolean =>
   externals.some(([, e]) => e.poolName !== undefined);

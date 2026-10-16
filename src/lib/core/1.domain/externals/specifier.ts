@@ -47,3 +47,17 @@ export class SpecifierTags extends Map<Specifier, VersionName> {
     return this.get(specifier) ?? this.packages.get(owningPackage(specifier) ?? specifier);
   }
 }
+
+export function groupByPackage<T>(
+  items: Iterable<T>,
+  nameOf: (item: T) => ExternalName
+): Map<ExternalName, T[]> {
+  const packages = new Map<ExternalName, T[]>();
+  for (const item of items) {
+    const pkg = packageOf(nameOf(item));
+    const group = packages.get(pkg);
+    if (group) group.push(item);
+    else packages.set(pkg, [item]);
+  }
+  return packages;
+}
