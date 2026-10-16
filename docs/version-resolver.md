@@ -1091,13 +1091,17 @@ it in that scope, read as the map was generated (the serving build's copy, see
 - **Otherwise** — the map lacks an entrypoint the remote ships, serves the package from two builds, or a
   `strictVersion` range rejects its tag: the remote runs the whole package from its own build (`scope`).
 
-A rejecting range warns, and under `strictExternalCompatibility` fails the load, only where a cold init of the
-same remotes refuses it: the package is pooled, the file is at the serving tag of a package the map would otherwise
-serve the remote wholly from one build, or the file is of the copy's own external at the tag that external's own
-election would keep with the remote in it (a host's row, or under `latestSharedExternal` the newest tag), or of
-the copy's own external where no tag pleases every strict copy of it. A file the map serves at the serving build's
-tag rather than at its external's own election is not enough. Any other rejection runs the package from the
-remote's own build silently, as the cold init's fallback does.
+A rejecting range warns, and under `strictExternalCompatibility` fails the load, only where a cold init that kept
+the builds the committed map serves would refuse it: the package is pooled, the file is at the serving tag of a
+package the map would otherwise serve the remote wholly from one build, or the file is of the copy's own external
+at the tag that external's own election would keep with the remote in it (a host's row, or under
+`latestSharedExternal` the newest tag), or of the copy's own external where no tag pleases every strict copy of it.
+A file the map serves at the serving build's tag rather than at its external's own election is not enough. Any
+other rejection runs the package from the remote's own build silently, as the cold init's fallback does. Where the
+load splits the package, the copy's own external is judged as its own election with the remote in it would judge
+it, so some rejections such a cold init would refuse run silently. The load cannot change the committed builds, so
+it may refuse a remote that a cold init of the same remotes would accept by electing another build, one its range
+accepts.
 
 A remote whose ranges accept the map's tags but that runs a package from its own build because the map lacks an
 entrypoint it ships, or serves the package from two builds, opens no other package: an opened package's files
@@ -1139,10 +1143,10 @@ it. In order:
    `'<build>' is not in the cache, so its files cannot be mapped.` Both file checks serve its whole family, never
    a part: half its family on the map's files and half on its own build would tear it.
 
-Under `strictExternalCompatibility` a load that a cold init of the same remotes would refuse, as above, is refused
-before pooling runs (`Could not process remote '<remote>'`, as for any external). The gate itself never
-throws: a range that rejects a tag the map serves islands the family as `incompatible`. A strict page keeps the
-load's verdicts on the next page (see below): a re-election could refuse a pool the gate accepted.
+Under `strictExternalCompatibility` a load refused as above is refused before pooling runs (`Could not process
+remote '<remote>'`, as for any external). The gate itself never throws: a range that rejects a tag the map serves
+islands the family as `incompatible`. A strict page keeps the load's verdicts on the next page (see below): a
+re-election could refuse a pool the gate accepted.
 
 This gate is not redundant even though init enforced its own. Init guarantees no _remote_ runs a combination
 nothing shipped, but a remote loaded later is exactly the consumer that could bridge two builds the committed

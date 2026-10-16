@@ -990,11 +990,11 @@ describe('a remote that ships a package at two tags', () => {
   });
 });
 
-// A runtime load refuses a strict copy exactly where a cold init of the same remotes refuses it: in the copy's own
-// external (determine), at the serving tag of a remote that otherwise runs the package whole from one build
-// (decide-serving-builds), or in a pool. Every other rejection runs the package from the remote's own build, as
-// the cold init's fallback does, and logs nothing.
-describe('a strict runtime load refuses only what a cold init refuses', () => {
+// A runtime load refuses a strict copy only where a cold init keeping the committed builds refuses it: in the
+// copy's own external (determine), at the serving tag of a remote that otherwise runs the package whole from one
+// build (decide-serving-builds), or in a pool. Every other rejection runs the package from the remote's own build,
+// as the cold init's fallback does, and logs nothing.
+describe('a strict runtime load refuses only what a cold init keeping the committed builds refuses', () => {
   const P = 'p';
   const PX = 'p/x';
   const PY = 'p/y';

@@ -188,7 +188,7 @@ export function createUpdateCache(
     });
   }
 
-  // The first rejection of each copy that a cold init of the same remotes refuses too; see
+  // The first rejection of each copy that a cold init keeping the committed builds refuses too; see
   // docs/version-resolver.md §"Scope and dynamic init".
   function refused(
     group: Pending[],

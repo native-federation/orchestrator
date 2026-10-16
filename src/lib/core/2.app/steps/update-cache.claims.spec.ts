@@ -114,7 +114,7 @@ describe('update-cache: decisions read per package', () => {
   });
 
   // Each branch of the cold-election check, for an unpooled package that the load would split (r1 ships a
-  // specifier the map lacks): it refuses only where a cold init of the same remotes would.
+  // specifier the map lacks): it refuses only where a cold init keeping the committed builds would.
   const branches: Record<string, Shape & { refuses: boolean }> = {
     // a strict at ~2.2.0 and r1 strict at ~2.1.0 reject each other's tag.
     'no tag pleases every strict copy': {
