@@ -11,13 +11,10 @@ import {
 import type { LoadActions } from 'lib/core/1.domain/remote-entry/load-actions.contract';
 import { createAcceptsTag } from 'lib/core/1.domain/externals/compatibility';
 import { addRemoteToVersion } from 'lib/core/1.domain/externals/basis';
-import {
-  isPooled,
-  loadSplitsPackage,
-  type PackageExternals,
-} from 'lib/core/1.domain/externals/serving';
+import { loadSplitsPackage } from 'lib/core/1.domain/externals/serving';
 import { type Claim, claimsByPackage, committedClaims } from 'lib/core/1.domain/externals/claims';
-import { groupByPackage, packageOf, type Specifier } from 'lib/core/1.domain/externals/specifier';
+import { packageOf, type Specifier } from 'lib/core/1.domain/externals/specifier';
+import { type LabelledCopy, pooledPackagesWith } from 'lib/core/1.domain/pooling/membership';
 import type { DrivingContract } from '../driving-ports/driving.contract';
 import type { LoggingConfig } from '../config/log.contract';
 import * as _path from 'lib/utils/path';
@@ -35,7 +32,7 @@ type PackageClaims = readonly [Specifier, Claim][];
 type LoadView = {
   claims: CommittedClaims;
   claimsOf(pkg: ExternalName): PackageClaims;
-  externalsOf(pkg: ExternalName): PackageExternals;
+  inPool(pkg: ExternalName): boolean;
 };
 
 type Rejection = { item: Pending; specifier: Specifier; claim: Claim };
@@ -86,7 +83,7 @@ export function createUpdateCache(
 
   function decidePackages(remoteEntry: RemoteEntry, pending: Pending[]): Map<Pending, Decision> {
     const decisions = new Map<Pending, Decision>();
-    const viewOf = loadViewOf(remoteEntry);
+    const viewOf = loadViewOf(remoteEntry, pending);
     for (const group of pendingPerPackage(pending)) {
       // The strict scope shares every version side by side.
       const decision =
@@ -111,26 +108,38 @@ export function createUpdateCache(
     return [...packages.values()];
   }
 
-  function loadViewOf(remoteEntry: RemoteEntry): (shareScope: string | undefined) => LoadView {
+  function loadViewOf(
+    remoteEntry: RemoteEntry,
+    pending: Pending[]
+  ): (shareScope: string | undefined) => LoadView {
     const views = new Map<string, LoadView>();
     return shareScope => {
       const scope = shareScope ?? GLOBAL_SCOPE;
       let view = views.get(scope);
       if (!view) {
-        const record = Object.entries(ports.sharedExternalsRepo.getFromScope(shareScope));
-        const claims = committedClaims(record, { shareScope: scope, without: remoteEntry.name });
+        const record = ports.sharedExternalsRepo.getFromScope(shareScope);
+        const claims = committedClaims(Object.entries(record), {
+          shareScope: scope,
+          without: remoteEntry.name,
+        });
         const claimsIn = claimsByPackage(claims);
-        let externalsIn: Map<ExternalName, PackageExternals> | undefined;
+        let pooled: Set<ExternalName> | undefined;
         view = {
           claims,
           claimsOf: pkg => claimsIn.get(pkg) ?? [],
-          externalsOf: pkg =>
-            (externalsIn ??= groupByPackage(record, ([name]) => name)).get(pkg) ?? [],
+          inPool: pkg => (pooled ??= pooledPackagesWith(record, copiesIn(pending, scope))).has(pkg),
         };
         views.set(scope, view);
       }
       return view;
     };
+  }
+
+  // The load's copies count as stored, so a pool only their labels form is judged as the gate will see it.
+  function copiesIn(pending: Pending[], scope: string): LabelledCopy[] {
+    return pending
+      .filter(({ external }) => (external.shareScope ?? GLOBAL_SCOPE) === scope)
+      .map(({ external, ctx }) => ({ name: external.packageName, pool: ctx.remote.pool }));
   }
 
   function scopeOpenedPackages(decisions: Map<Pending, Decision>): void {
@@ -154,8 +163,7 @@ export function createUpdateCache(
     const rejections = group.flatMap(item => rejectionsOf(item, view.claims));
     if (rejections.length > 0) {
       const fromTwoBuilds = builds !== undefined && builds.size > 1;
-      const externals = view.externalsOf(pkg);
-      for (const rejection of refused(group, rejections, fromTwoBuilds, claims, externals))
+      for (const rejection of refused(group, rejections, fromTwoBuilds, claims, view.inPool(pkg)))
         reportIncompatible(remoteEntry, rejection);
       return { action: 'scope', partlyServed: false };
     }
@@ -188,16 +196,15 @@ export function createUpdateCache(
     });
   }
 
-  // The first rejection of each copy that a cold init of the same remotes refuses too; see
+  // The first rejection of each copy that a cold init keeping the committed builds refuses too; see
   // docs/version-resolver.md §"Scope and dynamic init".
   function refused(
     group: Pending[],
     rejections: Rejection[],
     fromTwoBuilds: boolean,
     claims: PackageClaims,
-    externals: PackageExternals
+    pooled: boolean
   ): Rejection[] {
-    const pooled = isPooledPackage(group, externals);
     const copies = group.map(({ ctx }) => ({ tag: ctx.tag, copy: ctx.remote }));
     const splits = fromTwoBuilds || loadSplitsPackage(copies, claims, accepts);
 
@@ -227,11 +234,6 @@ export function createUpdateCache(
     if (host) return host.tag === claim.tag;
     if (!config.profile.latestSharedExternal) return false;
     return tags.every(tag => ports.versionCheck.compare(claim.tag, tag) >= 0);
-  }
-
-  // Pool membership is decided across every copy, so a label on any copy or a pool on the record counts.
-  function isPooledPackage(group: Pending[], externals: PackageExternals): boolean {
-    return group.some(({ ctx }) => ctx.remote.pool?.trim()) || isPooled(externals);
   }
 
   function reportIncompatible(
