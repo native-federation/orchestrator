@@ -11,7 +11,6 @@ import type { ForProcessingRemoteEntries } from './for-processing-remote-entries
 import type { ForGettingRemoteEntry } from './for-getting-remote-entry.port';
 import type { ForUpdatingCache } from './for-updating-cache';
 import type { ForConvertingToImportMap } from './for-converting-to-import-map';
-import type { ForMarkingUndecidedScopes } from './for-marking-undecided-scopes.port';
 import type { ConfigContract } from 'lib/core/2.app/config';
 import type { DrivingContract } from 'lib/core/2.app/driving-ports/driving.contract';
 
@@ -29,7 +28,6 @@ export type InitDriversContract = {
   updateCache: ForUpdatingCache;
   poolDynamicExternals: ForPoolingDynamicExternals;
   convertToImportMap: ForConvertingToImportMap;
-  markUndecidedScopes: ForMarkingUndecidedScopes;
 };
 
 export type InitDriversFactory = (

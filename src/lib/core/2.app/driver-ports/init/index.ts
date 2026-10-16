@@ -11,6 +11,5 @@ export * from './for-exposing-module-loader.port';
 export * from './for-getting-remote-entry.port';
 export * from './for-updating-cache';
 export * from './for-converting-to-import-map';
-export * from './for-marking-undecided-scopes.port';
 export * from './flow.contract';
 export * from './drivers.contract';

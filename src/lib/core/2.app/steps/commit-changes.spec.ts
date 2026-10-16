@@ -4,6 +4,10 @@ import { DrivingContract } from '../driving-ports/driving.contract';
 import { createCommitChanges } from './commit-changes';
 import { mockAdapters } from 'lib/testing/adapters.mock';
 import { mockConfig } from 'lib/testing/config.mock';
+import { GLOBAL_SCOPE, STRICT_SCOPE } from 'lib/core/1.domain';
+import { createSharedExternalsRepository } from 'lib/core/3.adapters/storage/shared-externals.repository';
+import { globalThisStorageEntry } from 'lib/core/4.config/storage/global-this.storage';
+import { mockExternal_A } from 'lib/testing/domain/externals/external.mock';
 
 describe('createCommitChanges', () => {
   let commitChanges: ForCommittingChanges;
@@ -34,6 +38,46 @@ describe('createCommitChanges', () => {
   it('should forward override to the browser so the initial map replaces stale ones', async () => {
     await commitChanges({ imports: {} }, { override: true });
 
-    expect(adapters.browser.setImportMapFn).toHaveBeenCalledWith({ imports: {} }, { override: true });
+    expect(adapters.browser.setImportMapFn).toHaveBeenCalledWith(
+      { imports: {} },
+      { override: true }
+    );
+  });
+
+  // A runtime load decides no serving build; the scopes it wrote are left for the next init to decide.
+  describe('markUndecided', () => {
+    beforeEach(() => {
+      adapters.sharedExternalsRepo = createSharedExternalsRepository({
+        storage: globalThisStorageEntry('nf-commit-changes-mark'),
+        clearStorage: true,
+      });
+      commitChanges = createCommitChanges(config, adapters);
+      const repo = adapters.sharedExternalsRepo;
+      repo.addOrUpdate('a', mockExternal_A()).commit();
+      repo.addOrUpdate('a', mockExternal_A(), 'team');
+      repo.addOrUpdate('a', mockExternal_A(), STRICT_SCOPE);
+    });
+
+    const undecided = () =>
+      [GLOBAL_SCOPE, 'team', STRICT_SCOPE].filter(s => adapters.sharedExternalsRepo.isUndecided(s));
+
+    it('marks every non-strict scope written since the last commit', async () => {
+      await commitChanges({ imports: {} }, { markUndecided: true });
+
+      expect(undecided()).toEqual(['team']);
+    });
+
+    it.each([{}, { override: true }])('marks nothing with %o', async opts => {
+      await commitChanges({ imports: {} }, opts);
+
+      expect(undecided()).toEqual([]);
+    });
+
+    it('keeps the option from the browser', async () => {
+      adapters.browser.setImportMapFn = vi.fn();
+      await commitChanges({ imports: {} }, { markUndecided: true });
+
+      expect(adapters.browser.setImportMapFn).toHaveBeenCalledWith({ imports: {} }, {});
+    });
   });
 });

@@ -13,7 +13,6 @@ import { createGetRemoteEntry } from '../2.app/steps/get-remote-entry';
 import { createUpdateCache } from '../2.app/steps/update-cache';
 import { createPoolDynamicExternals } from '../2.app/steps/pooling/pool-dynamic-externals';
 import { createConvertToImportMap } from '../2.app/steps/convert-to-import-map';
-import { createMarkUndecidedScopes } from '../2.app/steps/mark-undecided-scopes';
 import type { DrivingContract } from '../2.app/driving-ports/driving.contract';
 import type { ConfigContract } from '../2.app/config/config.contract';
 
@@ -37,7 +36,6 @@ export const createInitDrivers = ({
   updateCache: createUpdateCache(config, adapters),
   poolDynamicExternals: createPoolDynamicExternals(config, adapters),
   convertToImportMap: createConvertToImportMap(config, adapters),
-  markUndecidedScopes: createMarkUndecidedScopes(adapters),
 });
 
 export const INIT_FLOW_FACTORY = ({
