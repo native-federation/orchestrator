@@ -6,9 +6,11 @@ import type {
   SharedExternals,
 } from 'lib/core/1.domain';
 import { portfolio } from 'lib/testing/pooling/portfolio';
+import { createStorageConfig } from 'lib/core/4.config/storage/storage.config';
+import { globalThisStorageEntry } from 'lib/core/4.config/storage/global-this.storage';
 
 /**
- * A cache stamped by another orchestrator version is dropped (`STORAGE_VERSION_KEY`), so a
+ * A cache stamped by another orchestrator version is dropped (`cache-state`), so a
  * released shape change needs no bump of its own. Within one version it does matter: unbundled builds all
  * stamp 'dev' and keep each other's caches, and the release notes must say when an upgrade changes what is
  * stored. This pins the stored keys so such a change is a visible decision: a change that adds, renames or
@@ -54,6 +56,12 @@ describe('stored shape', () => {
   const keysOf = (objects: object[]) => [...new Set(objects.flatMap(o => Object.keys(o)))].sort();
 
   it('lists every stored key', async () => {
+    // Stamps the version as a real page's startup does, before the repositories open.
+    createStorageConfig({
+      storage: globalThisStorageEntry,
+      storageNamespace: NAMESPACE,
+      exposeStorageGetter: false,
+    });
     const p = portfolio({}, { hosts: ['host'], storage: NAMESPACE, realRepositories: true });
     await p.runInit([
       entry(
@@ -102,8 +110,9 @@ describe('stored shape', () => {
       remoteInfo: keysOf(remotes),
       remoteModule: keysOf(remotes.flatMap(r => r.exposes)),
       scopedVersion: keysOf(scoped),
+      cacheState: keysOf([storage['cache-state'] as object]),
     }).toEqual({
-      storage: ['remotes', 'scoped-externals', 'shared-chunks', 'shared-externals'],
+      storage: ['cache-state', 'remotes', 'scoped-externals', 'shared-chunks', 'shared-externals'],
       sharedExternal: ['dirty', 'poolName', 'poolWinner', 'servingBuild', 'versions'],
       sharedVersion: ['action', 'host', 'remotes', 'tag'],
       sharedVersionMeta: [
@@ -120,6 +129,7 @@ describe('stored shape', () => {
       remoteInfo: ['exposes', 'integrity', 'scopeUrl'],
       remoteModule: ['file', 'moduleName'],
       scopedVersion: ['bundle', 'entries', 'tag'],
+      cacheState: ['undecidedScopes', 'version'],
     });
   });
 });

@@ -20,12 +20,14 @@ const STORAGE_KEYS = {
   sharedExternals: 'shared-externals',
   scopedExternals: 'scoped-externals',
   sharedChunks: 'shared-chunks',
+  cacheState: 'cache-state',
 } as const;
 
 type StorageKey = (typeof STORAGE_KEYS)[keyof typeof STORAGE_KEYS];
 
-// Holds the orchestrator version that wrote the cache; a cache stamped with any other is dropped.
-const STORAGE_VERSION_KEY = 'version';
+// The orchestrator version that wrote the cache, beside the records: a cache stamped with any other is dropped.
+// `undecidedScopes` are the share scopes a runtime load wrote since their serving builds were last decided.
+type CacheState = { version: string; undecidedScopes: string[] };
 
 type StorageEntryHandler = <TValue>(key: string, initialValue: TValue) => StorageEntry<TValue>;
 
@@ -51,5 +53,5 @@ export {
   StorageType,
   StorageKey,
   STORAGE_KEYS,
-  STORAGE_VERSION_KEY,
+  CacheState,
 };

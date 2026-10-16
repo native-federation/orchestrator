@@ -39,7 +39,7 @@ describe('publishStorageInfo', () => {
           version,
           type: 'localStorage',
           namespace: '__custom__',
-          keys: ['remotes', 'shared-externals', 'scoped-externals', 'shared-chunks'],
+          keys: ['remotes', 'shared-externals', 'scoped-externals', 'shared-chunks', 'cache-state'],
           get: expect.any(Function),
         },
       },
@@ -104,7 +104,13 @@ describe('publishStorageInfo', () => {
 
     const info = globalThis.__NF_ORCHESTRATOR__!.storage['ns']!;
     expect(info).not.toHaveProperty('get');
-    expect(info.keys).toEqual(['remotes', 'shared-externals', 'scoped-externals', 'shared-chunks']);
+    expect(info.keys).toEqual([
+      'remotes',
+      'shared-externals',
+      'scoped-externals',
+      'shared-chunks',
+      'cache-state',
+    ]);
   });
 
   it('is frozen all the way down', () => {

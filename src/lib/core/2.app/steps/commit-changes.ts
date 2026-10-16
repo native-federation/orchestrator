@@ -27,15 +27,25 @@ export function createCommitChanges(
    * erroneous changes into storage which can corrupt other pages/routes of the host. A failed
    * dynamic load is undone by `rollbackChanges` instead.
    */
-  return (importMap: ImportMap, opts: CommitOptions = {}) =>
+  return (importMap: ImportMap, { markUndecided = false, ...browserOpts }: CommitOptions = {}) =>
     Promise.resolve(importMap)
-      .then(map => addToBrowser(map, opts))
-      .then(persistRepositoryChanges);
+      .then(map => addToBrowser(map, browserOpts))
+      .then(() => {
+        if (markUndecided) markUndecidedScopes();
+        persistRepositoryChanges();
+      });
 
-  function addToBrowser(importMap: ImportMap, opts: CommitOptions) {
+  function addToBrowser(importMap: ImportMap, opts: Pick<CommitOptions, 'override'>) {
     ports.browser.setImportMapFn(importMap, opts);
     config.log.debug(5, 'Added import map to browser.', importMap);
     return importMap;
+  }
+
+  // A runtime load decides no serving build, so the next init decides one in each non-strict scope it wrote.
+  function markUndecidedScopes() {
+    const repo = ports.sharedExternalsRepo;
+    for (const shareScope of repo.uncommittedScopes())
+      if (repo.scopeType(shareScope) !== 'strict') repo.markUndecided(shareScope);
   }
 
   function persistRepositoryChanges() {

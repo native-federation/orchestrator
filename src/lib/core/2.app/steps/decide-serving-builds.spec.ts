@@ -16,6 +16,7 @@ import { mockAdapters } from 'lib/testing/adapters.mock';
 import { mockVersionRemote } from 'lib/testing/domain/externals/version.mock';
 import { pageFaults } from 'lib/testing/pooling/page-graph';
 import { portfolio } from 'lib/testing/pooling/portfolio';
+import { auditDecideWrites } from 'lib/testing/decide-write-audit';
 import type { DrivingContract } from '../driving-ports/driving.contract';
 import { createDecideServingBuilds } from './decide-serving-builds';
 
@@ -81,7 +82,9 @@ describe('createDecideServingBuilds', () => {
       v => `${v.tag}:${v.action}:[${v.remotes.map(r => r.name).join(',')}]`
     );
 
-  const decide = () => createDecideServingBuilds(config, adapters)();
+  // Every fixture also holds the step to the stringify rule it replaced (decide-write-audit.ts).
+  const decide = () =>
+    auditDecideWrites(adapters.sharedExternalsRepo, createDecideServingBuilds(config, adapters))();
 
   it('stores the serving build on every external of the package, skip- and scope-only ones included', async () => {
     seed({
@@ -604,5 +607,167 @@ describe('createDecideServingBuilds', () => {
 
       expect(stored()).toEqual(first);
     });
+  });
+
+  // `sameShape` compares copies by identity, which holds only while no helper edits a copy's fields. A copy
+  // frozen before deciding makes any such write throw (specs run in strict mode), so each fixture below runs
+  // frozen and unfrozen and must decide the same. Together they reach every rewrite: following and redirecting
+  // (`redirectRow`), sharing the serving build's skipped copy (`shareServingCopies`), falling back
+  // (`scopeRemote`), and merging rows (`mergeRows`).
+  describe('never edits a copy', () => {
+    const fixtures: Record<string, () => Record<string, SharedVersion[]>> = {
+      'split package': () => ({
+        fw: [row('fw', '2.0.0', 'share', [shipsAll])],
+        'fw/testing': [row('fw/testing', '1.0.0', 'share', [{ remote: 'b', strict: true }])],
+        'fw/other': [row('fw/other', '1.5.0', 'share', [{ remote: 'c' }])],
+      }),
+      'strict skips onto newer rows': () => ({
+        fw: [row('fw', '1.0.0', 'share', [{ remote: 'a' }])],
+        'fw/a': [
+          row('fw/a', '2.1.0', 'share', [{ remote: 'c' }]),
+          row('fw/a', '2.0.0', 'skip', [{ remote: 'b', req: '^2.0.0', strict: true }]),
+          row('fw/a', '1.0.0', 'skip', [{ remote: 'a' }]),
+        ],
+      }),
+      "the serving build's skipped copy": () => ({
+        fw: [row('fw', '2.0.0', 'share', [{ remote: 'b', ships: ['fw', 'fw/x'] }])],
+        'fw/x': [
+          row('fw/x', '3.0.0', 'share', [{ remote: 'r' }]),
+          row('fw/x', '2.0.0', 'skip', [{ remote: 'b' }]),
+        ],
+      }),
+      'a share row redirected onto a skip row': () => ({
+        fw: [row('fw', '2.0.0', 'share', [{ remote: 'a', ships: ['fw', 'fw/testing'] }])],
+        'fw/testing': [
+          row('fw/testing', '2.0.0', 'share', [{ remote: 'e' }]),
+          row('fw/testing', '1.0.0', 'share', [{ remote: 'b' }]),
+          row('fw/testing', '1.0.0', 'skip', [{ remote: 'f' }]),
+        ],
+      }),
+      'a fallback to scope rows': () => ({
+        fw: [
+          row('fw', '2.0.0', 'share', [
+            { remote: 'a', ships: ['fw', 'fw/other'] },
+            { remote: 'b' },
+          ]),
+        ],
+        'fw/testing': [row('fw/testing', '1.0.0', 'share', [{ remote: 'b' }])],
+      }),
+    };
+
+    const decideOver = async (versions: Record<string, SharedVersion[]>, frozen: boolean) => {
+      adapters.sharedExternalsRepo = createSharedExternalsRepository({
+        storage: globalThisStorageEntry(`nf-decide-frozen-${frozen}`),
+        clearStorage: true,
+      });
+      seed(versions);
+      if (frozen)
+        for (const external of Object.values(stored()))
+          for (const version of external.versions) version.remotes.forEach(Object.freeze);
+      await createDecideServingBuilds(config, adapters)();
+      return JSON.stringify(stored());
+    };
+
+    it.each(Object.keys(fixtures))('%s', async name => {
+      const unfrozen = await decideOver(fixtures[name]!(), false);
+      const frozen = await decideOver(fixtures[name]!(), true);
+
+      expect(frozen).toEqual(unfrozen);
+      expect(frozen).not.toEqual(JSON.stringify({}));
+    });
+  });
+
+  // A scope decides the same again unless something wrote to it: this page before deciding, or a runtime load
+  // since its last decide (stored as undecided).
+  describe('which scopes it decides', () => {
+    // The step bare: the audit reads every scope itself.
+    const decidedScopes = async () => {
+      const getFromScope = vi.spyOn(adapters.sharedExternalsRepo, 'getFromScope');
+      await createDecideServingBuilds(config, adapters)();
+      const read = getFromScope.mock.calls.map(([scope]) => scope);
+      getFromScope.mockRestore();
+      return read;
+    };
+
+    beforeEach(() => {
+      seed({ fw: [row('fw', '2.0.0', 'share', [{ remote: 'a' }])] });
+      seed({ fw: [row('fw', '1.0.0', 'share', [{ remote: 'b' }])] }, 'team');
+    });
+
+    it('decides every scope written since the last commit', async () => {
+      expect(await decidedScopes()).toEqual([GLOBAL_SCOPE, 'team']);
+      expect(stored().fw!.servingBuild).toBe('a');
+    });
+
+    it('never reads a scope nothing wrote since it was decided', async () => {
+      adapters.sharedExternalsRepo.commit();
+
+      expect(await decidedScopes()).toEqual([]);
+    });
+
+    it('decides a scope a runtime load left undecided, and stores it as decided', async () => {
+      adapters.sharedExternalsRepo.commit();
+      adapters.sharedExternalsRepo.markUndecided('team');
+
+      expect(await decidedScopes()).toEqual(['team']);
+      expect(stored('team').fw!.servingBuild).toBe('b');
+      expect(adapters.sharedExternalsRepo.isUndecided('team')).toBe(false);
+    });
+
+    it('decides only the scope this page wrote', async () => {
+      adapters.sharedExternalsRepo.commit();
+      seed({ fw: [row('fw', '1.0.0', 'share', [{ remote: 'c' }])] }, 'team');
+
+      expect(await decidedScopes()).toEqual(['team']);
+      expect(stored('team').fw!.servingBuild).toBe('c');
+    });
+
+    // Pins the current design choice, not a settled rule: like pooling's skip of a clean scope, a skipped scope
+    // is not checked again (docs/version-resolver.md §"One build per package").
+    it('refuses nothing in a skipped scope when strictExternalCompatibility is switched on later', async () => {
+      seed({
+        fw: [row('fw', '2.0.0', 'share', [shipsAll])],
+        'fw/testing': [row('fw/testing', '1.0.0', 'share', [{ remote: 'b', strict: true }])],
+      });
+      adapters.sharedExternalsRepo.commit();
+      config.strict.strictExternalCompatibility = true;
+
+      await expect(decide()).resolves.toBeUndefined();
+      adapters.sharedExternalsRepo.markUndecided(GLOBAL_SCOPE);
+      await expect(decide()).rejects.toThrow(NFError);
+    });
+  });
+
+  // The init right after a cold one finds nothing to decide: the cold init committed, and the import-map step's
+  // `cached` writes after deciding are committed with it.
+  it('decides nothing on the first warm init after a cold one', async () => {
+    const p = portfolio({}, { storage: 'nf-dsb-first-warm', realRepositories: true });
+    const pkg = (name: string, version: string): DenseSharedInfo =>
+      ({
+        packageName: name,
+        version,
+        requiredVersion: `^${version}`,
+        singleton: true,
+        strictVersion: false,
+        entries: { [name]: `${name}.js` },
+      }) as DenseSharedInfo;
+    const entries = ['a', 'b'].map(
+      (name, i) =>
+        ({
+          name,
+          url: `http://${name}/remoteEntry.json`,
+          exposes: [],
+          shared: [pkg('fw', `2.${i}.0`), pkg('fw/x', `2.${i}.0`)],
+        }) as unknown as RemoteEntry
+    );
+    await p.runInit(entries);
+    p.reload();
+
+    // A decided scope is always marked decided, so no call means no scope was decided.
+    const markDecided = vi.spyOn(p.adapters.sharedExternalsRepo, 'markDecided');
+    await p.runInit(entries);
+
+    expect(markDecided).not.toHaveBeenCalled();
+    expect(p.writes()).toBe(0);
   });
 });
