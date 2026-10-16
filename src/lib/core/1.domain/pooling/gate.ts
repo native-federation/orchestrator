@@ -77,12 +77,21 @@ export function committedView(
   for (const [owner, copies] of shipped)
     if (owner !== without) builds.set(owner, buildOf(owner, copies));
 
-  const fileOf = new Map<RemoteName, Record<Specifier, string>>();
+  const servers = new Set<RemoteName>();
   for (const member of members)
     for (const version of member.external.versions)
-      for (const { name, entries } of version.remotes)
+      for (const { servedBy } of version.remotes) if (servedBy) servers.add(servedBy);
+  const fileOf = new Map<RemoteName, Map<Specifier, string>>();
+  for (const member of members)
+    for (const version of member.external.versions)
+      for (const { name, entries } of version.remotes) {
+        if (!servers.has(name)) continue;
+        let files = fileOf.get(name);
+        if (!files) fileOf.set(name, (files = new Map()));
         // The first row wins, as in `copiesByRemote`.
-        fileOf.set(name, { ...entries, ...fileOf.get(name) });
+        for (const specifier in entries)
+          if (!files.has(specifier)) files.set(specifier, entries[specifier]!);
+      }
 
   const runsOffMap: CommittedView['runsOffMap'] = new Map();
   for (const member of members)
@@ -99,7 +108,7 @@ export function committedView(
           // A subpool member's copy keeps its own tag in the record but runs its build's files.
           const tag =
             (servedBy ? builds.get(servedBy)?.tags.pinnedTag(specifier) : undefined) ?? version.tag;
-          const file = servedBy && fileOf.get(servedBy)?.[specifier];
+          const file = servedBy && fileOf.get(servedBy)?.get(specifier);
           runs.set(
             specifier,
             file
