@@ -93,7 +93,7 @@ function subpoolFilesOf(members: PoolMember[]): Map<RemoteName, Map<Specifier, s
         if (!subpoolOwners.has(name)) continue;
         let files = fileOf.get(name);
         if (!files) fileOf.set(name, (files = new Map()));
-        // The first row wins, as in `copiesByRemote`.
+        // Per specifier, earlier rows first.
         for (const specifier in entries)
           if (!files.has(specifier)) files.set(specifier, entries[specifier]!);
       }
