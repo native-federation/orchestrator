@@ -2,6 +2,7 @@ import type { ForUpdatingCache } from '../driver-ports/init/for-updating-cache';
 import {
   type RemoteEntry,
   type DenseSharedInfo,
+  type ExternalName,
   type RemoteName,
   type SharedVersionAction,
   type SharedVersionMeta,
@@ -10,9 +11,13 @@ import {
 import type { LoadActions } from 'lib/core/1.domain/remote-entry/load-actions.contract';
 import { createAcceptsTag } from 'lib/core/1.domain/externals/compatibility';
 import { addRemoteToVersion } from 'lib/core/1.domain/externals/basis';
-import { isPooled, loadSplitsPackage } from 'lib/core/1.domain/externals/serving';
-import { type Claim, committedClaims } from 'lib/core/1.domain/externals/claims';
-import { packageOf, type Specifier } from 'lib/core/1.domain/externals/specifier';
+import {
+  isPooled,
+  loadSplitsPackage,
+  type PackageExternals,
+} from 'lib/core/1.domain/externals/serving';
+import { type Claim, claimsByPackage, committedClaims } from 'lib/core/1.domain/externals/claims';
+import { groupByPackage, packageOf, type Specifier } from 'lib/core/1.domain/externals/specifier';
 import type { DrivingContract } from '../driving-ports/driving.contract';
 import type { LoggingConfig } from '../config/log.contract';
 import * as _path from 'lib/utils/path';
@@ -22,7 +27,16 @@ import { createStoreRemoteEntry, type SharedExternalContext } from './store-remo
 
 type Pending = { external: DenseSharedInfo; ctx: SharedExternalContext };
 
-type Served = Map<Specifier, Claim>;
+type CommittedClaims = Map<Specifier, Claim>;
+
+type PackageClaims = readonly [Specifier, Claim][];
+
+// Indexes the record as decidePackages reads it, so it must not outlive it: applyDecision writes that record.
+type LoadView = {
+  claims: CommittedClaims;
+  claimsOf(pkg: ExternalName): PackageClaims;
+  externalsOf(pkg: ExternalName): PackageExternals;
+};
 
 type Rejection = { item: Pending; specifier: Specifier; claim: Claim };
 
@@ -72,20 +86,20 @@ export function createUpdateCache(
 
   function decidePackages(remoteEntry: RemoteEntry, pending: Pending[]): Map<Pending, Decision> {
     const decisions = new Map<Pending, Decision>();
-    const servedIn = servedPerScope(remoteEntry);
-    for (const group of groupByPackage(pending)) {
+    const viewOf = loadViewOf(remoteEntry);
+    for (const group of pendingPerPackage(pending)) {
       // The strict scope shares every version side by side.
       const decision =
         group[0]!.ctx.scopeType === 'strict'
           ? ({ action: 'share' } as const)
-          : decidePackage(remoteEntry, group, servedIn(group[0]!.external.shareScope));
+          : decidePackage(remoteEntry, group, viewOf(group[0]!.external.shareScope));
       for (const item of group) decisions.set(item, decision);
     }
     scopeOpenedPackages(decisions);
     return decisions;
   }
 
-  function groupByPackage(pending: Pending[]): Pending[][] {
+  function pendingPerPackage(pending: Pending[]): Pending[][] {
     const packages = new Map<string, Pending[]>();
     for (const item of pending) {
       const { shareScope, packageName } = item.external;
@@ -97,17 +111,25 @@ export function createUpdateCache(
     return [...packages.values()];
   }
 
-  function servedPerScope(remoteEntry: RemoteEntry): (shareScope: string | undefined) => Served {
-    const servedIn = new Map<string, Served>();
+  function loadViewOf(remoteEntry: RemoteEntry): (shareScope: string | undefined) => LoadView {
+    const views = new Map<string, LoadView>();
     return shareScope => {
       const scope = shareScope ?? GLOBAL_SCOPE;
-      let served = servedIn.get(scope);
-      if (!served) {
+      let view = views.get(scope);
+      if (!view) {
         const record = Object.entries(ports.sharedExternalsRepo.getFromScope(shareScope));
-        served = committedClaims(record, { shareScope: scope, without: remoteEntry.name });
-        servedIn.set(scope, served);
+        const claims = committedClaims(record, { shareScope: scope, without: remoteEntry.name });
+        const claimsIn = claimsByPackage(claims);
+        let externalsIn: Map<ExternalName, PackageExternals> | undefined;
+        view = {
+          claims,
+          claimsOf: pkg => claimsIn.get(pkg) ?? [],
+          externalsOf: pkg =>
+            (externalsIn ??= groupByPackage(record, ([name]) => name)).get(pkg) ?? [],
+        };
+        views.set(scope, view);
       }
-      return served;
+      return view;
     };
   }
 
@@ -119,47 +141,47 @@ export function createUpdateCache(
         decisions.set(item, { action: 'scope', partlyServed: false });
   }
 
-  function decidePackage(remoteEntry: RemoteEntry, group: Pending[], served: Served): Decision {
+  function decidePackage(remoteEntry: RemoteEntry, group: Pending[], view: LoadView): Decision {
     const pkg = packageOf(group[0]!.external.packageName);
-    if (![...served.keys()].some(specifier => packageOf(specifier) === pkg))
-      return { action: 'share' };
+    const claims = view.claimsOf(pkg);
+    if (claims.length === 0) return { action: 'share' };
 
     const specifiers = group.flatMap(({ external }) => Object.keys(external.entries));
-    const builds = specifiers.every(specifier => served.has(specifier))
-      ? new Set(specifiers.map(specifier => served.get(specifier)!.copy.name))
+    const builds = specifiers.every(specifier => view.claims.has(specifier))
+      ? new Set(specifiers.map(specifier => view.claims.get(specifier)!.copy.name))
       : undefined;
 
-    const rejections = group.flatMap(item => rejectionsOf(item, served));
+    const rejections = group.flatMap(item => rejectionsOf(item, view.claims));
     if (rejections.length > 0) {
       const fromTwoBuilds = builds !== undefined && builds.size > 1;
-      for (const rejection of refused(group, rejections, fromTwoBuilds, served))
+      const externals = view.externalsOf(pkg);
+      for (const rejection of refused(group, rejections, fromTwoBuilds, claims, externals))
         reportIncompatible(remoteEntry, rejection);
       return { action: 'scope', partlyServed: false };
     }
 
     if (!builds || builds.size > 1) return { action: 'scope', partlyServed: true };
-    return { action: 'skip', files: servingFiles(served, pkg, builds) };
+    return { action: 'skip', files: servingFiles(claims, builds) };
   }
 
   // What the map serves of the package from the build the remote follows; a named scope maps all of it, as init
   // maps a skip copy's serving version.
   function servingFiles(
-    served: Served,
-    pkg: string,
+    claims: PackageClaims,
     builds: ReadonlySet<RemoteName>
   ): Map<Specifier, SharedVersionMeta> {
     const files = new Map<Specifier, SharedVersionMeta>();
-    for (const [specifier, { copy }] of served)
-      if (builds.has(copy.name) && packageOf(specifier) === pkg) files.set(specifier, copy);
+    for (const [specifier, { copy }] of claims)
+      if (builds.has(copy.name)) files.set(specifier, copy);
     return files;
   }
 
   // A non-strict range follows the map's tag all the same, as at init.
-  function rejectionsOf(item: Pending, served: Served): Rejection[] {
+  function rejectionsOf(item: Pending, claims: CommittedClaims): Rejection[] {
     const { external, ctx } = item;
     if (!ctx.remote.strictVersion) return [];
     return Object.keys(external.entries).flatMap(specifier => {
-      const claim = served.get(specifier);
+      const claim = claims.get(specifier);
       return claim && !accepts(claim.tag, ctx.tag, ctx.remote.requiredVersion)
         ? [{ item, specifier, claim }]
         : [];
@@ -172,11 +194,10 @@ export function createUpdateCache(
     group: Pending[],
     rejections: Rejection[],
     fromTwoBuilds: boolean,
-    served: Served
+    claims: PackageClaims,
+    externals: PackageExternals
   ): Rejection[] {
-    const pkg = packageOf(group[0]!.external.packageName);
-    const pooled = isPooledPackage(group, pkg);
-    const claims = [...served].filter(([specifier]) => packageOf(specifier) === pkg);
+    const pooled = isPooledPackage(group, externals);
     const copies = group.map(({ ctx }) => ({ tag: ctx.tag, copy: ctx.remote }));
     const splits = fromTwoBuilds || loadSplitsPackage(copies, claims, accepts);
 
@@ -192,7 +213,7 @@ export function createUpdateCache(
   function electionKeeps({ item: { external, ctx }, claim }: Rejection): boolean {
     if (claim.external !== external.packageName) return false;
     const versions =
-      ports.sharedExternalsRepo.getFromScope(external.shareScope)[claim.external]?.versions ?? [];
+      ports.sharedExternalsRepo.tryGet(claim.external, external.shareScope).get()?.versions ?? [];
     const strict = [
       { tag: ctx.tag, copy: ctx.remote },
       ...versions.flatMap(v =>
@@ -209,10 +230,8 @@ export function createUpdateCache(
   }
 
   // Pool membership is decided across every copy, so a label on any copy or a pool on the record counts.
-  function isPooledPackage(group: Pending[], pkg: string): boolean {
-    if (group.some(({ ctx }) => ctx.remote.pool?.trim())) return true;
-    const record = ports.sharedExternalsRepo.getFromScope(group[0]!.external.shareScope);
-    return isPooled(Object.entries(record).filter(([name]) => packageOf(name) === pkg));
+  function isPooledPackage(group: Pending[], externals: PackageExternals): boolean {
+    return group.some(({ ctx }) => ctx.remote.pool?.trim()) || isPooled(externals);
   }
 
   function reportIncompatible(
