@@ -5,8 +5,7 @@ import { portfolio } from 'lib/testing/pooling/portfolio';
  * A runtime load decides each package from the committed claims of that package alone. These fixtures reach
  * the paths the generated portfolios barely do: a root-less package claimed at two tags, every branch of the
  * cold-election check behind a strict rejection, a pool label only the loader carries, alone or joining the
- * record, and a package whose
- * claims all come from another external's entries.
+ * record, and a package whose claims all come from another external's entries.
  */
 
 let storage = 0;
@@ -241,8 +240,8 @@ describe('update-cache: decisions read per package', () => {
       }
     );
 
-    // The pool check reads the record with r1's copies overlaid; the stored record keeps only what the load
-    // stored: a's share row and r1's own scope row, no overlay row.
+    // The pool check counts r1's copies as stored without storing them: the record keeps only a's share row and
+    // r1's own scope row.
     it("stores only a's share row and r1's scope row", async () => {
       const p = fresh(true);
       await p.runInit(lone.init);
@@ -295,8 +294,6 @@ describe('update-cache: decisions read per package', () => {
     });
   });
 
-  // h's dense p claims p/x under the external p; r1's flat p/x finds them in p's bucket, and its override maps
-  // the whole package to h's files.
   // a's dense p is labelled alone, until r1's unlabelled flat p/y joins its package: a pool of two once stored,
   // so r1's strict rejection stands, as a cold init keeping a's build refuses it (`Could not pool 'fw'`).
   describe("a load's flat secondary that turns a lone label of the record into a pool", () => {
@@ -394,6 +391,8 @@ describe('update-cache: decisions read per package', () => {
     });
   });
 
+  // h's dense p claims p/x under the external p; r1's flat p/x finds them in p's bucket, and its override maps
+  // the whole package to h's files.
   it("skips a flat secondary that a dense root serves, mapping the root's build in a named scope", async () => {
     const p = portfolio(
       {},
