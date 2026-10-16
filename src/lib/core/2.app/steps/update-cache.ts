@@ -4,10 +4,8 @@ import {
   type DenseSharedInfo,
   type ExternalName,
   type RemoteName,
-  type SharedExternal,
   type SharedVersionAction,
   type SharedVersionMeta,
-  type shareScope,
   GLOBAL_SCOPE,
 } from 'lib/core/1.domain';
 import type { LoadActions } from 'lib/core/1.domain/remote-entry/load-actions.contract';
@@ -16,8 +14,7 @@ import { addRemoteToVersion } from 'lib/core/1.domain/externals/basis';
 import { loadSplitsPackage } from 'lib/core/1.domain/externals/serving';
 import { type Claim, claimsByPackage, committedClaims } from 'lib/core/1.domain/externals/claims';
 import { packageOf, type Specifier } from 'lib/core/1.domain/externals/specifier';
-import { buildPools, pooledNames } from 'lib/core/1.domain/pooling/membership';
-import type { DeepReadonly } from 'lib/utils/deep-readonly';
+import { type LabelledCopy, pooledPackagesWith } from 'lib/core/1.domain/pooling/membership';
 import type { DrivingContract } from '../driving-ports/driving.contract';
 import type { LoggingConfig } from '../config/log.contract';
 import * as _path from 'lib/utils/path';
@@ -39,9 +36,6 @@ type LoadView = {
 };
 
 type Rejection = { item: Pending; specifier: Specifier; claim: Claim };
-
-const pooledPackages = (scope: DeepReadonly<shareScope>): Set<string> =>
-  new Set([...pooledNames(buildPools(scope).pools)].map(packageOf));
 
 // share: the remote's build opens the package; skip: it runs the build the map serves it from; scope: its own
 // build beside the map (partlyServed: the map serves some of it, or all of it from two builds).
@@ -129,11 +123,11 @@ export function createUpdateCache(
           without: remoteEntry.name,
         });
         const claimsIn = claimsByPackage(claims);
-        let pooled: Set<string> | undefined;
+        let pooled: Set<ExternalName> | undefined;
         view = {
           claims,
           claimsOf: pkg => claimsIn.get(pkg) ?? [],
-          inPool: pkg => (pooled ??= pooledPackages(withPending(record, pending, scope))).has(pkg),
+          inPool: pkg => (pooled ??= pooledPackagesWith(record, copiesIn(pending, scope))).has(pkg),
         };
         views.set(scope, view);
       }
@@ -141,20 +135,11 @@ export function createUpdateCache(
     };
   }
 
-  // The loaded copies' labels pool as they will once stored, so a pool only they form counts.
-  function withPending(
-    record: DeepReadonly<shareScope>,
-    pending: Pending[],
-    scope: string
-  ): DeepReadonly<shareScope> {
-    const overlaid: Record<ExternalName, DeepReadonly<SharedExternal>> = { ...record };
-    for (const { external, ctx } of pending) {
-      if ((external.shareScope ?? GLOBAL_SCOPE) !== scope) continue;
-      const base = overlaid[external.packageName] ?? { dirty: false, versions: [] };
-      const row = { tag: ctx.tag, action: 'share', host: false, remotes: [ctx.remote] } as const;
-      overlaid[external.packageName] = { ...base, versions: [...base.versions, row] };
-    }
-    return overlaid;
+  // The load's copies count as stored, so a pool only their labels form is judged as the gate will see it.
+  function copiesIn(pending: Pending[], scope: string): LabelledCopy[] {
+    return pending
+      .filter(({ external }) => (external.shareScope ?? GLOBAL_SCOPE) === scope)
+      .map(({ external, ctx }) => ({ name: external.packageName, pool: ctx.remote.pool }));
   }
 
   function scopeOpenedPackages(decisions: Map<Pending, Decision>): void {

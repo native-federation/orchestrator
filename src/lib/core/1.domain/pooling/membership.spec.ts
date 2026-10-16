@@ -1,6 +1,13 @@
 import type { SharedExternal, shareScope } from 'lib/core/1.domain';
 import { mockVersionRemote } from 'lib/testing/domain/externals/version.mock';
-import { buildPools, type PoolMember, type PoolName } from './membership';
+import { packageOf } from 'lib/core/1.domain/externals/specifier';
+import {
+  buildPools,
+  type LabelledCopy,
+  pooledPackagesWith,
+  type PoolMember,
+  type PoolName,
+} from './membership';
 
 // buildPools reads only the external name and each remote's name + pool label — one skip version suffices.
 const ext = (remotes: { remote: string; pool?: string }[]): SharedExternal => ({
@@ -237,4 +244,95 @@ describe('buildPools', () => {
     expect(shape(pools)).toEqual([['ng', ['@ng/core', '@ng/core/testing', '@ng/forms']]]);
     expect(labelledAlone).toEqual(['lonely']);
   });
+});
+
+// update-cache asks which packages are pooled before the load's copies are stored; the gate builds pools after.
+// pooledPackagesWith must answer what buildPools answers over the record with the copies stored, whatever row
+// the copies land in.
+describe('pooledPackagesWith', () => {
+  const stored = (record: shareScope, copies: LabelledCopy[]): shareScope => {
+    const out = structuredClone(record);
+    for (const { name, pool } of copies) {
+      const external = (out[name] ??= { dirty: false, versions: [] });
+      external.versions.push({
+        tag: '9.0.0',
+        host: false,
+        action: 'scope',
+        remotes: [mockVersionRemote('loader', 'x', { pool })],
+      });
+    }
+    return out;
+  };
+  const pooledOnceStored = (record: shareScope, copies: LabelledCopy[]) =>
+    new Set(
+      [...buildPools(stored(record, copies)).pools.values()].flatMap(members =>
+        members.map(m => packageOf(m.name))
+      )
+    );
+
+  // Each record's labels sit on a `skip` row (see `ext`), so a label off the share rows counts too.
+  const cases: Record<string, { record: shareScope; copies: LabelledCopy[]; pooled: string[] }> = {
+    'a lone label forms no pool': {
+      record: scope({ p: [{ remote: 'a' }] }),
+      copies: [{ name: 'p', pool: 'fw' }],
+      pooled: [],
+    },
+    "a copy's label joins a lone label of the record": {
+      record: scope({ p: [{ remote: 'a' }], q: [{ remote: 'a', pool: 'fw' }] }),
+      copies: [{ name: 'p', pool: 'fw' }],
+      pooled: ['p', 'q'],
+    },
+    'an unlabelled flat secondary turns a lone label of its package into a pool': {
+      record: scope({ p: [{ remote: 'a', pool: 'fw' }] }),
+      copies: [{ name: 'p/y' }],
+      pooled: ['p'],
+    },
+    'a copy of an external the record lacks': {
+      record: scope({ q: [{ remote: 'a', pool: 'fw' }] }),
+      copies: [{ name: 'r', pool: 'fw' }],
+      pooled: ['q', 'r'],
+    },
+    'pool results without a label pool nothing': {
+      record: { p: { ...ext([{ remote: 'a' }]), poolName: 'fw', poolWinner: 'a' } },
+      copies: [{ name: 'p' }],
+      pooled: [],
+    },
+    "a copy's label merges two pools": {
+      record: scope({
+        p: [{ remote: 'a', pool: 'fw' }],
+        p2: [{ remote: 'a', pool: 'fw' }],
+        q: [{ remote: 'a', pool: 'ui' }],
+        q2: [{ remote: 'a', pool: 'ui' }],
+      }),
+      copies: [{ name: 'p', pool: 'ui' }],
+      pooled: ['p', 'p2', 'q', 'q2'],
+    },
+    'a padded label is the same label': {
+      record: scope({ q: [{ remote: 'a', pool: 'fw' }] }),
+      copies: [{ name: 'p', pool: ' fw ' }],
+      pooled: ['p', 'q'],
+    },
+    'a rootless package pools through its owner': {
+      record: scope({ '@x/a/s1': [{ remote: 'a', pool: 'fw' }] }),
+      copies: [{ name: '@x/a/s2' }],
+      pooled: ['@x/a'],
+    },
+    'one external copied twice is still alone': {
+      record: {},
+      copies: [
+        { name: 'p', pool: 'fw' },
+        { name: 'p', pool: 'fw' },
+      ],
+      pooled: [],
+    },
+  };
+
+  for (const [name, { record, copies, pooled }] of Object.entries(cases))
+    it(name, () => {
+      const before = structuredClone(record);
+      const actual = pooledPackagesWith(record, copies);
+      expect(actual).toEqual(pooledOnceStored(record, copies));
+      expect([...actual].sort()).toEqual(pooled);
+      expect(record).toStrictEqual(before);
+    });
 });

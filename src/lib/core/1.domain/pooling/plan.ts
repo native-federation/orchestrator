@@ -1,5 +1,5 @@
 import type { ExternalName, SharedExternal, shareScope } from '../externals/external.contract';
-import { buildPools, pooledNames, type PoolMember, type PoolName } from './membership';
+import { buildPools, type PoolMember, type PoolName } from './membership';
 import { hasPoolResults, scopeHasPoolState } from './pool-state';
 import { withoutPoolResults } from './records';
 import type { DeepReadonly } from 'lib/utils/deep-readonly';
@@ -23,7 +23,7 @@ export function planElection(scope: DeepReadonly<shareScope>, poolable: boolean)
     return { pools: new Map(), stripped: new Map(), labelledAlone: [] };
 
   const { pools, labelledAlone } = buildPools(scope);
-  const pooled = pooledNames(pools);
+  const pooled = new Set([...pools.values()].flatMap(members => members.map(m => m.name)));
   const stripped = new Map<ExternalName, SharedExternal>();
   for (const [name, external] of Object.entries(scope))
     if (!pooled.has(name) && hasPoolResults(external))

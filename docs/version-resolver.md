@@ -1092,16 +1092,17 @@ it in that scope, read as the map was generated (the serving build's copy, see
   `strictVersion` range rejects its tag: the remote runs the whole package from its own build (`scope`).
 
 A rejecting range warns, and under `strictExternalCompatibility` fails the load, only where a cold init that kept
-the builds the committed map serves would refuse it: the package is pooled, the file is at the serving tag of a
-package the map would otherwise serve the remote wholly from one build, or the file is of the copy's own external
-at the tag that external's own election would keep with the remote in it (a host's row, or under
-`latestSharedExternal` the newest tag), or of the copy's own external where no tag pleases every strict copy of it.
-A file the map serves at the serving build's tag rather than at its external's own election is not enough. Any
-other rejection runs the package from the remote's own build silently, as the cold init's fallback does. Where the
-load splits the package, the copy's own external is judged as its own election with the remote in it would judge
-it, so some rejections such a cold init would refuse run silently. The load cannot change the committed builds, so
-it may refuse a remote that a cold init of the same remotes would accept by electing another build, one its range
-accepts.
+the builds the committed map serves would refuse it: the package is in a pool once the load's copies are stored (a
+label that joins no other external forms no pool, as at init; a dense build ships a package as one external), the
+file is at the serving tag of a package the map would otherwise serve the remote wholly from one build, or the file
+is of the copy's own external at the tag that external's own election would keep with the remote in it (a host's
+row, or under `latestSharedExternal` the newest tag), or of the copy's own external where no tag pleases every
+strict copy of it. A file the map serves at the serving build's tag rather than at its external's own election is
+not enough. Any other rejection runs the package from the remote's own build silently, as the cold init's fallback
+does. Where the load splits the package, only the election of the copy's own external with the remote in it can
+refuse, so some rejections a cold init keeping the committed builds would refuse run silently. The load cannot
+change the committed builds, so it may refuse a remote that a cold init of the same remotes would accept by
+electing another build, one its range accepts.
 
 A remote whose ranges accept the map's tags but that runs a package from its own build because the map lacks an
 entrypoint it ships, or serves the package from two builds, opens no other package: an opened package's files

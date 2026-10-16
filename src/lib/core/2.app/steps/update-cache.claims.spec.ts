@@ -4,7 +4,8 @@ import { portfolio } from 'lib/testing/pooling/portfolio';
 /**
  * A runtime load decides each package from the committed claims of that package alone. These fixtures reach
  * the paths the generated portfolios barely do: a root-less package claimed at two tags, every branch of the
- * cold-election check behind a strict rejection, a pool label only the loader carries, and a package whose
+ * cold-election check behind a strict rejection, a pool label only the loader carries, alone or joining the
+ * record, and a package whose
  * claims all come from another external's entries.
  */
 
@@ -35,25 +36,34 @@ const entry = (name: string, ...shared: DenseSharedInfo[]): RemoteEntry =>
 
 type Shape = {
   init: RemoteEntry[];
+  // Runtime loads before `load`, on the same page.
+  earlier?: RemoteEntry[];
   load: RemoteEntry;
   hosts: string[];
   latest?: boolean;
 };
 
-// The load's actions and its warnings and errors, or what it threw.
-async function load(c: Shape, strict: boolean) {
-  const p = portfolio(
+const fresh = (
+  strict: boolean,
+  { hosts = [], latest = false }: { hosts?: string[]; latest?: boolean } = {}
+) =>
+  portfolio(
     {},
     {
       storage: `nf-update-cache-claims-${storage++}`,
       realRepositories: true,
       assertNoTear: false,
-      hosts: c.hosts,
+      hosts,
       strict,
-      latestSharedExternal: c.latest ?? false,
+      latestSharedExternal: latest,
     }
   );
+
+// The load's actions and its warnings and errors, or what it threw.
+async function load(c: Shape, strict: boolean) {
+  const p = fresh(strict, c);
   await p.runInit(c.init);
+  for (const earlier of c.earlier ?? []) await p.runDynamic(earlier);
   const logged = () =>
     [...vi.mocked(p.config.log.warn).mock.calls, ...vi.mocked(p.config.log.error).mock.calls]
       .map(([, message]) => String(message))
@@ -233,17 +243,8 @@ describe('update-cache: decisions read per package', () => {
 
     // The pool check reads the record with r1's copies overlaid; the stored record keeps only what the load
     // stored: a's share row and r1's own scope row, no overlay row.
-    it('leaves no overlay row in the stored record', async () => {
-      const p = portfolio(
-        {},
-        {
-          storage: `nf-update-cache-claims-${storage++}`,
-          realRepositories: true,
-          assertNoTear: false,
-          hosts: [],
-          strict: true,
-        }
-      );
+    it("stores only a's share row and r1's scope row", async () => {
+      const p = fresh(true);
       await p.runInit(lone.init);
       await p.runDynamic(lone.load);
       const rows = p
@@ -256,16 +257,7 @@ describe('update-cache: decisions read per package', () => {
     });
 
     it('matches a cold init of both remotes, which refuses nothing', async () => {
-      const p = portfolio(
-        {},
-        {
-          storage: `nf-update-cache-claims-${storage++}`,
-          realRepositories: true,
-          assertNoTear: false,
-          hosts: [],
-          strict: true,
-        }
-      );
+      const p = fresh(true);
       await expect(p.runInit([...lone.init, lone.load])).resolves.toBeDefined();
     });
   });
@@ -273,16 +265,7 @@ describe('update-cache: decisions read per package', () => {
   // Pool results left on the record after its last label went: cold init strips them, the gate forms no pool
   // from them, and the load takes the unpooled path too, so r1's split load runs p from its own build silently.
   it('treats pool results without a label left as unpooled', async () => {
-    const p = portfolio(
-      {},
-      {
-        storage: `nf-update-cache-claims-${storage++}`,
-        realRepositories: true,
-        assertNoTear: false,
-        hosts: [],
-        strict: true,
-      }
-    );
+    const p = fresh(true);
     await p.runInit([entry('a', flat('p', '2.0.0', '^2.0.0'))]);
     p.seed('p', structuredClone(p.stored()['p']!.versions), false, {
       poolName: 'fw',
@@ -314,6 +297,103 @@ describe('update-cache: decisions read per package', () => {
 
   // h's dense p claims p/x under the external p; r1's flat p/x finds them in p's bucket, and its override maps
   // the whole package to h's files.
+  // a's dense p is labelled alone, until r1's unlabelled flat p/y joins its package: a pool of two once stored,
+  // so r1's strict rejection stands, as a cold init keeping a's build refuses it (`Could not pool 'fw'`).
+  describe("a load's flat secondary that turns a lone label of the record into a pool", () => {
+    const shaped: Shape = {
+      init: [entry('a', flat('p', '2.0.0', '^2.0.0', { with: ['p/x'], pool: 'fw' }))],
+      load: entry(
+        'r1',
+        flat('p', '1.0.0', '~1.0.0', { strict: true }),
+        flat('p/y', '1.0.0', '^1.0.0')
+      ),
+      hosts: [],
+    };
+    const WARNED =
+      "[__GLOBAL__][r1] p@1.0.0 Is not compatible with existing p@2.0.0 requiredRange '~1.0.0'";
+
+    it('refuses the strict load', async () => {
+      expect(await load(shaped, true)).toEqual({ threw: REFUSED, logged: [WARNED] });
+    });
+
+    it('warns once in lenient mode', async () => {
+      expect(await load(shaped, false)).toMatchObject({ logged: [WARNED] });
+    });
+
+    it('matches a cold init of both remotes', async () => {
+      await expect(fresh(true).runInit([...shaped.init, shaped.load])).rejects.toThrow(
+        "Could not pool 'fw'"
+      );
+    });
+  });
+
+  // r1's labelled p in share scope s must not pool its global p with a's q: pools form per share scope.
+  it.each([true, false])(
+    "pools a load's copies only in their own share scope (strict: %s)",
+    async strict => {
+      const p = fresh(strict);
+      await p.runInit([
+        entry('a', flat('p', '2.0.0', '^2.0.0'), flat('q', '1.0.0', '^1.0.0', { pool: 'fw' })),
+      ]);
+      const warned = vi.spyOn(p.config.log, 'warn');
+      await p.runDynamic(
+        entry(
+          'r1',
+          flat('p', '1.0.0', '~1.0.0', { strict: true, with: ['p/x'] }),
+          flat('p', '1.0.0', '^1.0.0', { pool: 'fw', shareScope: 's' })
+        )
+      );
+      const rows = p
+        .stored()
+        ['p']!.versions.map(v => [v.tag, v.action, v.remotes.map(r => r.name)]);
+      expect(rows).toEqual([
+        ['2.0.0', 'share', ['a']],
+        ['1.0.0', 'scope', ['r1']],
+      ]);
+      expect(
+        warned.mock.calls.map(([, m]) => String(m)).filter(m => m.includes('Is not compatible'))
+      ).toEqual([]);
+    }
+  );
+
+  // r1 runs its lone-labelled p from its own build; r2's q then joins that label, so p is in a pool once r2 is
+  // stored and r2's strict rejection stands, as a cold init keeping a's build refuses it. A cold init of all
+  // three elects r2's build instead and refuses nothing.
+  describe('a pool that forms across two runtime loads', () => {
+    const twoLoads: Shape = {
+      init: [entry('a', flat('p', '2.0.0', '^2.0.0'))],
+      earlier: [entry('r1', flat('p', '1.0.0', '~1.0.0', { with: ['p/x'], pool: 'fw' }))],
+      load: entry(
+        'r2',
+        flat('p', '1.0.0', '~1.0.0', { strict: true, with: ['p/x'] }),
+        flat('q', '1.0.0', '^1.0.0', { pool: 'fw' })
+      ),
+      hosts: [],
+    };
+    const WARNED =
+      "[__GLOBAL__][r2] p@1.0.0 Is not compatible with existing p@2.0.0 requiredRange '~1.0.0'";
+
+    it('refuses the strict load', async () => {
+      expect(await load(twoLoads, true)).toEqual({
+        threw: "NFError: Could not process remote 'r2'",
+        logged: [WARNED],
+      });
+    });
+
+    it('warns once in lenient mode', async () => {
+      expect(await load(twoLoads, false)).toEqual({
+        actions: { p: 'scope', q: 'scope' },
+        logged: [WARNED],
+      });
+    });
+
+    it('accepts in a cold init of all three remotes', async () => {
+      await expect(
+        fresh(true).runInit([...twoLoads.init, ...twoLoads.earlier!, twoLoads.load])
+      ).resolves.toBeDefined();
+    });
+  });
+
   it("skips a flat secondary that a dense root serves, mapping the root's build in a named scope", async () => {
     const p = portfolio(
       {},
