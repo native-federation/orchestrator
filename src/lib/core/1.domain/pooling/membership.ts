@@ -1,5 +1,5 @@
 import type { ExternalName, SharedExternal, shareScope } from 'lib/core/1.domain';
-import { owningPackage } from 'lib/core/1.domain/externals/specifier';
+import { owningPackage, packageOf } from 'lib/core/1.domain/externals/specifier';
 import type { DeepReadonly } from 'lib/utils/deep-readonly';
 import { compareStrings } from 'lib/utils/compare-strings';
 
@@ -16,6 +16,9 @@ export type Membership = {
   // In scope order.
   labelledAlone: ExternalName[];
 };
+
+// A copy the record doesn't hold yet: its external and its `pool` label.
+export type LabelledCopy = { name: ExternalName; pool?: string };
 
 // Iterative path halving: no stack growth in the browser.
 function unionFind() {
@@ -42,54 +45,81 @@ function unionFind() {
 const extNode = (name: ExternalName): string => `ext\x00${name}`;
 const labelNode = (label: string): string => `label\x00${label}`;
 
-// A pool is a connected component of `external -> label` and `entrypoint -> package` edges; see
-// docs/version-resolver.md §"Enabling pooling".
-export function buildPools(sharedExternals: DeepReadonly<shareScope>): Membership {
-  const { find, union } = unionFind();
-  // One entry per declaring copy, which `mostDeclaredLabel` counts.
-  const labelsOf = new Map<ExternalName, string[]>();
+const labelOf = (pool?: string): string | undefined => pool?.trim() || undefined;
 
-  for (const [name, external] of Object.entries(sharedExternals)) {
-    const labels = external.versions.flatMap(v =>
-      v.remotes.flatMap(r => {
-        const label = r.pool?.trim();
-        return label ? [label] : [];
-      })
+// One entry per declaring copy, which `mostDeclaredLabel` counts; in scope order.
+function labelsIn(sharedExternals: DeepReadonly<shareScope>): Map<ExternalName, string[]> {
+  const labelsOf = new Map<ExternalName, string[]>();
+  for (const [name, external] of Object.entries(sharedExternals))
+    labelsOf.set(
+      name,
+      external.versions.flatMap(v => v.remotes.flatMap(r => labelOf(r.pool) ?? []))
     );
-    labelsOf.set(name, labels);
+  return labelsOf;
+}
+
+// A pool is a connected component of `external -> label` and `entrypoint -> package` edges; see
+// docs/version-resolver.md §"Enabling pooling". Components in `labelsOf` order, each with a label.
+function labelledComponents(
+  labelsOf: ReadonlyMap<ExternalName, readonly string[]>
+): ExternalName[][] {
+  const { find, union } = unionFind();
+  for (const [name, labels] of labelsOf)
     for (const label of labels) union(extNode(name), labelNode(label));
-  }
 
   // An entrypoint follows its package into whatever pool the package joins, labelled or not: a flat build
   // that labels only the package would otherwise leave its entrypoints out — measured as a torn package.
+  // The package's node needs no root external, so a package that ships only entrypoints stays one unit too.
   for (const name of labelsOf.keys()) {
     const owner = owningPackage(name);
-    if (owner !== undefined && labelsOf.has(owner)) union(extNode(name), extNode(owner));
+    if (owner !== undefined) union(extNode(name), extNode(owner));
   }
 
-  const byComponent = new Map<string, PoolMember[]>();
-  for (const [name, external] of Object.entries(sharedExternals)) {
+  const byComponent = new Map<string, ExternalName[]>();
+  for (const name of labelsOf.keys()) {
     const root = find(extNode(name));
-    const members = byComponent.get(root) ?? byComponent.set(root, []).get(root)!;
-    members.push({ name, external });
+    const names = byComponent.get(root) ?? byComponent.set(root, []).get(root)!;
+    names.push(name);
   }
+  // A property of the component, not of one member: an entrypoint carries no label of its own yet pools
+  // with the package that does.
+  return [...byComponent.values()].filter(names => names.some(n => labelsOf.get(n)!.length > 0));
+}
 
+export function buildPools(sharedExternals: DeepReadonly<shareScope>): Membership {
+  const labelsOf = labelsIn(sharedExternals);
   // Unique without suffixing: a label belongs to exactly one component, so two pools never pick the same one.
   const pools = new Map<PoolName, PoolMember[]>();
   const labelledAlone: ExternalName[] = [];
-  for (const members of byComponent.values()) {
-    // A property of the component, not of one member: an entrypoint carries no label of its own yet pools
-    // with the package that does.
-    if (!members.some(m => labelsOf.get(m.name)!.length > 0)) continue;
-
-    if (members.length < 2) labelledAlone.push(members[0]!.name);
-    else
+  for (const names of labelledComponents(labelsOf)) {
+    if (names.length < 2) labelledAlone.push(names[0]!);
+    else {
+      const members = names.map(name => ({ name, external: sharedExternals[name]! }));
       pools.set(
         mostDeclaredLabel(members, labelsOf),
         members.sort((a, b) => compareStrings(a.name, b.name))
       );
+    }
   }
   return { pools, labelledAlone };
+}
+
+// The packages `buildPools` pools once `copies` are stored in the scope.
+export function pooledPackagesWith(
+  sharedExternals: DeepReadonly<shareScope>,
+  copies: readonly LabelledCopy[]
+): Set<ExternalName> {
+  const labelsOf = labelsIn(sharedExternals);
+  for (const { name, pool } of copies) {
+    const labels = labelsOf.get(name) ?? [];
+    const label = labelOf(pool);
+    labelsOf.set(name, label === undefined ? labels : [...labels, label]);
+  }
+  return new Set(
+    labelledComponents(labelsOf)
+      .filter(names => names.length > 1)
+      .flatMap(names => names.map(packageOf))
+  );
 }
 
 function mostDeclaredLabel(

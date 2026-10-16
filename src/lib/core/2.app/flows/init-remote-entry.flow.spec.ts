@@ -14,7 +14,7 @@ import type { ConfigContract } from '../config/config.contract';
 import type { DrivingContract } from '../driving-ports/driving.contract';
 import type { InitDriversContract } from '../driver-ports/init/drivers.contract';
 import type { InitRemoteEntryFlow } from '../driver-ports/init/flow.contract';
-import type { DenseSharedInfo, RemoteEntry } from 'lib/core/1.domain';
+import { GLOBAL_SCOPE, type DenseSharedInfo, type RemoteEntry } from 'lib/core/1.domain';
 import type { LoadRemoteModule } from 'lib/core/init-federation.contract';
 
 // A dynamic load that fails must leave the page as if it never ran, against the real repositories: they
@@ -323,6 +323,79 @@ describe('init-remote-entry flow: a failed load', () => {
 
     expect(dumps()).toEqual([]);
     expect(adapters.remoteInfoRepo.contains('r1')).toBe(true);
+  });
+});
+
+// A runtime load decides no serving build, so it leaves the scopes it wrote for the next init to decide. The page
+// runs under strictExternalCompatibility, where pooling marks nothing dirty: the marks must not depend on that.
+describe('init-remote-entry flow: the scopes left to decide', () => {
+  let storageRef: Record<string, unknown>;
+  let adapters: DrivingContract;
+  let initRemoteEntry: InitRemoteEntryFlow;
+  let served: Record<string, () => RemoteEntry>;
+
+  beforeEach(async () => {
+    storageRef = {};
+    const storage = { storage: createStorageHandlerMock(storageRef), clearStorage: false };
+    const config = mockConfig();
+    config.strict.strictExternalCompatibility = true;
+    adapters = {
+      ...mockAdapters(),
+      remoteInfoRepo: createRemoteInfoRepository(storage),
+      scopedExternalsRepo: createScopedExternalsRepository(storage),
+      sharedExternalsRepo: createSharedExternalsRepository(storage),
+      sharedChunksRepo: createChunkRepository(storage),
+      versionCheck: createVersionCheck(),
+    };
+    served = {};
+    adapters.remoteEntryProvider.provide = vi.fn((url: string) => Promise.resolve(served[url]!()));
+    const drivers = createInitDrivers({ config, adapters });
+    initRemoteEntry = createInitRemoteEntryFlow({ flow: drivers, adapters, config });
+
+    await drivers
+      .processRemoteEntries([
+        entry('r0', [
+          shared('a', '1.0.0', '^1.0.0'),
+          shared('t', '1.0.0', '^1.0.0', { shareScope: 'team' }),
+          shared('o', '1.0.0', '^1.0.0', { shareScope: 'other' }),
+        ]),
+      ])
+      .then(drivers.poolSharedExternals)
+      .then(drivers.determineSharedExternals)
+      .then(drivers.decideServingBuilds)
+      .then(drivers.generateImportMap)
+      .then(importMap => drivers.commitChanges(importMap, { override: true }));
+  });
+
+  it('starts from an init that leaves nothing to decide', () => {
+    expect(storageRef['cache-state']).toBeUndefined();
+  });
+
+  it('marks exactly the share scopes the load wrote', async () => {
+    served['http://r1/remoteEntry.json'] = () =>
+      entry('r1', [
+        shared('a', '1.0.0', '^1.0.0'),
+        shared('t', '1.0.0', '^1.0.0', { shareScope: 'team' }),
+      ]);
+
+    await initRemoteEntry('http://r1/remoteEntry.json', 'r1');
+
+    expect(storageRef['cache-state']).toEqual({ undecidedScopes: [GLOBAL_SCOPE, 'team'] });
+  });
+
+  it('marks nothing for a load it rolls back', async () => {
+    served['http://r1/remoteEntry.json'] = () =>
+      entry('r1', [
+        shared('t', '1.0.0', '^1.0.0', { shareScope: 'team' }),
+        shared('a', '2.0.0', '^2.0.0'),
+      ]);
+
+    await expect(initRemoteEntry('http://r1/remoteEntry.json', 'r1')).rejects.toThrow(
+      "Could not process remote 'r1'"
+    );
+
+    expect(storageRef['cache-state']).toBeUndefined();
+    expect(adapters.sharedExternalsRepo.isUndecided('team')).toBe(false);
   });
 });
 

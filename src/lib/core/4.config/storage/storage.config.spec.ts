@@ -1,7 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { createStorageConfig } from './storage.config';
 import { globalThisStorageEntry } from './global-this.storage';
-import { STORAGE_VERSION_KEY } from 'lib/core/2.app/config/storage.contract';
 import { ORCHESTRATOR_VERSION } from 'lib/core/4.config/orchestrator-version';
 import { createSharedExternalsRepository } from 'lib/core/3.adapters/storage/shared-externals.repository';
 import { createRemoteInfoRepository } from 'lib/core/3.adapters/storage/remote-info.repository';
@@ -16,8 +15,8 @@ const create = (clearStorage?: boolean) =>
     clearStorage,
   });
 
-// A cache as 4.7.0 left it: no version stamp, a pool verdict whose cause no longer exists.
-const seed47Cache = () => {
+// A cache with no `cache-state`, and a pool verdict whose cause no longer exists.
+const seedUnstampedCache = () => {
   (globalThis as unknown as Record<string, unknown>)[NAMESPACE] = {
     remotes: { 'team/mfe1': { scopeUrl: 'http://mfe1/', exposes: [] } },
     'shared-externals': {
@@ -54,6 +53,10 @@ describe('createStorageConfig: orchestrator version stamp', () => {
     delete (globalThis as unknown as Record<string, unknown>)[NAMESPACE];
   });
 
+  const stamp = () => (raw()['cache-state'] as { version?: unknown } | undefined)?.version;
+  const stampCurrent = (o: object = {}) =>
+    (raw()['cache-state'] = { version: ORCHESTRATOR_VERSION, undecidedScopes: [], ...o });
+
   const coldInit = (config: ReturnType<typeof create>) => {
     expect(config.clearStorage).toBe(true);
     expect(createSharedExternalsRepository(config).getFromScope()).toEqual({});
@@ -61,10 +64,15 @@ describe('createStorageConfig: orchestrator version stamp', () => {
     expect(createRemoteInfoRepository(config).tryGet('team/mfe1').isPresent()).toBe(false);
   };
 
+  const warmInit = (config: ReturnType<typeof create>) => {
+    expect(config.clearStorage).toBe(false);
+    expect(createRemoteInfoRepository(config).tryGet('team/mfe1').isPresent()).toBe(true);
+  };
+
   it('stamps the running orchestrator version', () => {
     expect(ORCHESTRATOR_VERSION).toMatch(/^\d+\.\d+\.\d+/);
     create();
-    expect(raw()[STORAGE_VERSION_KEY]).toBe(ORCHESTRATOR_VERSION);
+    expect(raw()['cache-state']).toEqual({ version: ORCHESTRATOR_VERSION, undecidedScopes: [] });
   });
 
   it('keeps an empty storage as is', () => {
@@ -72,41 +80,64 @@ describe('createStorageConfig: orchestrator version stamp', () => {
   });
 
   it('keeps a cache the same version wrote: the next init is warm', () => {
-    seed47Cache();
-    raw()[STORAGE_VERSION_KEY] = ORCHESTRATOR_VERSION;
+    seedUnstampedCache();
+    stampCurrent();
+    warmInit(create());
+  });
+
+  it('keeps the undecided scopes the last page stored', () => {
+    seedUnstampedCache();
+    stampCurrent({ undecidedScopes: ['team'] });
     const config = create();
 
-    expect(config.clearStorage).toBe(false);
-    expect(createRemoteInfoRepository(config).tryGet('team/mfe1').isPresent()).toBe(true);
+    expect(raw()['cache-state']).toEqual({
+      version: ORCHESTRATOR_VERSION,
+      undecidedScopes: ['team'],
+    });
+    expect(createSharedExternalsRepository(config).isUndecided('team')).toBe(true);
   });
 
-  it('drops an unstamped cache, so a 4.7.0 verdict is never published', () => {
-    seed47Cache();
+  it('drops a cache that has records but no cache-state', () => {
+    seedUnstampedCache();
     coldInit(create());
-    expect(raw()[STORAGE_VERSION_KEY]).toBe(ORCHESTRATOR_VERSION);
+    expect(stamp()).toBe(ORCHESTRATOR_VERSION);
   });
 
-  // An older or newer release, an unbundled 'dev' build, or anything that is not a version string.
-  it.each(['4.7.9', '99.0.0', 'dev', 1])('drops a cache stamped %s', other => {
-    seed47Cache();
-    raw()[STORAGE_VERSION_KEY] = other;
+  // Another release, an unbundled 'dev' build, or anything that is not a version string.
+  it.each(['0.0.1', '99.0.0', 'dev', 1])('drops a cache stamped %s', other => {
+    seedUnstampedCache();
+    stampCurrent({ version: other, undecidedScopes: ['team'] });
     coldInit(create());
-    expect(raw()[STORAGE_VERSION_KEY]).toBe(ORCHESTRATOR_VERSION);
+    expect(raw()['cache-state']).toEqual({ version: ORCHESTRATOR_VERSION, undecidedScopes: [] });
+  });
+
+  it.each([
+    ['a string', '4.8.0'],
+    ['null', null],
+    ['an array', [ORCHESTRATOR_VERSION]],
+  ])('drops a cache whose cache-state is %s', (_, state) => {
+    seedUnstampedCache();
+    raw()['cache-state'] = state;
+    coldInit(create());
+    expect(stamp()).toBe(ORCHESTRATOR_VERSION);
   });
 
   it('drops a cache that only carries the prerelease schema stamp', () => {
-    seed47Cache();
+    seedUnstampedCache();
     raw()['schema'] = 1;
     coldInit(create());
   });
 
   it('only drops once: the next init finds the stamp', () => {
-    seed47Cache();
+    seedUnstampedCache();
     create();
-    expect(create().clearStorage).toBe(false);
+    warmInit(create());
   });
 
-  it('still honours an explicit clearStorage', () => {
-    expect(create(true).clearStorage).toBe(true);
+  it('still honours an explicit clearStorage, and keeps the version stamp', () => {
+    seedUnstampedCache();
+    stampCurrent({ undecidedScopes: ['team'] });
+    coldInit(create(true));
+    expect(raw()['cache-state']).toEqual({ version: ORCHESTRATOR_VERSION, undecidedScopes: [] });
   });
 });

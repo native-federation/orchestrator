@@ -187,52 +187,6 @@ describe('determine: splitting a version on election', () => {
     });
   });
 
-  it('subjects the newly deduping copy to the entrypoint coverage policy', async () => {
-    // New interaction: while the copy sat in a `scope` row, `findTears` skipped it. Now that it dedups it
-    // is checked like any other skip, and `scopeTornRemotes` merges it into the scope row already at its
-    // tag — so a split can be undone by coverage, which is the right outcome and not a second row.
-    config.profile.scopeUncoveredEntrypoints = true;
-    seed([
-      majority('2.2.0', 4),
-      version('2.1.0', [
-        {
-          remote: 'team/mfe-a',
-          req: '^2.1.0',
-          entries: { 'dep-a': 'a.js', 'dep-a/extra': 'x.js' },
-        },
-        { remote: 'team/mfe-c', req: '~2.1.0' },
-      ]),
-    ]);
-
-    await createDetermineSharedExternals(config, adapters)();
-
-    expect(rows()).toEqual([majorityRow('2.2.0', 4), '2.1.0:scope:[team/mfe-c,team/mfe-a]']);
-  });
-
-  it("puts a torn newer copy's scope row above an older winner", async () => {
-    // The newer copy is not strict, so it dedups to the older winner; coverage then tears it and empties
-    // its row. Its scope row has to take the emptied row's place, not land after the winner's.
-    config.profile.scopeUncoveredEntrypoints = true;
-    seed([
-      version('2.2.0', [
-        {
-          remote: 'team/mfe-n',
-          req: '^2.2.0',
-          strict: false,
-          entries: { 'dep-a': 'a.js', 'dep-a/extra': 'x.js' },
-        },
-      ]),
-      version(
-        '2.1.0',
-        Array.from({ length: 4 }, (_, i) => ({ remote: `team/maj${i + 1}`, req: '~2.1.0' }))
-      ),
-    ]);
-
-    await createDetermineSharedExternals(config, adapters)();
-
-    expect(rows()).toEqual(['2.2.0:scope:[team/mfe-n]', majorityRow('2.1.0', 4)]);
-  });
-
   it('still refuses the portfolio under strictExternalCompatibility', async () => {
     config.strict.strictExternalCompatibility = true;
     seed([
@@ -248,16 +202,21 @@ describe('determine: splitting a version on election', () => {
   });
 
   // Pooling runs first and leaves nothing dirty with pool results (plan.spec.ts, the portfolio harness), so
-  // determine never reads a `servedBy`. Should a stale one reach it anyway, it means nothing here: the copy
-  // is priced and scoped like any other.
-  it('elects a copy carrying a stale servedBy as if it carried none', async () => {
-    config.profile.scopeUncoveredEntrypoints = true;
+  // determine never reads a `servedBy`. Should a stale one reach it anyway, pricing still honours it: such a
+  // copy publishes no files of its own, so it is never the basis a candidate is priced on. Both candidates
+  // here then leave one entrypoint uncovered (2.2.0 lacks mfe-a's dep-a/extra; 2.1.0 has no basis, so
+  // mfe-b's dep-a), downloads are equal (all non-strict), and the tie goes to the newer version. Read
+  // without `servedBy`, 2.1.0 would cover both and win.
+  it('never prices a version on a copy carrying a stale servedBy', async () => {
     seed([
-      majority('2.2.0', 4),
+      version('2.2.0', [
+        { remote: 'team/mfe-b', req: '^2.1.0', strict: false, entries: { 'dep-a': 'a.js' } },
+      ]),
       version('2.1.0', [
         {
           remote: 'team/mfe-a',
           req: '^2.1.0',
+          strict: false,
           servedBy: 'team/mfe9',
           entries: { 'dep-a': 'a.js', 'dep-a/extra': 'x.js' },
         },
@@ -266,8 +225,7 @@ describe('determine: splitting a version on election', () => {
 
     await createDetermineSharedExternals(config, adapters)();
 
-    // Nothing the shared 2.2.0 ships covers `/extra`, so mfe-a is torn and takes its own build.
-    expect(rows()).toEqual([majorityRow('2.2.0', 4), '2.1.0:scope:[team/mfe-a]']);
+    expect(rows()).toEqual(['2.2.0:share:[team/mfe-b]', '2.1.0:skip:[team/mfe-a]']);
   });
 
   // The objective has to price a rejected row at the copies that really self-serve. Charging it for every
@@ -334,6 +292,72 @@ describe('determine: splitting a version on election', () => {
       await createDetermineSharedExternals(config, adapters)();
 
       expect(rows()).toEqual(['2.3.0:share:[team/a1]', '2.1.0:skip:[team/b1,team/b2]']);
+    });
+
+    // The serving build is decided after the election and may be any copy of the elected tag, so a candidate is
+    // priced on the union of its copies. 2.1.0's copies (b1's dep-a/y, b2's dep-a/x) cover a1 fully, while
+    // electing 2.2.0 leaves b1's dep-a/y uncovered. Equal downloads (all non-strict), fewer tears: 2.1.0 wins,
+    // a tag every range accepts. Priced on its basis copy b1 alone (cached outranks coverage) the two would tie
+    // and the newer version would win.
+    it("prices a candidate on every copy's entrypoints, not its basis copy's alone", async () => {
+      seed([
+        version('2.2.0', [
+          {
+            remote: 'team/a1',
+            req: '^2.1.0',
+            strict: false,
+            entries: { 'dep-a': 'a.js', 'dep-a/x': 'x.js' },
+          },
+        ]),
+        version('2.1.0', [
+          {
+            remote: 'team/b1',
+            req: '^2.1.0',
+            strict: false,
+            cached: true,
+            entries: { 'dep-a': 'a.js', 'dep-a/y': 'y.js' },
+          },
+          {
+            remote: 'team/b2',
+            req: '^2.1.0',
+            strict: false,
+            entries: { 'dep-a': 'a.js', 'dep-a/x': 'x.js' },
+          },
+        ]),
+      ]);
+
+      await createDetermineSharedExternals(config, adapters)();
+
+      expect(rows()).toEqual(['2.2.0:skip:[team/a1]', '2.1.0:share:[team/b1,team/b2]']);
+    });
+
+    // Priced on its basis copy a1 alone, 17.1.1 left c1's dep-a/y uncovered, while 17.0.0, which the 17.1.1
+    // copies reject, counted none of them: 17.0.0 won and b1 ran a tag its `^17.1.1` rejects. b1 ships
+    // dep-a/y at 17.1.1, so 17.1.1 covers c1, ties on tears and wins as the newer version.
+    it('never shares a tag the newer copies reject for a tear another copy of the newer tag covers', async () => {
+      seed([
+        version('17.1.1', [
+          {
+            remote: 'a1',
+            req: '^17.1.1',
+            strict: false,
+            entries: { 'dep-a': 'a.js', 'dep-a/x': 'x.js' },
+          },
+          {
+            remote: 'b1',
+            req: '^17.1.1',
+            strict: false,
+            entries: { 'dep-a': 'a.js', 'dep-a/y': 'y.js' },
+          },
+        ]),
+        version('17.0.0', [
+          { remote: 'c1', req: '^17.0.0', entries: { 'dep-a': 'a.js', 'dep-a/y': 'y.js' } },
+        ]),
+      ]);
+
+      await createDetermineSharedExternals(config, adapters)();
+
+      expect(rows()).toEqual(['17.1.1:share:[a1,b1]', '17.0.0:skip:[c1]']);
     });
   });
 

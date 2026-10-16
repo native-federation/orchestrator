@@ -160,9 +160,9 @@ test.describe('capture: the synthetic siblings', () => {
 
     const map = await nf.map();
     // The seven's shared platform-browser is unchanged, and its `/animations` entrypoints leave the global
-    // map with mfe11: the only build that carried them is now serving only itself. Same file, whichever
-    // build serves it: mfe3, mfe4 and mfe5 tie on round 1 (each borrows `material/sort` at its own Material
-    // tag), and record order breaks it.
+    // map with mfe11: the only build that carried them is now serving only itself. Same file in every 22.0.8
+    // build; mfe5's serves it, the only one shipping `material/sort` beside the `material/table` that mfe3
+    // and mfe4 take from it.
     expect(map.imports['@angular/platform-browser']).toMatch(
       /^http:\/\/mfe\d+\/_angular_platform_browser\.djzJcPG8PR\.js$/
     );
@@ -204,15 +204,17 @@ test.describe('capture: the synthetic siblings', () => {
     // which joins a different npm scope to the Angular family at a completely different version line
     // (4.2.0 beside 22.0.x); it pairs `react` + `react-dom` under `pool: react`, a family scope labelling
     // can never group because the names are unscoped; and one of its entrypoints lives in a non-global
-    // share scope. Nothing here conflicts, so nothing new islands — pools of unrelated version lines
-    // are not a coherence problem by themselves.
+    // share scope. Pools of unrelated version lines are not a coherence problem by themselves, but the
+    // elected build lacks platform-browser entrypoints mfe10 ships, so mfe10 runs its Angular family from its
+    // own build.
     await run(nf, [...CAPTURED_SEVEN, 'mfe10']);
 
-    expect(await nf.islands()).toEqual(['team/mfe1 incompatible']);
+    expect(await nf.islands()).toEqual(['team/mfe1 incompatible', 'team/mfe10 uncovered']);
     const tags = await sharedTags(nf);
     expect(tags['react']).toBe('18.3.1');
     expect(tags['react-dom']).toBe('18.3.1');
-    expect(tags['@acme/design-system']).toBe('4.2.0');
+    // Pooled with that family, mfe10's design system is scoped for it, not shared.
+    expect(tags['@acme/design-system']).toBeUndefined();
     expect(await nf.tears()).toEqual([]);
 
     // The lockstep pair really is one build, and the entrypoint in the `team-a` share scope resolves
@@ -232,12 +234,16 @@ test.describe('capture: the synthetic siblings', () => {
     // The two cross-major remotes leave round 1, and mfe11, which runs 22.0.6 and ships the material root
     // no 22.0.8 build carries. Every remaining shared Angular external on one major; no package split.
     // mfe2's exact cdk 22.0.6 pins run on mfe11's build, so its cdk is not published globally: that is
-    // the gap both warnings name, not material.
+    // the gap two warnings name, not material. The elected build lacks platform-browser entrypoints mfe10
+    // ships, so mfe10 runs its Angular family from its own build, and mfe9, which needs them, joins mfe11's
+    // subpool.
     expect(await nf.islands()).toEqual([
       'team/mfe1 subpool team/mfe1',
+      'team/mfe10 uncovered',
       'team/mfe11 subpool team/mfe11',
       'team/mfe2 subpool team/mfe11',
       'team/mfe8 subpool team/mfe1',
+      'team/mfe9 subpool team/mfe11',
     ]);
     expect(new Set(Object.values(await angularTags(nf)))).toEqual(new Set(['22.0.8', '22.0.6']));
     expect(await nf.tears()).toEqual([]);

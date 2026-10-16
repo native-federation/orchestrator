@@ -221,7 +221,8 @@ describe('createConvertToImportMap', () => {
       });
     });
 
-    it('should self-fill entrypoints the override lacks from the remote own scope', async () => {
+    // A skip is wholly covered by its override, so nothing of the remote's own build is mapped beside it.
+    it('should map a skip from its override alone', async () => {
       const remoteEntry: RemoteEntry = mockRemoteEntry_MFE2({
         exposes: [],
         shared: [
@@ -241,67 +242,9 @@ describe('createConvertToImportMap', () => {
         scopes: {
           [mockScopeUrl_MFE2()]: {
             'dep-a': mockScopeUrl_MFE1({ file: 'dep-a.js' }),
-            'dep-a/sub': mockScopeUrl_MFE2({ file: 'dep-a-sub.js' }),
           },
         },
       });
-    });
-
-    // `sameVersion` marks a skip against the remote's own tag: the copies merge, so the coverage
-    // policy does not apply and the entrypoint comes from this remote's build.
-    it.each([
-      ['scopeUncoveredEntrypoints', () => (config.profile.scopeUncoveredEntrypoints = true)],
-      ['strictEntryPointCoverage', () => (config.strict.strictEntryPointCoverage = true)],
-    ])('should still serve a same-version entrypoint with %s on', async (_name, enable) => {
-      enable();
-      const remoteEntry: RemoteEntry = mockRemoteEntry_MFE2({
-        exposes: [],
-        shared: [
-          mockSharedInfoA.v2_1_2({
-            shareScope: 'custom-scope',
-            entries: { 'dep-a': 'dep-a.js', 'dep-a/sub': 'dep-a-sub.js' },
-          }),
-        ],
-      });
-      const actions: SharedInfoActions = {
-        'dep-a': {
-          action: 'skip',
-          sameVersion: true,
-          override: { 'dep-a': mockScopeUrl_MFE1({ file: 'dep-a.js' }) },
-        },
-      };
-
-      const importMap = await convertToImportMap({ entry: remoteEntry, actions });
-      expect(importMap.scopes![mockScopeUrl_MFE2()]).toEqual({
-        'dep-a': mockScopeUrl_MFE1({ file: 'dep-a.js' }),
-        'dep-a/sub': mockScopeUrl_MFE2({ file: 'dep-a-sub.js' }),
-      });
-      expect(config.log.warn).not.toHaveBeenCalled();
-    });
-
-    it('should not self-fill an uncovered entrypoint when scopeUncoveredEntrypoints is on', async () => {
-      config.profile.scopeUncoveredEntrypoints = true;
-      const remoteEntry: RemoteEntry = mockRemoteEntry_MFE2({
-        exposes: [],
-        shared: [
-          mockSharedInfoA.v2_1_2({
-            shareScope: 'custom-scope',
-            entries: { 'dep-a': 'dep-a.js', 'dep-a/sub': 'dep-a-sub.js' },
-          }),
-        ],
-      });
-      const actions: SharedInfoActions = {
-        'dep-a': { action: 'skip', override: { 'dep-a': mockScopeUrl_MFE1({ file: 'dep-a.js' }) } },
-      };
-
-      const importMap = await convertToImportMap({ entry: remoteEntry, actions });
-      expect(importMap.scopes![mockScopeUrl_MFE2()]).toEqual({
-        'dep-a': mockScopeUrl_MFE1({ file: 'dep-a.js' }),
-      });
-      expect(config.log.warn).toHaveBeenCalledWith(
-        9,
-        "[team/mfe2][dep-a] Entrypoint 'dep-a/sub' is not covered by the override."
-      );
     });
 
     it('should fall back to the own scope when skip has shareScope but no override (non-strict)', async () => {

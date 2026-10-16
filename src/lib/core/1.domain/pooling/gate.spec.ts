@@ -153,8 +153,8 @@ describe('committedView', () => {
       expect([...builds.keys()]).toEqual(['mfe5']);
     });
 
-    // A package's secondary entrypoints are routinely published from a `skip` copy of the shared tag.
-    it('includes a specifier only a skipping copy publishes', () => {
+    // Only share rows publish: a `skip` copy's entrypoint the shared version lacks is not in `imports`.
+    it('leaves out a specifier only a skipping copy ships', () => {
       const members = [
         member('@ng/core', [
           { tag: '22.0.8', action: 'share', copies: [{ remote: 'mfe5' }] },
@@ -162,10 +162,7 @@ describe('committedView', () => {
         ]),
       ];
 
-      expect(viewOf(members).global.get('@ng/core/testing')).toMatchObject({
-        tag: '22.0.8',
-        remote: 'mfe2',
-      });
+      expect(viewOf(members).global.has('@ng/core/testing')).toBe(false);
     });
 
     // The map names a subpool copy's specifiers from its subpool's build, in its own scope, so counting it as
@@ -219,47 +216,186 @@ describe('committedView', () => {
       expect([...viewOf(runtimeJoiners()).global.keys()]).toEqual(['@ng/core']);
     });
 
-    // A named scope has no `imports` to inherit: the load's own scope gets an override, which may name any copy,
-    // as update-cache's `provided` does there.
+    // A named scope has no `imports` to inherit: the load's own scope gets an override, which may name any copy of
+    // the shared version, as update-cache's `provided` does there.
     it('counts that copy in a named scope', () => {
       expect([...viewOf(runtimeJoiners(), undefined, 'team').global]).toEqual([
         ['@ng/core', { tag: '22.0.8', remote: 'mfe5', file: '@ng/core.js' }],
         ['@ng/core/new', { tag: '22.0.8', remote: 'joiner', file: 'n.js' }],
-        ['@ng/core/late', { tag: '22.0.8', remote: 'late', file: 'l.js' }],
       ]);
     });
 
-    // A flat build ships `@ng/core/testing` as a package of its own, a dense one as an entry of `@ng/core`, and
-    // both share it. `generate-import-map` hands it to the package stored first, whatever the pool's name order.
-    it('names the package stored first for a specifier two shared packages claim', () => {
+    // A flat build ships `@ng/core/testing` as an external of its own, a dense one as an entry of `@ng/core`, and
+    // both share it. The package's stored serving build claims it, whichever external is stored first.
+    for (const recordOrder of [
+      ['@ng/core/testing', '@ng/core'],
+      ['@ng/core', '@ng/core/testing'],
+    ])
+      it(`names the serving build for a specifier two externals of one package claim (${recordOrder[0]} first)`, () => {
+        const members = [
+          member('@ng/core', [
+            {
+              tag: '22.0.8',
+              action: 'share',
+              copies: [
+                { remote: 'dense', entries: { '@ng/core': 'c.js', '@ng/core/testing': 't.js' } },
+              ],
+            },
+          ]),
+          member('@ng/core/testing', [
+            { tag: '22.0.8', action: 'share', copies: [{ remote: 'flat' }] },
+          ]),
+        ];
+        for (const { external } of members) external.servingBuild = 'dense';
+
+        expect(
+          committedView(
+            members,
+            copiesByRemote(members, () => false),
+            recordOrder,
+            {
+              shareScope: GLOBAL_SCOPE,
+              without: 'loaded',
+            }
+          ).global.get('@ng/core/testing')
+        ).toEqual({ tag: '22.0.8', remote: 'dense', file: 't.js' });
+      });
+  });
+
+  // A subpool member's copy keeps its own tag in the record, but the map points its scope at the subpool
+  // build's files, so that is what it runs: the build's file at the tag the build pins.
+  describe('what a build runs off the map', () => {
+    // `sub` ships core at 22.0.9 but is served by `x`, which committed core at 22.0.8.
+    const subpool = (subEntries: Record<string, string> = { '@ng/core': 'sub-core.js' }) => [
+      member('@ng/core', [
+        {
+          tag: '22.0.9',
+          copies: [{ remote: 'sub', servedBy: 'x', entries: subEntries }],
+        },
+        {
+          tag: '22.0.8',
+          action: 'share',
+          copies: [{ remote: 'x', entries: { '@ng/core': 'x-core.js' } }],
+        },
+      ]),
+    ];
+
+    it("runs a served copy's specifier from its build's file, at the build's tag", () => {
+      expect(viewOf(subpool()).runsOffMap.get('sub')?.get('@ng/core')).toEqual({
+        tag: '22.0.8',
+        remote: 'x',
+        file: 'x-core.js',
+      });
+    });
+
+    // A corrupt record: `x` lists core in two rows with different files. The first row wins, as in
+    // `copiesByRemote`, so the file and the tag come from one row.
+    it("takes the build's file from its first row", () => {
+      const members = subpool();
+      members[0]!.external.versions.push({
+        tag: '22.0.7',
+        host: false,
+        action: 'skip',
+        remotes: [
+          mockVersionRemote('x', '@ng/core', {
+            requiredVersion: '^22.0.0',
+            entries: { '@ng/core': 'x-core-old.js' },
+          }),
+        ],
+      });
+
+      expect(viewOf(members).runsOffMap.get('sub')?.get('@ng/core')).toMatchObject({
+        remote: 'x',
+        file: 'x-core.js',
+      });
+    });
+
+    // Flat vs dense: `x` ships core/testing as a package of its own, so its file is in a later member's row.
+    it("takes a specifier the build ships in a later row from that row's file", () => {
+      const members = [
+        ...subpool({ '@ng/core': 'sub-core.js', '@ng/core/testing': 'sub-t.js' }),
+        member('@ng/core/testing', [
+          {
+            tag: '22.0.8',
+            action: 'share',
+            copies: [{ remote: 'x', entries: { '@ng/core/testing': 'x-t.js' } }],
+          },
+        ]),
+      ];
+
+      expect(viewOf(members).runsOffMap.get('sub')?.get('@ng/core/testing')).toEqual({
+        tag: '22.0.8',
+        remote: 'x',
+        file: 'x-t.js',
+      });
+    });
+
+    // Specifiers are package names from the remote entry, so one may well name an Object.prototype member.
+    it('resolves a specifier named like an object property to the build file', () => {
+      const tricky = { constructor: 'ctor.js', ['__proto__']: 'proto.js' };
+      const members = [
+        member('@ng/core', [
+          { tag: '22.0.9', copies: [{ remote: 'sub', servedBy: 'x', entries: tricky }] },
+          {
+            tag: '22.0.8',
+            action: 'share',
+            copies: [
+              { remote: 'x', entries: { constructor: 'x-ctor.js', ['__proto__']: 'x-proto.js' } },
+            ],
+          },
+        ]),
+      ];
+      const runs = viewOf(members).runsOffMap.get('sub');
+
+      expect(runs?.get('constructor')).toMatchObject({ remote: 'x', file: 'x-ctor.js' });
+      expect(runs?.get('__proto__')).toMatchObject({ remote: 'x', file: 'x-proto.js' });
+    });
+
+    it('falls back on a specifier named like an object property the build lacks', () => {
+      const runs = viewOf(
+        subpool({ '@ng/core': 'sub-core.js', constructor: 'ctor.js', ['__proto__']: 'proto.js' })
+      ).runsOffMap.get('sub');
+
+      expect(runs?.get('constructor')).toMatchObject({ remote: 'sub', file: 'ctor.js' });
+      expect(runs?.get('__proto__')).toMatchObject({ remote: 'sub', file: 'proto.js' });
+    });
+
+    // The tag is still the build's: it pins the specifier's package, so its other entrypoints run at that tag.
+    it("falls back to the copy's own file where the build has none", () => {
+      const runs = viewOf(
+        subpool({ '@ng/core': 'sub-core.js', '@ng/core/extra': 'sub-extra.js' })
+      ).runsOffMap.get('sub');
+
+      expect(runs?.get('@ng/core/extra')).toEqual({
+        tag: '22.0.8',
+        remote: 'sub',
+        file: 'sub-extra.js',
+      });
+    });
+
+    // Without a subpool every copy runs its own files: a skip copy only the entrypoints the map lacks, a
+    // share copy nothing off the map.
+    it('runs every copy from its own files when no copy is served by another build', () => {
       const members = [
         member('@ng/core', [
           {
             tag: '22.0.8',
             action: 'share',
-            copies: [
-              { remote: 'dense', entries: { '@ng/core': 'c.js', '@ng/core/testing': 't.js' } },
-            ],
+            copies: [{ remote: 'mfe5', entries: { '@ng/core': 'c.js' } }],
           },
-        ]),
-        member('@ng/core/testing', [
-          { tag: '22.0.8', action: 'share', copies: [{ remote: 'flat' }] },
+          {
+            tag: '22.0.7',
+            copies: [{ remote: 'mfe2', entries: { '@ng/core': 'c2.js', '@ng/core/t': 't2.js' } }],
+          },
+          { tag: '21.2.0', action: 'scope', copies: [{ remote: 'old', req: '^21.0.0' }] },
         ]),
       ];
+      const { runsOffMap } = viewOf(members);
 
-      expect(
-        committedView(
-          members,
-          copiesByRemote(members, () => false),
-          ['@ng/core/testing', '@ng/core'],
-          {
-            shareScope: GLOBAL_SCOPE,
-            without: 'loaded',
-          }
-        ).global.get('@ng/core/testing')
-      ).toMatchObject({
-        remote: 'flat',
-      });
+      expect([...runsOffMap].map(([remote, runs]) => [remote, [...runs]])).toEqual([
+        ['mfe2', [['@ng/core/t', { tag: '22.0.7', remote: 'mfe2', file: 't2.js' }]]],
+        ['old', [['@ng/core', { tag: '21.2.0', remote: 'old', file: '@ng/core.js' }]]],
+      ]);
     });
   });
 });
@@ -267,40 +403,41 @@ describe('committedView', () => {
 describe('coverFromMap', () => {
   const policy = {
     shareScope: '__GLOBAL__',
-    selfFill: false,
     scopeUrlOf: () => undefined,
     isChunked: () => false,
   };
 
   // Defensive: unreachable under a coherent committed map, where a remote that agrees with the map never has
-  // a resolver-scoped member (jsdev-b-5's probe). A scope the map serves only in part, or not at all, stays a
-  // scope: half its entrypoints on the map's files and half on its own build would tear it.
-  it('leaves a resolver scope the map serves only in part, or not at all, out of the covers', () => {
+  // a resolver-scoped member. A scope whose package the map serves only in part reports the gap, as any copy
+  // that does not skip does: half the package on the map's files and half on its own build would tear it.
+  it('reports the gap of a resolver scope whose package the map serves only in part', () => {
     const scoped = (entries: Record<string, string>) => [
       member('@ng/core', [
         { tag: '22.0.0', action: 'share', copies: [{ remote: 'F' }] },
         { tag: '22.1.0', action: 'scope', copies: [{ remote: 'mfe', entries }] },
       ]),
     ];
-
-    const cases: Record<string, string>[] = [
-      { '@ng/core': 'core.js', '@ng/core/testing': 'testing.js' },
-      { '@ng/core/testing': 'testing.js' },
-    ];
-    for (const entries of cases) {
+    const cover = (entries: Record<string, string>) => {
       const members = scoped(entries);
-      const view = viewOf(members, 'mfe');
-      expect(
-        coverFromMap('mfe', members, view, { '@ng/core': { action: 'scope' } }, policy)
-      ).toEqual({ covers: [] });
-    }
+      return coverFromMap(
+        'mfe',
+        members,
+        viewOf(members, 'mfe'),
+        { '@ng/core': { action: 'scope' } },
+        policy
+      );
+    };
+
+    expect(cover({ '@ng/core': 'core.js', '@ng/core/testing': 'testing.js' })).toEqual({
+      gap: '@ng/core/testing',
+    });
+    expect(cover({ '@ng/core/testing': 'testing.js' })).toEqual({ gap: '@ng/core/testing' });
   });
 
-  // mfe's copy of `@ng/core` ships rxjs-interop, which the map lacks; the map serves its root from F. With
-  // the coverage policies off, mfe would self-fill rxjs-interop from its own build. A flat file binds its
-  // imports through the map, so that is a cover. A chunked one imports mfe's own core internals beside F's
-  // core: the package is torn, and no member is covered.
-  it("reports a package torn when a chunked copy's own entrypoint would run beside the map's files", () => {
+  // mfe's copy of `@ng/core` joined F's share row with rxjs-interop, which the map lacks; the map serves its
+  // root from F. A cover is whole or nothing, so the gap fails covering, from a flat build as from a chunked
+  // one. Only a copy the map serves whole takes F's files.
+  it('reports the gap of a share the map serves only in part', () => {
     const withMfe = (entries?: Record<string, string>) => [
       member('@ng/core', [
         {
@@ -310,26 +447,23 @@ describe('coverFromMap', () => {
         },
       ]),
     ];
-    const actions = { '@ng/core': { action: 'skip' as const, covered: ['@ng/core'] } };
-    const selfFill = { ...policy, selfFill: true };
+    const actions = { '@ng/core': { action: 'share' as const } };
     const cover = (members: PoolMember[], isChunked: (remote: string) => boolean) =>
-      coverFromMap('mfe', members, viewOf(members, 'mfe'), actions, { ...selfFill, isChunked });
-    const rootCovered = {
-      covers: [{ name: '@ng/core', toSkip: false, covered: ['@ng/core'], override: {} }],
-    };
+      coverFromMap('mfe', members, viewOf(members, 'mfe'), actions, { ...policy, isChunked });
 
     const interop = withMfe({ '@ng/core': 'c.js', '@ng/core/rxjs-interop': 'r.js' });
-    expect(cover(interop, () => false)).toEqual(rootCovered);
-    expect(cover(interop, r => r === 'mfe')).toEqual({ torn: '@ng/core' });
-    // Only an entrypoint mfe runs from its own build counts: F's chunked files are the map's, and a copy the
-    // map serves whole runs on them alone.
-    expect(cover(withMfe(), () => true)).toEqual(rootCovered);
+    expect(cover(interop, () => false)).toEqual({ gap: '@ng/core/rxjs-interop' });
+    expect(cover(interop, r => r === 'mfe')).toEqual({ gap: '@ng/core/rxjs-interop' });
+    expect(cover(withMfe(), () => true)).toEqual({
+      covers: [{ name: '@ng/core', toSkip: true, override: {} }],
+    });
   });
 
-  // mfe's flat core inherits the map's file whole (a skip with nothing to cover); its rxjs-interop, a package
-  // of its own the map lacks, it serves itself. From a chunked build that file binds mfe's core internals
-  // beside F's core, though the two are separate externals.
-  it('counts a package a copy inherits from the map whole as mapped', () => {
+  // mfe's flat core is a skip the map covers whole; its rxjs-interop, an external of its own the map lacks,
+  // would open beside F's core: the package is served in part, so the gap fails covering. From a chunked build
+  // that file binds mfe's core internals beside F's core, though the two are separate externals, which is
+  // reported first.
+  it('counts a package a skip takes from the map whole as mapped', () => {
     const members = [
       member('@ng/core', [
         {
@@ -343,17 +477,50 @@ describe('coverFromMap', () => {
       ]),
     ];
     const actions = {
-      '@ng/core': { action: 'skip' as const },
+      '@ng/core': { action: 'skip' as const, covered: ['@ng/core'] },
       '@ng/core/rxjs-interop': { action: 'share' as const },
     };
     const cover = (isChunked: (remote: string) => boolean) =>
-      coverFromMap('mfe', members, viewOf(members, 'mfe'), actions, {
-        ...policy,
-        selfFill: true,
-        isChunked,
-      });
+      coverFromMap('mfe', members, viewOf(members, 'mfe'), actions, { ...policy, isChunked });
 
-    expect(cover(() => false)).toEqual({ covers: [] });
+    expect(cover(() => false)).toEqual({ gap: '@ng/core/rxjs-interop' });
     expect(cover(r => r === 'mfe')).toEqual({ torn: '@ng/core' });
+  });
+
+  // The host ships only core's testing entrypoint; mfe ships the root, which the map lacks, beside a pool-mate
+  // the map serves whole. Opening or scoping the root alone would run core on two builds, so the gap fails
+  // covering either way.
+  it('reports the gap of a copy whose package the map serves only in part', () => {
+    const members = [
+      member('@ng/core', [
+        {
+          tag: '22.0.0',
+          action: 'share',
+          copies: [{ remote: 'F', entries: { '@ng/core/testing': 't.js' } }],
+        },
+        { tag: '22.1.0', action: 'scope', copies: [{ remote: 'mfe', cached: false }] },
+      ]),
+      member('@ng/common', [
+        {
+          tag: '22.0.0',
+          action: 'share',
+          copies: [{ remote: 'F' }, { remote: 'mfe', cached: false }],
+        },
+      ]),
+    ];
+    const cover = (action: 'share' | 'scope') =>
+      coverFromMap(
+        'mfe',
+        members,
+        viewOf(members, 'mfe'),
+        {
+          '@ng/core': { action },
+          '@ng/common': { action: 'skip', covered: ['@ng/common'] },
+        },
+        policy
+      );
+
+    expect(cover('share')).toEqual({ gap: '@ng/core' });
+    expect(cover('scope')).toEqual({ gap: '@ng/core' });
   });
 });

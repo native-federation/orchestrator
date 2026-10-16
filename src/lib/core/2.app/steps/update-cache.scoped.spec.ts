@@ -7,15 +7,13 @@ import { ModeConfig } from 'lib/core/2.app/config/mode.contract';
 import { RemoteInfo, SharedExternal } from 'lib/core/1.domain';
 import { mockConfig } from 'lib/testing/config.mock';
 import { mockAdapters } from 'lib/testing/adapters.mock';
+import { readScopeThroughTryGet } from 'lib/testing/adapters/shared-externals.repository.mock';
 import {
   mockRemoteInfo_MFE1,
   mockRemoteInfo_MFE2,
 } from 'lib/testing/domain/remote-info/remote-info.mock';
 import { mockRemoteEntry_MFE1 } from 'lib/testing/domain/remote-entry/remote-entry.mock';
-import {
-  mockSharedInfo,
-  mockSharedInfoE,
-} from 'lib/testing/domain/remote-entry/shared-info.mock';
+import { mockSharedInfo, mockSharedInfoE } from 'lib/testing/domain/remote-entry/shared-info.mock';
 import { mockVersion, mockVersion_E } from 'lib/testing/domain/externals/version.mock';
 
 describe('createProcessDynamicRemoteEntry - scoped', () => {
@@ -37,7 +35,10 @@ describe('createProcessDynamicRemoteEntry - scoped', () => {
     });
     adapters.sharedExternalsRepo.tryGet = vi.fn(_e => Optional.empty<SharedExternal>());
 
-    updateCache = createUpdateCache(config, adapters);
+    updateCache = readScopeThroughTryGet(
+      adapters.sharedExternalsRepo,
+      createUpdateCache(config, adapters)
+    );
   });
 
   it('should add a scoped external', async () => {

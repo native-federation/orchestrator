@@ -82,3 +82,8 @@ MF's `shared` config is flat — one key per import specifier, with no nested `e
 consume. So each secondary entrypoint of a shared package is emitted as its own top-level `ShareInfos`
 key (`@angular/core/testing` above), resolving to its own file/url alongside the primary entrypoint.
 See [`entries` in the version resolver](./version-resolver.md).
+
+Each specifier is shared from the copy the import map serves it from, so MF hands out a package's primary and
+secondary entrypoints from the same build, never a secondary only a sibling copy of the version ships. The
+`strict` scope offers every shared version side by side, each from its basis copy (see
+[One build per package](./version-resolver.md#one-build-per-package)).

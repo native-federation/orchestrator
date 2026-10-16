@@ -11,78 +11,10 @@ import type {
 } from 'lib/core/1.domain';
 import { addRemoteToVersion } from 'lib/core/1.domain/externals/basis';
 import { byTag, mergeRows, rowAt } from 'lib/core/1.domain/externals/rows';
-import { packageOf, type Specifier } from 'lib/core/1.domain/externals/specifier';
-import type { IsChunked } from './builds';
-import { tearsPackage } from './rules';
 import type { Election } from './election';
 import type { PoolMember, PoolName } from './membership';
 
-export type PlacedPool = Omit<Election, 'agreeing'> & {
-  poolName: PoolName;
-  // The builds, among those agreeing with round 1, whose remotes take its files where their versions match.
-  keepsGlobalFiles: ReadonlySet<RemoteName>;
-};
-
-// Rule 5 holds per group on one build (a subpool, or a self-serving remote), so its members bind each other
-// on one build. See docs/version-resolver.md §"How the verdicts land in the record and the map".
-export function placePool(
-  election: Election,
-  poolName: PoolName,
-  members: readonly PoolMember[],
-  isChunked: IsChunked
-): PlacedPool {
-  const { agreeing, globalTags, placements, ...placed } = election;
-  const servedPackages = new Set([...globalTags.keys()].map(packageOf));
-  // A copy off the map beside a specifier the map serves runs a second instance of it.
-  const tears = (meta: SharedVersionMeta) => {
-    const chunked = isChunked(meta.name, meta.bundle);
-    return Object.keys(meta.entries).some(
-      s => globalTags.has(s) || tearsPackage(chunked, s, servedPackages)
-    );
-  };
-  const keepsGlobalFiles = new Set(agreeing);
-  for (const member of members) {
-    const takesGlobalFiles = globalFilesTaker(member, { globalTags, placements }, agreeing);
-    for (const version of member.external.versions)
-      for (const meta of version.remotes) {
-        const runs = runsOn(placements, meta.name);
-        if (keepsGlobalFiles.has(runs) && !takesGlobalFiles(meta, version.tag) && tears(meta))
-          keepsGlobalFiles.delete(runs);
-      }
-  }
-  return { ...placed, globalTags, placements, poolName, keepsGlobalFiles };
-}
-
-const runsOn = (placements: Election['placements'], name: RemoteName) => {
-  const placement = placements.get(name)!;
-  return placement.kind === 'subpool' ? placement.owner : name;
-};
-
-// Rule 5: a build that keeps the global files takes them where a global copy at its tag lists every file it
-// takes.
-function globalFilesTaker(
-  member: PoolMember,
-  { globalTags, placements }: Pick<Election, 'globalTags' | 'placements'>,
-  keepsGlobalFiles: ReadonlySet<RemoteName>
-) {
-  // What the global copies of this member ship, per tag. The import map maps a specifier from whichever
-  // external reaches it first, so a global copy in another member's record cannot stop a copy of this one
-  // claiming it.
-  const claimableAt = new Map<VersionName, Set<Specifier>>();
-  for (const version of member.external.versions)
-    for (const { name, entries } of version.remotes)
-      if (placements.get(name)!.kind === 'global') {
-        let specifiers = claimableAt.get(version.tag);
-        if (!specifiers) claimableAt.set(version.tag, (specifiers = new Set()));
-        for (const s in entries) specifiers.add(s);
-      }
-
-  return (meta: SharedVersionMeta, tag: VersionName) =>
-    keepsGlobalFiles.has(runsOn(placements, meta.name)) &&
-    Object.keys(meta.entries).every(
-      s => globalTags.get(s) === tag && claimableAt.get(tag)?.has(s) === true
-    );
-}
+export type PlacedPool = Election & { poolName: PoolName };
 
 // One row per (tag, action); see docs/version-resolver.md §"How the verdicts land in the record and the map".
 export function memberRecord(
@@ -91,15 +23,14 @@ export function memberRecord(
   compare: (a: VersionName, b: VersionName) => number
 ): SharedExternal {
   const { globalTags, placements } = pool;
-  // A package can ship only secondary entrypoints (`material/table` without `material`), so its shared tag
-  // is whatever round 1 serves any of its entrypoints at.
-  let sharedTag: VersionName | undefined;
+  // The external's own specifier fixes its shared tag; a package can ship only secondary entrypoints
+  // (`material/table` without `material`), so failing that it is whatever round 1 serves any of them at.
+  let sharedTag = globalTags.get(member.name);
   for (const version of member.external.versions)
     for (const meta of version.remotes)
       for (const s in meta.entries) sharedTag ??= globalTags.get(s);
 
   const claimsGlobally = (name: RemoteName) => placements.get(name)!.kind === 'global';
-  const takesGlobalFiles = globalFilesTaker(member, pool, pool.keepsGlobalFiles);
 
   const placed: SharedVersion[] = [];
   let winnerRow: SharedVersion | undefined;
@@ -118,7 +49,7 @@ export function memberRecord(
       // The import map is rebuilt from scratch, so it re-marks what it publishes.
       const meta = { ...rest, cached: false };
       const placement = placements.get(meta.name)!;
-      if (placement.kind === 'global' || takesGlobalFiles(meta, version.tag))
+      if (placement.kind === 'global')
         place(version.tag, version.tag === sharedTag ? 'share' : 'skip', meta);
       else if (placement.kind === 'subpool')
         place(version.tag, 'skip', { ...meta, servedBy: placement.owner });
@@ -141,6 +72,25 @@ export type CopyMove = { cause: PoolCause } | { fromMap: true };
 
 // A fresh record, only the loaded remote's copy moved.
 export function movedRecord(
+  external: SharedExternal,
+  remote: RemoteName,
+  move: CopyMove,
+  compare: (a: VersionName, b: VersionName) => number
+): SharedExternal {
+  return withoutStaleServingBuild(moveCopy(external, remote, move, compare));
+}
+
+// The claim table trusts `servingBuild`, so a move that takes the named copy out of every share row drops it.
+function withoutStaleServingBuild(record: SharedExternal): SharedExternal {
+  const { servingBuild, ...rest } = record;
+  if (servingBuild === undefined) return record;
+  const shares = record.versions.some(
+    v => v.action === 'share' && v.remotes.some(r => r.name === servingBuild)
+  );
+  return shares ? record : rest;
+}
+
+function moveCopy(
   external: SharedExternal,
   remote: RemoteName,
   move: CopyMove,

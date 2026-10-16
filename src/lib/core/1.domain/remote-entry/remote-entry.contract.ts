@@ -21,10 +21,6 @@ type SharedInfoActions = Record<
   {
     action: SharedVersionAction;
     override?: Record<string, string>;
-    covered?: string[];
-    // The skip joins the shared version's own tag, so its extra entrypoints merge into that
-    // version instead of counting as a tear.
-    sameVersion?: boolean;
   }
 >;
 

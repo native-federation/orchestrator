@@ -8,7 +8,7 @@ import {
 } from 'lib/core/1.domain';
 import { NFError } from 'lib/core/native-federation.error';
 import { createAcceptsTag } from 'lib/core/1.domain/externals/compatibility';
-import { owningPackage } from 'lib/core/1.domain/externals/specifier';
+import { owningPackage, packageOf } from 'lib/core/1.domain/externals/specifier';
 import { buildPools } from 'lib/core/1.domain/pooling/membership';
 import { createVersionCheck } from 'lib/core/3.adapters/checks/version.check';
 import * as _path from 'lib/utils/path';
@@ -59,9 +59,9 @@ export function pools(record: shareScope): Map<string, shareScope> {
 }
 
 // The oracle per pool, as the labels make it rather than as the record names it; the strict scope, never
-// pooled, is read as stored. Unpooled packages are left out on purpose: outside a pool the import-map builders
-// self-fill an entrypoint the shared version lacks from the consumer's own build, a documented between-versions
-// tear that pooling makes no promise about.
+// pooled, is read as stored. Unpooled packages are left out on purpose, as pooling makes no promise about
+// them. At init a remote falls back one package at a time, and a dynamic load can run one from its own build
+// (docs/version-resolver.md §"Entrypoint coverage and tearing").
 export function poolTears(
   importMap: ImportMap,
   record: shareScope,
@@ -142,7 +142,6 @@ export function openPortfolio(
     strict?: boolean;
     scope?: string;
     latestSharedExternal?: boolean;
-    scopeUncoveredEntrypoints?: boolean;
   } = {}
 ) {
   const p = portfolio(
@@ -151,7 +150,6 @@ export function openPortfolio(
       hosts: o.host === undefined ? [] : [o.host],
       strict: o.strict,
       latestSharedExternal: o.latestSharedExternal,
-      scopeUncoveredEntrypoints: o.scopeUncoveredEntrypoints,
       ...(o.scope === undefined ? {} : { scope: o.scope }),
       storage: `nf-pooling-property-${namespaces++}`,
       realRepositories: true,
@@ -212,7 +210,6 @@ export async function initOrRefuse(spec: PortfolioSpec) {
     host,
     scope: spec.shareScope,
     latestSharedExternal: spec.latestSharedExternal,
-    scopeUncoveredEntrypoints: spec.scopeUncoveredEntrypoints,
   });
   try {
     const result = await rig.init(entries);
@@ -266,10 +263,6 @@ export function outcome(
       }
   return { runs, verdicts };
 }
-
-// Every `remote|specifier` a remote ships that the map leaves unresolved.
-export const unmapped = (runs: Record<string, string | null>): string[] =>
-  Object.keys(runs).filter(key => runs[key] === null);
 
 // `runs` split into the `remote|specifier` keys of the externals `record` names a pool for and the rest.
 export function byPooling(runs: Record<string, string | null>, record: shareScope) {
@@ -342,6 +335,8 @@ export function electedTags(importMap: ImportMap, copies: PoolCopy[]): Map<strin
  * elected tags, restated independently of `election.ts`:
  * - `rejects`: a copy's range rejects the elected tag of a specifier it ships (its own tag never);
  * - `missing`: the global map serves no tag for one of its specifiers;
+ * - `partial`: the global map lacks one of its specifiers but serves another of that package, so it runs the
+ *   package from its own build (a package the map lacks entirely it opens instead);
  * - `witnessed`: one build of `builds` shipped every one of its specifiers at the elected tag, a build's package
  *   tag standing in for an entrypoint it does not list (the witness rule the extension applies);
  * - `agrees`: every tag it ships is the elected one, compared through the package where the map lacks the
@@ -363,11 +358,16 @@ export function oracleVerdict(
   const buildTag = (build: string, member: string) =>
     copies.find(c => c.remote === build && c.member === member)?.tag;
 
+  const servedPackages = new Set([...elected.keys()].map(packageOf));
+
   return {
     rejects: own.some(c =>
       c.specifiers.some(s => elected.has(s) && !accepts(elected.get(s)!, c.tag, c.range))
     ),
     missing: own.some(c => c.specifiers.some(s => !elected.has(s))),
+    partial: own.some(c =>
+      c.specifiers.some(s => !elected.has(s) && servedPackages.has(packageOf(s)))
+    ),
     witnessed: builds.some(build =>
       own.every(c => c.specifiers.every(s => buildTag(build, c.member) === elected.get(s)))
     ),

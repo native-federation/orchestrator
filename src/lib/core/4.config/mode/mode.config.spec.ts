@@ -8,7 +8,6 @@ describe('config.mode', () => {
     expect(config.profile).toEqual({
       latestSharedExternal: false,
       skipInvalidExternalVersions: false,
-      scopeUncoveredEntrypoints: false,
       overrideCachedRemotes: 'init-only',
       overrideCachedRemotesIfURLMatches: false,
     });
@@ -18,7 +17,6 @@ describe('config.mode', () => {
     expect(config.profile).toEqual({
       latestSharedExternal: false,
       skipInvalidExternalVersions: false,
-      scopeUncoveredEntrypoints: false,
       overrideCachedRemotes: 'never',
       overrideCachedRemotesIfURLMatches: false,
     });
@@ -37,11 +35,10 @@ describe('config.mode', () => {
       strictExternalSameVersionCompatibility: false,
       strictExternalVersion: false,
       strictImportMap: false,
-      strictEntryPointCoverage: false,
     });
   });
 
-  it('should expand a strict: true shorthand to every strict flag, coverage included', () => {
+  it('should expand a strict: true shorthand to every strict flag', () => {
     const config = createModeConfig({ strict: true });
     expect(config.strict).toEqual({
       strictRemoteEntry: true,
@@ -49,13 +46,6 @@ describe('config.mode', () => {
       strictExternalSameVersionCompatibility: true,
       strictExternalVersion: true,
       strictImportMap: true,
-      strictEntryPointCoverage: true,
     });
-  });
-
-  it('should default strictEntryPointCoverage to false when other strict flags are set', () => {
-    const config = createModeConfig({ strict: { strictImportMap: true } });
-    expect(config.strict.strictEntryPointCoverage).toBe(false);
-    expect(config.strict.strictImportMap).toBe(true);
   });
 });

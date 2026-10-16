@@ -1,13 +1,16 @@
 import type { DeepReadonly } from 'lib/utils/deep-readonly';
+import { compareStrings } from 'lib/utils/compare-strings';
 import type { SharedVersion, SharedVersionMeta } from './version.contract';
 
 const coverage = (remote: SharedVersionMeta): number => Object.keys(remote.entries).length;
 
 // `remotes[0]` is the basis: the copy every consumer of the version resolves to. Host and cached
-// outrank coverage because repointing them invalidates a committed import map.
+// outrank coverage because repointing them invalidates a committed import map. An exact tie goes to the
+// name, so the basis does not depend on the order remotes register in.
 export function isBetterBasis(candidate: SharedVersionMeta, basis: SharedVersionMeta): boolean {
   if (basis.cached !== candidate.cached) return candidate.cached;
-  return coverage(candidate) > coverage(basis);
+  const byCoverage = coverage(candidate) - coverage(basis);
+  return byCoverage === 0 ? compareStrings(candidate.name, basis.name) < 0 : byCoverage > 0;
 }
 
 export function addRemoteToVersion(
@@ -46,39 +49,16 @@ export function versionDemands(version: SharedVersion): SharedVersionMeta[] {
   return Array.from(distinct.values());
 }
 
-// Every copy of a version builds the same tag, so a specifier only some of them bundle is not a
-// tear: the version exposes the union of its copies' entrypoints, each served by the first copy
-// that declares it — basis precedence first. See
-// docs/version-resolver.md#entrypoint-coverage-and-tearing.
+// Which copies of a version may publish a specifier, in basis precedence; callers keep the first claim. The
+// copies build one tag, so this is what the version ships, not whose files a consumer runs; see
+// docs/version-resolver.md#copies-of-one-version.
 //
 // Only copies that publish their own files count. Pooling places a copy in a subpool running a foreign
 // build via `servedBy`, and the import map then names that build's files for it, per consumer — so what
 // such a copy bundles answers for nobody but itself, and counting it would promise a specifier no
 // consumer of this version can resolve. Pooling keeps a subpool copy out of the basis slot for exactly
-// this reason, so a `share` version's basis always survives the skip.
-export function versionEntries(version: SharedVersion): Map<string, SharedVersionMeta> {
-  return collectEntries(version, undefined);
-}
-
-// The part of that surface a committed import map already publishes, which on the dynamic path is less than
-// all of it: a copy that joined at runtime served its extra entrypoints into its own scope alone, so it is
-// part of the version yet can serve nobody else. `cached` is set by whichever import-map builder mapped the
-// copy, so it answers exactly that. Only a consumer that resolves through the committed mapping needs this
-// — a per-consumer override names its provider outright and can use any copy.
-export function committedEntries(version: SharedVersion): Map<string, SharedVersionMeta> {
-  return collectEntries(version, remote => remote.cached);
-}
-
-/**
- * The walk both of those keep the first claim of: which copies of a version may publish a specifier, in basis
- * precedence. Exposed so a caller that models the same fill order without needing the map — the pooling gates
- * ask which build a consumer lands on, per specifier — reads the `servedBy` rule from here instead of
- * restating it. It deliberately does not dedup: the callers do, and this way the walk allocates nothing.
- *
- * `accepts` is for a caller with a further reason to discount a copy (`committedEntries`: one the committed
- * map does not publish). Filtering the *result* is not the same thing — that drops the specifier instead of
- * letting the next copy claim it.
- */
+// this reason, so a `share` version's basis always survives the skip. `accepts` lets a caller discount a
+// copy without dropping its specifiers for the next copy to claim.
 export function forEachVersionEntry(
   version: DeepReadonly<SharedVersion>,
   accepts: ((remote: SharedVersionMeta) => boolean) | undefined,
@@ -91,26 +71,10 @@ export function forEachVersionEntry(
   }
 }
 
-function collectEntries(
-  version: SharedVersion,
-  accepts: ((remote: SharedVersionMeta) => boolean) | undefined
-): Map<string, SharedVersionMeta> {
-  const entries = new Map<string, SharedVersionMeta>();
-  forEachVersionEntry(version, accepts, (entrypoint, remote) => {
-    if (!entries.has(entrypoint)) entries.set(entrypoint, remote);
-  });
-  return entries;
-}
-
-// A `versionEntries` map or a bare name set both answer "can this be served?".
 type Covered = Pick<ReadonlySet<string>, 'has'>;
 
-export function uncoveredEntrypoints(remote: SharedVersionMeta, covered: Covered): string[] {
-  return Object.keys(remote.entries).filter(entrypoint => !covered.has(entrypoint));
-}
-
-// `uncoveredEntrypoints` without materializing the names: the resolver's O(versions²) selection
-// loop asks this once per remote per candidate and only needs the count. Keep the two in sync.
+// Counted rather than listed: the resolver's O(versions²) selection loop asks this once per remote per
+// candidate.
 export function countUncoveredEntrypoints(remote: SharedVersionMeta, covered: Covered): number {
   let uncovered = 0;
   for (const entrypoint in remote.entries) {

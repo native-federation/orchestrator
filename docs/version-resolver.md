@@ -215,51 +215,121 @@ specifier to its output file:
 
 The resolver treats the whole `entries` map as one shared external: version negotiation happens once per
 package, and every specifier in `entries` follows the winning version's placement — scoped, shareScope,
-global, or the skip/override redirect. When a shared version wins, the union of its copies' `entries` is
-the surface served to every consumer of that version, so each secondary entrypoint resolves to the same
-version as its primary. (Older/flat remote builds emit one `SharedInfo` per specifier; set
-[`feature.convertFlatSharedInfo`](./config.md#modeConfig) to group them at runtime.)
+global, or the skip/override redirect. When a shared version wins, its serving build's `entries` publish, so
+every secondary entrypoint that build ships resolves to the same build as its primary (see
+[Copies of one version](#copies-of-one-version) for the version's other copies). (Older/flat remote
+builds emit one `SharedInfo` per specifier; set [`feature.convertFlatSharedInfo`](./config.md#modeConfig) to
+group them at runtime.)
 
 #### The basis of a version
 
 Several remotes can report the same version of a package, and they all land in one `SharedVersion` as its
 `remotes` list. They build the same tag, but each bundles only the entrypoints it actually imports, so the
 lists can differ. `remotes[0]` is the version's **basis** — the copy that serves every specifier it
-declares, and thus the primary — and the cache keeps it sorted on insert by this precedence:
+declares — and the cache keeps it sorted on insert by this precedence:
 
 1. **host** — the shell's build is already loaded in the browser and cannot be repointed.
 2. **cached** — an already-served copy; repointing it would invalidate a committed import map and force a
    redundant download.
 3. **widest coverage** — the copy declaring the most entrypoints, so fewest builds are needed.
-4. **record order** — ties keep the incumbent, so generated import maps stay byte-stable.
+4. **name** — an exact tie goes to the remote whose name sorts first (code-unit order), so the basis does not
+   depend on the order remotes register in. A tie never repoints a host or cached basis: a dynamic load keeps
+   the committed build, and the name decides only among copies none of which is the host or cached yet (a cold
+   init, or a version new to storage).
 
 Rule 3 is what makes a superset copy win: given `{table}`, `{table}` and `{sort, table}` of one version,
 the third becomes the basis and serves both specifiers from a single build. Rules 1 and 2 deliberately
-outrank it — stability beats optimality — so a host or already-served basis can leave gaps its siblings
-fill (see below).
+outrank it — stability beats optimality — so a host or already-served basis can lack an entrypoint a sibling
+ships (see [One build per package](#one-build-per-package) for the build that then serves the package).
 
-#### Merging within a version
+#### One build per package
 
-Copies of one version build the same tag, so a specifier only some of them bundle is not a conflict: the
-version **exposes the union of its copies' entries**, each specifier served by the first copy that declares
-it in basis precedence. Given a cached basis `{table}` and a sibling `{table, sort}`, `table` resolves to
-the basis's build and `sort` to the sibling's — every entrypoint any copy declares stays importable, and
-no copy is pushed out of sharing because it bundles more than the basis. This is unconditional: the
-coverage settings below never apply within a version. For pooled externals, pooling keeps a chunked package on
-one build (see [How pooling resolves](#how-pooling-resolves)). For unpooled ones, merging a chunked copy's
-entries can still run two copies of its internals.
+A package is its primary external plus any flat secondary externals (`@angular/core/testing` reported as an
+external of its own). Per share scope — global and each named shareScope — every package is served from
+**one build**, picked after the shared versions are determined and stored as `servingBuild` on every
+external of the package in that scope. A dynamic load that opens a package the committed map does not serve
+stores the loaded remote as its serving build, as an election would (see
+[Scope and dynamic init](#scope-and-dynamic-init)).
 
-Only copies that publish their own files join the union. A copy pooling has placed in a foreign build's
+- A **pooled** package takes its pool's winner, the build its election made global, when the winner has a copy
+  in the primary's share row (or in any share row of the package when the primary has none). It is not ranked
+  again: without such a copy it takes the widest copy in those rows that publishes its own files (the most
+  entrypoints across the package's externals, then the name that sorts first), and it has no serving build only
+  when no such copy is left.
+- An **unpooled** package ranks the copies that publish their own files in its primary's share rows, or in
+  every share row of its externals when the primary has none (a package can ship secondary entrypoints only),
+  leaving out a remote that ships the package at two tags unless it is the host:
+  1. **host** — the shell's build.
+  2. **fewest extra downloads** — one for the build itself unless its copies of the package are all cached,
+     plus one for every other remote that would run its own build of the package (a copy in a `scope` row, a
+     `strictVersion` copy whose range rejects the tag, or a fallback, key 3) unless that remote's copies are all
+     cached.
+  3. **fewest fallbacks** — the remotes that ship a specifier of the package outside the candidate's copies at
+     its tag, that would run one external of the package from a `scope` row and another from the map, or that
+     ship the package at two tags; each runs the whole package from its own build (see
+     [Entrypoint coverage and tearing](#entrypoint-coverage-and-tearing)).
+  4. **primary's basis** — the basis of the primary's share row.
+  5. **name** — code-unit order, so the choice never depends on the order remotes register in.
+
+Every specifier the serving build ships is served from it, also when another external of the package lists it:
+with a dense `@angular/core` and a flat `@angular/core/testing` at the same tag, `@angular/core/testing` comes
+from the serving build, not from whichever external the record lists first. A share row of an external whose
+name another external already serves at the same tag publishes nothing, and is not reported as a second
+shared version; only a share row at another tag is.
+
+The primary fixes the tag its secondaries follow. In an unpooled package every share row at another tag follows
+the serving tag, once the remotes the serving build does not cover have moved to `scope` rows: its copies
+`skip`, and a `strictVersion` copy whose range rejects the tag is scoped, or fails init under
+[`strict.strictExternalCompatibility`](./config.md#modeConfig), as in
+[Determine Shared Versions](#determine-shared-versions). A pooled package keeps the rows its election placed.
+
+A remote can ship one package at two tags: sharedMappings that carry versions of their own (`@org/shared/ui` 1.0.0
+beside `@org/shared/util` 2.0.0), or npm secondaries that a wildcard export stamps with the range's version beside
+the installed root (`17.1.0` beside `17.1.1`). Its build cannot serve both tags as one, so in an unpooled package
+such a remote is no candidate and never follows another build: it runs the whole package from its own build. When
+that leaves no candidate, nothing serves the package globally and every remote with a copy of it on the map runs
+its own build. The host is the exception whenever it is a candidate (it has a copy in the primary's share rows, or
+the primary has none): it serves every tag it ships, globally, and is never scoped. Its share rows at other tags
+stay shared, and a remote whose specifiers its copies cover follows it. A `strictVersion` copy whose range rejects
+a host file it would take at a tag other than the serving tag runs the package from its own build instead, as a
+runtime load of it does.
+
+Deciding the serving build is the second election stage, after the version election: `dirty` marks an external
+the version election must take again, and `undecidedScopes` (in the `cache-state` storage key) marks a share scope
+the serving-build election must take again. An init decides serving builds only in a share scope that changed: one
+it wrote before deciding (a fetched or evicted remote, a re-election), or one a runtime load wrote since the scope
+was last decided. A load decides none itself; it marks the scopes it wrote, and the next init decides them and
+clears the mark. A
+warm init that changes no remote decides nothing. Like pooling, which skips a scope with no dirty external, it
+therefore checks nothing again in a skipped scope: switching on `strict.strictExternalCompatibility` over a warm
+cache refuses nothing until a remote in that scope changes.
+
+#### Copies of one version
+
+Copies of one version build the same tag, so a specifier two of them ship is the same published code, and one
+only some of them bundle is not a conflict between them. Pooling relies on this when it asks whether one build
+shipped a combination: a build that ships a package at a tag also stands for that package's other entrypoints
+at it (see [How pooling resolves](#how-pooling-resolves)).
+
+It does not make their files interchangeable: a file binds its own imports where its build lives. A version
+with a serving build publishes that build's entries alone (see [One build per package](#one-build-per-package)),
+and a copy that declares an entrypoint the serving build lacks runs its package from its own build (see [Entrypoint
+coverage and tearing](#entrypoint-coverage-and-tearing)). The version's other `share`-row copies publish nothing,
+so a page that starts warm after a dynamic load still runs the package from the one build that serves it. An
+external without a serving build publishes its `share`-row copies in record order, each specifier from the first
+copy that declares it. A package in the `strict` scope has no serving build: its `share`-row copies publish in
+basis precedence, tag by tag (see [Entrypoint coverage and tearing](#entrypoint-coverage-and-tearing)).
+
+Only copies that publish their own files can serve a version. A copy pooling has placed in a foreign build's
 subpool (`servedBy`, see [How pooling resolves](#how-pooling-resolves)) runs that build's files, named in its
-own scope per consumer — so what it bundles answers for itself alone, and counting it would advertise a
-specifier no other consumer of the version can resolve. Pooling keeps a subpool copy out of the basis slot
-for this reason, so a shared version always has its basis to serve from.
+own scope per consumer, so what it bundles answers for itself alone. Pooling keeps a subpool copy out of the
+basis slot for this reason, so a shared version always has its basis to serve from.
 
 #### Entrypoint coverage and tearing
 
-A version's merged entries are not guaranteed to list every specifier a consumer needs. A `skip` version
-redirected to the winner can declare a secondary entrypoint no copy of the winner contains — for example
-the shared version ships `@angular/core` while a compatible, deduped remote on another tag also imports
+The build serving a package does not always ship every specifier a consumer imports. A `skip` version
+redirected to the winner can declare a secondary entrypoint the winner's copy lacks — for example the shared
+version ships `@angular/core` while a compatible, deduped remote on another tag also imports
 `@angular/core/testing`:
 
 ```
@@ -267,46 +337,72 @@ the shared version ships `@angular/core` while a compatible, deduped remote on a
 @angular/core  20.1.0  skip   mfe-b  entries { @angular/core, @angular/core/testing }
 ```
 
-Serving those two specifiers from two **different versions** is a **tear**. It is harmless for most
-libraries but can break packages whose secondary entrypoints share module-singleton state with the primary.
-Three behaviours are available, in precedence order:
+Serving those two specifiers from two **different builds** is a **tear**. It is harmless for most libraries but
+breaks packages whose secondary entrypoints share module-singleton state with the primary. Outside the `strict`
+share scope, a remote at init never resolves its own imports of one package to two builds, with one exception: a
+host whose build ships a secondary entrypoint without its root (see
+[When the host's build lacks an entrypoint](#when-the-hosts-build-lacks-an-entrypoint)).
+mfe-b above runs both specifiers from its own build: its copies move to `scope` rows at 20.1.0, and mfe-a's build
+keeps serving everyone else. The same holds within one version: a copy of the shared tag that ships an
+entrypoint the serving copy lacks runs its package from its own build too. So does a remote whose flat
+secondary external is scoped, say because its `strictVersion` range rejects that external's tag: it runs the
+primary from its own build as well, even where the serving build ships both. A shared file of another package can
+still bind the shared copy of a package the remote runs from its own build (see
+[Declare the coupling you actually have](#declare-the-coupling-you-actually-have)).
 
-| Setting | Behaviour on an entrypoint uncovered by the shared version |
-| --- | --- |
-| [`strict.strictEntryPointCoverage`](./config.md#modeConfig) | **Throws.** Resolution refuses to share a package it cannot serve coherently. |
-| [`profile.scopeUncoveredEntrypoints`](./config.md#modeConfig) | **Scopes.** The uncovered copy is split out into a `scope` version of its own tag and serves its whole `entries` bunch from its own build. Sharing continues for the copies the shared version does cover. |
-| neither (default) | **Self-fills.** The specifier is served from the declaring remote's own build and a warning is logged. Nothing is dropped; the package tears. |
+The `strict` scope has no serving build: the copies of one tag merge their entries, each specifier served by the
+first copy that declares it in basis precedence, so a copy can run its root from another copy's build beside a
+secondary from its own.
 
-**Inside a pool the tear cannot happen at all**, whichever of the three is configured: pooling tests coverage
-itself, **per specifier**, and a remote no build covers takes its whole family from its own build (see
-[How pooling resolves](#how-pooling-resolves)). Per specifier is the load-bearing part — a build can be the
-elected basis of every *member* of a pool and still not carry one secondary entrypoint, which the mapping then
-serves from the declaring remote's own build at that remote's own tag. Every test pooling applies, including
-the borrowing of same-tag entrypoints from other builds, is therefore keyed on specifiers. All three
-settings are `false` in every shipped profile, so a pooled family relies on the pooling rule, and an unpooled
-package still self-fills as described.
+**Inside a pool the unit is the family.** Pooling tests coverage **per specifier**, and a remote no build
+covers takes its whole family from its own build (see [How pooling resolves](#how-pooling-resolves)): leaving
+the map for one package only would tear one level up, since the shared files of its other packages bind the
+shared copy of the one it left. Per specifier is the load-bearing part: a build can be the elected basis of
+every *member* of a pool and still not carry one secondary entrypoint; a remote importing it is not served by
+that build and runs its whole family from a subpool's build that serves it, or else from its own
+(`uncovered`). Outside a pool no family is declared, so the unit is the package (see
+[Declare the coupling you actually have](#declare-the-coupling-you-actually-have)).
 
-Both settings are strictly about tears between versions; copies of the shared version itself always merge,
-whatever they are set to. A subpool copy is exempt in both directions — it cannot cover anyone else, and
-the shared version cannot tear it, because it resolves through its subpool's build rather than through the
-version. Scoping is per remote copy, not per version: given a shared surface
-`{table, sort}`, a skipped `{table}` and a skipped `{table, paginator}`, only the third is split out — the
-first two keep sharing. The import-map builders keep a last-resort net for stale storage: an uncovered
-specifier reaching them is refused under `strictEntryPointCoverage` or
-[`strict.strictImportMap`](./config.md#modeConfig), and warned about otherwise.
+A subpool copy resolves through its subpool's build rather than through the version, so it neither covers
+another copy nor is torn by the version.
 
-The additive dynamic-init path applies the same policy to a runtime remote whose tag differs from the shared
-one, but measures it against a smaller surface: what the **committed** import map publishes for the version,
-not the whole union. A copy that joined at runtime served its own extra entrypoints into its own scope alone
-— the committed `imports` cannot be added to — so it is part of the version and covers nobody. Reading the
-whole union there would report a specifier as covered that the joining remote has no way to resolve. A
-shareScope skip is not restricted this way: it is handed a per-consumer override that names its provider
-outright, so any copy can serve it.
+A dynamic load (`initRemoteEntry`) cannot change the committed map, so it takes each package of the loaded
+remote as a whole: it follows the build the map serves every entrypoint it ships from, or runs the whole package
+from its own build, never part of it on the map's files and part on its own (see
+[Scope and dynamic init](#scope-and-dynamic-init)). It reads what the **committed** map publishes, not the union
+of a version's copies: a specifier only a sibling copy ships is not on the map, so it covers nobody.
 
-To minimise tears (and scope promotions) the resolver also uses coverage as a **tiebreaker** when choosing
+To minimise tears the resolver also uses coverage as a **tiebreaker** when choosing
 the shared version: among candidates that tie on the extra-downloads heuristic, it prefers the one whose
-merged entries leave the fewest specifiers uncovered across the versions it would skip. A decisive
+copies together leave the fewest specifiers uncovered across the versions it would skip. It counts every copy of
+the candidate's tag, as the serving build is decided later and may be any of them. A decisive
 extra-downloads winner is never overridden, and an exact tie still keeps the highest version.
+
+#### When the host's build lacks an entrypoint
+
+The host's files can import a specifier its build never declared: an entrypoint the build skipped, or one a
+shared package loads through a dynamic `import()` that the build's unused-dependency pruning does not see. Init
+reads only what builds declare, never what their files import, so it cannot tell this from an entrypoint nobody
+needs. The host is never repointed and never borrows the specifier from another build, even one at the same tag,
+so the host's import of it does not resolve. It comes in two shapes:
+
+- **The host lacks a secondary entrypoint a remote ships** (`@fw/core/rxjs-interop` beside the host's
+  `@fw/core`). The global map leaves the specifier unmapped, and the remote that ships it runs the package —
+  pooled, its whole family — from its own build.
+- **The host ships a secondary entrypoint without its root** (`@fw/core/rxjs-interop`, no `@fw/core`). Pooled,
+  the root stays unmapped and the host's import of it unresolved; the remotes run the root off the map. Unpooled,
+  the serving remote publishes its root globally and the host's secondary moves to the host's own scope, where
+  its import of the root binds the remote's: no build ships both, so the host runs the package from two builds.
+
+Neither is repaired at runtime; the fix is in the host's build:
+
+- Do not `skip` an entrypoint the host's shared packages import: skipping `@angular/common/http` leaves
+  `@angular/platform-browser`'s static import of it unresolved, and the page fails to load.
+- For a dynamic import the pruning misses, set `features.ignoreUnusedDeps: false`, or keep every secondary of
+  the package with `includeSecondaries: { keepAll: true }` on its shared external. Angular's
+  `provideAnimationsAsync()` is the known case: `@angular/platform-browser/animations/async` loads
+  `@angular/animations/browser` dynamically, the default build omits it, and the host's animations silently
+  never run.
 
 ### Shared scopes
 
@@ -540,9 +636,7 @@ flowchart TD
 > Externals in a [pool](#dependency-pooling) skip this flow: the pool elects its members together, and
 > `determine` only reports them as re-elected.
 
-> The "least extra downloads" choice (F5) is tie-broken by entrypoint coverage, and with
-> [`profile.scopeUncoveredEntrypoints`](./config.md#modeConfig) a `SKIP` copy whose specifiers the
-> winner cannot cover is promoted to `SCOPE` — copies of the winner's own tag merge instead. See
+> The "least extra downloads" choice (F5) is tie-broken by entrypoint coverage. See
 > [Entrypoint coverage and tearing](#entrypoint-coverage-and-tearing).
 
 #### A verdict belongs to the copy, not the version
@@ -625,10 +719,10 @@ are elected by pooling alone; the per-external resolver leaves them untouched (s
 | **chunked** | A copy whose files import its build's internal chunks: its bundle has stored chunks (dense chunking), or its remote scopes `@nf-internal/` externals (flat chunking). Its files run correctly only beside that build's other files of the package. |
 | **global map** | The pool's specifiers in `imports`; a named shareScope has no `imports` of its own, so there each remote's own scope maps those files. A remote **resolves globally** when it runs those files. Not the global *scope* (`__GLOBAL__`): every pooled scope, named ones included, has its own global map. |
 | **winner** | The build round 1 elects; its coverage seeds the global map. Stored as `poolWinner`. |
-| **settle** | The loop after extension (step 4): the global map drops every tag no remote on it ships, and a remote it no longer serves moves to a subpool or a later round, until nothing changes. |
+| **settle** | The loop after extension (step 4): the global map keeps an extended package only where a remote on it ships exactly its published entrypoints at that tag, and a remote it no longer serves moves to a subpool or a later round, until nothing changes. |
 | **extended global tags** | The global map's tags once extension has added the packages the winner does not ship (step 4 of [How pooling resolves](#how-pooling-resolves)); a remote they serve moves onto the global map when one build shipped the combination it would resolve. |
 | **subpool** | Remotes off the global map that run one remote's build through scopes. Named after that remote; its members' copies record it as `servedBy`. |
-| **self-served** | A remote that runs its own build for its whole family, or, when it agrees with the global map, for everything the global map does not give it. Its scoped copies record why as `poolCause`. |
+| **self-served** | A remote that runs its own build for its whole family. Its scoped copies record why as `poolCause`. |
 | **island** | A self-served remote whose range rejects a tag of the elected build (`poolCause: incompatible`); the log says it "is islanded". One the elected build does not cover is `uncovered` and "serves its own family". |
 | **gate** | The dynamic path's check: per pool, a remote loaded by `initRemoteEntry` either resolves through the committed global map or serves itself, judged per file: no specifier it reaches may resolve to two files. It holds no election (see [Scope and dynamic init](#scope-and-dynamic-init)). |
 | `poolCause`, `servedBy`, `poolWinner` | The results pooling stores on the record; see [What pooling stores](#what-pooling-stores). |
@@ -696,19 +790,16 @@ pool. Two notions are read off it for every other remote R:
   build ships: `material/sort@17.0.2` beside `material/table@17.0.0` is two Materials too.
 
 **2. Round 1 elects the global map.** Every build is a candidate — only the host's when a host ships the pool,
-since the host cannot be repointed. A candidate's coverage is its own specifiers plus the **same-tag**
-entrypoints of the builds that agree with it, except chunked copies': at one tag, an unchunked
-`core/testing@22.0.8` from another remote is the same published code (see
-[Merging within a version](#merging-within-a-version)), though its imports resolve through the lender's scope;
-a chunked one imports its own build's internals and would run a second copy of the package beside the winner's.
-Candidates rank by, in order:
+since the host cannot be repointed. A candidate's coverage is what its own build ships and nothing else: an
+entrypoint another build ships at the same tag is never added, since that file's imports resolve through the
+other build's scope. Candidates rank by, in order:
 
 1. the newer build first, under [`profile.latestSharedExternal`](./config.md#modeConfig);
 2. **most remotes served**;
 3. most remotes that agree without being served — what separates a build its peers share from an outlier when
    no build serves more than itself;
 4. the build the stored record already elected (so a re-election on equal terms does not flip the family);
-5. the newer build, then record order (the order remotes first appear in the pool's versions).
+5. the newer build, then the name that sorts first (code-unit order), never record order.
 
 One build is **newer** than another when the first member both ship, in the pool's member order (by name),
 whose tags differ is newer in it — two unrelated version lines, such as `rxjs` and `@angular/core`, are never
@@ -718,12 +809,8 @@ Round 1 is **greedy**: it elects the build that serves the most remotes and plac
 That is not guaranteed to need the fewest builds overall; a build serving fewer remotes can leave a split the
 later rounds serve with fewer builds.
 
-A borrowed entrypoint is only as good as a copy that publishes it. A remote lending one that no round-1 remote
-ships itself is therefore kept on a route whose files resolve globally — it is never placed below in the
-subpool of a build that disagrees with the winner.
-
 **3. Later rounds form subpools.** Among the remotes round 1 does not serve, each one's **own** build is a
-candidate (no same-tag borrowing), and the one serving the most waiting remotes — itself included — forms a
+candidate, and the one serving the most waiting remotes — itself included — forms a
 **subpool**: those remotes run that one build, and the subpool is named after its remote. A tie goes to the
 newer build, then to the name that sorts first (code-unit order), never to record order: no stored winner
 keeps a subpool, and the record pooling rewrites changes that order, so a re-election would flip between equal
@@ -734,35 +821,30 @@ build's files through scopes (`servedBy`).
 round 1 that agrees with the coverage, and whose files would resolve globally, ships it at one tag. Under a host,
 a remote that agrees with the coverage but waits in a subpool whose build does not then offers the packages no
 such remote offered, so the subpool it waited in does not keep it off the host's runtime; a contributor's offer
-wins at any tag. A chunked package is published only when one remote offers it, or every offering remote ships
-the same entrypoints of it in one member: the map claims flat members row by row and could mix two builds' files.
+wins at any tag. Offers of a package at one tag publish one covering copy: the one containing the most of the
+others, then the widest, then the name that sorts first; offers at two tags publish nothing.
 A build's files resolve globally when it runs every member it ships from the global map: a file's own imports
 resolve in its owner's scope, so a file of a build that serves any member itself binds that build's copy for
 whoever takes it. Every remote the extended global tags now serve moves onto the global map, in a subpool or
 not — but a subpool's build only once no other member needs it, so a subpool moves as a whole or keeps its
 build. A subpool left with its build alone dissolves: that remote moves onto the global map when served, else
 serves itself. It runs after the rounds so the rounds can place what it leaves. Then the coverage
-**settles**: it keeps only what a remote on the global map ships at its tag, a borrowed entrypoint included,
-and a remote it no longer serves leaves the global map: it joins the first subpool whose build serves it, else
-another round of subpools, until nothing changes.
+**settles**: it keeps an extended package only where a remote on the global map ships exactly its published
+entrypoints at that tag, and a remote it no longer serves leaves the global map: it joins the first subpool whose
+build serves it, else another round of subpools, until nothing changes.
 Served is not enough to move: **one build must have shipped the combination the remote would resolve**,
 counting a build's package at its tag for that package's other entrypoints. The winner's `core@18.0.1` next
 to another build's `common@18.0.1` is a pair no build shipped, so a remote importing both stays where the
 rounds put it (or serves itself, `uncovered`) rather than resolving that pair.
 
-**5. Agreement takes the global files, all or nothing.** A remote running its own build — a subpool's build or
-a remote left alone — that agrees with the final coverage on *everything* both ship takes the global files for
-those packages and serves only the rest itself. This is decided per **group**, a subpool or a remote serving
-itself, over every copy of every member. The group keeps the global files only if none of its copies that run off
-the map ships a specifier the global map serves, or is chunked and ships an entrypoint of a package the global
-map serves. Otherwise its whole family runs on its own build: a file the group took from the map would bind the
-map's copy beside the one the group runs itself. This can cost downloads where nothing tore (the host stays the
-main pool and every other build a coherent subpool). A remote that disagrees on anything takes nothing global,
-**not even a file at its own version**: that file's own imports bind the global peers, so it would run the
-global `core` under its own `router` one hop in. A remote that serves any member itself publishes no global
-file; it takes a copy global only where a build whose files resolve globally lists every entrypoint of that
-copy in its own copy of the same member, at the same tag, since the import map maps a specifier from whichever
-member reaches it first.
+**5. A group off the map runs its whole family on its own build.** A **group** — a subpool, or a remote serving
+itself — takes no global file, even where its build agrees with the final coverage: a file the group took from
+the map would bind the map's copies beside the ones it runs itself. A remote that agrees and that the final
+coverage serves is already on the global map (step 4), unless it is the build of a subpool whose other members
+still need it. This can cost downloads where nothing tore (the host
+stays the main pool and every other build a coherent subpool). A remote that disagrees on anything takes nothing
+global, **not even a file at its own version**: that file's own imports bind the global peers, so it would run
+the global `core` under its own `router` one hop in.
 
 **6. Everyone left serves themselves**, with the reason recorded (`poolCause`, see
 [What pooling stores](#what-pooling-stores)).
@@ -770,16 +852,14 @@ member reaches it first.
 ```mermaid
 flowchart TD
     A[Pool: externals sharing a name, one scope] --> B[Builds: one per remote,<br/>specifier → tag]
-    B --> R1[Round 1: the candidate serving most remotes<br/>host forced; coverage borrows same-tag<br/>entrypoints from agreeing builds]
+    B --> R1[Round 1: the candidate serving most remotes<br/>host forced; coverage = its own build]
     R1 --> G[Global map = its coverage]
     R1 --> P[Remotes it does not serve]
     P --> R2{Does some waiting remote's own build<br/>serve ≥2 waiting remotes?}
     R2 -->|Yes| AN[Subpool: it and the remotes it serves<br/>run its build's files through scopes]
     AN --> R2
     R2 -->|No| EX[Extension: publish packages the winner lacks<br/>when every agreeing contributor ships one tag]
-    EX --> AG{Agrees with the final coverage<br/>on everything both ship?}
-    AG -->|Yes| T[Takes the global files for those packages,<br/>serves the rest itself]
-    AG -->|No| S[Serves its whole family itself<br/>poolCause + warn]
+    EX --> S[Serves its whole family itself<br/>poolCause + warn]
 ```
 
 **Host precedence is absolute.** The host's build is round 1 whenever it ships any member, whatever it serves:
@@ -796,10 +876,10 @@ refuses. A tag the copy ships itself is never a rejection
 only for **coverage** never throws: nothing about its versions is wrong,
 so a gap in what other builds ship must not fail a strict portfolio.
 
-**Coverage is keyed by specifier.** `generate-import-map` fills an entrypoint the shared version lacks from the
-consumer's own build — a second build — so package-granularity coverage would break the promise silently (see
+**Coverage is keyed by specifier.** An entrypoint the elected build lacks could only reach a remote from a
+second build, so package-granularity coverage would break the promise silently (see
 [Entrypoint coverage and tearing](#entrypoint-coverage-and-tearing)). Every test above is per specifier, which
-is also why a pooled remote is never torn whichever entrypoint-coverage setting is configured.
+is also why a pooled remote is never torn.
 
 > **Pooling chooses coherence first, then downloads.** Electing the family as a whole can move the global version
 > of a pooled family — an **older** build wins when it serves more remotes — and a remote that would mix builds
@@ -808,7 +888,7 @@ is also why a pooled remote is never torn whichever entrypoint-coverage setting 
 > Round 1 is greedy, so this is the order the rules are built for, not a search. Because the election maximises
 > the remotes one build serves and then places the rest in subpools, it also *saves* downloads where per-member
 > election split a family: on the recorded eleven-remote portfolio the `@angular/*` files the map can fetch drop
-> from 75 to 54, the seven-remote capture is unchanged at 37, and no measured portfolio rose. A warm init with
+> from 75 to 63 and the seven-remote capture is unchanged at 37. A warm init with
 > nothing dirty in a scope pays nothing there: pooling does no work and writes nothing. The escape hatch is to
 > not pool the family (no `pool` label), not a per-portfolio knob. The figures are asserted in
 > `src/lib/core/2.app/steps/pooling/capture.integration.spec.ts`.
@@ -827,11 +907,11 @@ Each member is rebuilt with one version (a **row**) per `(tag, action)`, newest 
 `share`, `skip`, `scope`:
 
 - **`share`** — the tag round 1 publishes the member at. Its first copy (`remotes[0]`, the basis) is the
-  winner's; every copy resolving globally at that tag joins it. The tag is read from any of the member's
-  entrypoints, because a package can be shipped entrypoint-only (`material/table` without `material`).
+  winner's; every copy resolving globally at that tag joins it. The tag is the one round 1 serves the member's
+  own specifier at, or, when it serves none (a package can ship entrypoint-only, `material/table` without
+  `material`), the one it serves any of the member's entrypoints at.
 - **`skip`** — copies resolving globally at another tag their range accepts; a subpool's copies with
-  `servedBy: <its build>`, the build's own copies naming itself. A subpool whose build agrees with the global
-  map (rule 5) resolves globally instead.
+  `servedBy: <its build>`, the build's own copies naming itself.
 - **`scope`** — copies of a remote serving itself, with their `poolCause`.
 
 **Every subpool's build maps its own family onto itself.** A consumer's scope governs only the consumer's
@@ -841,9 +921,9 @@ hop in — coherent at the top and torn one hop deeper. That is what `servedBy: 
 that merely repeats the global mapping is not emitted, and each URL keeps the hash of the remote that owns
 the file.
 
-`generate-import-map` publishes every `share` version first, then fills the specifiers no winner covered from
-the `skip` copies, so flat and dense builds of one specifier cannot race on external order. A copy carrying a
-`servedBy` never fills the global map: it runs another build.
+`generate-import-map` publishes each serving build's copy, and the `share` rows of an external without one in
+record order, so flat and dense builds of one specifier cannot race on external order. A `skip` copy publishes
+nothing, nor does a copy carrying a `servedBy`: it runs another build.
 
 Pools are re-elected per **scope**, and every member of a re-elected pool is written back: pooling's election
 plan (`planElection`) re-elects every pool of a scope with any dirty external, so pooling never reads back half
@@ -868,6 +948,13 @@ entrypoint of a labelled package, and the failure is quiet: the member is still 
 coordinated with the family. A build that emits flat entries makes this easy to get wrong — `@framework/core`
 and `@framework/core/primitives/di` are two externals, and labelling only the first leaves the second relying
 on the package edge rather than on your label.
+
+**A label decides what a remote runs on its own build.** A remote the elected build does not cover runs its
+whole family from its own build: coherent, but on its own runtime, a second framework instance beside the
+host's (see the *Coherent per remote, not per page* note in [How pooling resolves](#how-pooling-resolves)).
+Unlabelled, the fallback unit is the package alone (see
+[Entrypoint coverage and tearing](#entrypoint-coverage-and-tearing)): the remote runs its own `@framework/core`
+while the shared `@framework/common` it also takes binds the shared one, so the remote runs two cores.
 
 #### Unscoped lockstep families (react/react-dom)
 
@@ -912,14 +999,12 @@ portfolio had deliberately pooled apart.
 Every line starts with a prefix, given per line below: `[<scope>][pool:<name>]` for init's lines about one pool
 (`<name>` is the pool's name as stored), `[<scope>]` for init's lines about a whole scope and for the dynamic
 gate's, and `[<scope>][<remote>]` for the dynamic line about a build missing from the cache. At init, every
-remote not on the elected build gets a `warn`, subpool members included, ending in one of four clauses that say
+remote not on the elected build gets a `warn`, subpool members included, ending in one of three clauses that say
 where its copies come from:
 
 - `All N of its entrypoints are scoped for it.` — it serves its whole family itself;
 - `It runs in subpool '<build>' for all N of its entrypoints.` — it runs another remote's build;
-- `Its build serves subpool '<self>': its N entrypoints and K other remote(s).` — its build runs the subpool;
-- `It takes the elected files where its versions match; the rest of its N entrypoints are scoped for it.` — its
-  group agrees with the global map and keeps its files (rule 5).
+- `Its build serves subpool '<self>': its N entrypoints and K other remote(s).` — its build runs the subpool.
 
 | level | prefix | line | what to do |
 | --- | --- | --- | --- |
@@ -977,7 +1062,8 @@ gate reads it. A pooled row's basis is set by pooling (the winner first, then co
 
 The dynamic path holds no election, so it never writes `poolWinner`. It moves only the loaded remote's copies:
 a copy it scopes moves into a `scope` version at its own tag with its `poolCause`, dropping any stale
-`servedBy` (a `share` version only that copy held leaves with it); a copy that runs the map's files moves from
+`servedBy` (a `share` version only that copy held leaves with it, and the external drops a `servingBuild` that
+no `share` row holds any more); a copy that runs the map's files moves from
 the row `update-cache` put it in into a `skip` row at its tag, so it publishes nothing (a copy that joined the
 `share` row stays there unless the map serves it more than that row covers). When the load changes a pool's
 name (its label forms a pool, or tips the most-declared name), it also writes the new `poolName` on every
@@ -992,6 +1078,40 @@ both the initial pipeline and dynamic init (`initRemoteEntry`). Init skips a sco
 warm init that changes no remote does no pooling work at all; the dynamic pass skips a scope whose record holds
 no `pool` label and no stored pool result.
 
+**A load takes each package whole.** Before pooling, `update-cache` decides each package the loaded remote
+shares — a dense root and its flat secondaries together, per share scope — from what the committed map serves of
+it in that scope, read as the map was generated (the serving build's copy, see
+[Copies of one version](#copies-of-one-version)):
+
+- **The map serves none of it:** the remote's build opens it (`share`) and becomes its serving build.
+- **The map serves every entrypoint the remote ships of it, from one build, at a tag no `strictVersion` range of
+  the remote rejects:** the remote follows that build wholly (`skip`). Its copies go into a `skip` row of their
+  tag rather than the `share` row, and in a named shareScope its override maps every file that build serves of
+  the package. A range without `strictVersion` follows the map's tag, as at init.
+- **Otherwise** — the map lacks an entrypoint the remote ships, serves the package from two builds, or a
+  `strictVersion` range rejects its tag: the remote runs the whole package from its own build (`scope`).
+
+A rejecting range warns, and under `strictExternalCompatibility` fails the load, only where a cold init that kept
+the builds the committed map serves would refuse it: the package is in a pool once the load's copies are stored (a
+label that joins no other external forms no pool, as at init; a dense build ships a package as one external), the
+file is at the serving tag of a package the map would otherwise serve the remote wholly from one build, or the file
+is of the copy's own external at the tag that external's own election would keep with the remote in it (a host's
+row, or under `latestSharedExternal` the newest tag), or of the copy's own external where no tag pleases every
+strict copy of it. A file the map serves at the serving build's tag rather than at its external's own election is
+not enough. Any other rejection runs the package from the remote's own build silently, as the cold init's fallback
+does. Where the load splits a package outside any pool, only the election of the copy's own external with the
+remote in it can refuse, so some rejections a cold init keeping the committed builds would refuse run silently. The
+load cannot change the committed builds, so it may refuse a remote that a cold init of the same remotes would
+accept by electing another build, one its range accepts.
+
+A remote whose ranges accept the map's tags but that runs a package from its own build because the map lacks an
+entrypoint it ships, or serves the package from two builds, opens no other package: an opened package's files
+resolve through the loader's scope, so their consumers would reach the loader's own build of that package. A
+package a `strictVersion` range runs from its own build, or a family the pooling gate serves itself, does not stop
+the remote opening others. The `strict` scope shares every version
+side by side, as at init. So a load never maps an `imports` key the committed map already has: a browser keeps
+the first mapping of a key.
+
 Because the import map is immutable once committed, the dynamic pass holds no new election: it judges only the
 newly loaded remote against the **committed** record, never retro-corrects committed remotes, and coordinates
 each shareScope independently. Membership comes from the committed record, so the loaded remote is subject to
@@ -1005,7 +1125,7 @@ it. In order:
    named shareScope) when no range rejects a tag the map serves and either it **agrees** with the map on
    everything both ship — then the packages it adds are its own to publish — or the map serves every specifier
    it imports and some committed build shipped that exact combination. That second check matters because the
-   global map can combine tags from several builds (same-tag loans and extended global tags), so a remote that
+   global map can combine tags from several builds (extended global tags), so a remote that
    does not agree must run a combination one committed build shipped. It also needs every file it would reach to
    agree with it, judged by file, not by tag: a committed build whose file it takes, directly or through another
    committed build's file, must resolve each specifier the remote ships to the file the remote does. A committed
@@ -1013,19 +1133,21 @@ it. In order:
    row, an entrypoint it filled, or a build that published before its pool formed), else the map. And a chunked
    copy never runs part of a package beside the map's files of it. A range rejecting a global tag moves it on
    with cause `incompatible`. A member the resolver scoped is judged the same way: a strict range that rejects
-   the map's tag islands the family as `incompatible`, while a copy `scopeUncoveredEntrypoints` scoped for an
-   entrypoint the shared version lacks becomes a skip when the map serves every entrypoint it ships, as at init.
+   the map's tag islands the family as `incompatible`, while one scoped for any other reason becomes a skip when
+   the map serves every entrypoint it ships, as at init.
 2. **Otherwise it serves its own family**, with its `poolCause` recorded, and is warned in the dynamic lines of
-   [What pooling logs](#what-pooling-logs). A remote in a named scope whose map files belong to a remote no
-   longer in the cache serves itself too (`uncovered`): its scope cannot map those files, and half its family on
-   them and half on its own build would tear it. That case logs
+   [What pooling logs](#what-pooling-logs). The gate never covers a copy in part: a remote with a copy that
+   ships an entrypoint the map lacks, while the map serves another entrypoint of that package, serves itself
+   (`uncovered`, the coverage line names that entrypoint as its gap). A remote in a named scope whose map files
+   belong to a remote no longer in the cache serves itself too (`uncovered`): its scope cannot map those files,
+   and half its family on them and half on its own build would tear it. That case logs
    `'<build>' is not in the cache, so its files cannot be mapped.` Both file checks serve its whole family, never
    a part: half its family on the map's files and half on its own build would tear it.
 
-Under `strictExternalCompatibility` a load whose `strictVersion` copy rejects its external's shared version is
-refused before pooling runs (`Could not process remote '<remote>'`, as for any external). The gate itself never
-throws: a range that rejects a tag the map serves islands the family as `incompatible`. A strict page keeps the
-load's verdicts on the next page (see below): a re-election could refuse a pool the gate accepted.
+Under `strictExternalCompatibility` a load refused as above is refused before pooling runs (`Could not process
+remote '<remote>'`, as for any external). The gate itself never throws: a range that rejects a tag the map serves
+islands the family as `incompatible`. A strict page keeps the load's verdicts on the next page (see below): a
+re-election could refuse a pool the gate accepted.
 
 This gate is not redundant even though init enforced its own. Init guarantees no _remote_ runs a combination
 nothing shipped, but a remote loaded later is exactly the consumer that could bridge two builds the committed
@@ -1038,9 +1160,7 @@ with its own family. Pooling guarantees no tear, not one instance per version. T
 
 **The next init re-elects.** A load leaves the loaded remote's pooled members dirty, so the next init re-elects
 every pool of their scope with the remote in it: the page it builds is the one a manifest listing the remote
-would have built. Until then the page runs the gate's verdicts, so a load whose `pool` label turns a lone
-labelled external into a pool can expose an entrypoint [self-fill](#entrypoint-coverage-and-tearing) the
-committed map already holds (the committed map is immutable). Under `strictExternalCompatibility` nothing is
+would have built. Until then the page runs the gate's verdicts. Under `strictExternalCompatibility` nothing is
 marked, and the next page keeps the gate's verdicts.
 
 ## Dynamic Init
@@ -1069,37 +1189,36 @@ flowchart TD
     B --> C[Process new dependencies]
     C --> D{external.singleton?}
     D -->|No| E[Add to scoped externals]
-    D -->|Yes| F{Dependency already exists in scope?}
-    F -->|No| G[Action: SHARE<br/>Become shared version]
-    F -->|Yes| H{Scope type?}
-    H -->|Strict| I[Action: SHARE<br/>Add as additional exact version]
-    H -->|Other| J{Compatible with existing shared version?}
-    J -->|Yes| K[Action: SKIP<br/>Use existing shared version]
-    J -->|No| L{strictVersion: true?}
-    L -->|Yes| M[Action: SCOPE<br/>Individual download]
-    L -->|No| N[Action: SKIP + WARN<br/>Use existing incompatible]
-
-    N --> O{strict mode enabled?}
+    D -->|Yes| F{Scope type?}
+    F -->|Strict| I[Action: SHARE<br/>Add as additional exact version]
+    F -->|Other| G{Does the committed map serve the package?}
+    G -->|No| S[Action: SHARE<br/>Open the package, become its serving build]
+    G -->|Yes| J{A strictVersion range rejects the map's tag?}
+    J -->|Yes| O{strict mode enabled?}
     O -->|Yes| P[Throw NFError]
-    O -->|No| Q[Continue with warning]
+    O -->|No| M[Action: SCOPE + WARN<br/>Whole package from its own build]
+    J -->|No| H{Map serves every entrypoint it ships,<br/>from one build?}
+    H -->|Yes| K[Action: SKIP<br/>Follow that build]
+    H -->|No| N[Action: SCOPE<br/>Whole package from its own build]
 
     E --> R[Add additional import-map to DOM]
-    G --> R
     I --> R
+    S --> R
     K --> R
     M --> R
-    Q --> R
+    N --> R
 ```
 
 ### Dynamic Init Actions
 
-Each new dependency gets one of these actions during dynamic init:
+Each package the loaded remote shares gets one of these actions during dynamic init, taken by every external of
+the package (a dense root and its flat secondaries) in that scope:
 
 | Action    | Description                                                                                                                                                                                          |
 | --------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **SKIP**  | Version already exists or use existing shared version. In a shareScope context this action is used for overriding by skipping the provided external and loading a compatible cached version instead. |
-| **SHARE** | No compatible version exists (yet), become the shared version for this scope                                                                                                                         |
-| **SCOPE** | A copy whose own range rejects the shared version while `strictVersion: true` (never when the shared version is the copy's own), or (under `scopeUncoveredEntrypoints`) one **on another tag** whose entrypoints the shared winner cannot cover — served coherently from its own build. Per copy, not per version: co-tagged copies that accept the shared version keep deduping, and a copy of the shared tag merges its extra entrypoints in, serving them from its own build. |
+| **SKIP**  | The committed map serves every entrypoint the remote ships of the package, from one build: the remote follows that build wholly. In a shareScope its override maps every file that build serves of the package. |
+| **SHARE** | The committed map serves none of the package in this scope: the remote's build opens it and becomes its serving build. In the `strict` scope every version is shared side by side. |
+| **SCOPE** | Otherwise (the map lacks an entrypoint the remote ships, serves the package from two builds, or a `strictVersion` range rejects its tag): the remote runs the whole package from its own build. A remote that scopes a package because the map lacks an entrypoint it ships, or serves it from two builds, while its ranges accept the map's tags, scopes every package it would otherwise open too. |
 
 ### Example: Dynamic Loading Scenario
 
@@ -1214,7 +1333,7 @@ flowchart LR
 
 #### Cannot Replace Existing Dependencies
 
-If a dependency is already shared globally during the initial setup, dynamic init cannot replace it with a different version. For example, if React 18.2.0 is shared globally, dynamically loading React 17.0.0 with `strictVersion: false` will still use React 18.2.0 and show a warning. If `strictVersion: true` is used, the micro frontend will get its own scoped copy of React 17.0.0.
+If a dependency is already shared globally during the initial setup, dynamic init cannot replace it with a different version. For example, if React 18.2.0 is shared globally, dynamically loading React 17.0.0 with `strictVersion: false` will still use React 18.2.0, without a warning. If `strictVersion: true` is used and its range rejects 18.2.0, a warning is logged and the micro frontend gets its own scoped copy of React 17.0.0; under `strictExternalCompatibility` the load fails instead.
 
 #### Cannot Modify Scope Assignments
 
@@ -1276,7 +1395,7 @@ try {
 
 #### 4. Monitor Compatibility Warnings
 
-Dynamic init may produce warnings for version mismatches:
+Dynamic init warns when a `strictVersion` range rejects the version the committed map serves:
 
 ```javascript
 // Enable logging to catch compatibility issues
@@ -1286,7 +1405,7 @@ await initFederation(manifest, {
 });
 
 // Watch for warnings like:
-// "WARN: dashboard.react@18.1.0 using existing shared version 18.2.0"
+// "[__GLOBAL__][dashboard] react@17.0.0 Is not compatible with existing react@18.2.0 …"
 ```
 
 ### Use Cases for Dynamic Init

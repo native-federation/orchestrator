@@ -30,7 +30,6 @@ import {
   scopeUrlsOf,
   servedOffMap,
   torn,
-  unmapped,
 } from 'lib/testing/pooling/property-harness';
 
 /**
@@ -100,16 +99,12 @@ describe('pooling properties: dynamic loads (generated portfolios)', { timeout: 
         portfolioArbitrary({
           maxRemotes: 12,
           labelNoise: true,
-          scopeUncoveredEntrypoints: true,
         }).chain(spec => fc.tuple(fc.constant(lenient(spec)), loads(spec))),
         runs,
         async ([spec, extras]) => {
           const entries = toRemoteEntries(spec);
           const host = hostOf(spec);
-          const rig = openPortfolio({
-            host,
-            scopeUncoveredEntrypoints: spec.scopeUncoveredEntrypoints,
-          });
+          const rig = openPortfolio({ host });
           await rig.init(entries);
           const loaded = [...entries];
 
@@ -136,12 +131,6 @@ describe('pooling properties: dynamic loads (generated portfolios)', { timeout: 
             loaded.push(added);
             const after = torn(merged, record, scopeUrlsOf(loaded), host);
             expect(after.filter(t => !before.includes(t))).toEqual([]);
-            if (spec.scopeUncoveredEntrypoints)
-              expect(
-                unmapped(outcome(merged, record, scopeUrlsOf(loaded)).runs).filter(k =>
-                  k.startsWith(`${added.name}|`)
-                )
-              ).toEqual([]);
           }
         }
       ));
@@ -196,6 +185,38 @@ describe('pooling properties: dynamic loads (generated portfolios)', { timeout: 
             loaded.push(added);
             const after = torn(merged, record, scopeUrlsOf(loaded), host, shareScope);
             expect(after.filter(t => !before.includes(t))).toEqual([]);
+          }
+        }
+      ));
+
+  // 107 without pool labels: no gate places the load, so a flat external whose specifier the committed map
+  // already serves through a dense copy is update-cache's alone to resolve.
+  const unlabelled = (entry: RemoteEntry): RemoteEntry => ({
+    ...entry,
+    shared: entry.shared.map(({ pool: _pool, ...info }) => info),
+  });
+  for (const [offset, { mode, loads, runs }] of [
+    [115, pageModes[0]],
+    [116, pageModes[1]],
+  ] as const)
+    it(`dynamic additivity with flat and dense builds, unpooled (${mode})`, () =>
+      run(
+        offset,
+        portfolioArbitrary({ maxRemotes: 12, flat: true }).chain(spec =>
+          fc.tuple(fc.constant(lenient(spec)), loads(spec))
+        ),
+        runs,
+        async ([spec, extras]) => {
+          const entries = toRemoteEntries(spec).map(unlabelled);
+          const rig = openPortfolio({ host: hostOf(spec) });
+          await rig.init(entries);
+          let index = entries.length;
+
+          for (const extra of extras) {
+            const added = unlabelled(toRemoteEntry(extra, index++));
+            if (mode === 'reload') rig.reload();
+            const { committed, delta } = await rig.load(added);
+            expect(Object.keys(delta.imports).filter(key => key in committed.imports)).toEqual([]);
           }
         }
       ));
@@ -285,8 +306,8 @@ describe('pooling properties: dynamic loads (generated portfolios)', { timeout: 
 
   // The gate's rules against a committed map (docs/version-resolver.md §"Scope and dynamic init"): a range
   // rejecting a committed tag is `incompatible`; otherwise the remote resolves globally when no build serving it
-  // runs a pool-mate off the map, and it agrees with the map, or the map serves all of it and a committed build
-  // shipped that combination.
+  // runs a pool-mate off the map, the map serves each of its copies whole or not at all, and it agrees with the
+  // map, or the map serves all of it and a committed build shipped that combination.
   it('dynamic verdicts: a load is placed off the committed map only for a reason, and the right one', () =>
     run(
       103,
@@ -306,7 +327,7 @@ describe('pooling properties: dynamic loads (generated portfolios)', { timeout: 
           if (!copies.some(c => c.remote === added.name)) continue;
           const elected = electedTags(committed, copies);
           const builds = [...new Set(copies.map(c => c.remote))].filter(r => r !== added.name);
-          const { rejects, missing, witnessed, agrees } = oracleVerdict(
+          const { rejects, missing, partial, witnessed, agrees } = oracleVerdict(
             added.name,
             copies,
             elected,
@@ -315,7 +336,7 @@ describe('pooling properties: dynamic loads (generated portfolios)', { timeout: 
           const { causes, servedBy } = placementOf(added.name, copies);
           const at = { pool, causes, servedBy };
           const offMap = servedOffMap(added.name, copies, committed, elected);
-          const global = !rejects && !offMap && (agrees || (!missing && witnessed));
+          const global = !rejects && !offMap && !partial && (agrees || (!missing && witnessed));
           // Off the map, it serves its whole family itself: never a committed build.
           const cause = rejects ? 'incompatible' : 'uncovered';
           expect(at).toEqual({ ...at, causes: global ? [] : [cause], servedBy: [] });

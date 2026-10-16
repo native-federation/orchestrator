@@ -8,6 +8,7 @@ import { ModeConfig } from 'lib/core/2.app/config/mode.contract';
 import { RemoteInfo, SharedExternal } from 'lib/core/1.domain';
 import { mockConfig } from 'lib/testing/config.mock';
 import { mockAdapters } from 'lib/testing/adapters.mock';
+import { readScopeThroughTryGet } from 'lib/testing/adapters/shared-externals.repository.mock';
 import {
   mockRemoteInfo_MFE1,
   mockRemoteInfo_MFE2,
@@ -41,7 +42,10 @@ describe('createProcessDynamicRemoteEntry', () => {
     });
     adapters.sharedExternalsRepo.tryGet = vi.fn(_e => Optional.empty<SharedExternal>());
 
-    updateCache = createUpdateCache(config, adapters);
+    updateCache = readScopeThroughTryGet(
+      adapters.sharedExternalsRepo,
+      createUpdateCache(config, adapters)
+    );
   });
 
   describe('cleaning up before processing', () => {

@@ -33,14 +33,14 @@ import {
 
 /**
  * `update-cache` → `convert-to-import-map` on the dynamic path, against a map `generate-import-map` really
- * committed — the one question no single-step spec can ask, because the defect it guards is a *disagreement*
- * between the two: `covered` says the shared version serves a specifier, so nothing self-fills it, while the
- * committed `imports` never published it and the joining remote has no way to resolve it.
+ * committed — the one question no single-step spec can ask: what the committed map serves of a package decides
+ * where a joining remote runs it. A remote that ships an entrypoint the map lacks cannot take the rest of the
+ * package from the map, so it runs the whole package from its own build, in its own scope.
  *
- * It takes a third copy of one tag to reach: the copy that brought the specifier joined at runtime too, so it
- * only ever mapped the specifier into its *own* scope. `e2e/pooling/entrypoints.e2e.spec.ts` covers the merge
- * itself but joins through a second `init`, not `loadRemoteModule`, and CI does not run the e2e suite
- * (`npm run test-e2e` is local only) — so this file is the gate.
+ * A third copy of one tag reaches the case where the copy that brought the entrypoint joined at runtime too, so
+ * it only ever mapped it into its *own* scope. `e2e/pooling/entrypoints.e2e.spec.ts` covers the merge itself but
+ * joins through a second `init`, not `loadRemoteModule`, and CI does not run the e2e suite (`npm run test-e2e`
+ * is local only) — so this file is the gate.
  */
 describe('entrypoint coverage on the dynamic path (integration)', () => {
   let config: LoggingConfig & ModeConfig;
@@ -90,16 +90,16 @@ describe('entrypoint coverage on the dynamic path (integration)', () => {
     });
   });
 
-  // mfe2 and mfe3 both build the shared tag and both bundle `/sub`, which the cached basis does not.
-  // mfe2 merges in and serves `/sub` from its own build — into its own scope, since the map is committed.
-  // mfe3 is then told `/sub` is covered, but the only copy covering it is mfe2, whose file the committed
-  // `imports` never named: mfe3 must serve `/sub` itself or be left with an unresolvable specifier.
-  it('should self-fill a specifier only a runtime-joined copy of the shared version provides', async () => {
+  // mfe2 and mfe3 both build the shared tag and both bundle `/sub`, which the committed map does not serve.
+  // Each runs `dep-a` wholly from its own build, root included: taking the map's root beside its own `/sub`
+  // would run the package from two builds. mfe2's copy never reaches `imports`, so mfe3 cannot follow it.
+  it('should run a package the map serves only in part from the joining remote own build', async () => {
     const committed = await init();
     expect(committed.imports).toEqual({ 'dep-a': mockScopeUrl_MFE1({ file: 'dep-a.js' }) });
 
     const mfe2 = await join(mockRemoteEntry_MFE2({ exposes: [], shared: [withSub('v2_1_2')] }));
     expect(mfe2.scopes![mockScopeUrl_MFE2()]).toEqual({
+      'dep-a': mockScopeUrl_MFE2({ file: 'dep-a.js' }),
       'dep-a/sub': mockScopeUrl_MFE2({ file: 'dep-a-sub.js' }),
     });
     // Scoped to mfe2, so no other remote resolves through it — the committed `imports` are unchanged.
@@ -107,25 +107,9 @@ describe('entrypoint coverage on the dynamic path (integration)', () => {
 
     const mfe3 = await join(mockRemoteEntry_MFE3({ exposes: [], shared: [withSub('v2_1_2')] }));
     expect(mfe3.scopes![mockScopeUrl_MFE3()]).toEqual({
+      'dep-a': mockScopeUrl_MFE3({ file: 'dep-a.js' }),
       'dep-a/sub': mockScopeUrl_MFE3({ file: 'dep-a-sub.js' }),
     });
-  });
-
-  // The same disagreement decides whether a copy on *another* tag is torn, which is what the coverage
-  // settings act on: `/sub` sits in the version's surface but not in the map, so mfe3 does tear and the
-  // policy has to see it. Left to `convert-to-import-map` alone it would throw here instead.
-  it('should treat a specifier only a runtime-joined copy provides as a tear for another tag', async () => {
-    await init();
-    await join(mockRemoteEntry_MFE2({ exposes: [], shared: [withSub('v2_1_2')] }));
-
-    config.strict.strictEntryPointCoverage = true;
-    await expect(
-      join(mockRemoteEntry_MFE3({ exposes: [], shared: [withSub('v2_1_1')] }))
-    ).rejects.toThrow("Could not process remote 'team/mfe3'");
-
-    expect(config.log.error).toHaveBeenCalledWith(
-      8,
-      `[${GLOBAL_SCOPE}][team/mfe3][dep-a] Entrypoints not covered by the shared version: dep-a/sub.`
-    );
+    expect(mfe3.imports).toEqual({});
   });
 });

@@ -1,6 +1,7 @@
 import fc from 'fast-check';
-import { GLOBAL_SCOPE, type ImportMap, type shareScope } from 'lib/core/1.domain';
+import { GLOBAL_SCOPE, type ImportMap, type RemoteEntry, type shareScope } from 'lib/core/1.domain';
 import {
+  generatedImports,
   hostOf,
   portfolioArbitrary,
   redeployArbitrary,
@@ -24,11 +25,12 @@ import {
   run,
   scopeUrlsOf,
   strayNames,
-  unmapped,
 } from 'lib/testing/pooling/property-harness';
 import * as _path from 'lib/utils/path';
 import { copiesByRemote } from 'lib/core/1.domain/pooling/builds';
 import { committedView } from 'lib/core/1.domain/pooling/gate';
+import { pageFaults, pageTears, resolve } from 'lib/testing/pooling/page-graph';
+import { NFError } from 'lib/core/native-federation.error';
 
 /**
  * Pooling invariants over generated portfolios (`generate-portfolio.ts`), through the real init steps with
@@ -45,6 +47,16 @@ import { committedView } from 'lib/core/1.domain/pooling/gate';
  *
  * A deeper local search: POOLING_PROPERTY_SEED=<n> POOLING_PROPERTY_SCALE=<factor> (CI uses the defaults).
  */
+
+const UNPOOLED_REFUSALS = [
+  /^Could not determine shared externals in scope /,
+  /^External \S+ could not be shared\.$/,
+];
+
+const unpooled = (entry: RemoteEntry): RemoteEntry => ({
+  ...entry,
+  shared: entry.shared.map(({ pool: _, ...info }) => info),
+});
 
 // A page's pools: the records that carry a pool name, and the map's files for the specifiers they ship.
 const pooledPart = ({ importMap, record }: { importMap: ImportMap; record: shareScope }) => {
@@ -69,29 +81,38 @@ const pooledPart = ({ importMap, record }: { importMap: ImportMap; record: share
   };
 };
 
+// Per remote, the file each specifier it ships resolves to from its own URL.
+const resolvedFiles = (importMap: ImportMap, entries: RemoteEntry[]) =>
+  Object.fromEntries(
+    entries.flatMap(entry =>
+      entry.shared.flatMap(shared =>
+        Object.keys(shared.entries).map(specifier => [
+          `${entry.name}|${specifier}`,
+          resolve(importMap, specifier, scopeUrlOf(entry.name)) ?? null,
+        ])
+      )
+    )
+  );
+
+// The build each external's package is served from, as stored.
+const servingBuilds = (record: shareScope) =>
+  Object.fromEntries(
+    Object.entries(record).map(([name, external]) => [name, external.servingBuild ?? null])
+  );
+
 describe('pooling properties: init (generated portfolios)', { timeout: TIMEOUT }, () => {
   // The two oracles run as separate properties, so a failure names which of them broke.
   it('no-tear (resolution): no remote resolves a combination no build shipped', () =>
-    run(
-      1,
-      portfolioArbitrary({ latestSharedExternal: true, scopeUncoveredEntrypoints: true }),
-      150,
-      async spec => {
-        const init = await initOrRefuse(spec);
-        if (!init.ok) return;
-        const { importMap, record } = init.result;
-        for (const tear of poolTears(importMap, record, scopeUrlsOf(init.entries), init.host))
-          expect({ pool: tear.pool, incoherent: tear.incoherent }).toEqual({
-            pool: tear.pool,
-            incoherent: [],
-          });
-        // The oracle skips a specifier the map does not resolve. Under scopeUncoveredEntrypoints the builders
-        // drop an uncovered entrypoint instead of self-filling it, so a torn skip copy would leave it unmapped:
-        // nothing may be left so.
-        if (spec.scopeUncoveredEntrypoints)
-          expect(unmapped(outcome(importMap, record, scopeUrlsOf(init.entries)).runs)).toEqual([]);
-      }
-    ));
+    run(1, portfolioArbitrary({ latestSharedExternal: true }), 150, async spec => {
+      const init = await initOrRefuse(spec);
+      if (!init.ok) return;
+      const { importMap, record } = init.result;
+      for (const tear of poolTears(importMap, record, scopeUrlsOf(init.entries), init.host))
+        expect({ pool: tear.pool, incoherent: tear.incoherent }).toEqual({
+          pool: tear.pool,
+          incoherent: [],
+        });
+    }));
 
   it('no-tear (binding): no file a remote reaches binds a second tag of any specifier', () =>
     run(
@@ -99,7 +120,6 @@ describe('pooling properties: init (generated portfolios)', { timeout: TIMEOUT }
       portfolioArbitrary({
         labelNoise: true,
         latestSharedExternal: true,
-        scopeUncoveredEntrypoints: true,
       }),
       300,
       async spec => {
@@ -133,6 +153,86 @@ describe('pooling properties: init (generated portfolios)', { timeout: TIMEOUT }
         }
       ));
 
+  // The page oracle (`page-graph.ts`) per remote over every file its code reaches: one build per package, no
+  // package's internals from two builds, no specifier at two URLs, nothing unresolved. Leaks (another package's
+  // file binding a second build through its scope) are left out. A generated file never imports a root its
+  // own build lacks, so a host shipping a secondary without its root (left unresolved) never arises.
+  for (const [offset, shareScope] of [
+    [40, undefined],
+    [41, 'team'],
+  ] as const)
+    it(`page: every remote runs each package from one build, ${shareScope ?? 'global'} share scope`, () =>
+      run(
+        offset,
+        portfolioArbitrary({
+          flat: true,
+          chunks: true,
+          labelNoise: true,
+          ...(shareScope && { shareScope }),
+        }),
+        300,
+        async spec => {
+          const init = await initOrRefuse(spec);
+          if (!init.ok) return;
+          const { importMap } = init.result;
+          expect(
+            pageFaults({
+              importMap,
+              entries: init.entries,
+              hosts: init.host === undefined ? [] : [init.host],
+              importsOf: generatedImports(init.entries),
+            })
+          ).toEqual({});
+        }
+      ));
+
+  // The page portfolios with every pool label dropped, so each package (flat secondaries included) is unpooled:
+  // no remote's own specifiers of one package resolve to two builds. Leaks (another package's file binding a
+  // second build through its scope) are not counted. A strict refusal is not judged for soundness here, only
+  // recognized: unpooled, a strict copy can also fail sharing outright, which the pooled refusals do not list.
+  for (const [offset, shareScope] of [
+    [42, undefined],
+    [43, 'team'],
+  ] as const)
+    it(`page: no unpooled remote resolves its own specifiers of a package to two builds, ${shareScope ?? 'global'} share scope`, () =>
+      run(
+        offset,
+        portfolioArbitrary({ flat: true, chunks: true, ...(shareScope && { shareScope }) }),
+        300,
+        async spec => {
+          const entries = toRemoteEntries(spec).map(unpooled);
+          const host = hostOf(spec);
+          const rig = openPortfolio({
+            strict: spec.strict,
+            host,
+            scope: spec.shareScope,
+            latestSharedExternal: spec.latestSharedExternal,
+          });
+          let importMap: ImportMap;
+          try {
+            ({ importMap } = await rig.init(entries));
+          } catch (error) {
+            const refused =
+              spec.strict &&
+              error instanceof NFError &&
+              UNPOOLED_REFUSALS.some(refusal => refusal.test(error.message));
+            if (!refused) throw error;
+            return;
+          }
+          const split = pageTears({
+            importMap,
+            entries,
+            hosts: host === undefined ? [] : [host],
+            importsOf: generatedImports(entries),
+          }).flatMap(({ remote, causes }) =>
+            Object.entries(causes)
+              .filter(([, how]) => how.includes('direct'))
+              .map(([pkg]) => `${remote}: ${pkg}`)
+          );
+          expect(split).toEqual([]);
+        }
+      ));
+
   it('order independence: any registration order runs the same tags with the same verdicts', () =>
     run(
       3,
@@ -152,8 +252,46 @@ describe('pooling properties: init (generated portfolios)', { timeout: TIMEOUT }
         const a = await openPortfolio({ host }).init(entries);
         const b = await openPortfolio({ host }).init(order.map(i => entries[i]!));
         expect(outcome(b.importMap, b.record)).toEqual(outcome(a.importMap, a.record));
+        expect(servingBuilds(b.record)).toEqual(servingBuilds(a.record));
       }
     ));
+
+  // As above with flat and dense builds of one package side by side, chunked or not, with label noise,
+  // globally and in a named share scope: ties between builds go to the remote's name, so the order remotes
+  // register in picks neither the build that serves a package nor any file a remote runs.
+  for (const [offset, shareScope] of [
+    [30, undefined],
+    [31, 'team'],
+  ] as const)
+    it(`order independence: any registration order serves each package from the same build and runs the same files, ${shareScope ?? 'global'} share scope`, () =>
+      run(
+        offset,
+        portfolioArbitrary({
+          flat: true,
+          chunks: true,
+          labelNoise: true,
+          ...(shareScope && { shareScope }),
+        }).chain(spec =>
+          fc.tuple(
+            fc.constant(lenient(spec)),
+            fc.shuffledSubarray(
+              spec.remotes.map((_, i) => i),
+              { minLength: spec.remotes.length, maxLength: spec.remotes.length }
+            )
+          )
+        ),
+        200,
+        async ([spec, order]) => {
+          const entries = toRemoteEntries(spec);
+          const host = hostOf(spec);
+          const a = await openPortfolio({ host, scope: shareScope }).init(entries);
+          const b = await openPortfolio({ host, scope: shareScope }).init(
+            order.map(i => entries[i]!)
+          );
+          expect(servingBuilds(b.record)).toEqual(servingBuilds(a.record));
+          expect(resolvedFiles(b.importMap, entries)).toEqual(resolvedFiles(a.importMap, entries));
+        }
+      ));
 
   it('idempotence: a warm init writes nothing and yields the same map', () =>
     run(4, portfolioArbitrary({ latestSharedExternal: true }), 100, async spec => {
@@ -283,7 +421,7 @@ describe('pooling properties: init (generated portfolios)', { timeout: TIMEOUT }
  * fetched again and its old copies evicted), over portfolios with label noise (`Relabel`): the changes that
  * split, join or empty a pool. The oracle is the next warm page re-electing every pool of that same state.
  *
- * The partial warm re-elections `pooling.reelection.spec.ts` reproduces (N3, F3, P1) failed this: a label
+ * The partial warm re-elections `pooling.reelection.spec.ts` reproduces failed this: a label
  * change that splits a pool and an eviction that deletes a pool member left a part of the pool clean.
  */
 describe('pooling properties: redeploys (generated portfolios)', { timeout: TIMEOUT }, () => {
@@ -294,9 +432,9 @@ describe('pooling properties: redeploys (generated portfolios)', { timeout: TIME
       expect(strayNames(init.result.record)).toEqual([]);
     }));
 
-  // Not a cold page of the final portfolio: cold breaks ties by record order where warm keeps the stored winner
+  // Not a cold page of the final portfolio: cold breaks ties by name where warm keeps the stored winner
   // instead; that is no partial re-election. `outcome` leaves `poolWinner` out, which a stale election keeps
-  // (P1), so the winners are compared too.
+  // when a split pool keeps its name, so the winners are compared too.
   const warmEqualsReelected = async ([spec, redeployed]: [PortfolioSpec, Redeploy[]]) => {
     const rig = openPortfolio({
       host: hostOf(spec),

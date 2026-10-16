@@ -1,3 +1,5 @@
+import type { RemoteName } from '../remote/remote-info.contract';
+import type { AcceptsTag } from './compatibility';
 import type { SharedVersion, SharedVersionAction, VersionName } from './version.contract';
 
 // Newest tag first, as `write()` orders a record. Leaves a tag's rows in their order (`sort` is stable).
@@ -30,7 +32,7 @@ export function mergeRows(versions: SharedVersion[], lead?: SharedVersion): Shar
   });
 }
 
-// Coverage enforcement can leave a `scope` version beside a shareable one at the same tag.
+// `redirectRow` and `scopeRemote` can leave a `scope` row beside a shareable one at the same tag.
 export function findVersionForTag(
   versions: SharedVersion[],
   tag: string
@@ -42,4 +44,57 @@ export function findVersionForTag(
     scoped ??= version;
   }
   return scoped;
+}
+
+// Points a row at `tag`: its copies skip to it, and only the strict ones that reject it keep their own build,
+// split off into a `scope` row beside it. Returns the rows that replace `version`, in order; mutates it in place.
+export function redirectRow(
+  version: SharedVersion,
+  tag: VersionName,
+  acceptsTag: AcceptsTag
+): SharedVersion[] {
+  const objecting = new Set(
+    version.remotes.filter(r => r.strictVersion && !acceptsTag(tag, version.tag, r.requiredVersion))
+  );
+
+  if (objecting.size === 0) {
+    version.action = 'skip';
+    return [version];
+  }
+  if (objecting.size === version.remotes.length) {
+    version.action = 'scope';
+    return [version];
+  }
+
+  version.remotes = version.remotes.filter(r => !objecting.has(r));
+  version.action = 'skip';
+  // Beside its source rather than appended: the record stays newest-first, which `write()`
+  // guarantees and a later election reads as "the latest".
+  return [version, { tag: version.tag, host: false, action: 'scope', remotes: [...objecting] }];
+}
+
+// Moves `remote`'s copies out of every `share` and `skip` row into the `scope` row of their tag; a new scope row
+// goes right after its source, so the record stays newest-first. Mutates the source rows, returns the new list.
+export function scopeRemote(versions: SharedVersion[], remote: RemoteName): SharedVersion[] {
+  const rows = [...versions];
+  for (const source of versions) {
+    if (source.action === 'scope') continue;
+    const copies = source.remotes.filter(r => r.name === remote);
+    if (copies.length === 0) continue;
+    // The host leads its row and a later election finds the host's tag by the flag, so both move with it.
+    const host = source.host && copies.includes(source.remotes[0]!);
+    source.remotes = source.remotes.filter(r => r.name !== remote);
+    if (host) source.host = false;
+
+    let scoped = rowAt(rows, source.tag, 'scope');
+    if (!scoped) {
+      scoped = { tag: source.tag, host: false, action: 'scope', remotes: [] };
+      rows.splice(rows.indexOf(source) + 1, 0, scoped);
+    }
+    if (host) {
+      scoped.host = true;
+      scoped.remotes.unshift(...copies);
+    } else scoped.remotes.push(...copies);
+  }
+  return rows.filter(v => v.remotes.length > 0);
 }

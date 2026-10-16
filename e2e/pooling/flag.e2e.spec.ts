@@ -265,7 +265,7 @@ test.describe('the flag: what it does not change', () => {
     // entrypoints — is a *resolver* policy, decided per external in `determine` and
     // `generate-import-map`. The portfolio below holds a single external, so its pool has one member and
     // the gates have nothing to coordinate: both flag settings must produce the identical map, including
-    // the self-fill case, the one a pool gate could plausibly reach.
+    // a remote the serving build does not cover, the one a pool gate could plausibly reach.
     // See `entrypoints.e2e.spec.ts` for what the policy itself does.
     const M = '@angular/material';
     const portfolio = () => [

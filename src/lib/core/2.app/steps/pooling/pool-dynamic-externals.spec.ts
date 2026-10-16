@@ -6,9 +6,9 @@ import type {
   DenseSharedInfo,
   RemoteEntry,
   SharedExternal,
-  SharedInfoActions,
   SharedVersion,
 } from 'lib/core/1.domain';
+import type { LoadActions } from 'lib/core/1.domain/remote-entry/load-actions.contract';
 import { mockSharedInfo } from 'lib/testing/domain/remote-entry/shared-info.mock';
 import { mockVersionRemote } from 'lib/testing/domain/externals/version.mock';
 import { labelStoredByNpmScope } from 'lib/testing/pooling/label-by-npm-scope';
@@ -111,7 +111,7 @@ describe('createPoolDynamicExternals', () => {
       )
       .sort();
 
-  // D28: a record the orchestrator never writes itself, mfe listing core twice. A remote ships one copy per
+  // A record the orchestrator never writes itself: mfe lists core twice. A remote ships one copy per
   // member, so the gate reads mfe's first row, as the election does: core 17.0.0, which the map serves. The
   // second row's ^16 would reject the committed 17.0.0 and island mfe for a copy it does not run.
   it('reads a duplicated row of the loaded remote as the first one', async () => {
@@ -129,10 +129,15 @@ describe('createPoolDynamicExternals', () => {
 
     const result = await poolDynamicExternals({
       entry: entryWith(shared('@framework/core'), shared('@framework/common')),
-      actions: { '@framework/core': { action: 'skip' }, '@framework/common': { action: 'skip' } },
+      actions: {
+        '@framework/core': { action: 'skip', covered: ['@framework/core'] },
+        '@framework/common': { action: 'skip', covered: ['@framework/common'] },
+      },
     });
 
-    expect(result.actions['@framework/core']).toEqual({ action: 'skip' });
+    expect(result.actions['@framework/core']).toEqual({
+      action: 'skip',
+    });
     expect(verdictsWritten()).toEqual([]);
   });
 
@@ -155,9 +160,9 @@ describe('createPoolDynamicExternals', () => {
       ),
     });
     const entry = entryWith(shared('@framework/forms'), shared('@framework/forms/signals'));
-    const actions: SharedInfoActions = {
-      '@framework/forms': { action: 'skip' },
-      '@framework/forms/signals': { action: 'skip' },
+    const actions: LoadActions = {
+      '@framework/forms': { action: 'skip', covered: ['@framework/forms'] },
+      '@framework/forms/signals': { action: 'skip', covered: ['@framework/forms/signals'] },
     };
 
     const result = await poolDynamicExternals({ entry, actions });
@@ -187,9 +192,9 @@ describe('createPoolDynamicExternals', () => {
       }),
     });
     const entry = entryWith(shared('@framework/forms'), shared('@framework/forms/signals'));
-    const actions: SharedInfoActions = {
-      '@framework/forms': { action: 'skip' },
-      '@framework/forms/signals': { action: 'skip' },
+    const actions: LoadActions = {
+      '@framework/forms': { action: 'skip', covered: ['@framework/forms'] },
+      '@framework/forms/signals': { action: 'skip', covered: ['@framework/forms/signals'] },
     };
 
     const result = await poolDynamicExternals({ entry, actions });
@@ -211,8 +216,8 @@ describe('createPoolDynamicExternals', () => {
       '@framework/cdk': committed('@framework/cdk', { tag: '22.0.6', remotes: ['mfe'] }),
     });
     const entry = entryWith(shared('@framework/core'), shared('@framework/cdk'));
-    const actions: SharedInfoActions = {
-      '@framework/core': { action: 'skip' },
+    const actions: LoadActions = {
+      '@framework/core': { action: 'skip', covered: ['@framework/core'] },
       '@framework/cdk': { action: 'share' },
     };
 
@@ -249,8 +254,8 @@ describe('createPoolDynamicExternals', () => {
       }),
     });
     const entry = entryWith(shared('@framework/core'), shared('@framework/material/table'));
-    const actions: SharedInfoActions = {
-      '@framework/core': { action: 'skip' },
+    const actions: LoadActions = {
+      '@framework/core': { action: 'skip', covered: ['@framework/core'] },
       '@framework/material/table': { action: 'share' },
     };
 
@@ -273,8 +278,8 @@ describe('createPoolDynamicExternals', () => {
       '@framework/forms': committed('@framework/forms', { tag: '22.0.5', remotes: ['mfe'] }),
     });
     const entry = entryWith(shared('@framework/router'), shared('@framework/forms'));
-    const actions: SharedInfoActions = {
-      '@framework/router': { action: 'skip' },
+    const actions: LoadActions = {
+      '@framework/router': { action: 'skip', covered: ['@framework/router'] },
       '@framework/forms': { action: 'share' },
     };
 
@@ -308,9 +313,9 @@ describe('createPoolDynamicExternals', () => {
       external.versions[1]!.remotes[0]!.requiredVersion = '~16.0.0';
     givenCommitted(record);
     const entry = entryWith(shared('@framework/core'), shared('@framework/common'));
-    const actions: SharedInfoActions = {
-      '@framework/core': { action: 'skip' },
-      '@framework/common': { action: 'skip' },
+    const actions: LoadActions = {
+      '@framework/core': { action: 'skip', covered: ['@framework/core'] },
+      '@framework/common': { action: 'skip', covered: ['@framework/common'] },
     };
 
     const result = await poolDynamicExternals({ entry, actions });
@@ -340,9 +345,9 @@ describe('createPoolDynamicExternals', () => {
       ),
     });
     const entry = entryWith(shared('@framework/core'), shared('@framework/cdk'));
-    const actions: SharedInfoActions = {
-      '@framework/core': { action: 'skip' },
-      '@framework/cdk': { action: 'skip' },
+    const actions: LoadActions = {
+      '@framework/core': { action: 'skip', covered: ['@framework/core'] },
+      '@framework/cdk': { action: 'skip', covered: ['@framework/cdk'] },
     };
 
     const result = await poolDynamicExternals({ entry, actions });
@@ -371,7 +376,7 @@ describe('createPoolDynamicExternals', () => {
 
     const result = await poolDynamicExternals({
       entry,
-      actions: { '@framework/router': { action: 'skip' } },
+      actions: { '@framework/router': { action: 'skip', covered: ['@framework/router'] } },
     });
 
     expect(result.actions['@framework/router']).toEqual({ action: 'scope' });
@@ -397,9 +402,9 @@ describe('createPoolDynamicExternals', () => {
       }),
     });
     const entry = entryWith(shared('@framework/core'), shared('@framework/router'));
-    const actions: SharedInfoActions = {
-      '@framework/core': { action: 'skip' },
-      '@framework/router': { action: 'skip' },
+    const actions: LoadActions = {
+      '@framework/core': { action: 'skip', covered: ['@framework/core'] },
+      '@framework/router': { action: 'skip', covered: ['@framework/router'] },
     };
 
     const result = await poolDynamicExternals({ entry, actions });
@@ -426,9 +431,9 @@ describe('createPoolDynamicExternals', () => {
       }),
     });
     const entry = entryWith(shared('@framework/core'), shared('@framework/router'));
-    const actions: SharedInfoActions = {
-      '@framework/core': { action: 'skip' },
-      '@framework/router': { action: 'skip' },
+    const actions: LoadActions = {
+      '@framework/core': { action: 'skip', covered: ['@framework/core'] },
+      '@framework/router': { action: 'skip', covered: ['@framework/router'] },
     };
 
     const result = await poolDynamicExternals({ entry, actions });
@@ -455,9 +460,9 @@ describe('createPoolDynamicExternals', () => {
       }),
     });
     const entry = entryWith(shared('@framework/core'), shared('@framework/router'));
-    const actions: SharedInfoActions = {
-      '@framework/core': { action: 'skip' },
-      '@framework/router': { action: 'skip' },
+    const actions: LoadActions = {
+      '@framework/core': { action: 'skip', covered: ['@framework/core'] },
+      '@framework/router': { action: 'skip', covered: ['@framework/router'] },
     };
 
     const result = await poolDynamicExternals({ entry, actions });
@@ -473,8 +478,8 @@ describe('createPoolDynamicExternals', () => {
     ) => committed('@framework/cdk', ...versions);
     const routerFrom = (remote: string) =>
       committed('@framework/router', { tag: '17.0.0', remotes: [remote, 'mfe'] });
-    const actionsOf = (...names: string[]): SharedInfoActions =>
-      Object.fromEntries(names.map(n => [n, { action: 'skip' as const }]));
+    const actionsOf = (...names: string[]): LoadActions =>
+      Object.fromEntries(names.map(n => [n, { action: 'skip' as const, covered: [n] }]));
 
     it('scopes the family when the load ships it at another tag', async () => {
       // mfe agrees with the map and publishes its own cdk 17.0.0, yet team/b's router binds cdk 17.0.1.
@@ -582,9 +587,9 @@ describe('createPoolDynamicExternals', () => {
       }),
     });
     const entry = entryWith(shared('@framework/core'), shared('@framework/router'));
-    const actions: SharedInfoActions = {
-      '@framework/core': { action: 'skip' },
-      '@framework/router': { action: 'skip' },
+    const actions: LoadActions = {
+      '@framework/core': { action: 'skip', covered: ['@framework/core'] },
+      '@framework/router': { action: 'skip', covered: ['@framework/router'] },
     };
 
     const result = await poolDynamicExternals({ entry, actions });
@@ -618,8 +623,8 @@ describe('createPoolDynamicExternals', () => {
     await poolDynamicExternals({
       entry,
       actions: {
-        '@framework/forms': { action: 'skip' },
-        '@framework/forms/signals': { action: 'skip' },
+        '@framework/forms': { action: 'skip', covered: ['@framework/forms'] },
+        '@framework/forms/signals': { action: 'skip', covered: ['@framework/forms/signals'] },
       },
     });
 
@@ -642,8 +647,8 @@ describe('createPoolDynamicExternals', () => {
       foo: committed('foo', { tag: '17.0.0', remotes: ['host', 'mfe'] }),
       bar: committed('bar', { tag: '17.0.0', remotes: ['host', 'mfe'] }),
     });
-    const actions: SharedInfoActions = {
-      foo: { action: 'skip', override: { foo: 'http://host/foo.js' } },
+    const actions: LoadActions = {
+      foo: { action: 'skip', covered: ['foo'], override: { foo: 'http://host/foo.js' } },
       bar: { action: 'scope' },
     };
 
@@ -672,7 +677,7 @@ describe('createPoolDynamicExternals', () => {
         { tag: '18.0.0', remotes: ['mfe'], action: 'scope' }
       ),
     });
-    const actions: SharedInfoActions = {
+    const actions: LoadActions = {
       '@framework/core': { action: 'share' },
       '@framework/common': { action: 'scope' },
     };
@@ -707,7 +712,7 @@ describe('createPoolDynamicExternals', () => {
     adapters.sharedExternalsRepo.getFromScope = vi.fn(scope =>
       scope === 'team-a' ? teamA : global
     );
-    const actions: SharedInfoActions = {
+    const actions: LoadActions = {
       '@framework/core': { action: 'share' },
       '@framework/common': { action: 'scope' },
     };
@@ -753,7 +758,7 @@ describe('createPoolDynamicExternals', () => {
       await poolDynamicExternals({
         entry,
         actions: {
-          '@framework/core': { action: 'skip' },
+          '@framework/core': { action: 'skip', covered: ['@framework/core'] },
           '@framework/common': { action: 'scope' },
         },
       });
@@ -792,7 +797,7 @@ describe('createPoolDynamicExternals', () => {
       await poolDynamicExternals({
         entry,
         actions: {
-          '@framework/core': { action: 'skip' },
+          '@framework/core': { action: 'skip', covered: ['@framework/core'] },
           '@framework/common': { action: 'scope' },
         },
       });
@@ -804,8 +809,8 @@ describe('createPoolDynamicExternals', () => {
     });
 
     it("records a resolver scope for a missing entrypoint as 'uncovered', not a range rejection", async () => {
-      // Under `scopeUncoveredEntrypoints` the resolver scopes mfe's common@17.0.1: its `/http` entrypoint is
-      // not in the committed 17.0.0, though its range takes 17.0.0. The family self-serves for coverage.
+      // mfe's common@17.0.1 arrives scoped though its range takes the committed 17.0.0, whose surface lacks
+      // its `/http` entrypoint. The family self-serves for coverage.
       const entry = entryWith(shared('@framework/core'), shared('@framework/common'));
       const common = committed('@framework/common', { tag: '17.0.0', remotes: ['host'] });
       common.versions.push({
@@ -833,7 +838,7 @@ describe('createPoolDynamicExternals', () => {
       await poolDynamicExternals({
         entry,
         actions: {
-          '@framework/core': { action: 'skip' },
+          '@framework/core': { action: 'skip', covered: ['@framework/core'] },
           '@framework/common': { action: 'scope' },
         },
       });
@@ -871,8 +876,8 @@ describe('createPoolDynamicExternals', () => {
       await poolDynamicExternals({
         entry,
         actions: {
-          '@framework/forms': { action: 'skip' },
-          '@framework/forms/signals': { action: 'skip' },
+          '@framework/forms': { action: 'skip', covered: ['@framework/forms'] },
+          '@framework/forms/signals': { action: 'skip', covered: ['@framework/forms/signals'] },
           '@framework/animations': { action: 'share' },
         },
       });
@@ -912,7 +917,7 @@ describe('createPoolDynamicExternals', () => {
       await poolDynamicExternals({
         entry: entryWith(shared('@framework/core'), shared('@framework/common')),
         actions: {
-          '@framework/core': { action: 'skip' },
+          '@framework/core': { action: 'skip', covered: ['@framework/core'] },
           '@framework/common': { action: 'scope' },
         },
       });
@@ -966,8 +971,10 @@ describe('createPoolDynamicExternals', () => {
       );
     };
 
-    // mfe's `@fw/http` ships only `@fw/http/testing` (plus `extra` when given). Nobody shares a package
-    // `@fw/http`, so `update-cache` opened a share row for mfe's copy, as it does for a package it introduces.
+    // mfe's `@fw/http` ships only `@fw/http/testing` (plus `extra` when given), with a share row for its copy.
+    // A real load never hands the gate this `share`: `update-cache` decides the package as a whole and already
+    // skips it onto the map's `@fw/http/testing` (or scopes it when `extra` adds a root the map lacks). These
+    // specs pin how the gate would treat it all the same.
     const givenHttp = (o: { tag?: string; extra?: string[]; skipOnly?: string } = {}) =>
       givenCommitted({
         '@fw/core': external(
@@ -989,15 +996,15 @@ describe('createPoolDynamicExternals', () => {
       actions: {
         '@fw/core': { action: 'skip', covered: ['@fw/core'] },
         '@fw/http': { action: 'share' },
-      } as SharedInfoActions,
+      } as LoadActions,
     });
 
-    it('turns a share the map serves into a skip covering what it serves', async () => {
+    it('turns a share the map serves into a skip', async () => {
       givenHttp();
 
       const { actions } = await poolDynamicExternals(load());
 
-      expect(actions['@fw/http']).toEqual({ action: 'skip', covered: ['@fw/http/testing'] });
+      expect(actions['@fw/http']).toEqual({ action: 'skip' });
       // The share row `update-cache` opened becomes the skip row: a copy that points at the map publishes
       // nothing, so the next page must not read it as a shared version.
       expect(copies('@fw/http')).toEqual([['17.1.1:skip', [{ name: 'mfe', cached: false }]]]);
@@ -1012,7 +1019,6 @@ describe('createPoolDynamicExternals', () => {
       // A named scope has no `imports` to inherit from: the override is the only mapping it gets.
       expect(actions['@fw/http']).toEqual({
         action: 'skip',
-        covered: ['@fw/http/testing'],
         override: { '@fw/http/testing': 'http://F/fw_http_testing.js' },
       });
     });
@@ -1034,8 +1040,8 @@ describe('createPoolDynamicExternals', () => {
       ]);
     });
 
-    // The resolver scoped mfe's `@fw/http` (under `scopeUncoveredEntrypoints`, say): the shared version lacks
-    // its testing entrypoint. The map serves that entrypoint from F's flat package, so the gate judges mfe
+    // mfe's `@fw/http` arrives scoped though no range rejects the shared version, which lacks its testing
+    // entrypoint. The map serves that entrypoint from F's flat package, so the gate judges mfe
     // global, as init would, and the scope becomes a skip. X is a committed island at the same tag.
     it('turns a resolver scope the map serves into a skip, leaving the scope row to the others', async () => {
       givenCommitted({
@@ -1062,7 +1068,7 @@ describe('createPoolDynamicExternals', () => {
         },
       });
 
-      expect(actions['@fw/http']).toEqual({ action: 'skip', covered: ['@fw/http/testing'] });
+      expect(actions['@fw/http']).toEqual({ action: 'skip' });
       expect(copies('@fw/http')).toEqual([
         ['17.1.1:scope', [{ name: 'X', cached: true }]],
         ['17.1.1:skip', [{ name: 'mfe', cached: false }]],
@@ -1100,9 +1106,9 @@ describe('createPoolDynamicExternals', () => {
       ]);
     });
 
-    it('skips a share the map serves in part; the rest self-fills', async () => {
-      // mfe ships `@fw/http` 17.0.0 with its root, which nobody serves, so it only reaches a global
-      // verdict by agreeing: F serves its testing entrypoint at the same 17.0.0.
+    it('scopes the family when the map serves a share only in part', async () => {
+      // mfe ships `@fw/http` 17.0.0 with its root, which nobody serves, beside the testing entrypoint F serves
+      // at the same 17.0.0. A cover from the map is whole or nothing, so mfe runs the fw family itself.
       givenCommitted({
         '@fw/core': external(
           row('17.0.0', 'share', copy('F', ['@fw/core'], true), copy('mfe', ['@fw/core']))
@@ -1115,13 +1121,16 @@ describe('createPoolDynamicExternals', () => {
 
       const { actions } = await poolDynamicExternals(load());
 
-      expect(actions['@fw/http']).toEqual({ action: 'skip', covered: ['@fw/http/testing'] });
+      expect(actions).toEqual({ '@fw/core': { action: 'scope' }, '@fw/http': { action: 'scope' } });
+      expect(copies('@fw/http')).toEqual([
+        ['17.0.0:scope', [{ name: 'mfe', cached: true, poolCause: 'uncovered' }]],
+      ]);
     });
 
     // The same load from a chunked build: mfe's own `@fw/http` root imports mfe's http internals, and F's
-    // testing entrypoint F's. Self-filling the root beside the map's testing file would run both, so the
-    // whole family serves itself, as for any family the map can serve only in part.
-    it('scopes the family when a chunked copy would self-fill beside the map', async () => {
+    // testing entrypoint F's. Running the root beside the map's testing file would run both, so the whole
+    // family serves itself, as for any family the map can serve only in part.
+    it('scopes the family when a chunked copy would run beside the map', async () => {
       givenCommitted({
         '@fw/core': external(
           row('17.0.0', 'share', copy('F', ['@fw/core'], true), copy('mfe', ['@fw/core']))
@@ -1146,65 +1155,75 @@ describe('createPoolDynamicExternals', () => {
       expect(verdictsWritten()).toEqual(['mfe@@fw/core: uncovered', 'mfe@@fw/http: uncovered']);
     });
 
-    // Under a coverage policy a skip refuses what it does not cover, and a named scope under `strictImportMap`
-    // refuses a skip-only package with an entrypoint no shared version serves on the next page, so the partial
-    // share would publish its own testing. But mfe takes F's core, whose file resolves testing to F's: two
-    // files of one specifier, so mfe serves its whole family itself.
-    it.each([
-      [
-        'strictEntryPointCoverage',
-        undefined,
-        (c: ConfigContract): void => {
-          c.strict.strictEntryPointCoverage = true;
-        },
-      ],
-      [
-        'scopeUncoveredEntrypoints',
-        undefined,
-        (c: ConfigContract): void => {
-          c.profile.scopeUncoveredEntrypoints = true;
-        },
-      ],
-      [
-        'strictImportMap',
-        'team',
-        (c: ConfigContract): void => {
-          c.strict.strictImportMap = true;
-        },
-      ],
-    ] as const)(
-      'scopes the family of a partly served share under %s (%s)',
-      async (_policy, shareScope, set) => {
-        set(config);
-        scopeUrls('F');
+    // mfe opens `@fw/http` alone, so no committed file binds its pool-mates: the map serves only the testing
+    // entrypoint, from F's flat package. Sharing mfe's copy would restate that key from mfe's own build beside
+    // F's, so mfe serves the package itself, from a chunked build as from a flat one.
+    it('scopes a share the map serves only in part, with no pool-mate to bind it', async () => {
+      for (const bundle of [undefined, 'browser-shared']) {
+        vi.clearAllMocks();
         givenCommitted({
-          '@fw/core': external(
-            row('17.0.0', 'share', copy('F', ['@fw/core'], true), copy('mfe', ['@fw/core']))
-          ),
           '@fw/http/testing': external(
             row('17.0.0', 'share', copy('F', ['@fw/http/testing'], true))
           ),
           '@fw/http': external(
-            row('17.0.0', 'share', copy('mfe', ['@fw/http', '@fw/http/testing'], true))
+            row('17.0.0', 'share', {
+              ...copy('mfe', ['@fw/http', '@fw/http/testing'], true),
+              ...(bundle && { bundle }),
+            })
           ),
         });
+        adapters.sharedChunksRepo.tryGet = vi.fn((remote: string, b: string) =>
+          remote === 'mfe' && b === bundle
+            ? Optional.of(['_nf-internal_chunk-a.js'])
+            : Optional.empty<string[]>()
+        );
 
-        const { actions } = await poolDynamicExternals(load(shareScope));
-
-        expect(actions).toEqual({
-          '@fw/core': { action: 'scope' },
-          '@fw/http': { action: 'scope' },
+        const { actions } = await poolDynamicExternals({
+          entry: entryWith(shared('@fw/http')),
+          actions: { '@fw/http': { action: 'share' } },
         });
-        expect(verdictsWritten()).toEqual(['mfe@@fw/core: uncovered', 'mfe@@fw/http: uncovered']);
-        // F runs testing on the map; the line names the build whose file binds it all the same.
-        expect(config.log.warn).toHaveBeenCalledOnce();
+
+        expect(actions).toEqual({ '@fw/http': { action: 'scope' } });
+        expect(verdictsWritten()).toEqual(['mfe@@fw/http: uncovered']);
         expect(config.log.warn).toHaveBeenCalledWith(
           8,
           // Wording is pinned in island-warnings.contract.spec.ts alone.
-          expect.stringContaining("committed build 'F'")
+          expect.stringContaining("gap '@fw/http'")
         );
       }
-    );
+    });
+
+    // A named scope under `strictImportMap` refuses a skip-only package with an entrypoint no shared version
+    // serves on the next page, so the partial share would publish its own testing. But mfe takes F's core,
+    // whose file resolves testing to F's: two files of one specifier, so mfe serves its whole family itself.
+    it('scopes the family of a partly served share under strictImportMap', async () => {
+      config.strict.strictImportMap = true;
+      scopeUrls('F');
+      givenCommitted({
+        '@fw/core': external(
+          row('17.0.0', 'share', copy('F', ['@fw/core'], true), copy('mfe', ['@fw/core']))
+        ),
+        '@fw/http/testing': external(row('17.0.0', 'share', copy('F', ['@fw/http/testing'], true))),
+        '@fw/http': external(
+          row('17.0.0', 'share', copy('mfe', ['@fw/http', '@fw/http/testing'], true))
+        ),
+      });
+
+      const { actions } = await poolDynamicExternals(load('team'));
+
+      expect(actions).toEqual({
+        '@fw/core': { action: 'scope' },
+        '@fw/http': { action: 'scope' },
+      });
+      expect(verdictsWritten()).toEqual(['mfe@@fw/core: uncovered', 'mfe@@fw/http: uncovered']);
+      // F runs testing on the map; the line names the build whose file binds it all the same.
+      expect(config.log.warn).toHaveBeenCalledOnce();
+      expect(config.log.warn).toHaveBeenCalledWith(
+        8,
+        // Wording is pinned in island-warnings.contract.spec.ts alone.
+        expect.stringContaining("committed build 'F'")
+      );
+    });
 
     describe('a skip whose entrypoint another package serves', () => {
       // G ships `@fw/core` 17.0.1 and, flat, `@fw/core/testing`. The shared version of `@fw/core` lacks
@@ -1224,7 +1243,7 @@ describe('createPoolDynamicExternals', () => {
         entry: entryWith(shared('@fw/core', { shareScope })),
         actions: {
           '@fw/core': { action: 'skip', covered: ['@fw/core'], ...(override && { override }) },
-        } as SharedInfoActions,
+        } as LoadActions,
       });
 
       it('covers it', async () => {
@@ -1232,7 +1251,6 @@ describe('createPoolDynamicExternals', () => {
 
         expect(actions['@fw/core']).toEqual({
           action: 'skip',
-          covered: ['@fw/core', '@fw/core/testing'],
         });
         // The copy keeps its place in the record: only the actions change.
         expect(verdictsWritten()).toEqual([]);
@@ -1247,7 +1265,6 @@ describe('createPoolDynamicExternals', () => {
 
         expect(actions['@fw/core']).toEqual({
           action: 'skip',
-          covered: ['@fw/core', '@fw/core/testing'],
           override: {
             '@fw/core': 'http://G/fw_core.js',
             '@fw/core/testing': 'http://G/fw_core_testing.js',
@@ -1295,13 +1312,15 @@ describe('createPoolDynamicExternals', () => {
           remotes: ['host', 'mfe'],
         }),
       });
-      const actions: SharedInfoActions = {
+      const actions: LoadActions = {
         '@framework/core': {
           action: 'skip',
+          covered: ['@framework/core'],
           override: { '@framework/core': 'http://host/core.js' },
         },
         '@framework/common': {
           action: 'skip',
+          covered: ['@framework/common'],
           override: { '@framework/common': 'http://host/common.js' },
         },
       };
@@ -1340,7 +1359,7 @@ describe('createPoolDynamicExternals', () => {
         s: { ...labelled('s', 'y'), poolName: 'y' },
       });
 
-      await poolDynamicExternals({ entry, actions: { r: { action: 'skip' } } });
+      await poolDynamicExternals({ entry, actions: { r: { action: 'skip', covered: ['r'] } } });
 
       expect(namesWritten()).toEqual({ r: 'x', s: 'x' });
     });
@@ -1348,9 +1367,9 @@ describe('createPoolDynamicExternals', () => {
     describe('a member already carrying its name', () => {
       const entry = entryWith(shared('@framework/core'), shared('@framework/common'));
       let externals: Record<string, SharedExternal>;
-      const actions = (): SharedInfoActions => ({
-        '@framework/core': { action: 'skip' },
-        '@framework/common': { action: 'skip' },
+      const actions = (): LoadActions => ({
+        '@framework/core': { action: 'skip', covered: ['@framework/core'] },
+        '@framework/common': { action: 'skip', covered: ['@framework/common'] },
       });
 
       beforeEach(() => {
@@ -1395,7 +1414,10 @@ describe('createPoolDynamicExternals', () => {
         rxjs: { ...committed('rxjs', { tag: '7.0.0', remotes: ['host', 'mfe'] }), poolName: 'old' },
       });
 
-      await poolDynamicExternals({ entry, actions: { rxjs: { action: 'skip' } } });
+      await poolDynamicExternals({
+        entry,
+        actions: { rxjs: { action: 'skip', covered: ['rxjs'] } },
+      });
 
       // An external in no pool keeps its stored name until the next dirty init strips it.
       expect(adapters.sharedExternalsRepo.addOrUpdate).not.toHaveBeenCalled();

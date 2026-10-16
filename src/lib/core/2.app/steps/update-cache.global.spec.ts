@@ -8,6 +8,7 @@ import { ModeConfig } from 'lib/core/2.app/config/mode.contract';
 import { RemoteInfo, SharedExternal } from 'lib/core/1.domain';
 import { mockConfig } from 'lib/testing/config.mock';
 import { mockAdapters } from 'lib/testing/adapters.mock';
+import { readScopeThroughTryGet } from 'lib/testing/adapters/shared-externals.repository.mock';
 import {
   mockRemoteInfo_MFE1,
   mockRemoteInfo_MFE2,
@@ -49,7 +50,10 @@ describe('createProcessDynamicRemoteEntry - scoped', () => {
     adapters.sharedExternalsRepo.tryGet = vi.fn(_e => Optional.empty<SharedExternal>());
     adapters.sharedExternalsRepo.scopeType = vi.fn(() => 'global');
 
-    updateCache = createUpdateCache(config, adapters);
+    updateCache = readScopeThroughTryGet(
+      adapters.sharedExternalsRepo,
+      createUpdateCache(config, adapters)
+    );
   });
 
   it('should add a shared external to empty list', async () => {
@@ -71,7 +75,7 @@ describe('createProcessDynamicRemoteEntry - scoped', () => {
       'dep-a',
       mockExternal.shared(
         [mockVersion_A.v2_1_1({ remotes: { 'team/mfe1': { cached: true } }, action: 'share' })],
-        { dirty: false }
+        { dirty: false, servingBuild: 'team/mfe1' }
       ),
       undefined
     );
@@ -83,14 +87,13 @@ describe('createProcessDynamicRemoteEntry - scoped', () => {
 
   it('should add a shared external to list with compatible version', async () => {
     adapters.versionCheck.isCompatible = vi.fn(() => true);
-    adapters.sharedExternalsRepo.tryGet = vi.fn(
-      (): Optional<SharedExternal> =>
-        Optional.of(
-          mockExternal.shared(
-            [mockVersion_A.v2_1_2({ remotes: { 'team/mfe2': { cached: true } }, action: 'share' })],
-            { dirty: false }
-          )
+    adapters.sharedExternalsRepo.tryGet = vi.fn((): Optional<SharedExternal> =>
+      Optional.of(
+        mockExternal.shared(
+          [mockVersion_A.v2_1_2({ remotes: { 'team/mfe2': { cached: true } }, action: 'share' })],
+          { dirty: false }
         )
+      )
     );
 
     const remoteEntry = mockRemoteEntry_MFE1({
@@ -124,14 +127,13 @@ describe('createProcessDynamicRemoteEntry - scoped', () => {
 
   it('should add and skip shared external to list with incompatible version and not strictVersion', async () => {
     adapters.versionCheck.isCompatible = vi.fn(() => false);
-    adapters.sharedExternalsRepo.tryGet = vi.fn(
-      (): Optional<SharedExternal> =>
-        Optional.of(
-          mockExternal.shared(
-            [mockVersion_B.v2_2_2({ remotes: { 'team/mfe2': { cached: true } }, action: 'share' })],
-            { dirty: false }
-          )
+    adapters.sharedExternalsRepo.tryGet = vi.fn((): Optional<SharedExternal> =>
+      Optional.of(
+        mockExternal.shared(
+          [mockVersion_B.v2_2_2({ remotes: { 'team/mfe2': { cached: true } }, action: 'share' })],
+          { dirty: false }
         )
+      )
     );
 
     const remoteEntry = mockRemoteEntry_MFE1({
@@ -171,14 +173,13 @@ describe('createProcessDynamicRemoteEntry - scoped', () => {
     // Tags differ, so the range decides: a copy only accepts its own version regardless of range.
     adapters.versionCheck.compare = vi.fn(createVersionCheck().compare);
     config.strict.strictExternalCompatibility = false;
-    adapters.sharedExternalsRepo.tryGet = vi.fn(
-      (): Optional<SharedExternal> =>
-        Optional.of(
-          mockExternal.shared(
-            [mockVersion_B.v2_2_2({ remotes: { 'team/mfe2': { cached: true } }, action: 'share' })],
-            { dirty: false }
-          )
+    adapters.sharedExternalsRepo.tryGet = vi.fn((): Optional<SharedExternal> =>
+      Optional.of(
+        mockExternal.shared(
+          [mockVersion_B.v2_2_2({ remotes: { 'team/mfe2': { cached: true } }, action: 'share' })],
+          { dirty: false }
         )
+      )
     );
 
     const remoteEntry = mockRemoteEntry_MFE1({
@@ -218,14 +219,13 @@ describe('createProcessDynamicRemoteEntry - scoped', () => {
     // Tags differ, so the range decides: a copy only accepts its own version regardless of range.
     adapters.versionCheck.compare = vi.fn(createVersionCheck().compare);
     config.strict.strictExternalCompatibility = true;
-    adapters.sharedExternalsRepo.tryGet = vi.fn(
-      (): Optional<SharedExternal> =>
-        Optional.of(
-          mockExternal.shared(
-            [mockVersion_B.v2_2_2({ remotes: { 'team/mfe2': { cached: true } }, action: 'share' })],
-            { dirty: false }
-          )
+    adapters.sharedExternalsRepo.tryGet = vi.fn((): Optional<SharedExternal> =>
+      Optional.of(
+        mockExternal.shared(
+          [mockVersion_B.v2_2_2({ remotes: { 'team/mfe2': { cached: true } }, action: 'share' })],
+          { dirty: false }
         )
+      )
     );
 
     const remoteEntry = mockRemoteEntry_MFE1({
@@ -236,20 +236,19 @@ describe('createProcessDynamicRemoteEntry - scoped', () => {
     await expect(updateCache(remoteEntry)).rejects.toThrow(`Could not process remote 'team/mfe1'`);
     expect(config.log.error).toHaveBeenCalledWith(
       8,
-      "[__GLOBAL__][team/mfe1] dep-b@2.1.1 Is not compatible with existing dep-b@2.2.2 requiredRange '~2.2.0'"
+      "[__GLOBAL__][team/mfe1] dep-b@2.1.1 Is not compatible with existing dep-b@2.2.2 requiredRange '~2.1.0'"
     );
   });
 
   it('should handle duplicate versions of the same external', async () => {
     adapters.versionCheck.isCompatible = vi.fn(() => true);
-    adapters.sharedExternalsRepo.tryGet = vi.fn(
-      (): Optional<SharedExternal> =>
-        Optional.of(
-          mockExternal.shared(
-            [mockVersion_A.v2_1_1({ remotes: { 'team/mfe2': { cached: true } }, action: 'share' })],
-            { dirty: false }
-          )
+    adapters.sharedExternalsRepo.tryGet = vi.fn((): Optional<SharedExternal> =>
+      Optional.of(
+        mockExternal.shared(
+          [mockVersion_A.v2_1_1({ remotes: { 'team/mfe2': { cached: true } }, action: 'share' })],
+          { dirty: false }
         )
+      )
     );
 
     const remoteEntry = mockRemoteEntry_MFE1({
@@ -263,10 +262,9 @@ describe('createProcessDynamicRemoteEntry - scoped', () => {
       'dep-a',
       mockExternal.shared(
         [
-          mockVersion_A.v2_1_1({
-            remotes: { 'team/mfe2': { cached: true }, 'team/mfe1': { cached: false } },
-            action: 'share',
-          }),
+          mockVersion_A.v2_1_1({ remotes: { 'team/mfe2': { cached: true } }, action: 'share' }),
+          // A skip copy keeps out of the share row: it serves nobody.
+          mockVersion_A.v2_1_1({ remotes: { 'team/mfe1': { cached: false } }, action: 'skip' }),
         ],
         { dirty: false }
       ),
@@ -274,88 +272,74 @@ describe('createProcessDynamicRemoteEntry - scoped', () => {
     );
 
     expect(result.actions).toEqual({
-      'dep-a': { action: 'skip', covered: ['dep-a'], sameVersion: true },
+      'dep-a': { action: 'skip', covered: ['dep-a'] },
     });
   });
 
-  // The joining copy builds the tag that is already shared: its extra entrypoints merge in and it
-  // serves them itself, since the committed import map cannot be repointed. Both coverage settings
-  // are about tears between versions, so neither applies here.
-  it.each([
-    ['neither setting', () => {}],
-    ['scopeUncoveredEntrypoints', (c: ModeConfig) => (c.profile.scopeUncoveredEntrypoints = true)],
-    ['strictEntryPointCoverage', (c: ModeConfig) => (c.strict.strictEntryPointCoverage = true)],
-  ])(
-    'should merge extra entrypoints of a remote joining the shared version with %s',
-    async (_name, enable) => {
-      enable(config);
-      adapters.versionCheck.isCompatible = vi.fn(() => true);
-      adapters.sharedExternalsRepo.tryGet = vi.fn(
-        (): Optional<SharedExternal> =>
-          Optional.of(
-            mockExternal.shared(
-              [
-                mockVersion_A.v2_1_1({
-                  remotes: { 'team/mfe2': { cached: true } },
-                  action: 'share',
-                }),
-              ],
-              { dirty: false }
-            )
-          )
-      );
-
-      const remoteEntry = mockRemoteEntry_MFE1({
-        shared: [
-          mockSharedInfoA.v2_1_1({ entries: { 'dep-a': 'dep-a.js', 'dep-a/sub': 'dep-a-sub.js' } }),
-        ],
-        exposes: [],
-      });
-
-      const result = await updateCache(remoteEntry);
-
-      expect(result.actions).toEqual({
-        'dep-a': { action: 'skip', covered: ['dep-a'], sameVersion: true },
-      });
-      // Merged into the shared version, so its own entrypoint is reachable from that version.
-      expect(adapters.sharedExternalsRepo.addOrUpdate).toHaveBeenCalledWith(
-        'dep-a',
+  // The joining copy builds the tag that is already shared, plus an entrypoint the committed map lacks. Taking
+  // the map's root beside its own `/sub` would run the package from two builds, so it runs all of it itself.
+  it('should scope a remote that ships an entrypoint the committed map lacks', async () => {
+    adapters.versionCheck.isCompatible = vi.fn(() => true);
+    adapters.sharedExternalsRepo.tryGet = vi.fn((): Optional<SharedExternal> =>
+      Optional.of(
         mockExternal.shared(
           [
             mockVersion_A.v2_1_1({
-              remotes: {
-                'team/mfe2': { cached: true },
-                'team/mfe1': {
-                  cached: false,
-                  entries: { 'dep-a': 'dep-a.js', 'dep-a/sub': 'dep-a-sub.js' },
-                },
-              },
+              remotes: { 'team/mfe2': { cached: true } },
               action: 'share',
             }),
           ],
           { dirty: false }
-        ),
-        undefined
-      );
-    }
-  );
+        )
+      )
+    );
+
+    const remoteEntry = mockRemoteEntry_MFE1({
+      shared: [
+        mockSharedInfoA.v2_1_1({ entries: { 'dep-a': 'dep-a.js', 'dep-a/sub': 'dep-a-sub.js' } }),
+      ],
+      exposes: [],
+    });
+
+    const result = await updateCache(remoteEntry);
+
+    expect(result.actions).toEqual({ 'dep-a': { action: 'scope' } });
+    expect(adapters.sharedExternalsRepo.addOrUpdate).toHaveBeenCalledWith(
+      'dep-a',
+      mockExternal.shared(
+        [
+          mockVersion_A.v2_1_1({ remotes: { 'team/mfe2': { cached: true } }, action: 'share' }),
+          mockVersion_A.v2_1_1({
+            remotes: {
+              'team/mfe1': {
+                cached: true,
+                entries: { 'dep-a': 'dep-a.js', 'dep-a/sub': 'dep-a-sub.js' },
+              },
+            },
+            action: 'scope',
+          }),
+        ],
+        { dirty: false }
+      ),
+      undefined
+    );
+  });
 
   it('should warn users if the requiredVersions differ and strictVersion', async () => {
     adapters.versionCheck.isCompatible = vi.fn(() => true);
     config.strict.strictExternalSameVersionCompatibility = false;
-    adapters.sharedExternalsRepo.tryGet = vi.fn(
-      (): Optional<SharedExternal> =>
-        Optional.of(
-          mockExternal.shared(
-            [
-              mockVersion_A.v2_1_1({
-                remotes: { 'team/mfe2': { cached: true, requiredVersion: '~2.1.0' } },
-                action: 'share',
-              }),
-            ],
-            { dirty: false }
-          )
+    adapters.sharedExternalsRepo.tryGet = vi.fn((): Optional<SharedExternal> =>
+      Optional.of(
+        mockExternal.shared(
+          [
+            mockVersion_A.v2_1_1({
+              remotes: { 'team/mfe2': { cached: true, requiredVersion: '~2.1.0' } },
+              action: 'share',
+            }),
+          ],
+          { dirty: false }
         )
+      )
     );
 
     const remoteEntry = mockRemoteEntry_MFE1({
@@ -370,11 +354,12 @@ describe('createProcessDynamicRemoteEntry - scoped', () => {
       mockExternal.shared(
         [
           mockVersion_A.v2_1_1({
-            remotes: {
-              'team/mfe2': { cached: true, requiredVersion: '~2.1.0' },
-              'team/mfe1': { cached: false, requiredVersion: '~2.1.1' },
-            },
+            remotes: { 'team/mfe2': { cached: true, requiredVersion: '~2.1.0' } },
             action: 'share',
+          }),
+          mockVersion_A.v2_1_1({
+            remotes: { 'team/mfe1': { cached: false, requiredVersion: '~2.1.1' } },
+            action: 'skip',
           }),
         ],
         { dirty: false }
@@ -383,7 +368,7 @@ describe('createProcessDynamicRemoteEntry - scoped', () => {
     );
 
     expect(result.actions).toEqual({
-      'dep-a': { action: 'skip', covered: ['dep-a'], sameVersion: true },
+      'dep-a': { action: 'skip', covered: ['dep-a'] },
     });
     expect(config.log.warn).toHaveBeenCalledWith(
       8,
@@ -394,19 +379,18 @@ describe('createProcessDynamicRemoteEntry - scoped', () => {
   it('should throw an error if the requiredVersions differs if strictVersion and in strict mode', async () => {
     adapters.versionCheck.isCompatible = vi.fn(() => true);
     config.strict.strictExternalSameVersionCompatibility = true;
-    adapters.sharedExternalsRepo.tryGet = vi.fn(
-      (): Optional<SharedExternal> =>
-        Optional.of(
-          mockExternal.shared(
-            [
-              mockVersion_A.v2_1_1({
-                remotes: { 'team/mfe2': { cached: true, requiredVersion: '~2.1.0' } },
-                action: 'share',
-              }),
-            ],
-            { dirty: false }
-          )
+    adapters.sharedExternalsRepo.tryGet = vi.fn((): Optional<SharedExternal> =>
+      Optional.of(
+        mockExternal.shared(
+          [
+            mockVersion_A.v2_1_1({
+              remotes: { 'team/mfe2': { cached: true, requiredVersion: '~2.1.0' } },
+              action: 'share',
+            }),
+          ],
+          { dirty: false }
         )
+      )
     );
 
     const remoteEntry = mockRemoteEntry_MFE1({
@@ -449,7 +433,7 @@ describe('createProcessDynamicRemoteEntry - scoped', () => {
             action: 'share',
           }),
         ],
-        { dirty: false }
+        { dirty: false, servingBuild: 'team/mfe1' }
       ),
       undefined
     );
@@ -489,7 +473,7 @@ describe('createProcessDynamicRemoteEntry - scoped', () => {
             action: 'share',
           }),
         ],
-        { dirty: false }
+        { dirty: false, servingBuild: 'team/mfe1' }
       ),
       undefined
     );
@@ -508,19 +492,18 @@ describe('createProcessDynamicRemoteEntry - scoped', () => {
       const order = ['2.1.3', '2.1.2', '2.1.1'];
       return order.indexOf(b) - order.indexOf(a);
     });
-    adapters.sharedExternalsRepo.tryGet = vi.fn(
-      (): Optional<SharedExternal> =>
-        Optional.of(
-          mockExternal.shared(
-            [
-              mockVersion_A.v2_1_1({ remotes: { 'team/mfe1': { cached: false } }, action: 'skip' }),
-              mockVersion_A.v2_1_3({ remotes: { 'team/mfe3': { cached: true } }, action: 'share' }),
-            ],
-            {
-              dirty: false,
-            }
-          )
+    adapters.sharedExternalsRepo.tryGet = vi.fn((): Optional<SharedExternal> =>
+      Optional.of(
+        mockExternal.shared(
+          [
+            mockVersion_A.v2_1_1({ remotes: { 'team/mfe1': { cached: false } }, action: 'skip' }),
+            mockVersion_A.v2_1_3({ remotes: { 'team/mfe3': { cached: true } }, action: 'share' }),
+          ],
+          {
+            dirty: false,
+          }
         )
+      )
     );
 
     const remoteEntry = mockRemoteEntry_MFE2({
@@ -627,7 +610,7 @@ describe('createProcessDynamicRemoteEntry - scoped', () => {
           }),
           mockVersion_A.v2_1_1({ remotes: { 'team/mfe1': { cached: true } }, action: 'share' }),
         ],
-        { dirty: false }
+        { dirty: false, servingBuild: 'team/mfe1' }
       ),
       undefined
     );
@@ -710,7 +693,7 @@ describe('createProcessDynamicRemoteEntry - scoped', () => {
               action: 'share',
             }),
           ],
-          { dirty: false }
+          { dirty: false, servingBuild: 'team/mfe1' }
         ),
         undefined
       );

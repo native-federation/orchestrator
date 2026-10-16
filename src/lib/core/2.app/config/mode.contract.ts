@@ -1,7 +1,6 @@
 export type ModeProfileConfig = {
   latestSharedExternal: boolean;
   skipInvalidExternalVersions: boolean;
-  scopeUncoveredEntrypoints: boolean;
   overrideCachedRemotes: 'always' | 'never' | 'init-only';
   overrideCachedRemotesIfURLMatches: boolean;
   cacheTag?: string;
@@ -17,7 +16,6 @@ export type ModeStrictnessConfig = {
   strictExternalSameVersionCompatibility: boolean;
   strictExternalVersion: boolean;
   strictImportMap: boolean;
-  strictEntryPointCoverage: boolean;
 };
 
 export type ModeConfig = {

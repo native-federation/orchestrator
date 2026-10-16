@@ -656,7 +656,7 @@ describe('pooling regressions', () => {
       .versions.map(v => `${v.tag}:${v.action}:[${v.remotes.map(r => r.name).join(',')}]`);
 
   /**
-   * Finding 1. mfe-b pins core to exactly 17.1.0 and mfe-a's `~17.1.1` rejects it, so the newer 17.1.1 is
+   * mfe-b pins core to exactly 17.1.0 and mfe-a's `~17.1.1` rejects it, so the newer 17.1.1 is
    * shared and 17.1.0's only row is mfe-b's `scope` row. mfe-c, loaded at runtime with 17.1.0 under `^17.1.0`, accepts the shared 17.1.1
    * and the page maps it onto `imports`. Filed into mfe-b's `scope` row, the next page scoped it to its own
    * 17.1.0 instead: a tear beside anything it shares with mfe-a, and a page that differs across a reload.
@@ -682,7 +682,7 @@ describe('pooling regressions', () => {
 
       p.reload();
       const { actions, merged } = await p.runDynamic(loaded);
-      expect(actions['@fw/core']).toEqual({ action: 'skip', covered: ['@fw/core'] });
+      expect(actions['@fw/core']).toEqual({ action: 'skip' });
       expect(resolves(merged, 'team/mfe-c', '@fw/core')).toBe(file('team/mfe-a', '@fw/core'));
 
       // Its own `skip` row beside the island, so the record rebuilds what the page ran.
@@ -700,12 +700,12 @@ describe('pooling regressions', () => {
   });
 
   /**
-   * Finding 2, and the architect's two follow-ups on the same state. The host mfe-a runs 19.2.0; mfe-b and
-   * mfe-c pin 19.1.0 exactly, so they run mfe-b's build as a subpool. anim then has no `share` row: both
-   * copies `skip` onto mfe-b through per-consumer overrides, and `imports` never names it. mfe-d, loaded with
-   * only anim@19.1.0, joined that `skip` row and got `skip` with nothing `covered`: an unmapped bare
-   * specifier. It now shares its own copy. The next init re-elects the pool with it, as a cold init does, and
-   * mfe-d, agreeing with the host, fills the host's map with that copy.
+   * The host mfe-a runs 19.2.0; mfe-b and mfe-c pin 19.1.0 exactly, so they run mfe-b's build as a
+   * subpool. anim then has no `share` row: both copies `skip` onto mfe-b through per-consumer overrides,
+   * and `imports` never names it. mfe-d, loaded with only anim@19.1.0, joined that `skip` row and got
+   * `skip` with nothing `covered`: an unmapped bare specifier. It now shares its own copy. The next init
+   * re-elects the pool with it, as a cold init does, and mfe-d, agreeing with the host, fills the host's
+   * map with that copy.
    */
   describe('a dynamically loaded copy of a member nothing shares still resolves', () => {
     let p: ReturnType<typeof portfolio>;
@@ -889,12 +889,9 @@ describe('pooling regressions', () => {
 
       p.reload();
       const { actions, merged } = await p.runDynamic(loaded);
-      expect(actions['@ui/kit']).toEqual({
-        action: 'skip',
-        covered: ['@ui/kit', '@ui/kit/sub'],
-        sameVersion: true,
-      });
-      expect(resolves(merged, 'team/mfe-d', '@ui/kit/sub')).toBe(file('team/mfe-a', '@ui/kit/sub'));
+      expect(actions['@ui/kit']).toEqual({ action: 'skip' });
+      for (const specifier of ['@ui/kit', '@ui/kit/sub'])
+        expect(resolves(merged, 'team/mfe-d', specifier)).toBe(file('team/mfe-a', specifier));
       // The share row keeps mfe-a's copy; mfe-d's runs its files from a skip row at the same tag.
       expect(rows(p, '@ui/kit')).toEqual(['18.2.0:share:[team/mfe-a]', '18.2.0:skip:[team/mfe-d]']);
 
@@ -971,15 +968,15 @@ describe('pooling regressions', () => {
   });
 
   /**
-   * D28. A record the orchestrator never writes itself: a remote lists `@fw/core` twice, at 1.0.1 and at
+   * A record the orchestrator never writes itself: a remote lists `@fw/core` twice, at 1.0.1 and at
    * 1.0.0 with another file. A build ships one copy per member, so the election, the dynamic gate and the
    * no-tear oracle all read its first row, whole: the build is core 1.0.1 beside common 1.0.0. The gate's own
    * first-row read is pinned in pool-dynamic-externals.spec.ts.
    */
-  describe('D28: a duplicated row is read as the first one', () => {
+  describe('a duplicated row is read as the first one', () => {
     let p: ReturnType<typeof portfolio>;
     beforeEach(() => {
-      p = portfolio({}, { storage: 'nf-regression-d28', realRepositories: true });
+      p = portfolio({}, { storage: 'nf-regression-duplicated-row', realRepositories: true });
     });
 
     // mfe-d disagrees with the map's core 1.0.1, so it takes the map's files only because a build shipped
@@ -1010,17 +1007,15 @@ describe('pooling regressions', () => {
   });
 
   /**
-   * A remote that serves some members itself could still publish a global file: rule 5 gave an
-   * agreeing build every file at a tag round 1 publishes, and both the extension and round 1's same-tag loans
-   * took files from such builds. Import-map scopes are keyed by URL, so that file's own imports resolve in its
-   * owner's scope, and every remote taking it also ran the owner's private copies one hop in: a split. Now only
-   * a build that takes every member it ships from the global map may publish one. Both cases are one pool
-   * under one npm-scope label, no label noise; the harness's no-tear oracle failed each with a `split` for c.
+   * The global map publishes a package the winner does not ship only while a remote on it ships that package
+   * whole at its tag. A build that serves some members itself is off the map, so it publishes nothing: import-map
+   * scopes are keyed by URL, so its file's own imports resolve in its owner's scope, and every remote taking it
+   * would also run the owner's private copies one hop in, a split. When the settle drops a package, a remote the
+   * map no longer serves leaves it, which can drop the next. Each case is one pool under one npm-scope label.
    */
   describe('a build serving some members itself publishes no global file', () => {
     const CORE = '@ng/core';
     const ROUTER = '@ng/router';
-    const MATERIAL = '@ng/material';
     const CDK = '@ng/cdk';
 
     const copy = (remote: string, entries?: Record<string, string>) => ({
@@ -1029,51 +1024,16 @@ describe('pooling regressions', () => {
       strict: false,
       entries,
     });
-
-    // The host w ships cdk's root; l and c lend cdk/overlay at w's tag. They ship different material
-    // entrypoints at different tags, so neither serves the other and material is not published. The overlay
-    // file was l's, which binds l's material 17.3.1, and c ran it beside its own material 17.3.0.
-    it('through a borrowed entrypoint', async () => {
-      const p = portfolio(
-        { w: 'http://w/', l: 'http://l/', c: 'http://c/' },
-        { storage: 'nf-regression-t1-loan', hosts: ['w'] }
-      );
-      p.seed(CORE, [
-        { ...p.version('17.3.0', CORE, [copy('w'), copy('l'), copy('c')]), host: true },
-      ]);
-      p.seed(CDK, [
-        {
-          ...p.version('17.3.0', CDK, [
-            copy('w', { '@ng/cdk': '@ng/cdk.js' }),
-            copy('l', { '@ng/cdk/overlay': '@ng/cdk/overlay.js' }),
-            copy('c', { '@ng/cdk/overlay': '@ng/cdk/overlay.js' }),
-          ]),
-          host: true,
-        },
-      ]);
-      p.seed(MATERIAL, [
-        p.version('17.3.1', MATERIAL, [copy('l', { '@ng/material/sort': '@ng/material/sort.js' })]),
-        p.version('17.3.0', MATERIAL, [
-          copy('c', { '@ng/material/table': '@ng/material/table.js' }),
-        ]),
-      ]);
-
-      const importMap = await p.runInit();
-
-      expect(importMap.imports).toEqual({
-        [CORE]: 'http://w/@ng/core.js',
-        [CDK]: 'http://w/@ng/cdk.js',
-      });
-      expect(p.islands()).toEqual({ l: 'uncovered', c: 'uncovered' });
-    });
+    const withFiles = (remote: string, ...specifiers: string[]) =>
+      copy(remote, Object.fromEntries(specifiers.map(s => [s, `${remote}-${s.slice(4)}.js`])));
 
     // The host w wins with core+router@17.3.0. n's build (Y@17.3.1, Z@17.3.5) serves m1 and m2 (router and
     // Y at 17.3.1 and 17.3.0, `^17.3.0`), so they form subpool n. The extension publishes Y@17.3.1, as n is
     // the only agreeing remote shipping Y (m1 and m2 disagree on router), and m1 and m2 move onto the global
     // map, which n's build witnesses. But n serves Z itself (q ships it at 17.3.4, both exact), so the
-    // fixpoint drops Y and takes m1 and m2 off the global map again. They went `alone` and each served its
+    // settle drops Y and takes m1 and m2 off the global map again. They went `alone` and each served its
     // whole family itself; now they go back to the later rounds and n's subpool takes them in again.
-    it('sends a remote the fixpoint takes off the global map back to the subpool rounds', async () => {
+    it('sends a remote the settle takes off the global map back to the subpool rounds', async () => {
       const Y = '@ng/y';
       const Z = '@ng/z';
       const p = portfolio(
@@ -1124,9 +1084,9 @@ describe('pooling regressions', () => {
 
     // As above, but n's subpool survives the extension: m3 (router@17.3.1, Z@17.3.5) stays in it, as the
     // extended global tags do not serve Z, while m1 (router@17.3.1, Y@17.3.0) moves onto the global map. When
-    // the fixpoint drops Y again, no new subpool can form around m1, so it has to rejoin subpool n, the one
+    // the settle drops Y again, no new subpool can form around m1, so it has to rejoin subpool n, the one
     // it left, instead of going `alone` and serving its whole family itself.
-    it('returns a remote the fixpoint takes off the global map to the subpool it left', async () => {
+    it('returns a remote the settle takes off the global map to the subpool it left', async () => {
       const Y = '@ng/y';
       const Z = '@ng/z';
       const p = portfolio(
@@ -1176,43 +1136,59 @@ describe('pooling regressions', () => {
       });
     });
 
-    // The same way back for a remote round 1 placed. The host w ships core alone; l lends it `core/testing`
-    // at 17.3.0, so round 1 serves a (core and core/testing at 17.3.1). l ships router too, so it serves
-    // itself and m (router@17.3.1) as subpool l. But l runs router off the global map, so it publishes
-    // nothing: the fixpoint drops `core/testing` and takes a off the global map again. a was never in a
-    // subpool and no new one forms around it; it joins subpool l, whose build serves it, instead of going
-    // `alone` and serving core itself.
-    it('puts a remote the fixpoint takes off the global map in a subpool whose build serves it', async () => {
-      const TESTING = '@ng/core/testing';
+    // The same way back for a remote whose subpool dissolved. The host w ships core alone; x ships p with p/a,
+    // d and e ship p alone, and e, f and g ship s, all at 17.3.0; v and x ship r at two tags. e's build serves
+    // d, f and g, x's serves v and d, so subpool e forms first and x keeps v. The extension publishes x's p
+    // and the s that e, f and g ship, and all of subpool e moves onto the global map. No remote there ships p
+    // whole, so the settle drops p and takes d and e off the map again, and keeps s, which f and g ship whole:
+    // d joins subpool x, whose build serves it, and e, which no subpool's build serves, goes `uncovered`.
+    it('puts a remote the settle takes off the global map in a subpool it was never in', async () => {
+      const P = '@ng/p';
+      const S = '@ng/s';
+      const R = '@ng/r';
       const p = portfolio(
-        { w: 'http://w/', l: 'http://l/', a: 'http://a/', m: 'http://m/' },
-        { storage: 'nf-regression-t1-round1', hosts: ['w'] }
+        {
+          w: 'http://w/',
+          x: 'http://x/',
+          v: 'http://v/',
+          d: 'http://d/',
+          e: 'http://e/',
+          f: 'http://f/',
+          g: 'http://g/',
+        },
+        { storage: 'nf-regression-t1-joins', hosts: ['w'] }
       );
-      const at = (remote: string, entries?: Record<string, string>) => ({
-        remote,
-        req: '^17.3.0',
-        strict: false,
-        entries,
-      });
-      const withTesting = (remote: string) =>
-        at(remote, { [CORE]: `${remote}-core.js`, [TESTING]: `${remote}-testing.js` });
       p.seed(CORE, [
-        p.version('17.3.1', CORE, [withTesting('a')]),
-        { ...p.version('17.3.0', CORE, [at('w'), withTesting('l'), at('m')]), host: true },
+        {
+          ...p.version(
+            '17.3.0',
+            CORE,
+            ['w', 'x', 'v', 'd', 'e', 'f', 'g'].map(r => copy(r))
+          ),
+          host: true,
+        },
       ]);
-      p.seed(ROUTER, [
-        p.version('17.3.1', ROUTER, [at('m')]),
-        p.version('17.3.0', ROUTER, [at('l')]),
+      p.seed(P, [
+        p.version('17.3.0', P, [withFiles('x', P, `${P}/a`), withFiles('d', P), withFiles('e', P)]),
       ]);
+      p.seed(S, [p.version('17.3.0', S, [copy('e'), copy('f'), copy('g')])]);
+      p.seed(R, [p.version('17.3.1', R, [copy('v')]), p.version('17.3.0', R, [copy('x')])]);
 
       const importMap = await p.runInit();
 
-      expect(importMap.imports).toEqual({ [CORE]: 'http://w/@ng/core.js' });
-      // Without it, a went `uncovered` and scoped its own core and core/testing.
-      expect(p.islands()).toEqual({ a: 'subpool l', l: 'subpool l', m: 'subpool l' });
-      expect(importMap.scopes?.['http://a/']).toEqual({
-        [CORE]: 'http://l/l-core.js',
-        [TESTING]: 'http://l/l-testing.js',
+      expect(importMap.imports).toEqual({
+        [CORE]: 'http://w/@ng/core.js',
+        [S]: 'http://f/@ng/s.js',
+      });
+      expect(p.islands()).toEqual({
+        x: 'subpool x',
+        v: 'subpool x',
+        d: 'subpool x',
+        e: 'uncovered',
+      });
+      expect(importMap.scopes?.['http://d/']).toEqual({
+        [CORE]: 'http://x/@ng/core.js',
+        [P]: 'http://x/x-p.js',
       });
     });
 
@@ -1285,50 +1261,47 @@ describe('pooling regressions', () => {
         });
       });
 
-    // A drop that leaves a second remote without a publisher. The host w ships core and router; l agrees and
-    // lends core/testing and router/upgrade at 17.3.0, but is not served, as nothing covers Z (q ships it at
-    // another tag, both exact). r ships upgrade at 17.3.1, so it disagrees and lends nothing, yet its range
-    // takes the borrowed upgrade; x's range takes the borrowed testing: both go global. Only l, off the map,
-    // ships upgrade at 17.3.0, so the fixpoint drops it and takes r off the map. r was the only global remote
-    // shipping testing at 17.3.0, so a second pass drops that too and takes x off the map. l's build then
-    // serves all three as a subpool.
+    // A drop that leaves a second package without a publisher. The host w ships core alone; x ships p with
+    // p/a, a ships p alone and q with q/x, b ships q alone, all at 17.3.0; v and x ship r at two tags. x's build
+    // serves v, a's serves b. The extension publishes x's p and a's q, and b, then a, move onto the global
+    // map; x stays in its subpool, as the map publishes no r. No remote there ships p whole, so the settle
+    // drops p and takes a off the map. a was the only global remote shipping q whole, so q drops too and takes
+    // b off the map. a's build then serves both as a subpool again.
     it('drops what a remote it took off the global map published, and whoever needed that', async () => {
-      const TESTING = '@ng/core/testing';
-      const UPGRADE = '@ng/router/upgrade';
-      const Z = '@ng/z';
+      const P = '@ng/p';
+      const Q = '@ng/q';
+      const R = '@ng/r';
       const p = portfolio(
-        { w: 'http://w/', l: 'http://l/', r: 'http://r/', x: 'http://x/', q: 'http://q/' },
+        { w: 'http://w/', x: 'http://x/', v: 'http://v/', a: 'http://a/', b: 'http://b/' },
         { storage: 'nf-regression-t1-cascade', hosts: ['w'] }
       );
-      const testing = (remote: string) => copy(remote, { [TESTING]: `${remote}-testing.js` });
-      const upgrade = (remote: string) => copy(remote, { [UPGRADE]: `${remote}-upgrade.js` });
       p.seed(CORE, [
-        p.version('17.3.2', CORE, [testing('x')]),
-        { ...p.version('17.3.0', CORE, [copy('w'), testing('l'), testing('r')]), host: true },
+        {
+          ...p.version(
+            '17.3.0',
+            CORE,
+            ['w', 'x', 'v', 'a', 'b'].map(r => copy(r))
+          ),
+          host: true,
+        },
       ]);
-      p.seed(ROUTER, [
-        p.version('17.3.1', ROUTER, [upgrade('r')]),
-        { ...p.version('17.3.0', ROUTER, [copy('w'), upgrade('l')]), host: true },
-      ]);
-      p.seed(Z, [
-        p.version('17.3.5', Z, [{ ...copy('l'), req: '17.3.5' }]),
-        p.version('17.3.4', Z, [{ ...copy('q'), req: '17.3.4' }]),
-      ]);
+      p.seed(P, [p.version('17.3.0', P, [withFiles('x', P, `${P}/a`), withFiles('a', P)])]);
+      p.seed(Q, [p.version('17.3.0', Q, [withFiles('a', Q, `${Q}/x`), withFiles('b', Q)])]);
+      p.seed(R, [p.version('17.3.1', R, [copy('v')]), p.version('17.3.0', R, [copy('x')])]);
 
       const importMap = await p.runInit();
 
-      expect(importMap.imports).toEqual({
-        [CORE]: 'http://w/@ng/core.js',
-        [ROUTER]: 'http://w/@ng/router.js',
-      });
-      // With one pass, x stayed global and the map took core/testing from x's own 17.3.2 file.
+      expect(importMap.imports).toEqual({ [CORE]: 'http://w/@ng/core.js' });
       expect(p.islands()).toEqual({
-        l: 'subpool l',
-        r: 'subpool l',
-        x: 'subpool l',
-        q: 'uncovered',
+        x: 'subpool x',
+        v: 'subpool x',
+        a: 'subpool a',
+        b: 'subpool a',
       });
-      expect(importMap.scopes?.['http://x/']).toEqual({ [TESTING]: 'http://l/l-testing.js' });
+      expect(importMap.scopes?.['http://b/']).toEqual({
+        [CORE]: 'http://a/@ng/core.js',
+        [Q]: 'http://a/a-q.js',
+      });
     });
   });
 
@@ -1572,11 +1545,10 @@ describe('pooling regressions', () => {
         });
     });
 
-    // Flat throughout. l1, loaded first, takes the host's core, fills testing from its own build, as the map
-    // lacks it, and publishes forms, which nobody shared. l2, a copy of l1's build, would take l1's forms and
-    // fill testing itself, at l1's tag but from its own file, while l1's forms resolves testing to l1's: two
-    // instances of one specifier. So l2 serves its whole family itself.
-    it('serves the whole family of a load whose served file binds a pool-mate another file serves it', async () => {
+    // Flat throughout. The host's map serves core but not testing, so l1, loaded first, serves its whole family
+    // itself rather than run the host's core beside its own testing, and publishes nothing. l2, a copy of l1's
+    // build, meets the same map and does the same: no load's file binds another's pool-mate.
+    it('serves the whole family of each load the map serves only in part, publishing none of it', async () => {
       const TESTING = '@fw/core/testing';
       const p = portfolio(
         {},
@@ -1591,8 +1563,12 @@ describe('pooling regressions', () => {
       await p.runInit([entry('host', shared(CORE, { flat: true }))]);
 
       const first = await p.runDynamic(build('l1'));
-      expect(scopeOf(first.merged, 'l1')).toEqual({ [TESTING]: 'http://l1/fw_core_testing.js' });
-      expect(first.merged.imports[FORMS]).toBe('http://l1/fw_forms.js');
+      expect(scopeOf(first.merged, 'l1')).toEqual({
+        [CORE]: 'http://l1/fw_core.js',
+        [TESTING]: 'http://l1/fw_core_testing.js',
+        [FORMS]: 'http://l1/fw_forms.js',
+      });
+      expect(first.merged.imports[FORMS]).toBeUndefined();
 
       const { merged } = await p.runDynamic(build('l2'));
 
@@ -1601,14 +1577,13 @@ describe('pooling regressions', () => {
         [TESTING]: 'http://l2/fw_core_testing.js',
         [FORMS]: 'http://l2/fw_forms.js',
       });
-      expect(p.islands()).toEqual({ l2: 'uncovered' });
+      expect(p.islands()).toEqual({ l1: 'uncovered', l2: 'uncovered' });
     });
 
-    // One hop further. c, loaded first, takes the host's core, fills testing itself and publishes forms; b
-    // takes c's forms and publishes router. l takes b's router and would fill testing itself, but b's router
-    // resolves forms to c's file, which resolves testing to c's own: two testings in l, though no build l
-    // takes a file from directly runs one off the map. So l serves its whole family itself.
-    it('serves the whole family of a load bound one build further in', async () => {
+    // c, loaded first, ships testing beside the host's core, which the map lacks, so it serves its whole family
+    // itself and publishes nothing; b then opens forms and router. l ships testing too: it serves its whole
+    // family itself rather than take b's router, whose forms would bind it to b's build beside its own testing.
+    it('serves the whole family of a load the map serves only in part, beside a build that opened a pool-mate', async () => {
       const TESTING = '@fw/core/testing';
       const ROUTER = '@fw/router';
       const p = portfolio(
@@ -1628,17 +1603,20 @@ describe('pooling regressions', () => {
         [TESTING]: 'http://l/fw_core_testing.js',
         [ROUTER]: 'http://l/fw_router.js',
       });
-      expect(p.islands()).toEqual({ l: 'uncovered' });
-      expect(p.config.log.warn).toHaveBeenCalledWith(
+      expect(p.islands()).toEqual({ c: 'uncovered', l: 'uncovered' });
+      // l already runs core from its own build, so b's router, whose build resolves core to the host's file, is
+      // the first thing that keeps it off the map.
+      expect(p.config.log.warn).toHaveBeenLastCalledWith(
         8,
-        expect.stringContaining("committed build 'c'")
+        expect.stringContaining(
+          "committed build 'b', whose files it would reach, resolves '@fw/core'"
+        )
       );
     });
 
-    // A remote loaded at runtime whose chunked core needs interop, which the committed map lacks. Self-filling
-    // interop beside the map's core would run two cores, and so would taking the map's forms beside its own
-    // core: the remote serves its whole family itself. From a flat build it binds the map's core and fills
-    // interop itself.
+    // A remote loaded at runtime whose core needs interop, which the committed map lacks. Running its own interop
+    // beside the map's core would run two builds of the package, so the remote serves its whole family itself,
+    // from a flat build as from a chunked one.
     for (const flat of [false, true])
       it(`serves the whole family of a remote it cannot fill from the map (${flat ? 'flat' : 'chunked'})`, async () => {
         const p = portfolio(
@@ -1655,18 +1633,37 @@ describe('pooling regressions', () => {
             entry(remote, shared(CORE, { entrypoints: [INTEROP], flat }), shared(FORMS, { flat }))
           );
 
-          expect(scopeOf(merged, remote)).toEqual(
-            flat
-              ? { [INTEROP]: `http://${remote}/fw_core_interop.js` }
-              : {
-                  [CORE]: `http://${remote}/fw_core.js`,
-                  [INTEROP]: `http://${remote}/fw_core_interop.js`,
-                  [FORMS]: `http://${remote}/fw_forms.js`,
-                }
-          );
+          expect(scopeOf(merged, remote)).toEqual({
+            [CORE]: `http://${remote}/fw_core.js`,
+            [INTEROP]: `http://${remote}/fw_core_interop.js`,
+            [FORMS]: `http://${remote}/fw_forms.js`,
+          });
         }
-        expect(p.islands()).toEqual(flat ? {} : { mfe3: 'uncovered', mfe4: 'uncovered' });
+        expect(p.islands()).toEqual({ mfe3: 'uncovered', mfe4: 'uncovered' });
       });
+
+    // The map serves only a flat secondary of core, from the host; r opens core from a chunked build that lists
+    // the secondary too. Sharing r's copy would restate the host's interop from r's build beside the host's file,
+    // so r serves the whole package itself and the load adds no `imports` key.
+    it('serves the whole package of a load that opens one the map serves only a secondary of', async () => {
+      const p = portfolio(
+        {},
+        { storage: 'nf-regression-open-partial', realRepositories: true, hosts: ['host'] }
+      );
+      await p.runInit([entry('host', shared(INTEROP, { flat: true }))]);
+
+      const { importMap, merged } = await p.runDynamic(
+        entry('r', shared(CORE, { entrypoints: [INTEROP] }))
+      );
+
+      expect(importMap.imports).toEqual({});
+      expect(merged.imports[INTEROP]).toBe('http://host/fw_core_interop.js');
+      expect(scopeOf(merged, 'r')).toEqual({
+        [CORE]: 'http://r/fw_core.js',
+        [INTEROP]: 'http://r/fw_core_interop.js',
+      });
+      expect(p.islands()).toEqual({ r: 'uncovered' });
+    });
   });
 
   /**

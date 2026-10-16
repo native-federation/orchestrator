@@ -3,6 +3,7 @@ import type { ForRollingBackChanges } from './for-rolling-back-changes.port';
 import type { ForDeterminingSharedExternals } from './for-determining-shared-externals.port';
 import type { ForPoolingSharedExternals } from './for-pooling-shared-externals.port';
 import type { ForPoolingDynamicExternals } from './for-pooling-dynamic-externals.port';
+import type { ForDecidingServingBuilds } from './for-deciding-serving-builds.port';
 import type { ForExposingModuleLoader } from './for-exposing-module-loader.port';
 import type { ForGeneratingImportMap } from './for-generating-import-map';
 import type { ForGettingRemoteEntries } from './for-getting-remote-entries.port';
@@ -18,6 +19,7 @@ export type InitDriversContract = {
   processRemoteEntries: ForProcessingRemoteEntries;
   determineSharedExternals: ForDeterminingSharedExternals;
   poolSharedExternals: ForPoolingSharedExternals;
+  decideServingBuilds: ForDecidingServingBuilds;
   generateImportMap: ForGeneratingImportMap;
   commitChanges: ForCommittingChanges;
   rollbackChanges: ForRollingBackChanges;

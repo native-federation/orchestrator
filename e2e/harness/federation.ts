@@ -40,6 +40,8 @@ export type InitOptions = Omit<BootOptions, 'host' | 'manifestUrl'> & {
   unlisted?: RemoteEntry[];
   /** Hand the library a manifest URL to fetch instead of a manifest object. */
   manifestFromUrl?: boolean;
+  /** With `shim`: es-module-shims' `mapOverrides`, on by default. Off, a later map cannot replace a mapped key. */
+  mapOverrides?: boolean;
 };
 
 export type Loaded = { remote: string; seen: Record<string, string> };
@@ -163,7 +165,14 @@ export const test = base.extend<{ nf: Federation }, Worker>({
     let booted = false;
 
     const boot = async (remotes: RemoteEntry[], opts: InitOptions) => {
-      const { hostEntry, unlisted, manifestFromUrl, pooling = true, ...bootOptions } = opts;
+      const {
+        hostEntry,
+        unlisted,
+        manifestFromUrl,
+        pooling = true,
+        mapOverrides = true,
+        ...bootOptions
+      } = opts;
       const built = (entry: RemoteEntry): RemoteEntry =>
         pooling && entry.shared
           ? { ...entry, shared: labelSharedInfoByNpmScope(entry.shared) }
@@ -177,7 +186,9 @@ export const test = base.extend<{ nf: Federation }, Worker>({
       harness.serve(compile([...remotes, ...(hostEntry ? [hostEntry] : [])].map(built)));
       if (unlisted?.length) harness.add(unlisted.map(built));
 
-      await page.goto(`http://${PAGE_HOST}/${shim ? '?shim=1' : ''}`);
+      await page.goto(
+        `http://${PAGE_HOST}/${shim ? `?shim=1${mapOverrides ? '' : '&overrides=0'}` : ''}`
+      );
       if (shim)
         await page.waitForFunction(
           () => typeof (globalThis as { importShim?: unknown }).importShim === 'function'

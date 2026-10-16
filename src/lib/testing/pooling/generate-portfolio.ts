@@ -1,5 +1,6 @@
 import fc from 'fast-check';
 import type { DenseSharedInfo, RemoteEntry } from 'lib/core/1.domain';
+import type { ImportsOf } from './page-graph';
 
 /**
  * Generated portfolios for the pooling property suite; `portfolio.ts` (`register` with `realRepositories`)
@@ -40,11 +41,16 @@ export type RemoteSpec = {
   // Ships each secondary entrypoint as a package of its own (flat), as a build without
   // `feature.convertFlatSharedInfo` emits it, rather than as an entry of its package (dense).
   flat?: boolean;
+  // Its build imports internal chunks: per bundle (`dense`, a `bundle` per shared info and `chunks`) or as
+  // `@nf-internal/` externals (`flat`, flat chunking).
+  chunks?: 'dense' | 'flat';
   strictVersion: boolean;
   // An unpooled singleton beside the pools, at one of two minors.
   extra: number | null;
   // Its range: `~1.<minor>.0` (the default) rejects the other minor, `^1.0.0` accepts both.
   extraRange?: 'tilde' | 'caret';
+  // The named share scope this remote declares its shared externals in, over the portfolio's (`mixedScope`).
+  shareScope?: string;
 };
 
 export type PortfolioSpec = {
@@ -57,8 +63,6 @@ export type PortfolioSpec = {
   shareScope?: string;
   // `profile.latestSharedExternal`: round 1 takes the newest build first.
   latestSharedExternal?: boolean;
-  // `profile.scopeUncoveredEntrypoints`: a copy the shared version tears is scoped, never self-filled.
-  scopeUncoveredEntrypoints?: boolean;
 };
 
 /** What one build ships of a pool: everything a `RemotePoolSpec` says except the range its remote declares. */
@@ -124,7 +128,8 @@ const freshRemoteArbitrary = (poolSizes: number[]): fc.Arbitrary<RemoteSpec> =>
  * straggler's build of its own, which keeps ragged one-off families in the mix. `labelNoise` has one remote
  * in five mislabel a member (`Relabel`); off, the portfolios are the ones the seeds have always produced.
  * `flat` has each remote ship flat or dense at random; `shareScope` puts every shared external in that named
- * scope. Both draw nothing when absent, so the default stream is unchanged. `latestSharedExternal` turns the
+ * scope, and `mixedScope` puts each remote in that named scope or the global one at random. All three draw
+ * nothing when absent, so the default stream is unchanged. `latestSharedExternal` turns the
  * profile flag on or off at random, drawn last, so the portfolio itself is the one the seed draws without it.
  */
 export const portfolioArbitrary = (
@@ -133,9 +138,10 @@ export const portfolioArbitrary = (
     maxRemotes?: number;
     labelNoise?: boolean;
     flat?: boolean;
+    chunks?: boolean;
     shareScope?: string;
+    mixedScope?: string;
     latestSharedExternal?: boolean;
-    scopeUncoveredEntrypoints?: boolean;
   } = {}
 ): fc.Arbitrary<PortfolioSpec> =>
   fc
@@ -187,6 +193,12 @@ export const portfolioArbitrary = (
                   }
                 : {}),
               ...(o.flat ? { flat: fc.boolean() } : {}),
+              ...(o.chunks
+                ? { chunks: fc.constantFrom<RemoteSpec['chunks']>(undefined, 'dense', 'flat') }
+                : {}),
+              ...(o.mixedScope === undefined
+                ? {}
+                : { shareScope: fc.constantFrom<string | undefined>(undefined, o.mixedScope) }),
             }),
             { minLength: o.minRemotes ?? 1, maxLength: o.maxRemotes ?? 20 }
           ),
@@ -200,17 +212,16 @@ export const portfolioArbitrary = (
             )
           ),
           ...(o.latestSharedExternal ? { latest: fc.boolean() } : {}),
-          ...(o.scopeUncoveredEntrypoints ? { scopeUncovered: fc.boolean() } : {}),
         })
-        .map(({ templates, remotes, host, mixedMajors, latest, scopeUncovered }) => ({
+        .map(({ templates, remotes, host, mixedMajors, latest }) => ({
           poolSizes,
           strict,
           host,
           ...(o.shareScope === undefined ? {} : { shareScope: o.shareScope }),
           ...(latest === undefined ? {} : { latestSharedExternal: latest }),
-          ...(scopeUncovered === undefined ? {} : { scopeUncoveredEntrypoints: scopeUncovered }),
-          remotes: remotes.map(remote => ({
+          remotes: remotes.map(({ shareScope, ...remote }) => ({
             ...remote,
+            ...(shareScope === undefined ? {} : { shareScope }),
             pools: remote.pools.map((pick, p) => {
               if (pick === null) return null;
               const builds = templates[p]!;
@@ -411,9 +422,10 @@ export function toRemoteEntry(
   spec: RemoteSpec,
   index: number,
   deploy = 0,
-  shareScope?: string
+  portfolioScope?: string
 ): RemoteEntry {
   const name = remoteName(index);
+  const shareScope = spec.shareScope ?? portfolioScope;
   const shared: DenseSharedInfo[] = [];
   const shipped = spec.pools.flatMap((pool, p) => (pool ? [p] : []));
   const relabelled =
@@ -432,8 +444,10 @@ export function toRemoteEntry(
       const to = spec.relabel!.to;
       return to === 'alias' ? `p${p}-alias` : `p${to % spec.pools.length}`;
     };
-    members.forEach((shape, m) => {
-      if (shape === null) return;
+    members.forEach((drawn, m) => {
+      if (drawn === null) return;
+      // A flat secondary without its package's root is a broken build: a flat remote ships the root beside it.
+      const shape = spec.flat && drawn === 'sub' ? 'root+sub' : drawn;
       const pkg = memberName(p, m);
       const entries: Record<string, string> = {};
       if (shape !== 'sub') entries[pkg] = `${pkg.slice(1).replace('/', '_')}.js`;
@@ -467,13 +481,56 @@ export function toRemoteEntry(
     } as DenseSharedInfo);
   }
 
+  // A chunk's name is its content's: one package at one tag builds the same chunk.
+  // A flat secondary entrypoint is bundled with its package, as a build bundles per package.
+  const slug = (info: DenseSharedInfo) =>
+    info.packageName
+      .replace(/\/sub$/, '')
+      .replace(/^@/, '')
+      .replace(/\//g, '_');
+  const chunkOf = (info: DenseSharedInfo) => `chunk-${slug(info)}-${info.version}`;
+  const chunks: Record<string, string[]> = {};
+  if (spec.chunks) for (const info of shared) info.bundle = `browser-${slug(info)}`;
+  if (spec.chunks === 'dense')
+    for (const info of shared) chunks[info.bundle!] = [`${chunkOf(info)}.js`];
+  if (spec.chunks === 'flat') {
+    const perPackage = new Map(shared.map(info => [slug(info), info]));
+    for (const info of perPackage.values())
+      shared.push({
+        packageName: `@nf-internal/${chunkOf(info)}`,
+        bundle: info.bundle,
+        version: info.version,
+        requiredVersion: info.version,
+        singleton: false,
+        strictVersion: false,
+        ...(shareScope === undefined ? {} : { shareScope }),
+        entries: { [`@nf-internal/${chunkOf(info)}`]: `${chunkOf(info)}.js` },
+      } as DenseSharedInfo);
+  }
+
   return {
     name,
     url: `${scopeUrlOf(name, deploy)}remoteEntry.json`,
     exposes: [],
     shared,
+    ...(spec.chunks === 'dense' ? { chunks } : {}),
   } as unknown as RemoteEntry;
 }
+
+// What a generated file imports beyond its own package: its pool's first member (the framework root) and the
+// unpooled `extra` (an rxjs), when its build ships them.
+export const generatedImports =
+  (entries: RemoteEntry[]): ImportsOf =>
+  (build, specifier) => {
+    const ships = new Set(
+      entries.find(e => e.name === build)?.shared.flatMap(s => Object.keys(s.entries)) ?? []
+    );
+    const pool = /^@p(\d+)\//.exec(specifier)?.[1];
+    if (pool === undefined) return [];
+    return [memberName(Number(pool), 0), 'extra'].filter(
+      s => ships.has(s) && !specifier.startsWith(`${s}/`) && s !== specifier
+    );
+  };
 
 export const toRemoteEntries = (spec: PortfolioSpec): RemoteEntry[] =>
   spec.remotes.map((remote, i) => toRemoteEntry(remote, i, 0, spec.shareScope));

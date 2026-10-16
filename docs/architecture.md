@@ -325,6 +325,9 @@ classDiagram
     }
     class SharedExternal {
         dirty: boolean
+        poolName?: string
+        poolWinner?: string
+        servingBuild?: string
         versions: SharedVersion[]
     }
     class SharedVersion{
@@ -340,6 +343,9 @@ classDiagram
         cached: boolean
         name: string
         bundle?: string
+        pool?: string
+        servedBy?: string
+        poolCause?: 'incompatible'|'uncovered'
     }
     class ScopedExternals {
         Map<.string, ScopedExternal>
@@ -619,7 +625,7 @@ Enforced by ESLint (`no-restricted-imports` in `eslint.config.js`):
 2. `registry`, `audit` and `node` may depend on `core` and `utils`, never on each other. `core` depends on no flow folder.
 3. `core/1.domain` is pure: it imports nothing from core's outer layers (`2.app`, `3.adapters`, `4.config`, `5.di`). Logging and storage stay with the caller: a domain function returns what the step should log or write (for example `buildPools` returns the externals whose pool label joined nothing, and the pooling step logs them).
 4. Only `core/5.di` imports the pipeline steps (`core/2.app/steps/**`), which it wires into the flows. Everything else, flows and adapters included, reaches a step through its driver port. `src/lib/testing` is exempt, since the test harness runs the real steps.
-5. A step never imports another step, i.e. any module `5.di` wires (`init.factory.ts`). Steps share code through `1.domain`, or through a template that is not itself a step, such as `store-remote-entry` (used by `process-remote-entries` and `update-cache`) or `apply-winner` (used by `determine-shared-externals`).
+5. A step never imports another step, i.e. any module `5.di` wires (`init.factory.ts`). Steps share code through `1.domain`, or through a template that is not itself a step, such as `store-remote-entry` (used by `process-remote-entries` and `update-cache`) or `apply-winner` (used by `determine-shared-externals` and `decide-serving-builds`).
 6. Inside the domain, `core/1.domain/externals` never imports `core/1.domain/pooling`: pooling builds on the externals model, never the other way round.
 
 ### Pooling
@@ -640,8 +646,9 @@ Enforced by ESLint (`no-restricted-imports` in `eslint.config.js`):
 | The init step: plan, elect, log, write; throws under `strictExternalCompatibility`     | `2.app/steps/pooling/pool-shared-externals.ts`, port `for-pooling-shared-externals.port.ts`   |
 | The dynamic step: judge the loaded remote, rewrite its actions, write its moved copies | `2.app/steps/pooling/pool-dynamic-externals.ts`, port `for-pooling-dynamic-externals.port.ts` |
 | Mapping a subpool's copies onto its build (`servedBy`)                                 | `2.app/steps/generate-import-map.ts`                                                          |
+| Which copy publishes each specifier: the serving build's copy alone, else record order | `1.domain/externals/claims.ts` (`claimTable`, `versionClaims`)                                |
 | Marking a pool's other members dirty when removing a remote empties a member           | `3.adapters/storage/shared-externals.repository.ts`                                           |
 
-The two pipelines stay separate. Init runs `processRemoteEntries → poolSharedExternals → determineSharedExternals → generateImportMap → commitChanges` and re-elects every pool of a scope with a dirty external; pooling runs before `determine`, which leaves pooled externals alone. `initRemoteEntry` runs `updateCache → poolDynamicExternals → convertToImportMap → commitChanges`, or `rollbackChanges` when a step fails: a committed import map cannot change, so it elects nothing and only judges the loaded remote against the committed record (see [Scope and dynamic init](./version-resolver.md#scope-and-dynamic-init)).
+The two pipelines stay separate. Init runs `processRemoteEntries → poolSharedExternals → determineSharedExternals → decideServingBuilds → generateImportMap → commitChanges` and re-elects every pool of a scope with a dirty external; pooling runs before `determine`, which leaves pooled externals alone. `decideServingBuilds` then stores one serving build per package in each share scope but `strict`, skipping a scope nothing wrote since it was last decided (see [One build per package](./version-resolver.md#one-build-per-package)). `generateImportMap` publishes each specifier from the copy that claims it: an external with a serving build publishes that build's copy alone, one without publishes its share rows' copies in record order; a skipped copy claims nothing. The `strict` scope has no serving build, so each of its tags publishes its own copies, basis first. `initRemoteEntry` runs `updateCache → poolDynamicExternals → convertToImportMap → commitChanges`, or `rollbackChanges` when a step fails: a committed import map cannot change, so it elects nothing and only judges the loaded remote against the committed record. `updateCache` decides each package the remote shares as a whole from what the committed map serves of it, recording the remote as the serving build of a package it opens, and `poolDynamicExternals` then judges the remote's pools (see [Scope and dynamic init](./version-resolver.md#scope-and-dynamic-init)). Its `commitChanges` marks the share scopes the load wrote as undecided, so the next init decides their serving builds again.
 
 Adding a new flow means adding a new folder under `src/lib/`, a `<name>.index.ts` barrel next to the existing ones, and one bundle entry in `build.js`.

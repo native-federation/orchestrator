@@ -406,11 +406,10 @@ describe('a load into a pool of flat and dense builds, and the page after it', (
     expect(files(merged, 'L')).toEqual(files(init, 'D'));
   });
 
-  // As above with the shapes swapped and F's flat `@fw/core/testing` stored ahead of D's dense `@fw/core`: the
-  // page maps F's file for testing in every scope, the first stored package claiming it. L, a copy of D, skips
-  // `@fw/core`, whose shared version names D's testing. Pool members come in name order, `@fw/core` first, so
-  // a committed view walking them would name D's too.
-  it("a load runs the first stored package's file, not its own (team)", async () => {
+  // As above with the shapes swapped and F's flat `@fw/core/testing` stored ahead of D's dense `@fw/core`. The
+  // package's serving build, D, serves both specifiers in every scope, whichever external is stored first, and
+  // L, a copy of D, runs the same files.
+  it("a load runs the serving build's files, whichever external is stored first (team)", async () => {
     const shareScope = 'team';
     const p = portfolio({}, { realRepositories: true, assertNoTear: false, scope: shareScope });
     const dense = (name: string) =>
@@ -430,10 +429,12 @@ describe('a load into a pool of flat and dense builds, and the page after it', (
 
     const files = (importMap: ImportMap, remote: string) => importMap.scopes?.[`http://${remote}/`];
     expect(Object.keys(p.stored())).toEqual(['@fw/core/testing', '@fw/core']);
+    expect(p.stored()['@fw/core/testing']!.servingBuild).toBe('D');
     expect(files(init, 'D')).toEqual({
       '@fw/core': 'http://D/@fw_core.js',
-      '@fw/core/testing': 'http://F/@fw_core_testing.js',
+      '@fw/core/testing': 'http://D/@fw_core_testing.js',
     });
+    expect(files(init, 'F')).toEqual(files(init, 'D'));
     expect(files(merged, 'L')).toEqual(files(init, 'D'));
   });
 });

@@ -61,27 +61,14 @@ export function createConvertToImportMap(
       // consumer. A global skip without one inherits the committed global mapping and needs no entry of
       // its own.
       if (actions[external.packageName]!.action === 'skip') {
-        const { override, covered, sameVersion } = actions[external.packageName]!;
+        const { override } = actions[external.packageName]!;
         if (override) {
           Object.entries(override).forEach(([packageName, url]) => {
             addToScopes(remoteEntryScope, packageName, url, importMap);
           });
-          serveUncovered(
-            remoteEntry,
-            external,
-            covered ?? Object.keys(override),
-            remoteEntryScope,
-            importMap,
-            sameVersion
-          );
           return;
         }
-        if (!external.shareScope) {
-          if (covered) {
-            serveUncovered(remoteEntry, external, covered, remoteEntryScope, importMap, sameVersion);
-          }
-          return;
-        }
+        if (!external.shareScope) return;
         // Reaching here means the resolver failed to produce the expected override.
         log.error(
           9,
@@ -171,45 +158,6 @@ export function createConvertToImportMap(
       });
     });
     return importMap;
-  }
-
-  // `sameVersion` means the shared copy builds this remote's own tag, so its extra entrypoints
-  // merge in rather than tearing the package: the coverage policy does not apply.
-  function serveUncovered(
-    remoteEntry: RemoteEntry,
-    external: { packageName: string; entries: Record<string, string> },
-    covered: string[],
-    remoteEntryScope: string,
-    importMap: ImportMap,
-    sameVersion = false
-  ): void {
-    const provided = new Set(covered);
-    Object.entries(external.entries).forEach(([packageName, fileName]) => {
-      if (provided.has(packageName)) return;
-      if (
-        !sameVersion &&
-        (config.strict.strictEntryPointCoverage || config.profile.scopeUncoveredEntrypoints)
-      ) {
-        warnUncoveredEntrypoint(remoteEntry.name, external.packageName, packageName);
-        return;
-      }
-      const url = _path.join(remoteEntryScope, fileName);
-      addToScopes(remoteEntryScope, packageName, url, importMap);
-      addIntegrity(importMap, url, remoteEntry.integrity, fileName);
-    });
-  }
-
-  function warnUncoveredEntrypoint(
-    remoteName: string,
-    externalName: string,
-    packageName: string
-  ): void {
-    const msg = `[${remoteName}][${externalName}] Entrypoint '${packageName}' is not covered by the override.`;
-    if (config.strict.strictEntryPointCoverage || config.strict.strictImportMap) {
-      log.error(9, msg);
-      throw new NFError('Could not create ImportMap.');
-    }
-    log.warn(9, msg);
   }
 
   function addIntegrity(

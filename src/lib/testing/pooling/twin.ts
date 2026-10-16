@@ -1,4 +1,5 @@
 import { GLOBAL_SCOPE, type ImportMap, type shareScope } from 'lib/core/1.domain';
+import { packageOf } from 'lib/core/1.domain/externals/specifier';
 import {
   hostOf,
   scopeUrlOf,
@@ -17,9 +18,10 @@ import { openPortfolio, rangeViolations, scopeUrlsOf, torn } from './property-ha
  *   specifier resolves, ranges accept, one build shipped the tags T runs together (`witness`), every
  *   map-served specifier maps the committed file (`iv`), and R's cause is not `incompatible` (`rejected`).
  * - T in a subpool => `subpool`: runtime subpool joining, which dynamic pooling does not do.
- * Only pooled specifiers are compared (an unpooled self-fill is not pooling's), and a case whose R tears in the
- * committed map is skipped. Each global off R's placement is tagged with its shape: KB (R ran its own build as
- * a subpool build), AG-i (R self), SG (R a subpool member), PUB (T runs its own file from a share row it opened).
+ * Only pooled specifiers are compared (an unpooled package a remote runs from its own build is not pooling's),
+ * and a case whose R tears in the committed map is skipped. Each global off R's placement is tagged with its
+ * shape: KB (R ran its own build as a subpool build), AG-i (R self), SG (R a subpool member), PUB (T runs its own
+ * file from a share row it opened).
  */
 
 type TwinRed = {
@@ -72,7 +74,6 @@ export async function twinGate(
   const rig = openPortfolio({
     host,
     latestSharedExternal: spec.latestSharedExternal,
-    scopeUncoveredEntrypoints: spec.scopeUncoveredEntrypoints,
     ...(scope && { scope }),
   });
   const init = await rig.init(entries);
@@ -114,18 +115,21 @@ export async function twinGate(
         for (const meta of version.remotes)
           if (meta.name === T)
             for (const s of Object.keys(meta.entries))
-              memberOf.set(s, { pool: external.poolName, member: name });
+              memberOf.set(s, { pool: external.poolName, member: packageOf(name) });
   const tagOfUrl = new Map<string, string>();
-  // remote -> member -> the tag its build ships
+  // remote -> package -> the tag its build ships; a flat build's `@p1/m1/sub` is the same member as a dense `@p1/m1`
   const buildTags = new Map<string, Map<string, string>>();
-  for (const [name, external] of Object.entries(record))
+  for (const [name, external] of Object.entries(record)) {
+    const member = packageOf(name);
     for (const version of external.versions)
       for (const meta of version.remotes) {
         for (const file of Object.values(meta.entries))
           tagOfUrl.set(scopeUrlOf(meta.name) + file, version.tag);
         if (!buildTags.has(meta.name)) buildTags.set(meta.name, new Map());
-        if (!buildTags.get(meta.name)!.has(name)) buildTags.get(meta.name)!.set(name, version.tag);
+        if (!buildTags.get(meta.name)!.has(member))
+          buildTags.get(meta.name)!.set(member, version.tag);
       }
+  }
   const urlIn = (map: ImportMap, remote: string, s: string) =>
     map.scopes?.[scopeUrlOf(remote)]?.[s] ?? map.imports[s];
   const viaScope = (map: ImportMap, remote: string, s: string) =>

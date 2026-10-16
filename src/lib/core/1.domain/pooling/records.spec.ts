@@ -4,7 +4,7 @@ import { createAcceptsTag } from 'lib/core/1.domain/externals/compatibility';
 import { createVersionCheck } from 'lib/core/3.adapters/checks/version.check';
 import { elect } from './election';
 import type { PoolMember } from './membership';
-import { memberRecord, placePool, renamedRecords } from './records';
+import { memberRecord, renamedRecords } from './records';
 
 /**
  * The records the init step writes are computed here, before any write, and nothing here may change what it
@@ -58,7 +58,7 @@ describe('memberRecord', () => {
       latestFirst: false,
       isChunked: () => false,
     });
-    const placed = placePool(election, 'x', members, () => false);
+    const placed = { ...election, poolName: 'x' };
 
     const records = members.map(m => memberRecord(m, placed, compare));
 
@@ -84,13 +84,68 @@ describe('memberRecord', () => {
       latestFirst: false,
       isChunked: () => false,
     });
-    const placed = placePool(election, 'x', members, () => false);
+    const placed = { ...election, poolName: 'x' };
 
     const flags = members.flatMap(m =>
       memberRecord(m, placed, compare).versions.flatMap(v => v.remotes.map(r => r.cached))
     );
 
     expect(flags).toEqual(Array(8).fill(false));
+  });
+});
+
+describe('memberRecord of a package whose copies ship different entrypoints', () => {
+  // The host r2 ships the root at 17.2.0 and sub at 17.2.1; r7's dense copy of the root, listed first, ships
+  // only sub.
+  const remote = (name: string, entries: string[]) => ({
+    ...mockVersionRemote(name, '@y/pkg', { requiredVersion: '*' }),
+    entries: Object.fromEntries(entries.map(e => [e, `${e.slice(1).replace(/\//g, '_')}.js`])),
+  });
+  const row = (
+    tag: string,
+    host: boolean,
+    ...remotes: SharedVersion['remotes']
+  ): SharedVersion => ({
+    tag,
+    host,
+    action: 'share',
+    remotes,
+  });
+  const members = (): PoolMember[] => [
+    {
+      name: '@y/pkg',
+      external: {
+        dirty: true,
+        poolName: 'y',
+        versions: [
+          row('18.0.1', false, remote('r7', ['@y/pkg/sub'])),
+          row('17.2.0', true, remote('r2', ['@y/pkg'])),
+        ],
+      },
+    },
+    {
+      name: '@y/pkg/sub',
+      external: {
+        dirty: true,
+        poolName: 'y',
+        versions: [row('17.2.1', true, remote('r2', ['@y/pkg/sub']))],
+      },
+    },
+  ];
+
+  it("shares the copy at its own specifier's global tag, not at a secondary's", () => {
+    const pool = members();
+    const election = elect({
+      members: pool,
+      acceptsTag: createAcceptsTag(isCompatible, compare),
+      compare,
+      latestFirst: false,
+      isChunked: () => false,
+    });
+
+    const record = memberRecord(pool[0]!, { ...election, poolName: 'y' }, compare);
+
+    expect(record.versions.find(v => v.action === 'share')?.tag).toBe('17.2.0');
   });
 });
 
@@ -144,5 +199,65 @@ describe('renamedRecords', () => {
       ['@framework/core', { ...pooled('framework'), poolName: 'angular' }],
     ]);
     expect(record).toEqual(pooled('framework'));
+  });
+});
+
+// The host h ships core alone; r ships core and interop at h's tag as flat externals of their own, so each
+// is a member of its own. Round 1 borrows nothing, so r leaves for its family: interop is uncovered, and its
+// core must leave with it. Taking the global core while interop scopes would run core from h's build beside
+// r's interop.
+describe('a remote that leaves the pool for its family', () => {
+  it('takes no global files for one flat member while another scopes', () => {
+    const copy = (remote: string, name: string) =>
+      mockVersionRemote(remote, name, { requiredVersion: '~17.0.0', strictVersion: false });
+    const members: PoolMember[] = [
+      {
+        name: '@fw/core',
+        external: {
+          dirty: true,
+          versions: [
+            {
+              tag: '17.0.0',
+              host: true,
+              action: 'share',
+              remotes: [copy('h', '@fw/core'), copy('r', '@fw/core')],
+            },
+          ],
+        },
+      },
+      {
+        name: '@fw/core/interop',
+        external: {
+          dirty: true,
+          versions: [
+            {
+              tag: '17.0.0',
+              host: false,
+              action: 'share',
+              remotes: [copy('r', '@fw/core/interop')],
+            },
+          ],
+        },
+      },
+    ];
+    for (const order of [members, [...members].reverse()]) {
+      const election = elect({
+        members: order,
+        acceptsTag: createAcceptsTag(isCompatible, compare),
+        compare,
+        latestFirst: false,
+        isChunked: () => false,
+      });
+      const placed = { ...election, poolName: 'fw' };
+
+      const rows = members.map(m =>
+        memberRecord(m, placed, compare).versions.map(
+          v => `${v.tag}:${v.action}:[${v.remotes.map(r => r.name).join(',')}]`
+        )
+      );
+
+      expect(placed.placements.get('r')).toEqual({ kind: 'self', cause: 'uncovered' });
+      expect(rows).toEqual([['17.0.0:share:[h]', '17.0.0:scope:[r]'], ['17.0.0:scope:[r]']]);
+    }
   });
 });

@@ -9,18 +9,17 @@ import { dep, remote, SCOPE } from '../harness/portfolio';
  * bundled the `/sort` entrypoint. Serving `/table` from one build and `/sort` from another tears the
  * package — the same hazard as two members of a family from two builds, one level down. So the resolver
  * elects the *widest* remote as the serving basis (`versions[0].remotes[0]`) and, when no single remote
- * covers everything, fills the remainder from a sibling that declares it.
+ * covers everything, runs each remote the serving build does not cover wholly from its own build.
  *
  * mfe1 and mfe2 stand in for the two narrow production remotes, mfe3 for the one bundling `/sort`.
- * What the browser ends up *running* is the part a step-level guard cannot check: self-fill keeps the
- * map resolvable but does put two builds of one package on the page, and `nf.buildsOf` says so.
+ * What the browser ends up *running* is the part a step-level guard cannot check: a remote on its own build
+ * keeps every remote on one build of the package, at the price of a second build on the page, and
+ * `nf.buildsOf` says so.
  *
  * **This is a resolver policy, not a pooling one.** Coverage is decided per external in `determine`
  * and `generate-import-map`; the portfolios below hold a single external, so its pool has one member
  * and the gates have nothing to coordinate. Every case here behaves identically with
- * `pooling: false`, which `flag.e2e.spec.ts` pins — it matters because self-fill makes one
- * remote draw a package from two builds, the very shape gate 2 reacts to when the builds belong to a
- * *family*. What happens when the ragged package belongs to a family whose remote is islanded is in
+ * `pooling: false`, which `flag.e2e.spec.ts` pins. What happens when the ragged package belongs to a family whose remote is islanded is in
  * `asymmetric.e2e.spec.ts`; how the same subsets look in the flat remoteEntry shape, where the whole
  * policy depends on `convertFlatSharedInfo`, is in `vendor-shapes.e2e.spec.ts`.
  */
@@ -79,9 +78,11 @@ test.describe('entrypoint coverage: electing the basis', () => {
     expect(await nf.buildsOf(M)).toEqual([build(3)]);
   });
 
-  test('fills the remainder from a sibling when no remote covers everything', async ({ nf }) => {
+  test('runs a remote whose entrypoints the shared build lacks wholly from its own build', async ({
+    nf,
+  }) => {
     // Coverage is not a total order: mfe1 has /sort, mfe3 has /paginator, neither has both. The basis
-    // serves what it can and the uncovered entrypoint comes from the sibling that declares it.
+    // serves what it covers, and mfe3, which it does not cover, runs the package from its own build.
     await nf.init([
       remote('team/mfe1', SCOPE.mfe1, [
         dep(M, TAG, { req: REQ, entrypoints: ['/table', '/sort'] }),
@@ -92,25 +93,38 @@ test.describe('entrypoint coverage: electing the basis', () => {
     ]);
 
     const map = await nf.map();
+    expect(map.imports[M]).toBe(`${SCOPE.mfe1}${M}.js`);
     expect(map.imports[`${M}/table`]).toBe(`${SCOPE.mfe1}${M}/table.js`);
     expect(map.imports[`${M}/sort`]).toBe(`${SCOPE.mfe1}${M}/sort.js`);
-    expect(map.imports[`${M}/paginator`]).toBe(`${SCOPE.mfe3}${M}/paginator.js`);
+    expect(map.imports[`${M}/paginator`]).toBeUndefined();
+    expect(map.scopes?.[SCOPE.mfe3]).toEqual({
+      [M]: `${SCOPE.mfe3}${M}.js`,
+      [`${M}/table`]: `${SCOPE.mfe3}${M}/table.js`,
+      [`${M}/paginator`]: `${SCOPE.mfe3}${M}/paginator.js`,
+    });
 
-    // The price of self-fill, which only a real page shows: mfe3 takes the basis for what it covers
-    // and its own build for `/paginator`, so both builds are evaluated. Every entrypoint still
-    // resolves, and because both copies carry one tag this is a merge rather than a tear — so neither
-    // coverage setting changes it.
+    // Two builds on the page, but each remote runs every entrypoint of the package from one of them.
     const loaded = await nf.loadAll();
-    expect(loaded['team/mfe3']!.seen).toEqual({
+    expect(loaded['team/mfe1']!.seen).toEqual({
       [M]: build(1),
       [`${M}/table`]: build(1),
+      [`${M}/sort`]: build(1),
+    });
+    expect(loaded['team/mfe3']!.seen).toEqual({
+      [M]: build(3),
+      [`${M}/table`]: build(3),
       [`${M}/paginator`]: build(3),
     });
     expect(await nf.buildsOf(M)).toEqual([build(1), build(3)]);
-    // Drawing one package from two builds does not island mfe3, for two independent reasons: both builds
-    // ship the same tag, so the map serves mfe3 every specifier at exactly the version its own build
-    // shipped — the witness of the provenance promise — and a one-member pool has nothing to coordinate
-    // in any case. What the promise rules out is a *tag* mismatch across builds, not two origins of one.
+    expect(nf.downloads().sort()).toEqual([
+      `${SCOPE.mfe1}${M}.js`,
+      `${SCOPE.mfe1}${M}/sort.js`,
+      `${SCOPE.mfe1}${M}/table.js`,
+      `${SCOPE.mfe3}${M}.js`,
+      `${SCOPE.mfe3}${M}/paginator.js`,
+      `${SCOPE.mfe3}${M}/table.js`,
+    ]);
+    // A one-member pool has nothing to coordinate, so running its own build does not island mfe3.
     expect(await nf.islands()).toEqual([]);
   });
 });
@@ -123,7 +137,9 @@ test.describe('entrypoint coverage: a remote joining an already-resolved version
     wide('team/mfe3', SCOPE.mfe3),
   ];
 
-  test('self-fills the joining remote by default', async ({ nf }) => {
+  test('moves the package whole to a joiner whose same-tag build ships more of it', async ({
+    nf,
+  }) => {
     const [first, late] = joined();
     await nf.init([first]);
     expect((await nf.map()).imports[`${M}/sort`]).toBeUndefined();
@@ -131,39 +147,28 @@ test.describe('entrypoint coverage: a remote joining an already-resolved version
     await nf.init([first, late]);
     expect(nf.fetches()).toEqual([late.url]);
 
+    // mfe3's build covers mfe1's, so it serves the version to both.
     const map = await nf.map();
-    expect(map.imports[`${M}/table`]).toBe(`${SCOPE.mfe1}${M}/table.js`);
+    expect(map.imports[M]).toBe(`${SCOPE.mfe3}${M}.js`);
+    expect(map.imports[`${M}/table`]).toBe(`${SCOPE.mfe3}${M}/table.js`);
     expect(map.imports[`${M}/sort`]).toBe(`${SCOPE.mfe3}${M}/sort.js`);
+    expect(map.scopes).toBeUndefined();
     expect(storedActions(await nf.store(), M)).toEqual([`${TAG}:share`]);
-  });
 
-  // The joiner builds the tag that is already shared, so the two copies merge and the union of their
-  // entrypoints is published. Both coverage settings only govern tears *between* versions, so neither
-  // splits the joiner out — nothing here is torn to begin with.
-  for (const [name, profile, strict] of [
-    ['scopeUncoveredEntrypoints', { scopeUncoveredEntrypoints: true }, undefined],
-    ['strictEntryPointCoverage', undefined, { strictEntryPointCoverage: true }],
-  ] as const) {
-    test(`merges the joining remote into the cached version under ${name}`, async ({ nf }) => {
-      const [first, late] = joined();
-      const options = { ...(profile ? { profile } : {}), ...(strict ? { strict } : {}) };
-      await nf.init([first], options);
-      await nf.init([first, late], options);
-
-      // One record on the tag: the joiner deduped into the shared copy rather than taking its own.
-      expect(storedActions(await nf.store(), M)).toEqual([`${TAG}:share`]);
-
-      const map = await nf.map();
-      expect(map.imports[`${M}/table`]).toBe(`${SCOPE.mfe1}${M}/table.js`);
-      // `/sort` is the entrypoint only the joiner bundles, published from its build at the same tag.
-      expect(map.imports[`${M}/sort`]).toBe(`${SCOPE.mfe3}${M}/sort.js`);
-      expect((await nf.load('team/mfe3')).seen).toEqual({
-        [M]: build(1),
-        [`${M}/table`]: build(1),
-        [`${M}/sort`]: build(3),
-      });
+    const loaded = await nf.loadAll();
+    expect(loaded['team/mfe1']!.seen).toEqual({ [M]: build(3), [`${M}/table`]: build(3) });
+    expect(loaded['team/mfe3']!.seen).toEqual({
+      [M]: build(3),
+      [`${M}/table`]: build(3),
+      [`${M}/sort`]: build(3),
     });
-  }
+    expect(await nf.buildsOf(M)).toEqual([build(3)]);
+    expect(nf.downloads().sort()).toEqual([
+      `${SCOPE.mfe3}${M}.js`,
+      `${SCOPE.mfe3}${M}/sort.js`,
+      `${SCOPE.mfe3}${M}/table.js`,
+    ]);
+  });
 
   test('re-resolves compatibility when a strict remote joins a skipped version', async ({ nf }) => {
     // 22.0.5 is skipped on the first init because mfe2 accepts whatever is shared. mfe3 then joins

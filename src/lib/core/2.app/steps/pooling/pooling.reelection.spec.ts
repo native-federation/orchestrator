@@ -195,7 +195,7 @@ describe('pooling re-election', () => {
       );
 
       const cold = await p.runInit([a, b, c]);
-      // a and b ship the same family, so record order makes a the winner.
+      // a and b ship the same family, so the name makes a the winner.
       expect(cold.imports['@fw/core']).toBe('http://a/fw_core.js');
       expect(p.record('@fw/core').poolWinner).toBe('team/a');
 
@@ -276,7 +276,7 @@ describe('pooling re-election', () => {
       };
 
       // Cold page of `before` (plus any `loaded` at runtime), warm page of `after` over it, then a warm page that re-elects every pool of
-      // that same state. Not a cold page of `after`: a cold page breaks ties by record order where a warm one
+      // that same state. Not a cold page of `after`: a cold page breaks ties by name where a warm one
       // keeps the stored winner, a difference that fix does not touch.
       const warmAndReelected = async (
         before: RemoteEntry[],
@@ -292,7 +292,7 @@ describe('pooling re-election', () => {
         return { warm, reelected: settled(q, await q.reelect()) };
       };
 
-      // N3. W, W2 and W3 ship `@x/core/testing` 2.0.0; R ships `@x/core` 1.0.0 with that entrypoint, which
+      // W, W2 and W3 ship `@x/core/testing` 2.0.0; R ships `@x/core` 1.0.0 with that entrypoint, which
       // makes them one pool `x`; S ships `@x/core/testing` 1.0.0 under a strict `~1.0.0`. R's build serves S
       // as a subpool. R redeploys shipping nothing: eviction deletes `@x/core`, the last external of the pool
       // R shipped. Unless eviction marks `@x/core/testing` dirty, nothing dirty is left, pooling skips
@@ -316,7 +316,7 @@ describe('pooling re-election', () => {
         expect(pages.warm).toEqual(pages.reelected);
       });
 
-      // F3. a and b are labelled `x` by everyone; c is labelled `y` by W and Q, but R labels it `x`, which
+      // a and b are labelled `x` by everyone; c is labelled `y` by W and Q, but R labels it `x`, which
       // joins all three into one pool, where Q's c 1.0.0 islands Q's whole family `incompatible`. R redeploys
       // labelling c `y`: the pool splits into {a, b} and a lone c, but only c (whose copies changed) is
       // dirty. Unless every pool of the scope is re-elected, the untouched half keeps the merged election: Q's
@@ -346,12 +346,12 @@ describe('pooling re-election', () => {
         expect(pages.warm).toEqual(pages.reelected);
       });
 
-      // P1. Per-remote labels: Y labels a and b `p`, X labels a `q`, and W, V, U label c1 and c2 `q`; X's
+      // Per-remote labels: Y labels a and b `p`, X labels a `q`, and W, V, U label c1 and c2 `q`; X's
       // label joins everything into one pool `q`, won by Y. X redeploys without `a`: the pool splits into
       // {a, b} (now `p`) and {c1, c2}, which keeps the name `q` and has no dirty member. Unless every pool of
-      // the scope is re-elected, warm keeps `q`'s stale election: `poolWinner` Y, which ships no member of `q`, U's
-      // 18 as a subpool for V, and W `uncovered`. A re-election elects V's 18 for `q` (global) and islands W
-      // as `incompatible`.
+      // the scope is re-elected, warm keeps `q`'s stale election: `poolWinner` Y, which ships no member of `q`, one
+      // equal 18 as a subpool for the other, and W `uncovered`. A re-election elects U's 18 for `q` (global;
+      // V's equal 18 loses on the name) and islands W as `incompatible`.
       it('re-elects the half of a split pool that keeps its name', async () => {
         const lenient = (pool: string | null, name: string, version: string) =>
           sharedIn(pool, name, version, `^${version}`, { strict: false });
@@ -364,8 +364,8 @@ describe('pooling re-election', () => {
           [Y, redeployed('X', lenient(null, 'zzz', '1.0.0')), W, V, U]
         );
 
-        expect(pages.reelected.pools['c1']).toBe('q won by V');
-        expect(pages.warm.pools['c1']).toBe('q won by V');
+        expect(pages.reelected.pools['c1']).toBe('q won by U');
+        expect(pages.warm.pools['c1']).toBe('q won by U');
         expect(pages.warm).toEqual(pages.reelected);
       });
 

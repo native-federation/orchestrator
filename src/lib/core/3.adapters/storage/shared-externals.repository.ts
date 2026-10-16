@@ -10,6 +10,7 @@ import {
   type StorageEntry,
 } from 'lib/core/2.app/config/storage.contract';
 import type { ForSharedExternalsStorage } from 'lib/core/2.app/driving-ports/for-shared-externals-storage.port';
+import { createCacheState } from './cache-state';
 import { Optional } from 'lib/utils/optional';
 
 const createSharedExternalsRepository = (config: StorageConfig): ForSharedExternalsStorage => {
@@ -18,11 +19,20 @@ const createSharedExternalsRepository = (config: StorageConfig): ForSharedExtern
     { [GLOBAL_SCOPE]: {} }
   );
 
-  if (config.clearStorage) STORAGE.clear();
+  const cacheState = createCacheState(config.storage);
+  const storedUndecided = () => new Set(cacheState.read().undecidedScopes);
+
+  if (config.clearStorage) {
+    STORAGE.clear();
+    cacheState.update({ undecidedScopes: [] });
+  }
 
   let _cache: SharedExternals = STORAGE.get() ?? { [GLOBAL_SCOPE]: {} };
 
-  let _dirty = false;
+  const _uncommitted = new Set<string>();
+
+  let _undecided = storedUndecided();
+  let _undecidedChanged = false;
 
   return {
     getFromScope: function (shareScope?: string) {
@@ -31,7 +41,7 @@ const createSharedExternalsRepository = (config: StorageConfig): ForSharedExtern
     addOrUpdate: function (externalName: string, external: SharedExternal, shareScope?: string) {
       if (!_cache[shareScope ?? GLOBAL_SCOPE]) _cache[shareScope ?? GLOBAL_SCOPE] = {};
       _cache[shareScope ?? GLOBAL_SCOPE]![externalName] = external;
-      _dirty = true;
+      _uncommitted.add(shareScope ?? GLOBAL_SCOPE);
       return this;
     },
     getScopes: function (o = { includeGlobal: true }) {
@@ -42,7 +52,7 @@ const createSharedExternalsRepository = (config: StorageConfig): ForSharedExtern
     removeFromAllScopes: function (remoteNames: ReadonlySet<string>) {
       if (remoteNames.size === 0) return;
 
-      Object.values(_cache).forEach(scope => {
+      Object.entries(_cache).forEach(([scopeName, scope]) => {
         const removeExternals: string[] = [];
 
         Object.entries(scope).forEach(([name, external]) => {
@@ -62,14 +72,14 @@ const createSharedExternalsRepository = (config: StorageConfig): ForSharedExtern
             if (keep !== remotes.length) {
               remotes.length = keep;
               removedCopy = true;
-              _dirty = true;
+              _uncommitted.add(scopeName);
               // Or `determine` keeps granting host precedence to a tag the host has left.
               if (host !== undefined && remoteNames.has(host)) version.host = false;
             }
 
             if (remotes.length === 0) {
               external.versions.splice(i, 1);
-              _dirty = true;
+              _uncommitted.add(scopeName);
             }
           }
 
@@ -111,15 +121,36 @@ const createSharedExternalsRepository = (config: StorageConfig): ForSharedExtern
     tryGet: function (external: string, shareScope?: string) {
       return Optional.of(_cache[shareScope ?? GLOBAL_SCOPE]?.[external]);
     },
+    uncommittedScopes: function () {
+      return [..._uncommitted];
+    },
+    markUndecided: function (shareScope: string) {
+      if (_undecided.has(shareScope)) return;
+      _undecided.add(shareScope);
+      _undecidedChanged = true;
+    },
+    isUndecided: function (shareScope: string) {
+      return _undecided.has(shareScope);
+    },
+    markDecided: function (shareScope: string) {
+      if (_undecided.delete(shareScope)) _undecidedChanged = true;
+    },
+    // Records before marks: should their write throw, the stored marks still send the next init to decide them. A
+    // failed cache-state write after the records loses only this load's marks.
     commit: function () {
-      if (!_dirty) return this;
-      STORAGE.set(_cache);
-      _dirty = false;
+      if (_uncommitted.size > 0) {
+        STORAGE.set(_cache);
+        _uncommitted.clear();
+      }
+      if (_undecidedChanged) cacheState.update({ undecidedScopes: [..._undecided] });
+      _undecidedChanged = false;
       return this;
     },
     rollback: function () {
       _cache = STORAGE.get() ?? { [GLOBAL_SCOPE]: {} };
-      _dirty = false;
+      _uncommitted.clear();
+      _undecided = storedUndecided();
+      _undecidedChanged = false;
       return this;
     },
   };

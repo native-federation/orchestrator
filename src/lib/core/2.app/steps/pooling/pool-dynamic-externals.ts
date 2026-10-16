@@ -13,12 +13,14 @@ import {
   type SharedInfoActions,
   type shareScope,
 } from 'lib/core/1.domain';
+import type { LoadActions } from 'lib/core/1.domain/remote-entry/load-actions.contract';
 import { copiesByRemote, specifierCount } from 'lib/core/1.domain/pooling/builds';
 import { buildPools, type PoolMember, type PoolName } from 'lib/core/1.domain/pooling/membership';
 import { scopeHasPoolState } from 'lib/core/1.domain/pooling/pool-state';
 import {
   committedView,
   coverFromMap,
+  type CoverResult,
   type GateMiss,
   judgeRemote,
 } from 'lib/core/1.domain/pooling/gate';
@@ -59,24 +61,23 @@ export function createPoolDynamicExternals(
       writeMoves(entry.name, names, moves, committed, pools, scope);
     }
 
-    return Promise.resolve({ entry, actions });
+    return Promise.resolve({ entry, actions: publicActions(actions) });
   };
 
   function judgeScope(
     remote: RemoteName,
     names: ReadonlySet<ExternalName>,
-    actions: SharedInfoActions,
+    actions: LoadActions,
     pools: ReadonlyMap<PoolName, PoolMember[]>,
     recordOrder: ExternalName[],
     scope: string
   ): Map<ExternalName, CopyMove> {
-    const policy = { shareScope: scope, selfFill: maySelfFill(scope), scopeUrlOf, isChunked };
+    const policy = { shareScope: scope, scopeUrlOf, isChunked };
     const moves = new Map<ExternalName, CopyMove>();
     const selfServe = (members: PoolMember[], cause: PoolCause) => {
       for (const { name } of members) {
         actions[name]!.action = 'scope';
         delete actions[name]!.override;
-        delete actions[name]!.covered;
         moves.set(name, { cause });
       }
     };
@@ -103,24 +104,21 @@ export function createPoolDynamicExternals(
       const cover = coverFromMap(remote, mine, view, actions, policy);
       if (!('covers' in cover)) {
         if ('unmapped' in cover) warnUnmapped(scope, remote, cover.unmapped);
-        else {
-          const miss: SelfServeMiss =
-            'torn' in cover
-              ? { cause: 'uncovered', torn: cover.torn }
-              : { cause: 'uncovered', ...cover.bound };
-          config.log.warn(8, `[${scope}] ${selfServeWarning(remote, miss, specifierCount(own))}`);
-        }
+        else
+          config.log.warn(
+            8,
+            `[${scope}] ${selfServeWarning(remote, coverMiss(cover), specifierCount(own))}`
+          );
         // Half its family on the map's files and half on its own build would tear it.
         selfServe(mine, 'uncovered');
         continue;
       }
-      for (const { name, toSkip, covered, override } of cover.covers) {
+      for (const { name, toSkip, override } of cover.covers) {
         const action = actions[name]!;
         if (toSkip) {
           action.action = 'skip';
           moves.set(name, { fromMap: true });
         }
-        action.covered = covered;
         if (Object.keys(override).length > 0) action.override = override;
       }
     }
@@ -152,14 +150,6 @@ export function createPoolDynamicExternals(
       ports.sharedExternalsRepo.addOrUpdate(name, record, scope);
   }
 
-  // Whether an entrypoint a skip leaves uncovered may come from the remote's own build: the coverage policies
-  // refuse it, and so does the next page of a named scope, for a skip-only package, under `strictImportMap`.
-  function maySelfFill(scope: string): boolean {
-    if (config.strict.strictEntryPointCoverage || config.profile.scopeUncoveredEntrypoints)
-      return false;
-    return scope === GLOBAL_SCOPE || !config.strict.strictImportMap;
-  }
-
   function warnUnmapped(scope: string, remote: RemoteName, build: RemoteName): void {
     config.log.warn(
       8,
@@ -168,10 +158,13 @@ export function createPoolDynamicExternals(
   }
 }
 
-function poolableNames(
-  entry: RemoteEntry,
-  actions: SharedInfoActions
-): Map<string, Set<ExternalName>> {
+// `covered` only carries a skip from the cache update into the gate.
+function publicActions(actions: LoadActions): SharedInfoActions {
+  for (const action of Object.values(actions)) delete action.covered;
+  return actions;
+}
+
+function poolableNames(entry: RemoteEntry, actions: LoadActions): Map<string, Set<ExternalName>> {
   const declared = new Map<string, Set<ExternalName>>();
   for (const external of entry.shared ?? []) {
     const name = external.packageName;
@@ -187,6 +180,14 @@ function poolableNames(
 }
 
 type SelfServeMiss = GateMiss | { cause: 'uncovered'; torn: string };
+
+function coverMiss(
+  cover: Exclude<CoverResult, { covers: unknown } | { unmapped: unknown }>
+): SelfServeMiss {
+  if ('gap' in cover) return { cause: 'uncovered', specifier: cover.gap };
+  if ('torn' in cover) return { cause: 'uncovered', torn: cover.torn };
+  return { cause: 'uncovered', ...cover.bound };
+}
 
 // Wording is pinned in `island-warnings.contract.spec.ts` alone; tools read islands from the record.
 function selfServeWarning(remote: RemoteName, miss: SelfServeMiss, imports: number): string {
