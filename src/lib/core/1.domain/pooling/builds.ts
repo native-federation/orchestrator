@@ -30,24 +30,27 @@ export function copiesByRemote(
   isChunked: IsChunked
 ): Map<RemoteName, Copy[]> {
   const shipped = new Map<RemoteName, Copy[]>();
-  for (const member of members)
+  for (const member of members) {
+    const seen = new Set<RemoteName>();
     for (const version of member.external.versions)
       for (const meta of version.remotes) {
-        let copies = shipped.get(meta.name);
-        if (!copies) shipped.set(meta.name, (copies = []));
         // A remote ships one copy per member, so a second row is a record it cannot produce; the first row
         // wins whole, entries included, so a build never covers a specifier at a tag it does not ship.
-        if (!copies.some(c => c.member === member.name))
-          copies.push({
-            member: member.name,
-            tag: version.tag,
-            requiredVersion: meta.requiredVersion,
-            strict: meta.strictVersion,
-            host: version.host && meta === version.remotes[0],
-            specifiers: Object.keys(meta.entries),
-            chunked: isChunked(meta.name, meta.bundle),
-          });
+        if (seen.has(meta.name)) continue;
+        seen.add(meta.name);
+        let copies = shipped.get(meta.name);
+        if (!copies) shipped.set(meta.name, (copies = []));
+        copies.push({
+          member: member.name,
+          tag: version.tag,
+          requiredVersion: meta.requiredVersion,
+          strict: meta.strictVersion,
+          host: version.host && meta === version.remotes[0],
+          specifiers: Object.keys(meta.entries),
+          chunked: isChunked(meta.name, meta.bundle),
+        });
       }
+  }
   return shipped;
 }
 
