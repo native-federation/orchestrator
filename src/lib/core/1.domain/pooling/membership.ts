@@ -17,6 +17,9 @@ export type Membership = {
   labelledAlone: ExternalName[];
 };
 
+export const pooledNames = (pools: ReadonlyMap<PoolName, PoolMember[]>): Set<ExternalName> =>
+  new Set([...pools.values()].flatMap(members => members.map(m => m.name)));
+
 // Iterative path halving: no stack growth in the browser.
 function unionFind() {
   const parent = new Map<string, string>();

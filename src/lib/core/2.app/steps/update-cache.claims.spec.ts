@@ -196,8 +196,9 @@ describe('update-cache: decisions read per package', () => {
       }
     });
 
-  // The record holds no pool and only the loader's copy carries a label: the package counts as pooled, so the
-  // rejection stands although the load would split it, as in "a claim of another external than the loader's".
+  // Only the loading copy is labelled, but its label pulls h's p/x external (p's entrypoint) into a pool of two
+  // once stored, so the package is pooled and the rejection stands although the load would split it, as in "a
+  // claim of another external than the loader's".
   it('refuses a rejection where only the loading copy is labelled', async () => {
     const c: Shape = {
       init: [entry('h', flat('p', '1.0.0', '^1.0.0'), flat('p/x', '2.0.0', '^2.0.0'))],
@@ -208,6 +209,105 @@ describe('update-cache: decisions read per package', () => {
       threw: REFUSED,
       logged: [
         "[__GLOBAL__][r1] p/x@1.0.0 Is not compatible with existing p/x@2.0.0 requiredRange '~1.0.0'",
+      ],
+    });
+  });
+
+  // A label that joins no other external forms no pool, at init and here alike: p is the record's only external
+  // of its package and r1's dense p is its only copy, so the unpooled rule decides. With no host and no
+  // latestSharedExternal, r1's 1.0.0 pleases every strict copy, so the split load runs p from its own build
+  // silently, and a cold init of both remotes refuses nothing either.
+  describe('a lone label on the loading copy', () => {
+    const lone: Shape = {
+      init: [entry('a', flat('p', '2.0.0', '^2.0.0'))],
+      load: entry('r1', flat('p', '1.0.0', '~1.0.0', { strict: true, with: ['p/x'], pool: 'fw' })),
+      hosts: [],
+    };
+
+    it.each([true, false])(
+      'runs the package from its own build silently (strict: %s)',
+      async strict => {
+        expect(await load(lone, strict)).toEqual({ actions: { p: 'scope' }, logged: [] });
+      }
+    );
+
+    // The pool check reads the record with r1's copies overlaid; the stored record keeps only what the load
+    // stored: a's share row and r1's own scope row, no overlay row.
+    it('leaves no overlay row in the stored record', async () => {
+      const p = portfolio(
+        {},
+        {
+          storage: `nf-update-cache-claims-${storage++}`,
+          realRepositories: true,
+          assertNoTear: false,
+          hosts: [],
+          strict: true,
+        }
+      );
+      await p.runInit(lone.init);
+      await p.runDynamic(lone.load);
+      const rows = p
+        .stored()
+        ['p']!.versions.map(v => [v.tag, v.action, v.remotes.map(r => r.name)]);
+      expect(rows).toEqual([
+        ['2.0.0', 'share', ['a']],
+        ['1.0.0', 'scope', ['r1']],
+      ]);
+    });
+
+    it('matches a cold init of both remotes, which refuses nothing', async () => {
+      const p = portfolio(
+        {},
+        {
+          storage: `nf-update-cache-claims-${storage++}`,
+          realRepositories: true,
+          assertNoTear: false,
+          hosts: [],
+          strict: true,
+        }
+      );
+      await expect(p.runInit([...lone.init, lone.load])).resolves.toBeDefined();
+    });
+  });
+
+  // Pool results left on the record after its last label went: cold init strips them, the gate forms no pool
+  // from them, and the load takes the unpooled path too, so r1's split load runs p from its own build silently.
+  it('treats pool results without a label left as unpooled', async () => {
+    const p = portfolio(
+      {},
+      {
+        storage: `nf-update-cache-claims-${storage++}`,
+        realRepositories: true,
+        assertNoTear: false,
+        hosts: [],
+        strict: true,
+      }
+    );
+    await p.runInit([entry('a', flat('p', '2.0.0', '^2.0.0'))]);
+    p.seed('p', structuredClone(p.stored()['p']!.versions), false, {
+      poolName: 'fw',
+      poolWinner: 'a',
+    });
+    const { actions } = await p.runDynamic(
+      entry('r1', flat('p', '1.0.0', '~1.0.0', { strict: true, with: ['p/x'] }))
+    );
+    expect(actions['p']?.action).toBe('scope');
+  });
+
+  // The same label on a record external of another package that is alone in the record: the loading copy joins
+  // it, so a pool of two forms once stored and the rejection stands.
+  it('refuses a rejection where the loading label joins a lone label of the record', async () => {
+    const c: Shape = {
+      init: [
+        entry('a', flat('p', '2.0.0', '^2.0.0'), flat('q', '1.0.0', '^1.0.0', { pool: 'fw' })),
+      ],
+      load: entry('r1', flat('p', '1.0.0', '~1.0.0', { strict: true, with: ['p/x'], pool: 'fw' })),
+      hosts: [],
+    };
+    expect(await load(c, true)).toEqual({
+      threw: REFUSED,
+      logged: [
+        "[__GLOBAL__][r1] p@1.0.0 Is not compatible with existing p@2.0.0 requiredRange '~1.0.0'",
       ],
     });
   });

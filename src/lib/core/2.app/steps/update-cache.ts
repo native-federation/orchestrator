@@ -4,20 +4,20 @@ import {
   type DenseSharedInfo,
   type ExternalName,
   type RemoteName,
+  type SharedExternal,
   type SharedVersionAction,
   type SharedVersionMeta,
+  type shareScope,
   GLOBAL_SCOPE,
 } from 'lib/core/1.domain';
 import type { LoadActions } from 'lib/core/1.domain/remote-entry/load-actions.contract';
 import { createAcceptsTag } from 'lib/core/1.domain/externals/compatibility';
 import { addRemoteToVersion } from 'lib/core/1.domain/externals/basis';
-import {
-  isPooled,
-  loadSplitsPackage,
-  type PackageExternals,
-} from 'lib/core/1.domain/externals/serving';
+import { loadSplitsPackage } from 'lib/core/1.domain/externals/serving';
 import { type Claim, claimsByPackage, committedClaims } from 'lib/core/1.domain/externals/claims';
-import { groupByPackage, packageOf, type Specifier } from 'lib/core/1.domain/externals/specifier';
+import { packageOf, type Specifier } from 'lib/core/1.domain/externals/specifier';
+import { buildPools, pooledNames } from 'lib/core/1.domain/pooling/membership';
+import type { DeepReadonly } from 'lib/utils/deep-readonly';
 import type { DrivingContract } from '../driving-ports/driving.contract';
 import type { LoggingConfig } from '../config/log.contract';
 import * as _path from 'lib/utils/path';
@@ -35,10 +35,13 @@ type PackageClaims = readonly [Specifier, Claim][];
 type LoadView = {
   claims: CommittedClaims;
   claimsOf(pkg: ExternalName): PackageClaims;
-  externalsOf(pkg: ExternalName): PackageExternals;
+  inPool(pkg: ExternalName): boolean;
 };
 
 type Rejection = { item: Pending; specifier: Specifier; claim: Claim };
+
+const pooledPackages = (scope: DeepReadonly<shareScope>): Set<string> =>
+  new Set([...pooledNames(buildPools(scope).pools)].map(packageOf));
 
 // share: the remote's build opens the package; skip: it runs the build the map serves it from; scope: its own
 // build beside the map (partlyServed: the map serves some of it, or all of it from two builds).
@@ -86,7 +89,7 @@ export function createUpdateCache(
 
   function decidePackages(remoteEntry: RemoteEntry, pending: Pending[]): Map<Pending, Decision> {
     const decisions = new Map<Pending, Decision>();
-    const viewOf = loadViewOf(remoteEntry);
+    const viewOf = loadViewOf(remoteEntry, pending);
     for (const group of pendingPerPackage(pending)) {
       // The strict scope shares every version side by side.
       const decision =
@@ -111,26 +114,47 @@ export function createUpdateCache(
     return [...packages.values()];
   }
 
-  function loadViewOf(remoteEntry: RemoteEntry): (shareScope: string | undefined) => LoadView {
+  function loadViewOf(
+    remoteEntry: RemoteEntry,
+    pending: Pending[]
+  ): (shareScope: string | undefined) => LoadView {
     const views = new Map<string, LoadView>();
     return shareScope => {
       const scope = shareScope ?? GLOBAL_SCOPE;
       let view = views.get(scope);
       if (!view) {
-        const record = Object.entries(ports.sharedExternalsRepo.getFromScope(shareScope));
-        const claims = committedClaims(record, { shareScope: scope, without: remoteEntry.name });
+        const record = ports.sharedExternalsRepo.getFromScope(shareScope);
+        const claims = committedClaims(Object.entries(record), {
+          shareScope: scope,
+          without: remoteEntry.name,
+        });
         const claimsIn = claimsByPackage(claims);
-        let externalsIn: Map<ExternalName, PackageExternals> | undefined;
+        let pooled: Set<string> | undefined;
         view = {
           claims,
           claimsOf: pkg => claimsIn.get(pkg) ?? [],
-          externalsOf: pkg =>
-            (externalsIn ??= groupByPackage(record, ([name]) => name)).get(pkg) ?? [],
+          inPool: pkg => (pooled ??= pooledPackages(withPending(record, pending, scope))).has(pkg),
         };
         views.set(scope, view);
       }
       return view;
     };
+  }
+
+  // The loaded copies' labels pool as they will once stored, so a pool only they form counts.
+  function withPending(
+    record: DeepReadonly<shareScope>,
+    pending: Pending[],
+    scope: string
+  ): DeepReadonly<shareScope> {
+    const overlaid: Record<ExternalName, DeepReadonly<SharedExternal>> = { ...record };
+    for (const { external, ctx } of pending) {
+      if ((external.shareScope ?? GLOBAL_SCOPE) !== scope) continue;
+      const base = overlaid[external.packageName] ?? { dirty: false, versions: [] };
+      const row = { tag: ctx.tag, action: 'share', host: false, remotes: [ctx.remote] } as const;
+      overlaid[external.packageName] = { ...base, versions: [...base.versions, row] };
+    }
+    return overlaid;
   }
 
   function scopeOpenedPackages(decisions: Map<Pending, Decision>): void {
@@ -154,8 +178,7 @@ export function createUpdateCache(
     const rejections = group.flatMap(item => rejectionsOf(item, view.claims));
     if (rejections.length > 0) {
       const fromTwoBuilds = builds !== undefined && builds.size > 1;
-      const externals = view.externalsOf(pkg);
-      for (const rejection of refused(group, rejections, fromTwoBuilds, claims, externals))
+      for (const rejection of refused(group, rejections, fromTwoBuilds, claims, view.inPool(pkg)))
         reportIncompatible(remoteEntry, rejection);
       return { action: 'scope', partlyServed: false };
     }
@@ -195,9 +218,8 @@ export function createUpdateCache(
     rejections: Rejection[],
     fromTwoBuilds: boolean,
     claims: PackageClaims,
-    externals: PackageExternals
+    pooled: boolean
   ): Rejection[] {
-    const pooled = isPooledPackage(group, externals);
     const copies = group.map(({ ctx }) => ({ tag: ctx.tag, copy: ctx.remote }));
     const splits = fromTwoBuilds || loadSplitsPackage(copies, claims, accepts);
 
@@ -227,11 +249,6 @@ export function createUpdateCache(
     if (host) return host.tag === claim.tag;
     if (!config.profile.latestSharedExternal) return false;
     return tags.every(tag => ports.versionCheck.compare(claim.tag, tag) >= 0);
-  }
-
-  // Pool membership is decided across every copy, so a label on any copy or a pool on the record counts.
-  function isPooledPackage(group: Pending[], externals: PackageExternals): boolean {
-    return group.some(({ ctx }) => ctx.remote.pool?.trim()) || isPooled(externals);
   }
 
   function reportIncompatible(
