@@ -16,6 +16,7 @@ import { mockAdapters } from 'lib/testing/adapters.mock';
 import { mockVersionRemote } from 'lib/testing/domain/externals/version.mock';
 import { pageFaults } from 'lib/testing/pooling/page-graph';
 import { portfolio } from 'lib/testing/pooling/portfolio';
+import { auditDecideWrites } from 'lib/testing/decide-write-audit';
 import type { DrivingContract } from '../driving-ports/driving.contract';
 import { createDecideServingBuilds } from './decide-serving-builds';
 
@@ -81,7 +82,9 @@ describe('createDecideServingBuilds', () => {
       v => `${v.tag}:${v.action}:[${v.remotes.map(r => r.name).join(',')}]`
     );
 
-  const decide = () => createDecideServingBuilds(config, adapters)();
+  // Every fixture also holds the step to the stringify rule it replaced (decide-write-audit.ts).
+  const decide = () =>
+    auditDecideWrites(adapters.sharedExternalsRepo, createDecideServingBuilds(config, adapters))();
 
   it('stores the serving build on every external of the package, skip- and scope-only ones included', async () => {
     seed({

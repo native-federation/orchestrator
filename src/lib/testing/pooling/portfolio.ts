@@ -26,6 +26,7 @@ import { createInitDrivers } from 'lib/core/5.di/init.factory';
 import { createInitFlow } from 'lib/core/2.app/flows/init.flow';
 import { createInitRemoteEntryFlow } from 'lib/core/2.app/flows/init-remote-entry.flow';
 import { hasPoolResults } from 'lib/core/1.domain/pooling/pool-state';
+import { auditDecideWrites } from 'lib/testing/decide-write-audit';
 import { emittedUrls, tearsByPool, withLabelledPools } from './no-tear';
 import { type CopySpec, storedRecord, version } from './portfolio-fixtures';
 
@@ -153,6 +154,10 @@ export const portfolio = (
     };
 
     const drivers = createInitDrivers({ config, adapters });
+    drivers.decideServingBuilds = auditDecideWrites(
+      adapters.sharedExternalsRepo,
+      drivers.decideServingBuilds
+    );
     // Determine reads no pool results: whatever pooling leaves dirty must carry none.
     const poolShared = drivers.poolSharedExternals;
     drivers.poolSharedExternals = () =>
