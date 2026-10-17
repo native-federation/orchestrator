@@ -40,15 +40,10 @@ const members = (builds: Build[]): PoolMember[] => {
   }));
 };
 
-// `host` ships every member first, as basis precedence lists the host's copy; `chunked` names the builds
-// whose files import their own internal chunks.
-const electFrom = (
-  builds: Build[],
-  { host, chunked }: { host?: string; chunked?: string[] } = {}
-) =>
+// `host` ships every member first, as basis precedence lists the host's copy.
+const electFrom = (builds: Build[], { host }: { host?: string } = {}) =>
   elect({
     members: hosted(members(builds), host),
-    isChunked: remote => chunked?.includes(remote) ?? false,
     acceptsTag: createAcceptsTag(versionCheck.isCompatible, versionCheck.compare),
     compare: versionCheck.compare,
     latestFirst: false,
@@ -266,16 +261,14 @@ describe('chunked copies', () => {
       { name: 'x', copies: { core: at('1.0.0', 'core'), mat: at('2.0.0', 'mat', 'mat/a') } },
     ];
 
-    for (const chunked of [[], ['x'], ['y'], ['x', 'y']]) {
-      const election = electFrom(builds, { host: 'host', chunked });
-      expect([...election.globalTags]).toEqual([
-        ['core', '1.0.0'],
-        ['mat', '2.0.0'],
-        ['mat/a', '2.0.0'],
-      ]);
-      expect(inGlobal(election)).toEqual(['host', 'x']);
-      expect(election.placements.get('y')).toEqual({ kind: 'self', cause: 'uncovered' });
-    }
+    const election = electFrom(builds, { host: 'host' });
+    expect([...election.globalTags]).toEqual([
+      ['core', '1.0.0'],
+      ['mat', '2.0.0'],
+      ['mat/a', '2.0.0'],
+    ]);
+    expect(inGlobal(election)).toEqual(['host', 'x']);
+    expect(election.placements.get('y')).toEqual({ kind: 'self', cause: 'uncovered' });
   });
 
   // The copy that contains the most others is published, so every remote whose copy it contains runs on it.
@@ -315,7 +308,7 @@ describe('chunked copies', () => {
         { name: 'x', copies: { core: at('1.0.0', 'core'), mat: at('2.0.0', 'mat', 'mat/a') } },
         { name: 'y', copies: { core: at('1.0.0', 'core'), mat: at('2.0.0', 'mat', 'mat/a') } },
       ],
-      { host: 'host', chunked: ['x', 'y'] }
+      { host: 'host' }
     );
 
     expect([...election.globalTags]).toEqual([
@@ -342,16 +335,15 @@ describe('chunked copies', () => {
     for (const builds of [
       [host, flat('x'), flat('y')],
       [host, flat('y'), flat('x')],
-    ])
-      for (const chunked of [[], ['x', 'y']]) {
-        const election = electFrom(builds, { host: 'host', chunked });
-        expect([...election.globalTags]).toEqual([
-          ['core', '1.0.0'],
-          ['mat', '2.0.0'],
-          ['mat/a', '2.0.0'],
-        ]);
-        expect(inGlobal(election).sort()).toEqual(['host', 'x', 'y']);
-      }
+    ]) {
+      const election = electFrom(builds, { host: 'host' });
+      expect([...election.globalTags]).toEqual([
+        ['core', '1.0.0'],
+        ['mat', '2.0.0'],
+        ['mat/a', '2.0.0'],
+      ]);
+      expect(inGlobal(election).sort()).toEqual(['host', 'x', 'y']);
+    }
   });
 
   /**
@@ -364,12 +356,10 @@ describe('chunked copies', () => {
       { name: 'l', copies: { core: at('1.0.0', 'core', 'core/rxjs-interop') } },
     ];
 
-    for (const chunked of [[], ['l']]) {
-      const election = electFrom(builds, { host: 'host', chunked });
-      expect([...election.globalTags]).toEqual([['core', '1.0.0']]);
-      expect(inGlobal(election)).toEqual(['host']);
-      expect(election.placements.get('l')).toEqual({ kind: 'self', cause: 'uncovered' });
-    }
+    const election = electFrom(builds, { host: 'host' });
+    expect([...election.globalTags]).toEqual([['core', '1.0.0']]);
+    expect(inGlobal(election)).toEqual(['host']);
+    expect(election.placements.get('l')).toEqual({ kind: 'self', cause: 'uncovered' });
   });
 });
 
@@ -488,12 +478,10 @@ describe('host fill', () => {
       agreeing('r1', at('1.0.0', '^1.0.0', 'el', 'el/a')),
     ];
 
-    for (const chunked of [[], ['r1'], ['r1', 'r2']]) {
-      const election = electFrom(builds, { host: 'host', chunked });
-      expect([...election.globalTags]).toEqual([...HOST_TAGS, ['el', '1.0.0'], ['el/a', '1.0.0']]);
-      expect(inGlobal(election)).toEqual(['host', 'r1']);
-      expect(inSubpool(election, 'o')).toEqual(['r2', 'o']);
-    }
+    const election = electFrom(builds, { host: 'host' });
+    expect([...election.globalTags]).toEqual([...HOST_TAGS, ['el', '1.0.0'], ['el/a', '1.0.0']]);
+    expect(inGlobal(election)).toEqual(['host', 'r1']);
+    expect(inSubpool(election, 'o')).toEqual(['r2', 'o']);
   });
 
   /**
@@ -513,17 +501,16 @@ describe('host fill', () => {
       ['o', 'r', 'c'],
       ['c', 'o', 'r'],
       ['r', 'c', 'o'],
-    ])
-      for (const chunked of [[], ['c']]) {
-        const builds = [host, family('w1'), family('w2'), ...order.map(n => remotes[n]!)];
-        const election = electFrom(builds, { host: 'host', chunked });
-        expect([...election.globalTags]).toEqual([
-          ...HOST_TAGS,
-          ['mat', '2.0.0'],
-          ['mat/a', '2.0.0'],
-        ]);
-        expect(inGlobal(election).sort()).toEqual(['c', 'host', 'r', 'w1', 'w2']);
-        expect(election.placements.get('o')).toEqual({ kind: 'self', cause: 'incompatible' });
-      }
+    ]) {
+      const builds = [host, family('w1'), family('w2'), ...order.map(n => remotes[n]!)];
+      const election = electFrom(builds, { host: 'host' });
+      expect([...election.globalTags]).toEqual([
+        ...HOST_TAGS,
+        ['mat', '2.0.0'],
+        ['mat/a', '2.0.0'],
+      ]);
+      expect(inGlobal(election).sort()).toEqual(['c', 'host', 'r', 'w1', 'w2']);
+      expect(election.placements.get('o')).toEqual({ kind: 'self', cause: 'incompatible' });
+    }
   });
 });

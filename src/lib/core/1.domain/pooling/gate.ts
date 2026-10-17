@@ -10,9 +10,9 @@ import { committedClaims } from 'lib/core/1.domain/externals/claims';
 import type { AcceptsTag } from 'lib/core/1.domain/externals/compatibility';
 import { packageOf, type Specifier, SpecifierTags } from 'lib/core/1.domain/externals/specifier';
 import * as _path from 'lib/utils/path';
-import { type Build, buildOf, type Copy, type IsChunked } from './builds';
+import { type Build, buildOf, type Copy } from './builds';
 import type { PoolMember } from './membership';
-import { agrees, tearsPackage, unwitnessedGap } from './rules';
+import { agrees, unwitnessedGap } from './rules';
 
 // See docs/version-resolver.md §"Scope and dynamic init".
 
@@ -50,11 +50,10 @@ type Coverable = MappedFiles & {
 };
 
 // Where the remote resolves a specifier it ships: the map's file, or its own.
-type Reach = { remote: RemoteName; file: string; chunked: boolean };
+type Reach = { remote: RemoteName; file: string };
 
 type MapPolicy = {
   shareScope: string;
-  isChunked: IsChunked;
   scopeUrlOf: (remote: RemoteName) => string | undefined;
 };
 
@@ -156,18 +155,13 @@ export function judgeRemote(
 type Binding = { owner: RemoteName; specifier: Specifier; tag: VersionName };
 
 export type CoverResult =
-  | { covers: MapCover[] }
-  | { unmapped: RemoteName }
-  | { gap: Specifier }
-  | { torn: string }
-  | { bound: Binding };
+  { covers: MapCover[] } | { unmapped: RemoteName } | { gap: Specifier } | { bound: Binding };
 
 // `covered` is per external, but the map serves by specifier: an entrypoint another member ships as a package
 // of its own (flat vs dense) is served all the same. A named scope has no `imports` to inherit, so the remote's
 // own scope maps each such specifier to the file the committed map serves it from, replacing the resolver's
-// override. Covering fails, and the remote serves the pool itself, when it would run a package partly on the
-// map's files and partly on its own chunked ones (`torn`), reach one specifier at two files (`bound`), or
-// take a copy whose package the map serves only in part (`gap`).
+// override. Covering fails, and the remote serves the pool itself, when it would reach one specifier at two
+// files (`bound`) or take a copy whose package the map serves only in part (`gap`).
 export function coverFromMap(
   remote: RemoteName,
   mine: readonly PoolMember[],
@@ -186,9 +180,7 @@ export function coverFromMap(
     files.push({ member, action, copy, ...mapped });
   }
 
-  const reaches = reachesOf(remote, files, view, policy);
-  const torn = tornPackage(remote, reaches);
-  if (torn !== undefined) return { torn };
+  const reaches = reachesOf(remote, files, view);
   const bound = boundByFile(reaches, view);
   if (bound !== undefined) return { bound };
   const servedPackages = new Set([...view.global.keys()].map(packageOf));
@@ -229,20 +221,17 @@ function coverOf({ member, action, copy, covered, override }: Coverable): MapCov
 function reachesOf(
   remote: RemoteName,
   files: readonly Coverable[],
-  view: CommittedView,
-  policy: MapPolicy
+  view: CommittedView
 ): Map<Specifier, Reach> {
   const reaches = new Map<Specifier, Reach>();
   const fromMap = (specifier: Specifier): Reach | undefined => {
     const served = view.global.get(specifier);
-    return served && { remote: served.remote, file: served.file, chunked: false };
+    return served && { remote: served.remote, file: served.file };
   };
   for (const file of files) {
     const takesMap = covering(file);
-    const chunked = policy.isChunked(remote, file.copy.bundle);
     for (const [specifier, own] of Object.entries(file.copy.entries)) {
-      if (!takesMap || !file.covered.has(specifier))
-        reaches.set(specifier, { remote, file: own, chunked });
+      if (!takesMap || !file.covered.has(specifier)) reaches.set(specifier, { remote, file: own });
       else {
         const reach = fromMap(specifier);
         if (reach) reaches.set(specifier, reach);
@@ -250,15 +239,6 @@ function reachesOf(
     }
   }
   return reaches;
-}
-
-function tornPackage(remote: RemoteName, reaches: ReadonlyMap<Specifier, Reach>) {
-  const mapped = new Set<string>();
-  for (const [specifier, { remote: from }] of reaches)
-    if (from !== remote) mapped.add(packageOf(specifier));
-  for (const [specifier, { remote: from, chunked }] of reaches)
-    if (from === remote && tearsPackage(chunked, specifier, mapped)) return packageOf(specifier);
-  return undefined;
 }
 
 // `offMapBinding` by file rather than tag: a committed file binds its pool-mates where its build resolves them

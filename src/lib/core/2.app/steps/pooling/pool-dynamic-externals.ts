@@ -26,18 +26,10 @@ import {
 } from 'lib/core/1.domain/pooling/gate';
 import { type CopyMove, movedRecord, renamedRecords } from 'lib/core/1.domain/pooling/records';
 import { createAcceptsTag } from 'lib/core/1.domain/externals/compatibility';
-import { createIsChunked } from './is-chunked';
 
 export function createPoolDynamicExternals(
   config: LoggingConfig & ModeConfig,
-  ports: Pick<
-    DrivingContract,
-    | 'sharedExternalsRepo'
-    | 'remoteInfoRepo'
-    | 'versionCheck'
-    | 'sharedChunksRepo'
-    | 'scopedExternalsRepo'
-  >
+  ports: Pick<DrivingContract, 'sharedExternalsRepo' | 'remoteInfoRepo' | 'versionCheck'>
 ): ForPoolingDynamicExternals {
   // Read per call so a port swapped after wiring is honoured.
   const accepts = createAcceptsTag(
@@ -45,7 +37,6 @@ export function createPoolDynamicExternals(
     (a, b) => ports.versionCheck.compare(a, b)
   );
   const scopeUrlOf = (remote: RemoteName) => ports.remoteInfoRepo.tryGet(remote).get()?.scopeUrl;
-  const isChunked = createIsChunked(ports);
 
   // The committed map is immutable, so this only rewrites the loaded remote's own actions and copies, never
   // another remote's. See docs/version-resolver.md §"Scope and dynamic init".
@@ -72,7 +63,7 @@ export function createPoolDynamicExternals(
     recordOrder: ExternalName[],
     scope: string
   ): Map<ExternalName, CopyMove> {
-    const policy = { shareScope: scope, scopeUrlOf, isChunked };
+    const policy = { shareScope: scope, scopeUrlOf };
     const moves = new Map<ExternalName, CopyMove>();
     const selfServe = (members: PoolMember[], cause: PoolCause) => {
       for (const { name } of members) {
@@ -88,7 +79,7 @@ export function createPoolDynamicExternals(
       const mine = pool.filter(member => names.has(member.name));
       if (mine.length === 0) continue;
 
-      const shipped = copiesByRemote(pool, isChunked);
+      const shipped = copiesByRemote(pool);
       const view = committedView(pool, shipped, recordOrder, {
         shareScope: scope,
         without: remote,
@@ -179,23 +170,18 @@ function poolableNames(entry: RemoteEntry, actions: LoadActions): Map<string, Se
   return declared;
 }
 
-type SelfServeMiss = GateMiss | { cause: 'uncovered'; torn: string };
-
 function coverMiss(
   cover: Exclude<CoverResult, { covers: unknown } | { unmapped: unknown }>
-): SelfServeMiss {
+): GateMiss {
   if ('gap' in cover) return { cause: 'uncovered', specifier: cover.gap };
-  if ('torn' in cover) return { cause: 'uncovered', torn: cover.torn };
   return { cause: 'uncovered', ...cover.bound };
 }
 
 // Wording is pinned in `island-warnings.contract.spec.ts` alone; tools read islands from the record.
-function selfServeWarning(remote: RemoteName, miss: SelfServeMiss, imports: number): string {
+function selfServeWarning(remote: RemoteName, miss: GateMiss, imports: number): string {
   const where = `All ${imports} of its entrypoints are scoped for it.`;
   if (miss.cause === 'incompatible')
     return `'${remote}' is islanded: its range rejects '${miss.specifier}@${miss.tag}' of the committed map. ${where}`;
-  if ('torn' in miss)
-    return `'${remote}' serves its own family: its chunked '${miss.torn}' cannot run beside the map's files of it. ${where}`;
   if ('owner' in miss)
     return `'${remote}' serves its own family: committed build '${miss.owner}', whose files it would reach, resolves '${miss.specifier}' to another file than it would. ${where}`;
   if ('unshipped' in miss)

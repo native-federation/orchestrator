@@ -1014,7 +1014,6 @@ where its copies come from:
 | `warn` | `[<scope>]` | `'<remote>' is islanded: its range rejects '<specifier>@<tag>' of the committed map. All N of its entrypoints are scoped for it.` | Dynamic init only — a range rejects a tag the committed map serves (see [Scope and dynamic init](#scope-and-dynamic-init)). |
 | `warn` | `[<scope>]` | `'<remote>' serves its own family: no committed build offers every entrypoint it imports at a version it accepts (gap '<gap>'). All N of its entrypoints are scoped for it.` | Dynamic init only — the coverage finding read off the committed record. |
 | `warn` | `[<scope>]` | `'<remote>' serves its own family: no committed build shipped the map's combination for it. All N of its entrypoints are scoped for it.` | Dynamic init only — the witness finding: the committed map serves everything this remote imports at versions it accepts, but no committed build shipped those versions together. |
-| `warn` | `[<scope>]` | `'<remote>' serves its own family: its chunked '<package>' cannot run beside the map's files of it. All N of its entrypoints are scoped for it.` | Dynamic init only. The remote's build is chunked (its files import its own build's internals), and the committed map serves part of `<package>` from another build. Shipping every entrypoint of `<package>` the remote imports in the build the map serves it from recovers the dedup. |
 | `warn` | `[<scope>]` | `'<remote>' serves its own family: committed build '<build>', whose files it would reach, resolves '<specifier>' to another file than it would. All N of its entrypoints are scoped for it.` | Dynamic init only. A committed file binds its pool-mates where its build resolves them, so this remote, reaching that build's files directly or through another committed build's, would run `<specifier>` from two files. Typical causes: the build published before its pool formed, runs a member from a scope row, or filled an entrypoint itself. Shipping `<specifier>` in this remote's build at the map's tag, or not importing it, recovers the dedup. |
 | `warn` | `[<scope>][pool:<name>]` | `'<build>' keeps subpool '<build>': the elected build would serve it, but K other remote(s) in it need its build.` | A subpool's build the global map would serve, kept for the members that need it. Nothing to fix on that remote; aligning the other members moves the whole subpool onto the global map. |
 | `warn` | `[<scope>][<remote>]` | `'<build>' is not in the cache, so its files cannot be mapped.` | Dynamic init in a named scope only: the committed map serves the loaded remote's family from `<build>`, whose scope URL is gone, so the remote serves itself (`uncovered`). |
@@ -1130,8 +1129,8 @@ it. In order:
    agree with it, judged by file, not by tag: a committed build whose file it takes, directly or through another
    committed build's file, must resolve each specifier the remote ships to the file the remote does. A committed
    file binds its pool-mates where its build resolves them: off the map where that build runs one itself (a scope
-   row, an entrypoint it filled, or a build that published before its pool formed), else the map. And a chunked
-   copy never runs part of a package beside the map's files of it. A range rejecting a global tag moves it on
+   row, an entrypoint it filled, or a build that published before its pool formed), else the map. A range
+   rejecting a global tag moves it on
    with cause `incompatible`. A member the resolver scoped is judged the same way: a strict range that rejects
    the map's tag islands the family as `incompatible`, while one scoped for any other reason becomes a skip when
    the map serves every entrypoint it ships, as at init.

@@ -589,9 +589,8 @@ describe('island warnings (contract)', () => {
     });
 
     describe('by file', () => {
-      // Whole entries through the real repositories, so a bundle's chunks reach the gate. One `fw` pool at
-      // 17.0.0; a package is flat unless `chunked`, then its bundle ships one internal chunk.
-      const shared = (packageName: string, entrypoints: string[] = [], chunked = false) =>
+      // Whole entries through the real repositories. One `fw` pool at 17.0.0.
+      const shared = (packageName: string, entrypoints: string[] = []) =>
         ({
           packageName,
           version: '17.0.0',
@@ -599,43 +598,17 @@ describe('island warnings (contract)', () => {
           singleton: true,
           strictVersion: false,
           pool: 'fw',
-          ...(chunked ? { bundle: `browser-${packageName.slice(1).replace(/\//g, '_')}` } : {}),
           entries: Object.fromEntries(
             [packageName, ...entrypoints].map(e => [e, `${e.slice(1).replace(/\//g, '_')}.js`])
           ),
         }) as RemoteEntry['shared'][number];
-      const whole = (name: string, ...sharedInfo: RemoteEntry['shared']): RemoteEntry => {
-        const bundles = sharedInfo.flatMap(i => (i.bundle ? [i.bundle] : []));
-        return {
+      const whole = (name: string, ...sharedInfo: RemoteEntry['shared']): RemoteEntry =>
+        ({
           name,
           url: `http://${name}/remoteEntry.json`,
           exposes: [],
           shared: sharedInfo,
-          ...(bundles.length > 0
-            ? { chunks: Object.fromEntries(bundles.map(b => [b, [`chunk-${b}.js`]])) }
-            : {}),
-        } as RemoteEntry;
-      };
-
-      it('torn: a chunked package would run partly from the map', async () => {
-        // r takes the host's core and forms as they are; its interop, a chunked entrypoint of core the map
-        // lacks, would come from r's build beside the map's core.
-        p = portfolio(
-          {},
-          { storage: 'nf-island-warnings-torn', realRepositories: true, hosts: ['host'] }
-        );
-        await p.runInit([whole('host', shared('@fw/core'), shared('@fw/forms'))]);
-        vi.mocked(p.config.log.warn).mockClear();
-
-        await p.runDynamic(
-          whole('r', shared('@fw/core'), shared('@fw/core/interop', [], true), shared('@fw/forms'))
-        );
-
-        expect(p.islands()).toEqual({ r: 'uncovered' });
-        expect(warnings()).toEqual([
-          "[__GLOBAL__] 'r' serves its own family: its chunked '@fw/core' cannot run beside the map's files of it. All 3 of its entrypoints are scoped for it.",
-        ]);
-      });
+        }) as RemoteEntry;
 
       it('bound: a committed file binds a specifier to the map, the load to its own', async () => {
         // The host ships http's testing entrypoint as a package of its own; m ships it inside http, which

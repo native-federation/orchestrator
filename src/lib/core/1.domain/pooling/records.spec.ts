@@ -56,7 +56,6 @@ describe('memberRecord', () => {
       acceptsTag: createAcceptsTag(isCompatible, compare),
       compare,
       latestFirst: false,
-      isChunked: () => false,
     });
     const placed = { ...election, poolName: 'x' };
 
@@ -82,7 +81,6 @@ describe('memberRecord', () => {
       acceptsTag: createAcceptsTag(isCompatible, compare),
       compare,
       latestFirst: false,
-      isChunked: () => false,
     });
     const placed = { ...election, poolName: 'x' };
 
@@ -140,7 +138,6 @@ describe('memberRecord of a package whose copies ship different entrypoints', ()
       acceptsTag: createAcceptsTag(isCompatible, compare),
       compare,
       latestFirst: false,
-      isChunked: () => false,
     });
 
     const record = memberRecord(pool[0]!, { ...election, poolName: 'y' }, compare);
@@ -246,7 +243,6 @@ describe('a remote that leaves the pool for its family', () => {
         acceptsTag: createAcceptsTag(isCompatible, compare),
         compare,
         latestFirst: false,
-        isChunked: () => false,
       });
       const placed = { ...election, poolName: 'fw' };
 
