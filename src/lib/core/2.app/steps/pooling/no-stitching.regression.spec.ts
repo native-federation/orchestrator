@@ -215,7 +215,7 @@ describe('a remote runs every specifier of a package from one build', () => {
     // core, and its own testing external is that package's only share row. Core's row claims the testing
     // specifier first, so mfe1 runs mfe2's testing, which binds core through mfe2's URL: core 1.0.0 with
     // testing 2.0.0. In a named share scope and in the global one.
-    ...(['custom', undefined] as const).map((shareScope): Case => {
+    ...(['custom', 'strict', undefined] as const).map((shareScope): Case => {
       const pin = (version: string) => ({
         pool: false as const,
         strict: true,
@@ -657,6 +657,165 @@ describe('a remote runs every specifier of a package from one build', () => {
   ];
 
   for (const c of cases) register(c);
+});
+
+// The strict scope shares every tag side by side and elects no serving build, yet within one tag a remote still
+// runs each package from one build: the basis of the root's share row at that tag (else of the package's first
+// row there) serves it, and a remote shipping a specifier that build lacks runs the package from its own build.
+// b is the remote that stitched before; a and b keep their names, as the basis tie goes to the name.
+describe('the strict scope runs a package at one tag from one build', () => {
+  const STRICT = 'strict';
+  const s = (packageName: string, opts: SharedOpts = {}): DenseSharedInfo =>
+    shared(packageName, { pool: false, shareScope: STRICT, ...opts });
+  // A dense copy without its root, as ignoreUnusedDeps leaves one nothing imports the root of.
+  const rootless = (...entrypoints: string[]): DenseSharedInfo => ({
+    ...s(CORE),
+    entries: Object.fromEntries(entrypoints.map(e => [e, file(e)])),
+  });
+
+  type Pair = Omit<Case, 'entries' | 'dynamic' | 'reload' | 'scope'> & {
+    first: RemoteEntry;
+    then: RemoteEntry;
+  };
+  // Each pair at init, and as a runtime load the next page's warm init then serves.
+  const pages = ({ first, then, ...c }: Pair): Case[] => [
+    { ...c, scope: STRICT, name: `${c.name} (init)`, entries: [first, then] },
+    {
+      ...c,
+      scope: STRICT,
+      name: `${c.name} (runtime load, then reload)`,
+      entries: [first],
+      dynamic: [then],
+      reload: true,
+    },
+  ];
+
+  const cases: Case[] = [
+    // Neither build covers the other; a wins the basis on the name.
+    ...pages({
+      name: 'runs a dense copy beside a basis that lacks one of its entrypoints from its own build',
+      first: entry('a', s(CORE, { entrypoints: [X] })),
+      then: entry('b', s(CORE, { entrypoints: [SUB] })),
+      expectMap: map => {
+        expect(resolve(map, CORE, 'http://b/expose.js')).toBe('http://b/fw_core.js');
+        expect(resolve(map, CORE, 'http://a/expose.js')).toBe('http://a/fw_core.js');
+      },
+    }),
+    // The host leads the row though b ships more.
+    ...pages({
+      name: "runs a copy wider than the host's from its own build",
+      hosts: ['a'],
+      first: entry('a', s(CORE)),
+      then: entry('b', s(CORE, { entrypoints: [SUB] })),
+      expectMap: map =>
+        expect(resolve(map, CORE, 'http://b/expose.js')).toBe('http://b/fw_core.js'),
+    }),
+    // Flat: core and sub are rows of their own, each with its own basis (a leads core, b leads sub).
+    ...pages({
+      name: 'runs a flat secondary and its root from one build',
+      first: entry('a', s(CORE)),
+      then: entry('b', s(CORE), s(SUB)),
+      expectMap: map =>
+        expect(resolve(map, CORE, 'http://b/expose.js')).toBe('http://b/fw_core.js'),
+    }),
+    // a ships the flat sub alone and leads its row on the name; b leads core, so b serves sub as well.
+    ...pages({
+      name: 'serves a flat secondary from the serving build where another copy leads its row',
+      first: entry('a', s(SUB)),
+      then: entry('b', s(CORE), s(SUB)),
+      expectMap: map => {
+        expect(resolve(map, SUB, 'http://b/expose.js')).toBe('http://b/fw_core_sub.js');
+        expect(resolve(map, SUB, 'http://a/expose.js')).toBe('http://b/fw_core_sub.js');
+      },
+    }),
+    // No root external at the tag: the first row's basis (a's `core/a`) serves.
+    ...pages({
+      name: 'runs a package without a root row from one build',
+      first: entry('a', s(A)),
+      then: entry('b', s(A), s(B)),
+      expectMap: map => expect(resolve(map, A, 'http://b/expose.js')).toBe('http://b/fw_core_a.js'),
+    }),
+    ...pages({
+      name: 'runs a dense copy without its root from one build',
+      first: entry('a', rootless(A, X)),
+      then: entry('b', rootless(A, B)),
+      expectMap: map => expect(resolve(map, A, 'http://b/expose.js')).toBe('http://b/fw_core_a.js'),
+    }),
+    // Guards that pass today. b covers a, so a runs b's files rather than its own: no copy falls back needlessly.
+    ...pages({
+      name: 'serves a covered copy from the basis',
+      first: entry('a', s(CORE)),
+      then: entry('b', s(CORE, { entrypoints: [SUB] })),
+      expectMap: map =>
+        expect(resolve(map, CORE, 'http://a/expose.js')).toBe('http://b/fw_core.js'),
+    }).slice(0, 1),
+    // A strict copy's range is its own tag, so a fallback never refuses.
+    {
+      name: 'refuses no strict copy that falls back',
+      scope: STRICT,
+      strict: true,
+      entries: [
+        entry('a', s(CORE, { strict: true, entrypoints: [X] })),
+        entry('b', s(CORE, { strict: true, entrypoints: [SUB] })),
+      ],
+    },
+  ];
+
+  for (const c of cases) register(c);
+
+  const record = async (entries: RemoteEntry[], hosts: string[] = []) => {
+    const p = portfolio(
+      {},
+      {
+        storage: `nf-no-stitching-${storage++}`,
+        realRepositories: true,
+        assertNoTear: false,
+        hosts,
+        scope: STRICT,
+      }
+    );
+    await p.runInit(entries);
+    return p;
+  };
+
+  // The tag scopes are views: what reaches storage is the stored rows, with the copies the map publishes marked.
+  it('stores share rows only, with the serving and the fallback copy cached', async () => {
+    const p = await record(
+      [entry('a', s(CORE)), entry('b', s(CORE, { entrypoints: [SUB] }))],
+      ['a']
+    );
+    p.reload();
+    expect(p.record(CORE)).toEqual({
+      dirty: false,
+      versions: [
+        {
+          tag: '17.0.0',
+          action: 'share',
+          host: true,
+          remotes: [
+            expect.objectContaining({ name: 'a', cached: true }),
+            expect.objectContaining({ name: 'b', cached: true }),
+          ],
+        },
+      ],
+    });
+  });
+
+  it('marks the copies of every tag of one external', async () => {
+    const p = await record([
+      entry('a', s(CORE, { entrypoints: [X] })),
+      entry('b', s(CORE, { entrypoints: [SUB] })),
+      entry('c', s(CORE, { ...at('18.0.0'), entrypoints: [X] })),
+      entry('d', s(CORE, { ...at('18.0.0'), entrypoints: [SUB] })),
+    ]);
+    p.reload();
+    expect(p.record(CORE).versions.flatMap(v => v.remotes.map(r => [r.name, r.cached]))).toEqual([
+      ['c', true],
+      ['d', true],
+      ['a', true],
+      ['b', true],
+    ]);
+  });
 });
 
 // The host's files may import a specifier its build never declared (an entrypoint its build skipped, or a dynamic

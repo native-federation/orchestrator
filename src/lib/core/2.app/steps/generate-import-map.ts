@@ -12,6 +12,7 @@ import {
 } from 'lib/core/1.domain';
 import { forEachVersionEntry } from 'lib/core/1.domain/externals/basis';
 import { claimTable, versionClaims, type Claim } from 'lib/core/1.domain/externals/claims';
+import { strictTagScopes } from 'lib/core/1.domain/externals/serving';
 import type { Specifier } from 'lib/core/1.domain/externals/specifier';
 import type { LoggingConfig } from '../config/log.contract';
 import type { ModeConfig } from '../config/mode.contract';
@@ -101,7 +102,23 @@ export function createGenerateImportMap(
     const shareScopes = ports.sharedExternalsRepo.getScopes({ includeGlobal: false });
 
     for (const shareScope of shareScopes) {
-      addShareScope(importMap, shareScope, chunkBundles);
+      const sharedExternals = ports.sharedExternalsRepo.getFromScope(shareScope);
+      const cachedBefore = new Map<string, string>();
+      for (const [externalName, external] of Object.entries(sharedExternals))
+        cachedBefore.set(externalName, cachedFingerprint(external));
+
+      if (ports.sharedExternalsRepo.scopeType(shareScope) === 'strict') {
+        for (const tagScope of strictTagScopes(sharedExternals))
+          addShareScope(importMap, shareScope, tagScope, chunkBundles);
+      } else {
+        addShareScope(importMap, shareScope, sharedExternals, chunkBundles);
+      }
+
+      for (const [externalName, external] of Object.entries(sharedExternals)) {
+        if (cachedFingerprint(external) !== cachedBefore.get(externalName)) {
+          ports.sharedExternalsRepo.addOrUpdate(externalName, external, shareScope);
+        }
+      }
     }
 
     return importMap;
@@ -110,9 +127,9 @@ export function createGenerateImportMap(
   function addShareScope(
     importMap: ImportMap,
     shareScope: string,
+    sharedExternals: Record<string, SharedExternal>,
     chunkBundles: Record<string, Set<string>>
   ): void {
-    const sharedExternals = ports.sharedExternalsRepo.getFromScope(shareScope);
     const index = buildServedIndex(sharedExternals);
 
     const claims = shareRowMappings(sharedExternals, shareScope);
@@ -123,7 +140,6 @@ export function createGenerateImportMap(
 
     for (const [externalName, external] of Object.entries(sharedExternals)) {
       let override: SharedVersion | undefined | 'NOT_AVAILABLE' = undefined;
-      const cachedBefore = cachedFingerprint(external);
 
       for (const version of external.versions) {
         if (version.action === 'scope') {
@@ -201,9 +217,6 @@ export function createGenerateImportMap(
         for (const m of mappings) {
           addIntegrity(importMap, m.url, m.name, m.file);
         }
-      }
-      if (cachedFingerprint(external) !== cachedBefore) {
-        ports.sharedExternalsRepo.addOrUpdate(externalName, external, shareScope);
       }
     }
   }

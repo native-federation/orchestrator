@@ -317,8 +317,9 @@ and a copy that declares an entrypoint the serving build lacks runs its package 
 coverage and tearing](#entrypoint-coverage-and-tearing)). The version's other `share`-row copies publish nothing,
 so a page that starts warm after a dynamic load still runs the package from the one build that serves it. An
 external without a serving build publishes its `share`-row copies in record order, each specifier from the first
-copy that declares it. A package in the `strict` scope has no serving build: its `share`-row copies publish in
-basis precedence, tag by tag (see [Entrypoint coverage and tearing](#entrypoint-coverage-and-tearing)).
+copy that declares it. The `strict` scope elects no serving build: each tag of a package is served by the basis of
+its root's `share` row there, never across tags (see [Entrypoint coverage and
+tearing](#entrypoint-coverage-and-tearing)).
 
 Only copies that publish their own files can serve a version. A copy pooling has placed in a foreign build's
 subpool (`servedBy`, see [How pooling resolves](#how-pooling-resolves)) runs that build's files, named in its
@@ -338,9 +339,9 @@ version ships `@angular/core` while a compatible, deduped remote on another tag 
 ```
 
 Serving those two specifiers from two **different builds** is a **tear**. It is harmless for most libraries but
-breaks packages whose secondary entrypoints share module-singleton state with the primary. Outside the `strict`
-share scope, a remote at init never resolves its own imports of one package to two builds, with one exception: a
-host whose build ships a secondary entrypoint without its root (see
+breaks packages whose secondary entrypoints share module-singleton state with the primary. A remote at init never
+resolves its own imports of one package to two builds, with one exception: a host whose build ships a secondary
+entrypoint without its root (see
 [When the host's build lacks an entrypoint](#when-the-hosts-build-lacks-an-entrypoint)).
 mfe-b above runs both specifiers from its own build: its copies move to `scope` rows at 20.1.0, and mfe-a's build
 keeps serving everyone else. The same holds within one version: a copy of the shared tag that ships an
@@ -350,9 +351,12 @@ primary from its own build as well, even where the serving build ships both. A s
 still bind the shared copy of a package the remote runs from its own build (see
 [Declare the coupling you actually have](#declare-the-coupling-you-actually-have)).
 
-The `strict` scope has no serving build: the copies of one tag merge their entries, each specifier served by the
-first copy that declares it in basis precedence, so a copy can run its root from another copy's build beside a
-secondary from its own.
+The `strict` scope elects no serving build, yet within each tag of a package the same rule holds. The basis of the
+root's `share` row at that tag serves the package, or the basis of the package's first row there when no build
+ships the root at that tag. A remote whose copies declare a specifier that build lacks at that tag runs the package
+from its own build. Each tag is judged alone, so no copy is ever refused here: a strict copy's range is its own tag.
+The basis favours the host and copies a committed map already serves, so a warm page can serve a tag from another
+build than a cold page would; either way each remote runs the package from one build.
 
 **Inside a pool the unit is the family.** Pooling tests coverage **per specifier**, and a remote no build
 covers takes its whole family from its own build (see [How pooling resolves](#how-pooling-resolves)): leaving

@@ -3,7 +3,7 @@ import { compareStrings } from 'lib/utils/compare-strings';
 import type { RemoteName } from '../remote/remote-info.contract';
 import type { AcceptsTag } from './compatibility';
 import type { ExternalName, SharedExternal, shareScope } from './external.contract';
-import { mergeRows, redirectRow, rowAt } from './rows';
+import { mergeRows, redirectRow, rowAt, scopeRemote } from './rows';
 import { groupByPackage, packageOf, type Specifier } from './specifier';
 import type { SharedVersion, SharedVersionMeta, VersionName } from './version.contract';
 
@@ -114,6 +114,35 @@ export function followServingBuild(
   });
   external.versions = mergeRows(rebuilt);
   return { external, objector };
+}
+
+// A strict copy's range is its own tag, and a tag scope compares a copy with its own tag only.
+const sameTagOnly: AcceptsTag = () => true;
+
+// See docs/version-resolver.md §"Entrypoint coverage and tearing". The rows are copies; the copies in them are the
+// record's, so the map's marks reach it.
+export function strictTagScopes(scope: shareScope): shareScope[] {
+  const tagScopes: shareScope[] = [];
+  for (const [pkg, names] of packagesOf(scope)) {
+    const byTag = new Map<VersionName, shareScope>();
+    for (const name of names)
+      for (const row of scope[name]!.versions) {
+        let tagScope = byTag.get(row.tag);
+        if (!tagScope) byTag.set(row.tag, (tagScope = {}));
+        const external = (tagScope[name] ??= { ...scope[name]!, versions: [] });
+        external.versions.push({ ...row, remotes: [...row.remotes] });
+      }
+    for (const [tag, tagScope] of byTag) {
+      const lead = tagScope[pkg] ?? Object.values(tagScope)[0]!;
+      const serving = { remote: lead.versions[0]!.remotes[0]!.name, tag };
+      for (const external of Object.values(tagScope)) external.servingBuild = serving.remote;
+      for (const remote of fallbacksOf(Object.entries(tagScope), serving, sameTagOnly))
+        for (const external of Object.values(tagScope))
+          external.versions = scopeRemote(external.versions, remote);
+      tagScopes.push(tagScope);
+    }
+  }
+  return tagScopes;
 }
 
 function shareRows(external: DeepReadonly<SharedExternal> | undefined): Row[] {

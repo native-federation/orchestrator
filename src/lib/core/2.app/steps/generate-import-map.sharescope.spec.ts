@@ -924,3 +924,83 @@ describe('createGenerateImportMap (shareScope-externals)', () => {
     });
   });
 });
+
+describe('createGenerateImportMap (strict shareScope)', () => {
+  let adapters: Pick<
+    DrivingContract,
+    'remoteInfoRepo' | 'scopedExternalsRepo' | 'sharedExternalsRepo'
+  >;
+  const entries = (...specifiers: string[]) =>
+    Object.fromEntries(specifiers.map(s => [s, `${s.replace('/', '-')}.js`]));
+
+  // mfe2 ships `dep-a/sub`, which the basis mfe1 lacks at 2.1.2, so it falls back; mfe3 alone serves 2.1.1.
+  const record = () =>
+    mockExternal_A({
+      dirty: false,
+      versions: [
+        mockVersion_A.v2_1_2({
+          action: 'share',
+          remotes: {
+            'team/mfe1': { entries: entries('dep-a', 'dep-a/x') },
+            'team/mfe2': { entries: entries('dep-a', 'dep-a/sub') },
+          },
+        }),
+        mockVersion_A.v2_1_1({ action: 'share', remotes: ['team/mfe3'] }),
+      ],
+    });
+
+  beforeEach(() => {
+    adapters = mockAdapters();
+    adapters.scopedExternalsRepo.getAll = vi.fn(() => ({}));
+    adapters.remoteInfoRepo.getAll = vi.fn(() => ({}));
+    adapters.sharedExternalsRepo.getScopes = vi.fn(({ includeGlobal } = { includeGlobal: true }) =>
+      includeGlobal ? [GLOBAL_SCOPE, 'strict'] : ['strict']
+    );
+    adapters.sharedExternalsRepo.scopeType = vi.fn(s => (s === 'strict' ? 'strict' : 'global'));
+    adapters.remoteInfoRepo.tryGet = vi.fn(remote => {
+      if (remote === 'team/mfe3') return Optional.of(mockRemoteInfo_MFE3({ exposes: [] }));
+      if (remote === 'team/mfe2') return Optional.of(mockRemoteInfo_MFE2({ exposes: [] }));
+      if (remote === 'team/mfe1') return Optional.of(mockRemoteInfo_MFE1({ exposes: [] }));
+      return Optional.empty<RemoteInfo>();
+    });
+  });
+
+  it('runs a copy the basis does not cover wholly from its own build', async () => {
+    const stored = record();
+    adapters.sharedExternalsRepo.getFromScope = vi.fn((scope?: string): shareScope =>
+      scope === 'strict' ? { 'dep-a': stored } : {}
+    );
+
+    const actual = await createGenerateImportMap(mockConfig(), adapters)();
+
+    expect(actual.scopes![mockScopeUrl_MFE2()]).toEqual({
+      'dep-a': mockScopeUrl_MFE2({ file: 'dep-a.js' }),
+      'dep-a/sub': mockScopeUrl_MFE2({ file: 'dep-a-sub.js' }),
+    });
+    expect(actual.scopes![mockScopeUrl_MFE1()]).toEqual({
+      'dep-a': mockScopeUrl_MFE1({ file: 'dep-a.js' }),
+      'dep-a/x': mockScopeUrl_MFE1({ file: 'dep-a-x.js' }),
+    });
+  });
+
+  // Each tag is served from a view of the record; the stored record keeps its rows and is written once.
+  it('writes the stored record once, with the copies of both tags marked', async () => {
+    const stored = record();
+    adapters.sharedExternalsRepo.getFromScope = vi.fn((scope?: string): shareScope =>
+      scope === 'strict' ? { 'dep-a': stored } : {}
+    );
+
+    await createGenerateImportMap(mockConfig(), adapters)();
+
+    expect(adapters.sharedExternalsRepo.addOrUpdate).toHaveBeenCalledTimes(1);
+    const [name, written, scope] = vi.mocked(adapters.sharedExternalsRepo.addOrUpdate).mock
+      .calls[0]!;
+    expect([name, scope]).toEqual(['dep-a', 'strict']);
+    expect(written).toBe(stored);
+    expect(written.servingBuild).toBeUndefined();
+    expect(written.versions.map(v => [v.tag, v.action, v.remotes.map(r => r.cached)])).toEqual([
+      ['2.1.2', 'share', [true, true]],
+      ['2.1.1', 'share', [true]],
+    ]);
+  });
+});

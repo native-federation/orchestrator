@@ -85,5 +85,7 @@ See [`entries` in the version resolver](./version-resolver.md).
 
 Each specifier is shared from the copy the import map serves it from, so MF hands out a package's primary and
 secondary entrypoints from the same build, never a secondary only a sibling copy of the version ships. The
-`strict` scope offers every shared version side by side, each from its basis copy (see
-[One build per package](./version-resolver.md#one-build-per-package)).
+`strict` scope offers every shared version side by side, each with the entrypoints of the build serving that
+package at that tag (see [Entrypoint coverage and tearing](./version-resolver.md#entrypoint-coverage-and-tearing)).
+A remote the import map runs from its own build instead has no place in `ShareInfos`, which offers one location
+per specifier and version.
