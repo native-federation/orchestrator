@@ -73,8 +73,16 @@ export function createProcessRemoteEntries(
   function addSharedExternal(
     remoteEntry: RemoteEntry,
     _sharedInfo: DenseSharedInfo,
-    { tag, remote, cached, scopeType, assertSameVersionCompatibility, write }: SharedExternalContext
+    {
+      tag,
+      remote,
+      readRecord,
+      scopeType,
+      assertSameVersionCompatibility,
+      write,
+    }: SharedExternalContext
   ): void {
+    const cached = readRecord();
     // Resolution is a function of the whole remote set, not of the tag list: a remote joining an
     // existing version can take the basis slot (changing what the version serves) and always adds
     // to `versionDemands` (changing what it accepts). Either way the cached actions are stale.

@@ -53,7 +53,7 @@ export type SharedExternalHandler = (
 export type SharedExternalContext = {
   tag: string;
   remote: SharedVersionMeta;
-  cached: SharedExternal;
+  readRecord: () => SharedExternal;
   scopeType: 'global' | 'strict' | 'shareScope';
   assertSameVersionCompatibility: (matchingVersion: SharedVersion) => void;
   write: () => void;
@@ -190,9 +190,7 @@ export function createStoreRemoteEntry(
     return {
       tag,
       remote,
-      get cached() {
-        return readRecord();
-      },
+      readRecord,
       scopeType,
       assertSameVersionCompatibility(matchingVersion: SharedVersion): void {
         if (!remote.strictVersion) return;
