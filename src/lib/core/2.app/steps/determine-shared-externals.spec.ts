@@ -55,6 +55,24 @@ describe('createDetermineSharedExternals', () => {
 
       expect(adapters.sharedExternalsRepo.addOrUpdate).not.toHaveBeenCalled();
     });
+
+    it('should reject with the original error as its cause', async () => {
+      const inner = new Error('storage unavailable');
+      adapters.sharedExternalsRepo.getFromScope = vi.fn(() => ({
+        'dep-a': mockExternal_A({
+          dirty: true,
+          versions: [mockVersion_A.v2_1_1({ remotes: ['team/mfe1'], action: 'skip' })],
+        }),
+      }));
+      adapters.sharedExternalsRepo.addOrUpdate = vi.fn(() => {
+        throw inner;
+      });
+
+      const rejection = await determineSharedExternals().catch((e: unknown) => e);
+
+      expect(rejection).toBeInstanceOf(NFError);
+      expect((rejection as NFError).cause).toBe(inner);
+    });
   });
 
   describe('handle version incompatibilities', () => {
