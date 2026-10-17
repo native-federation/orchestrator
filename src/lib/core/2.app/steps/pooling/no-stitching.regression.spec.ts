@@ -1,6 +1,7 @@
 import type { DenseSharedInfo, ImportMap, RemoteEntry } from 'lib/core/1.domain';
 import { portfolio } from 'lib/testing/pooling/portfolio';
 import { importsFrom, pageFaults, resolve, type PageFaults } from 'lib/testing/pooling/page-graph';
+import { createGetShared } from 'lib/module-federation/get-shared';
 
 /**
  * One build per package: for each remote, every specifier of one package resolves to files of one build. Each
@@ -749,6 +750,26 @@ describe('the strict scope runs a package at one tag from one build', () => {
       expectMap: map =>
         expect(resolve(map, CORE, 'http://a/expose.js')).toBe('http://b/fw_core.js'),
     }).slice(0, 1),
+    // As above with strictVersion copies, as strict-scope builds usually ship them: a tag scope offers a copy its
+    // own tag only, so the range never sends a covered copy to its own build.
+    {
+      name: 'serves a covered strict-version copy from the basis',
+      scope: STRICT,
+      entries: [
+        entry('a', s(CORE, { strict: true })),
+        entry('b', s(CORE, { strict: true, entrypoints: [SUB] })),
+      ],
+      expectMap: map =>
+        expect(resolve(map, CORE, 'http://a/expose.js')).toBe('http://b/fw_core.js'),
+    },
+    // Rootless with two rows led by different builds: m leads `core/a`, the first row, so m serves `core/b` too
+    // although k leads that row.
+    {
+      name: "serves a package without a root row from its first row's basis",
+      scope: STRICT,
+      entries: [entry('m', s(A), s(B)), entry('n', s(A)), entry('k', s(B))],
+      expectMap: map => expect(resolve(map, B, 'http://k/expose.js')).toBe('http://m/fw_core_b.js'),
+    },
     // A strict copy's range is its own tag, so a fallback never refuses.
     {
       name: 'refuses no strict copy that falls back',
@@ -799,6 +820,26 @@ describe('the strict scope runs a package at one tag from one build', () => {
         },
       ],
     });
+  });
+
+  // The URLs getShared hands Module Federation, per specifier.
+  const offered = async (p: ReturnType<typeof portfolio>) => {
+    const ports = { ...p.adapters, browser: { ...p.adapters.browser } };
+    ports.browser.importModule = ((url: string) => Promise.resolve(url)) as never;
+    const urls: Record<string, string[]> = {};
+    for (const [specifier, list] of Object.entries(createGetShared(ports as never)()))
+      for (const shared of list)
+        (urls[specifier] ??= []).push(((await shared.get()) as () => string)());
+    return urls;
+  };
+
+  // b is wider than the committed basis a; its runtime copy runs its own build, so MF must keep a's file.
+  it('offers the committed basis after a runtime load joins its row', async () => {
+    const p = await record([entry('a', s(CORE))]);
+    const { merged } = await p.runDynamic(entry('b', s(CORE, { entrypoints: [SUB] })));
+
+    expect(resolve(merged, CORE, 'http://a/expose.js')).toBe('http://a/fw_core.js');
+    expect(await offered(p)).toEqual({ [CORE]: ['http://a/fw_core.js'] });
   });
 
   it('marks the copies of every tag of one external', async () => {

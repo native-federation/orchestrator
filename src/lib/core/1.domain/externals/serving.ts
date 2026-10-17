@@ -133,12 +133,17 @@ export function strictTagScopes(scope: shareScope): shareScope[] {
         external.versions.push({ ...row, remotes: [...row.remotes] });
       }
     for (const [tag, tagScope] of byTag) {
-      const lead = tagScope[pkg] ?? Object.values(tagScope)[0]!;
-      const serving = { remote: lead.versions[0]!.remotes[0]!.name, tag };
-      for (const external of Object.values(tagScope)) external.servingBuild = serving.remote;
-      for (const remote of fallbacksOf(Object.entries(tagScope), serving, sameTagOnly))
-        for (const external of Object.values(tagScope))
-          external.versions = scopeRemote(external.versions, remote);
+      // A determine run after an eviction can leave a skip row at the tag, whose copy publishes nothing.
+      const lead = [tagScope[pkg], ...Object.values(tagScope)]
+        .map(external => external && rowAt(external.versions, tag, 'share'))
+        .find(row => row !== undefined);
+      if (lead) {
+        const serving = { remote: lead.remotes[0]!.name, tag };
+        for (const external of Object.values(tagScope)) external.servingBuild = serving.remote;
+        for (const remote of fallbacksOf(Object.entries(tagScope), serving, sameTagOnly))
+          for (const external of Object.values(tagScope))
+            external.versions = scopeRemote(external.versions, remote);
+      }
       tagScopes.push(tagScope);
     }
   }
