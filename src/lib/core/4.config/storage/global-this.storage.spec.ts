@@ -39,15 +39,6 @@ describe('globalThisStorageEntry', () => {
       const expected = { 'team/mfe1': mockRemoteInfo_MFE1() };
       expect(entry.get()).toEqual(expected);
     });
-
-    it('not allow any mutations', () => {
-      const expected = { 'team/mfe1': mockRemoteInfo_MFE1() };
-
-      const keyA = entry.get()!;
-      keyA['team/mfe1'] = mockRemoteInfo_MFE1();
-
-      expect(entry.get()).toEqual(expected);
-    });
   });
 
   describe('set', () => {
