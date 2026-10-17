@@ -75,7 +75,7 @@ const soleProviderIsland = (): PoolMember[] => [
 const viewOf = (members: PoolMember[], without?: string, shareScope = GLOBAL_SCOPE) =>
   committedView(
     members,
-    copiesByRemote(members, () => false),
+    copiesByRemote(members),
     members.map(m => m.name),
     {
       shareScope,
@@ -249,15 +249,10 @@ describe('committedView', () => {
         for (const { external } of members) external.servingBuild = 'dense';
 
         expect(
-          committedView(
-            members,
-            copiesByRemote(members, () => false),
-            recordOrder,
-            {
-              shareScope: GLOBAL_SCOPE,
-              without: 'loaded',
-            }
-          ).global.get('@ng/core/testing')
+          committedView(members, copiesByRemote(members), recordOrder, {
+            shareScope: GLOBAL_SCOPE,
+            without: 'loaded',
+          }).global.get('@ng/core/testing')
         ).toEqual({ tag: '22.0.8', remote: 'dense', file: 't.js' });
       });
   });
@@ -404,7 +399,6 @@ describe('coverFromMap', () => {
   const policy = {
     shareScope: '__GLOBAL__',
     scopeUrlOf: () => undefined,
-    isChunked: () => false,
   };
 
   // Defensive: unreachable under a coherent committed map, where a remote that agrees with the map never has
@@ -435,8 +429,8 @@ describe('coverFromMap', () => {
   });
 
   // mfe's copy of `@ng/core` joined F's share row with rxjs-interop, which the map lacks; the map serves its
-  // root from F. A cover is whole or nothing, so the gap fails covering, from a flat build as from a chunked
-  // one. Only a copy the map serves whole takes F's files.
+  // root from F. A cover is whole or nothing, so the gap fails covering. Only a copy the map serves whole
+  // takes F's files.
   it('reports the gap of a share the map serves only in part', () => {
     const withMfe = (entries?: Record<string, string>) => [
       member('@ng/core', [
@@ -448,21 +442,19 @@ describe('coverFromMap', () => {
       ]),
     ];
     const actions = { '@ng/core': { action: 'share' as const } };
-    const cover = (members: PoolMember[], isChunked: (remote: string) => boolean) =>
-      coverFromMap('mfe', members, viewOf(members, 'mfe'), actions, { ...policy, isChunked });
+    const cover = (members: PoolMember[]) =>
+      coverFromMap('mfe', members, viewOf(members, 'mfe'), actions, policy);
 
     const interop = withMfe({ '@ng/core': 'c.js', '@ng/core/rxjs-interop': 'r.js' });
-    expect(cover(interop, () => false)).toEqual({ gap: '@ng/core/rxjs-interop' });
-    expect(cover(interop, r => r === 'mfe')).toEqual({ gap: '@ng/core/rxjs-interop' });
-    expect(cover(withMfe(), () => true)).toEqual({
+    expect(cover(interop)).toEqual({ gap: '@ng/core/rxjs-interop' });
+    expect(cover(withMfe())).toEqual({
       covers: [{ name: '@ng/core', toSkip: true, override: {} }],
     });
   });
 
   // mfe's flat core is a skip the map covers whole; its rxjs-interop, an external of its own the map lacks,
-  // would open beside F's core: the package is served in part, so the gap fails covering. From a chunked build
-  // that file binds mfe's core internals beside F's core, though the two are separate externals, which is
-  // reported first.
+  // would open beside F's core: the package is served in part, so the gap fails covering, though the two are
+  // separate externals.
   it('counts a package a skip takes from the map whole as mapped', () => {
     const members = [
       member('@ng/core', [
@@ -480,11 +472,9 @@ describe('coverFromMap', () => {
       '@ng/core': { action: 'skip' as const, covered: ['@ng/core'] },
       '@ng/core/rxjs-interop': { action: 'share' as const },
     };
-    const cover = (isChunked: (remote: string) => boolean) =>
-      coverFromMap('mfe', members, viewOf(members, 'mfe'), actions, { ...policy, isChunked });
-
-    expect(cover(() => false)).toEqual({ gap: '@ng/core/rxjs-interop' });
-    expect(cover(r => r === 'mfe')).toEqual({ torn: '@ng/core' });
+    expect(coverFromMap('mfe', members, viewOf(members, 'mfe'), actions, policy)).toEqual({
+      gap: '@ng/core/rxjs-interop',
+    });
   });
 
   // The host ships only core's testing entrypoint; mfe ships the root, which the map lacks, beside a pool-mate

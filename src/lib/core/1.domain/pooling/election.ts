@@ -1,7 +1,7 @@
 import type { ExternalName, PoolCause, RemoteName, VersionName } from 'lib/core/1.domain';
 import type { AcceptsTag } from 'lib/core/1.domain/externals/compatibility';
 import { packageOf, type Specifier, SpecifierTags } from 'lib/core/1.domain/externals/specifier';
-import { type Build, buildOf, type Copy, copiesByRemote, type IsChunked } from './builds';
+import { type Build, buildOf, type Copy, copiesByRemote } from './builds';
 import type { PoolMember } from './membership';
 import { agrees, serves, unwitnessedGap } from './rules';
 import { compareStrings } from 'lib/utils/compare-strings';
@@ -15,7 +15,6 @@ type ElectionInput = {
   // The stored record's winner, which breaks round-1 ties.
   previousWinner?: RemoteName;
   latestFirst: boolean;
-  isChunked: IsChunked;
 };
 
 // `unshipped`: the map serves every specifier, but no build shipped them together.
@@ -62,7 +61,7 @@ type State = {
 };
 
 export function elect(input: ElectionInput): Election {
-  const shipped = copiesByRemote(input.members, input.isChunked);
+  const shipped = copiesByRemote(input.members);
   const builds = new Map<RemoteName, Build>();
   for (const [owner, copies] of shipped) builds.set(owner, buildOf(owner, copies));
   const pool: Pool = {

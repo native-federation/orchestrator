@@ -716,7 +716,6 @@ are elected by pooling alone; the per-external resolver leaves them untouched (s
 | **copy** | One remote's entry for one member at one version (a `SharedVersionMeta` in the record). |
 | **row** | One of an external's `versions` in the record: a tag, an action (`share`, `skip` or `scope`) and the copies that take it. Pooling writes one row per `(tag, action)` (see [How the verdicts land](#how-the-verdicts-land-in-the-record-and-the-map)). |
 | **build** | Everything one remote ships in a pool, as *specifier → tag*. Builds are the election's candidates: each remote ends up on the global map, in a subpool, or on its own build. |
-| **chunked** | A copy whose files import its build's internal chunks: its bundle has stored chunks (dense chunking), or its remote scopes `@nf-internal/` externals (flat chunking). Its files run correctly only beside that build's other files of the package. |
 | **global map** | The pool's specifiers in `imports`; a named shareScope has no `imports` of its own, so there each remote's own scope maps those files. A remote **resolves globally** when it runs those files. Not the global *scope* (`__GLOBAL__`): every pooled scope, named ones included, has its own global map. |
 | **winner** | The build round 1 elects; its coverage seeds the global map. Stored as `poolWinner`. |
 | **settle** | The loop after extension (step 4): the global map keeps an extended package only where a remote on it ships exactly its published entrypoints at that tag, and a remote it no longer serves moves to a subpool or a later round, until nothing changes. |
@@ -865,9 +864,9 @@ flowchart TD
 **Host precedence is absolute.** The host's build is round 1 whenever it ships any member, whatever it serves:
 the host's files are loaded regardless and cannot be repointed. A remote whose range rejects the host's tag
 islands; the host never gives way. Extra downloads are accepted to keep it so: the host's build is the main pool,
-every other build a coherent subpool. A remote that ships a chunked entrypoint the host lacks (a chunked
-`core/rxjs-interop`, say) cannot run on the host's runtime: it runs on its subpool's or its own core. To keep
-such a remote on the host's runtime, the host must ship that entrypoint.
+every other build a coherent subpool. A remote that ships an entrypoint the host lacks (`core/rxjs-interop`,
+say) cannot run on the host's runtime: it runs on its subpool's or its own core. To keep such a remote on the
+host's runtime, the host must ship that entrypoint.
 
 **Strict compatibility.** Under [`strict.strictExternalCompatibility`](./config.md#modeConfig) init throws when
 a `strictVersion` range rejects a tag of the elected build — the same incompatibility the per-external resolver
@@ -1014,7 +1013,6 @@ where its copies come from:
 | `warn` | `[<scope>]` | `'<remote>' is islanded: its range rejects '<specifier>@<tag>' of the committed map. All N of its entrypoints are scoped for it.` | Dynamic init only — a range rejects a tag the committed map serves (see [Scope and dynamic init](#scope-and-dynamic-init)). |
 | `warn` | `[<scope>]` | `'<remote>' serves its own family: no committed build offers every entrypoint it imports at a version it accepts (gap '<gap>'). All N of its entrypoints are scoped for it.` | Dynamic init only — the coverage finding read off the committed record. |
 | `warn` | `[<scope>]` | `'<remote>' serves its own family: no committed build shipped the map's combination for it. All N of its entrypoints are scoped for it.` | Dynamic init only — the witness finding: the committed map serves everything this remote imports at versions it accepts, but no committed build shipped those versions together. |
-| `warn` | `[<scope>]` | `'<remote>' serves its own family: its chunked '<package>' cannot run beside the map's files of it. All N of its entrypoints are scoped for it.` | Dynamic init only. The remote's build is chunked (its files import its own build's internals), and the committed map serves part of `<package>` from another build. Shipping every entrypoint of `<package>` the remote imports in the build the map serves it from recovers the dedup. |
 | `warn` | `[<scope>]` | `'<remote>' serves its own family: committed build '<build>', whose files it would reach, resolves '<specifier>' to another file than it would. All N of its entrypoints are scoped for it.` | Dynamic init only. A committed file binds its pool-mates where its build resolves them, so this remote, reaching that build's files directly or through another committed build's, would run `<specifier>` from two files. Typical causes: the build published before its pool formed, runs a member from a scope row, or filled an entrypoint itself. Shipping `<specifier>` in this remote's build at the map's tag, or not importing it, recovers the dedup. |
 | `warn` | `[<scope>][pool:<name>]` | `'<build>' keeps subpool '<build>': the elected build would serve it, but K other remote(s) in it need its build.` | A subpool's build the global map would serve, kept for the members that need it. Nothing to fix on that remote; aligning the other members moves the whole subpool onto the global map. |
 | `warn` | `[<scope>][<remote>]` | `'<build>' is not in the cache, so its files cannot be mapped.` | Dynamic init in a named scope only: the committed map serves the loaded remote's family from `<build>`, whose scope URL is gone, so the remote serves itself (`uncovered`). |
@@ -1130,11 +1128,10 @@ it. In order:
    agree with it, judged by file, not by tag: a committed build whose file it takes, directly or through another
    committed build's file, must resolve each specifier the remote ships to the file the remote does. A committed
    file binds its pool-mates where its build resolves them: off the map where that build runs one itself (a scope
-   row, an entrypoint it filled, or a build that published before its pool formed), else the map. And a chunked
-   copy never runs part of a package beside the map's files of it. A range rejecting a global tag moves it on
-   with cause `incompatible`. A member the resolver scoped is judged the same way: a strict range that rejects
-   the map's tag islands the family as `incompatible`, while one scoped for any other reason becomes a skip when
-   the map serves every entrypoint it ships, as at init.
+   row, an entrypoint it filled, or a build that published before its pool formed), else the map. A range
+   rejecting a global tag moves it on with cause `incompatible`. A member the resolver scoped is judged the same
+   way: a strict range that rejects the map's tag islands the family as `incompatible`, while one scoped for any
+   other reason becomes a skip when the map serves every entrypoint it ships, as at init.
 2. **Otherwise it serves its own family**, with its `poolCause` recorded, and is warned in the dynamic lines of
    [What pooling logs](#what-pooling-logs). The gate never covers a copy in part: a remote with a copy that
    ships an entrypoint the map lacks, while the map serves another entrypoint of that package, serves itself

@@ -12,8 +12,6 @@ export type Copy = {
   // Basis precedence puts the host's own copy first on a `host: true` version.
   host: boolean;
   specifiers: Specifier[];
-  // Its files import its build's internal chunks, so they run only beside that build's other files.
-  chunked: boolean;
 };
 
 export type Build = {
@@ -23,12 +21,7 @@ export type Build = {
   host: boolean;
 };
 
-export type IsChunked = (remote: RemoteName, bundle: string | undefined) => boolean;
-
-export function copiesByRemote(
-  members: readonly PoolMember[],
-  isChunked: IsChunked
-): Map<RemoteName, Copy[]> {
+export function copiesByRemote(members: readonly PoolMember[]): Map<RemoteName, Copy[]> {
   const shipped = new Map<RemoteName, Copy[]>();
   for (const member of members) {
     const seen = new Set<RemoteName>();
@@ -47,7 +40,6 @@ export function copiesByRemote(
           strict: meta.strictVersion,
           host: version.host && meta === version.remotes[0],
           specifiers: Object.keys(meta.entries),
-          chunked: isChunked(meta.name, meta.bundle),
         });
       }
   }

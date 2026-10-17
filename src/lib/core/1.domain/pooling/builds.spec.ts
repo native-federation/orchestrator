@@ -39,7 +39,7 @@ const member = (
 });
 
 const buildFor = (owner: string, members: PoolMember[]) =>
-  buildOf(owner, copiesByRemote(members, () => false).get(owner)!);
+  buildOf(owner, copiesByRemote(members).get(owner)!);
 
 describe('a build read from the record', () => {
   // A record the orchestrator never writes itself: b lists `x` twice, and only the second row carries
@@ -79,7 +79,7 @@ describe('a build read from the record', () => {
     ];
 
     expect(
-      copiesByRemote(members, () => false)
+      copiesByRemote(members)
         .get('b')!
         .map(({ member, tag, specifiers }) => ({ member, tag, specifiers }))
     ).toEqual([

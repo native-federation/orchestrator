@@ -10,17 +10,12 @@ import { elect, type PoolMiss, previousWinner } from 'lib/core/1.domain/pooling/
 import type { PoolMember, PoolName } from 'lib/core/1.domain/pooling/membership';
 import { type ElectionPlan, planElection } from 'lib/core/1.domain/pooling/plan';
 import { memberRecord, type PlacedPool } from 'lib/core/1.domain/pooling/records';
-import { createIsChunked } from './is-chunked';
 
 export function createPoolSharedExternals(
   config: LoggingConfig & ModeConfig,
-  ports: Pick<
-    DrivingContract,
-    'sharedExternalsRepo' | 'versionCheck' | 'sharedChunksRepo' | 'scopedExternalsRepo'
-  >
+  ports: Pick<DrivingContract, 'sharedExternalsRepo' | 'versionCheck'>
 ): ForPoolingSharedExternals {
   const { compare } = ports.versionCheck;
-  const isChunked = createIsChunked(ports);
 
   // See docs/version-resolver.md §"How pooling resolves".
   return () => {
@@ -76,7 +71,6 @@ export function createPoolSharedExternals(
     const election = elect({
       members,
       acceptsTag: createAcceptsTag(ports.versionCheck.isCompatible, compare),
-      isChunked,
       compare,
       previousWinner: previousWinner(members),
       latestFirst: config.profile.latestSharedExternal,
@@ -121,7 +115,7 @@ export function createPoolSharedExternals(
         );
         continue;
       }
-      shipped ??= copiesByRemote(members, isChunked);
+      shipped ??= copiesByRemote(members);
       const counts = {
         imports: specifierCount(shipped.get(remote)!),
         subpoolSize: subpoolSizes.get(remote) ?? 0,
