@@ -56,7 +56,7 @@ export function servingBuildOf(
 }
 
 function cheapestBuild(
-  field: Omit<ServingCandidate, keyof Cost>[],
+  field: UnpricedBuild[],
   costOf: (build: ServingBuild) => Cost
 ): ServingBuild {
   let best: ServingCandidate | undefined;
@@ -125,8 +125,8 @@ function buildsOf(
   rows: Row[],
   rootRows: Row[],
   consumers: Map<RemoteName, Placed[]>
-): Omit<ServingCandidate, keyof Cost>[] {
-  const candidates = new Map<string, Omit<ServingCandidate, keyof Cost>>();
+): UnpricedBuild[] {
+  const candidates = new Map<string, UnpricedBuild>();
   for (const row of rows)
     for (const copy of row.remotes) {
       const key = `${row.tag}|${copy.name}`;
@@ -176,6 +176,7 @@ export function consumersOf(externals: PackageExternals): Map<RemoteName, Placed
 }
 
 type Cost = Pick<ServingCandidate, 'downloads' | 'fallbacks'>;
+type UnpricedBuild = Omit<ServingCandidate, keyof Cost>;
 // The remotes that fall back and those that download their own build; a cached copy costs nothing.
 type Toll = { fallbacks: Set<RemoteName>; downloads: Set<RemoteName> };
 
@@ -185,21 +186,21 @@ export function costTable(
   consumers: Map<RemoteName, Placed[]>,
   accepts: AcceptsTag
 ): (build: ServingBuild) => Cost {
-  const tolled = new Map<VersionName, { surface: Surface; toll: Toll }[]>();
-  const tolls = new Map<string, Toll>();
+  const scanned = new Map<VersionName, { surface: Surface; toll: Toll }[]>();
+  const keyed = new Map<string, Toll>();
   const tollFor = (build: ServingBuild, surface: Surface): Toll => {
-    let atTag = tolled.get(build.tag);
-    if (!atTag) tolled.set(build.tag, (atTag = []));
+    let atTag = scanned.get(build.tag);
+    if (!atTag) scanned.set(build.tag, (atTag = []));
     const known = atTag.find(t => sameSurface(t.surface, surface));
     if (known) return known.toll;
-    if (atTag.length < TOLLED_SURFACES_PER_TAG) {
+    if (atTag.length < SCANNED_SURFACES_PER_TAG) {
       const toll = tollOf(consumers, surface, build.tag, accepts);
       atTag.push({ surface, toll });
       return toll;
     }
     const key = [build.tag, ...[...surface].map(([s, tag]) => `${s}@${tag}`).sort()].join('\n');
-    let toll = tolls.get(key);
-    if (!toll) tolls.set(key, (toll = tollOf(consumers, surface, build.tag, accepts)));
+    let toll = keyed.get(key);
+    if (!toll) keyed.set(key, (toll = tollOf(consumers, surface, build.tag, accepts)));
     return toll;
   };
   return build => {
@@ -274,8 +275,8 @@ export function strictObjectorOf(
 // Each specifier the serving build publishes, at the tag of the row it publishes it from.
 type Surface = Map<Specifier, VersionName>;
 
-// Up to here a scan beats building the sorted key; past it the key keeps lookups O(1).
-const TOLLED_SURFACES_PER_TAG = 8;
+// Up to here a scan beats building the sorted key; a surface past it is looked up by that key after the scan.
+export const SCANNED_SURFACES_PER_TAG = 8;
 
 function sameSurface(a: Surface, b: Surface): boolean {
   if (a.size !== b.size) return false;
