@@ -45,6 +45,8 @@ export function createDetermineSharedExternals(
     );
 
     for (const shareScope of ports.sharedExternalsRepo.getScopes()) {
+      // The strict scope shares every tag side by side; an eviction still marks its externals dirty.
+      if (ports.sharedExternalsRepo.scopeType(shareScope) === 'strict') continue;
       const sharedExternals = ports.sharedExternalsRepo.getFromScope(shareScope);
 
       try {

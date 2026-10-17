@@ -784,7 +784,7 @@ describe('the strict scope runs a package at one tag from one build', () => {
 
   for (const c of cases) register(c);
 
-  const record = async (entries: RemoteEntry[], hosts: string[] = []) => {
+  const record = async (entries: RemoteEntry[], hosts: string[] = [], strict = false) => {
     const p = portfolio(
       {},
       {
@@ -793,6 +793,7 @@ describe('the strict scope runs a package at one tag from one build', () => {
         assertNoTear: false,
         hosts,
         scope: STRICT,
+        strict,
       }
     );
     await p.runInit(entries);
@@ -841,6 +842,36 @@ describe('the strict scope runs a package at one tag from one build', () => {
     expect(resolve(merged, CORE, 'http://a/expose.js')).toBe('http://a/fw_core.js');
     expect(await offered(p)).toEqual({ [CORE]: ['http://a/fw_core.js'] });
   });
+
+  // Redeploying b at a new URL evicts its copy and marks the record dirty; electing it would demote 17.0.0 (a
+  // skip row, or a scope row for strictVersion copies, or a refusal under strictExternalCompatibility). l then
+  // loads 17.0.0 at runtime and joins a's row, so the next page runs both from a's build and offers both tags.
+  for (const strictVersion of [false, true])
+    for (const compat of [false, true])
+      it(`keeps every tag shared across a redeploy (strictVersion=${strictVersion}, strictExternalCompatibility=${compat})`, async () => {
+        const core = (version: string) => s(CORE, { strict: strictVersion, ...at(version) });
+        const a = entry('a', core('17.0.0'));
+        const b2 = { ...entry('b', core('18.0.0')), url: 'http://b2/remoteEntry.json' };
+        const l = entry('l', core('17.0.0'));
+        const p = await record([a, entry('b', core('18.0.0'))], [], compat);
+        p.reload();
+        await p.runInit([a, b2]);
+        await p.runDynamic(l);
+        p.reload();
+        const map = await p.runInit();
+
+        expect(p.record(CORE).versions.map(v => [v.tag, v.action])).toEqual([
+          ['18.0.0', 'share'],
+          ['17.0.0', 'share'],
+        ]);
+        expect(
+          pageFaults({ importMap: map, entries: [a, b2, l], importsOf: importsFrom({}) })
+        ).toEqual({});
+        expect(resolve(map, CORE, 'http://l/expose.js')).toBe('http://a/fw_core.js');
+        expect(await offered(p)).toEqual({
+          [CORE]: ['http://b2/fw_core.js', 'http://a/fw_core.js'],
+        });
+      });
 
   it('marks the copies of every tag of one external', async () => {
     const p = await record([

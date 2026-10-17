@@ -133,7 +133,8 @@ export function strictTagScopes(scope: shareScope): shareScope[] {
         external.versions.push({ ...row, remotes: [...row.remotes] });
       }
     for (const [tag, tagScope] of byTag) {
-      // A determine run after an eviction can leave a skip row at the tag, whose copy publishes nothing.
+      // A record stored before determine skipped the strict scope can hold a skip row here, whose copy publishes
+      // nothing.
       const lead = [tagScope[pkg], ...Object.values(tagScope)]
         .map(external => external && rowAt(external.versions, tag, 'share'))
         .find(row => row !== undefined);

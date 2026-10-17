@@ -272,6 +272,28 @@ describe('createDetermineSharedExternals', () => {
     });
   });
 
+  describe('Strict scope', () => {
+    // An override eviction marks a strict external dirty; electing it would demote every tag but one.
+    it('leaves a dirty strict external with every tag shared', async () => {
+      adapters.sharedExternalsRepo.getScopes = vi.fn(() => ['strict']);
+      adapters.sharedExternalsRepo.scopeType = vi.fn(() => 'strict');
+      adapters.sharedExternalsRepo.getFromScope = vi.fn(() => ({
+        'dep-b': mockExternal_B({
+          dirty: true,
+          versions: [
+            mockVersion_B.v2_1_2({ remotes: ['team/mfe1'], action: 'share' }),
+            mockVersion_B.v2_1_1({ remotes: ['team/mfe2'], action: 'share' }),
+          ],
+        }),
+      }));
+
+      await determineSharedExternals();
+
+      expect(adapters.sharedExternalsRepo.getFromScope).not.toHaveBeenCalled();
+      expect(adapters.sharedExternalsRepo.addOrUpdate).not.toHaveBeenCalled();
+    });
+  });
+
   describe('entrypoint coverage tiebreaker', () => {
     it('should break a download tie toward the version with the richest entrypoint coverage', async () => {
       // Both versions compatible => equal (zero) extra downloads. The lower-semver version
