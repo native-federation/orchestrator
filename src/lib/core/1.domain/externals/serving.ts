@@ -3,7 +3,7 @@ import { compareStrings } from 'lib/utils/compare-strings';
 import type { RemoteName } from '../remote/remote-info.contract';
 import type { AcceptsTag } from './compatibility';
 import type { ExternalName, SharedExternal, shareScope } from './external.contract';
-import { mergeRows, redirectRow, rowAt, scopeRemote } from './rows';
+import { mergeRows, redirectRow, rowAt, scopeRemotes } from './rows';
 import { groupByPackage, packageOf, type Specifier } from './specifier';
 import type { SharedVersion, SharedVersionMeta, VersionName } from './version.contract';
 
@@ -141,9 +141,7 @@ export function strictTagScopes(scope: shareScope): shareScope[] {
       if (lead) {
         const serving = { remote: lead.remotes[0]!.name, tag };
         for (const external of Object.values(tagScope)) external.servingBuild = serving.remote;
-        for (const remote of fallbacksOf(Object.entries(tagScope), serving, sameTagOnly))
-          for (const external of Object.values(tagScope))
-            external.versions = scopeRemote(external.versions, remote);
+        scopeFallbacks(Object.entries(tagScope), serving, sameTagOnly);
       }
       tagScopes.push(tagScope);
     }
@@ -284,6 +282,16 @@ export function fallbacksOf(
         remote !== serving?.remote && fallsBack(placed, surface, serving?.tag, accepts)
     )
     .map(([remote]) => remote);
+}
+
+export function scopeFallbacks(
+  externals: readonly (readonly [ExternalName, SharedExternal])[],
+  serving: ServingBuild | undefined,
+  accepts: AcceptsTag
+): void {
+  const remotes = fallbacksOf(externals, serving, accepts);
+  for (const [, external] of externals)
+    external.versions = scopeRemotes(external.versions, remotes);
 }
 
 // The first copy, in record order, that `rejectsServingTag` while its remote's coverage alone (`splitsPackage`)

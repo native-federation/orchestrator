@@ -1,7 +1,8 @@
 import { createVersionCheck } from 'lib/core/3.adapters/checks/version.check';
 import { mockVersionRemote } from 'lib/testing/domain/externals/version.mock';
 import { createAcceptsTag } from './compatibility';
-import { byTag, findVersionForTag, mergeRows, redirectRow, rowAt, scopeRemote } from './rows';
+import fc from 'fast-check';
+import { byTag, findVersionForTag, mergeRows, redirectRow, rowAt, scopeRemotes } from './rows';
 import type { SharedVersion, SharedVersionAction, SharedVersionMeta } from './version.contract';
 
 const row = (tag: string, action: SharedVersionAction, ...remotes: string[]): SharedVersion => ({
@@ -138,11 +139,11 @@ describe('rows', () => {
     });
   });
 
-  describe('scopeRemote', () => {
+  describe('scopeRemotes', () => {
     it("moves the remote's copy into a scope row of its tag, right after its source row", () => {
       const versions = [row('2.0.0', 'share', 'a', 'r'), row('1.0.0', 'skip', 'b')];
 
-      expect(shape(scopeRemote(versions, 'r'))).toEqual([
+      expect(shape(scopeRemotes(versions, ['r']))).toEqual([
         '2.0.0:share:[a]',
         '2.0.0:scope:[r]',
         '1.0.0:skip:[b]',
@@ -154,7 +155,7 @@ describe('rows', () => {
     it('drops the row it empties, the scope row taking its place', () => {
       const versions = [row('2.2.0', 'skip', 'r'), row('2.1.0', 'share', 'a')];
 
-      expect(shape(scopeRemote(versions, 'r'))).toEqual(['2.2.0:scope:[r]', '2.1.0:share:[a]']);
+      expect(shape(scopeRemotes(versions, ['r']))).toEqual(['2.2.0:scope:[r]', '2.1.0:share:[a]']);
     });
 
     it('joins a scope row already at the tag, and leaves scope rows and other remotes alone', () => {
@@ -164,7 +165,7 @@ describe('rows', () => {
         row('1.0.0', 'scope', 'r'),
       ];
 
-      expect(shape(scopeRemote(versions, 'r'))).toEqual([
+      expect(shape(scopeRemotes(versions, ['r']))).toEqual([
         '2.0.0:scope:[c,r]',
         '2.0.0:skip:[b]',
         '1.0.0:scope:[r]',
@@ -177,7 +178,7 @@ describe('rows', () => {
       const source: SharedVersion = { ...row('2.0.0', 'share', 'host', 'a'), host: true };
       const versions = [row('2.0.0', 'scope', 'c'), source];
 
-      const rows = scopeRemote(versions, 'host');
+      const rows = scopeRemotes(versions, ['host']);
 
       expect(shape(rows)).toEqual(['2.0.0:scope:[host,c]', '2.0.0:share:[a]']);
       expect(rows.map(v => v.host)).toEqual([true, false]);
@@ -186,12 +187,89 @@ describe('rows', () => {
     it("leaves a host row's flag when another remote leaves it", () => {
       const versions = [{ ...row('2.0.0', 'share', 'host', 'r'), host: true }];
 
-      const rows = scopeRemote(versions, 'r');
+      const rows = scopeRemotes(versions, ['r']);
 
       expect(rows.map(v => [v.action, v.host])).toEqual([
         ['share', true],
         ['scope', false],
       ]);
+    });
+
+    it('moves copies by remote, then by row, the host in front', () => {
+      const versions = [
+        row('2.0.0', 'scope', 'c'),
+        { ...row('2.0.0', 'share', 'host', 'a', 'b'), host: true },
+        row('2.0.0', 'skip', 'a'),
+      ];
+
+      const rows = scopeRemotes(versions, ['b', 'a', 'host']);
+
+      expect(shape(rows)).toEqual(['2.0.0:scope:[host,c,b,a,a]']);
+      expect(rows.map(v => v.host)).toEqual([true]);
+    });
+
+    // The batch replaced one scopeRemote call per remote; deciding persists its rows, so it must match that fold
+    // exactly. `scopeRemote` below is the removed function, verbatim.
+    it('matches moving each remote in turn', () => {
+      function scopeRemote(versions: SharedVersion[], remote: string): SharedVersion[] {
+        const rows = [...versions];
+        for (const source of versions) {
+          if (source.action === 'scope') continue;
+          const copies = source.remotes.filter(r => r.name === remote);
+          if (copies.length === 0) continue;
+          const host = source.host && copies.includes(source.remotes[0]!);
+          source.remotes = source.remotes.filter(r => r.name !== remote);
+          if (host) source.host = false;
+          let scoped = rowAt(rows, source.tag, 'scope');
+          if (!scoped) {
+            scoped = { tag: source.tag, host: false, action: 'scope', remotes: [] };
+            rows.splice(rows.indexOf(source) + 1, 0, scoped);
+          }
+          if (host) {
+            scoped.host = true;
+            scoped.remotes.unshift(...copies);
+          } else scoped.remotes.push(...copies);
+        }
+        return rows.filter(v => v.remotes.length > 0);
+      }
+
+      const names = ['a', 'b', 'c', 'd', 'host'];
+      const rowArb = fc.record({
+        tag: fc.constantFrom('3.0.0', '2.0.0', '1.0.0'),
+        action: fc.constantFrom<SharedVersionAction>('share', 'skip', 'scope'),
+        host: fc.boolean(),
+        remotes: fc.array(fc.constantFrom(...names), { minLength: 1, maxLength: 5 }),
+      });
+      // Copies are compared by identity, as deciding does, so both runs share one set of copies.
+      const build = (
+        spec: { tag: string; action: SharedVersionAction; host: boolean; remotes: string[] }[]
+      ) => {
+        const copies = spec.map(r => r.remotes.map(name => mockVersionRemote(name)));
+        return () =>
+          spec.map((r, i) => ({
+            tag: r.tag,
+            action: r.action,
+            host: r.host,
+            remotes: [...copies[i]!],
+          }));
+      };
+
+      fc.assert(
+        fc.property(
+          fc.array(rowArb, { maxLength: 6 }),
+          fc.shuffledSubarray(names),
+          (spec, remotes) => {
+            const rows = build(spec);
+            const folded = remotes.reduce(scopeRemote, rows());
+            expect(scopeRemotes(rows(), remotes)).toEqual(folded);
+            const batch = scopeRemotes(rows(), remotes);
+            batch.forEach((v, i) =>
+              v.remotes.forEach((r, j) => expect(r).toBe(folded[i]!.remotes[j]))
+            );
+          }
+        ),
+        { numRuns: 2000 }
+      );
     });
   });
 });
