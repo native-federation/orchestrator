@@ -116,12 +116,16 @@ export function followServingBuild(
   return { external, objector };
 }
 
-// A strict copy's range is its own tag, and a tag scope compares a copy with its own tag only.
-const sameTagOnly: AcceptsTag = () => true;
+// A strict copy's range is its own tag, and a tag scope holds that tag only.
+const sameTagOnly: AcceptsTag = (offered, ownTag) => offered === ownTag;
 
-// See docs/version-resolver.md §"Entrypoint coverage and tearing". The rows are copies; the copies in them are the
-// record's, so the map's marks reach it.
-export function strictTagScopes(scope: shareScope): shareScope[] {
+// The strict scope shares every tag side by side, so each package at each tag is served on its own.
+export const servedScopes = (scope: shareScope, strict: boolean): shareScope[] =>
+  strict ? strictTagScopes(scope) : [scope];
+
+// See docs/version-resolver.md §"Entrypoint coverage and tearing". Rows are cloned, but each remote's copy in them is
+// the record's own, so the map's `cached` marks reach storage.
+function strictTagScopes(scope: shareScope): shareScope[] {
   const tagScopes: shareScope[] = [];
   for (const [pkg, names] of packagesOf(scope)) {
     const byTag = new Map<VersionName, shareScope>();

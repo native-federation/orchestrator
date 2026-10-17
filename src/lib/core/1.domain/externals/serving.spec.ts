@@ -15,7 +15,7 @@ import {
   servingBuildOf,
   shareServingCopies,
   strictObjectorOf,
-  strictTagScopes,
+  servedScopes,
   type ServingBuild,
   type ServingCandidate,
 } from './serving';
@@ -946,15 +946,18 @@ describe('followServingBuild', () => {
   });
 });
 
-describe('strictTagScopes', () => {
+describe('servedScopes in the strict scope', () => {
   // A determine run after an override eviction re-elects a strict external and demotes a copy to a skip row.
   it('serves a tag from its share row when a skip row comes first', () => {
-    const [tagScope] = strictTagScopes({
-      core: external(
-        version('skip', [copy('x', ['core'])]),
-        version('share', [copy('a', ['core', 'core/sub']), copy('b', ['core'])])
-      ),
-    });
+    const [tagScope] = servedScopes(
+      {
+        core: external(
+          version('skip', [copy('x', ['core'])]),
+          version('share', [copy('a', ['core', 'core/sub']), copy('b', ['core'])])
+        ),
+      },
+      true
+    );
 
     expect(tagScope!['core']!.servingBuild).toBe('a');
     expect(tagScope!['core']!.versions.map(v => [v.action, v.remotes.map(r => r.name)])).toEqual([
@@ -964,9 +967,10 @@ describe('strictTagScopes', () => {
   });
 
   it('elects no serving build for a tag without a share row', () => {
-    const [tagScope] = strictTagScopes({
-      core: external(version('skip', [copy('x', ['core'])])),
-    });
+    const [tagScope] = servedScopes(
+      { core: external(version('skip', [copy('x', ['core'])])) },
+      true
+    );
 
     expect(tagScope!['core']!.servingBuild).toBeUndefined();
     expect(tagScope!['core']!.versions).toEqual([version('skip', [copy('x', ['core'])])]);

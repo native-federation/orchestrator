@@ -12,7 +12,7 @@ import {
 } from 'lib/core/1.domain';
 import { forEachVersionEntry } from 'lib/core/1.domain/externals/basis';
 import { claimTable, versionClaims, type Claim } from 'lib/core/1.domain/externals/claims';
-import { strictTagScopes } from 'lib/core/1.domain/externals/serving';
+import { servedScopes } from 'lib/core/1.domain/externals/serving';
 import type { Specifier } from 'lib/core/1.domain/externals/specifier';
 import type { LoggingConfig } from '../config/log.contract';
 import type { ModeConfig } from '../config/mode.contract';
@@ -107,12 +107,9 @@ export function createGenerateImportMap(
       for (const [externalName, external] of Object.entries(sharedExternals))
         cachedBefore.set(externalName, cachedFingerprint(external));
 
-      if (ports.sharedExternalsRepo.scopeType(shareScope) === 'strict') {
-        for (const tagScope of strictTagScopes(sharedExternals))
-          addShareScope(importMap, shareScope, tagScope, chunkBundles);
-      } else {
-        addShareScope(importMap, shareScope, sharedExternals, chunkBundles);
-      }
+      const strict = ports.sharedExternalsRepo.scopeType(shareScope) === 'strict';
+      for (const served of servedScopes(sharedExternals, strict))
+        addShareScope(importMap, shareScope, served, chunkBundles);
 
       for (const [externalName, external] of Object.entries(sharedExternals)) {
         if (cachedFingerprint(external) !== cachedBefore.get(externalName)) {

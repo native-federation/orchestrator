@@ -2,7 +2,7 @@ import type { DrivingContract } from 'lib/core/2.app/driving-ports/driving.contr
 import type { ForSharedExternalsStorage } from 'lib/core/2.app/driving-ports/for-shared-externals-storage.port';
 import type { SharedExternal, SharedVersion, SharedVersionMeta } from 'lib/core/1.domain';
 import { claimTable } from 'lib/core/1.domain/externals/claims';
-import { strictTagScopes } from 'lib/core/1.domain/externals/serving';
+import { servedScopes } from 'lib/core/1.domain/externals/serving';
 import type { Specifier } from 'lib/core/1.domain/externals/specifier';
 import type { GetSharedOptions, ShareInfos, Shared } from './share-infos.contract';
 import * as _path from 'lib/utils/path';
@@ -60,12 +60,10 @@ function sharedEntrypoints(
   externals: Record<string, SharedExternal>,
   scopeType: ScopeType
 ): SharedEntrypoint[] {
-  // The strict scope is a version -> location map: every tag is shared side by side, from the build serving it.
-  if (scopeType === 'strict')
-    return strictTagScopes(externals).flatMap(tagScope =>
-      servedEntrypoints(tagScope, 'shareClaims')
-    );
-  return servedEntrypoints(externals, scopeType === 'global' ? 'claims' : 'shareClaims');
+  const view = scopeType === 'global' ? 'claims' : 'shareClaims';
+  return servedScopes(externals, scopeType === 'strict').flatMap(served =>
+    servedEntrypoints(served, view)
+  );
 }
 
 // One singleton per specifier, from the build the import map serves it from.
