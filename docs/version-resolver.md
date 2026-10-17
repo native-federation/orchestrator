@@ -1677,6 +1677,13 @@ await initFederation(manifest, {
 
 > **Note:** the `overrideCachedRemotes` is generally meant as "override only if urls differ".
 
+Without `overrideCachedRemotesIfURLMatches`, a remote redeployed at the same URL keeps its stored remoteEntry until
+the cache is cleared: an init over a cache kept across page loads (`localStorage`, `sessionStorage`) does not fetch
+that remote at all, so the page keeps resolving the old build, even when the new build's ranges would reject what the
+page runs. A `cacheTag` does not change this, since it only applies to a remoteEntry that is fetched. Deploy each
+build at its own URL (a version or content hash in the path), or set `overrideCachedRemotesIfURLMatches`. Under
+`overrideCachedRemotes: 'never'` neither helps: a stored remote is never fetched again.
+
 ### Override Processing Steps
 
 When a remote is marked for override by the orchestrator (`override: true`), the system performs complete cache cleanup by purging all cached meta data like exposed modules and externals:
