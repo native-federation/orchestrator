@@ -11,12 +11,14 @@ import { labelSharedInfoByNpmScope } from 'lib/testing/pooling/label-by-npm-scop
 describe('a pooling error', () => {
   // Only the `@broken/*` copies carry this range.
   const BROKEN = '17.x';
+  // One instance, so a rejection can be checked to carry this very error as its cause.
+  const RANGE_BUG = new Error('range bug');
 
   // Throws for the sentinel range whenever `armed()` says so; every other question is real semver.
   const breakRange = (p: ReturnType<typeof portfolio>, armed: () => boolean = () => true) => {
     const isCompatible = p.adapters.versionCheck.isCompatible;
     p.adapters.versionCheck.isCompatible = (version, range) => {
-      if (range === BROKEN && armed()) throw new Error('range bug');
+      if (range === BROKEN && armed()) throw RANGE_BUG;
       return isCompatible(version, range);
     };
   };
@@ -41,9 +43,14 @@ describe('a pooling error', () => {
         ]);
       }
 
-    await expect(p.runInit()).rejects.toThrow(
-      'Could not pool shared externals in scope __GLOBAL__.'
-    );
+    const rejection = await p.runInit().catch((e: unknown) => e);
+
+    expect(rejection).toMatchObject({
+      name: 'NFError',
+      message: 'Could not pool shared externals in scope __GLOBAL__.',
+    });
+    // The injected error survives as the cause, not only in the log.
+    expect((rejection as Error).cause).toBe(RANGE_BUG);
     expect(p.config.log.error).toHaveBeenCalledWith(
       3,
       expect.any(String),
