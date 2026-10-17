@@ -633,8 +633,8 @@ flowchart TD
     G8 --> H
 ```
 
-> Externals in a [pool](#dependency-pooling) skip this flow: the pool elects its members together, and
-> `determine` only reports them as re-elected.
+> Externals in a [pool](#dependency-pooling) skip this flow: the pool elects its members together and writes
+> them clean, so `determine` never sees them.
 
 > The "least extra downloads" choice (F5) is tie-broken by entrypoint coverage. See
 > [Entrypoint coverage and tearing](#entrypoint-coverage-and-tearing).

@@ -595,7 +595,7 @@ core/
   1.domain/            Pure domain contracts, their invariants and pure policy (remote entries, externals, import maps, pooling)
   2.app/               Application logic
     flows/               The pipelines: which steps run in which order (init, initRemoteEntry)
-    steps/               The pipeline steps (1-6 run during init, 7-9 and rollbackChanges back initRemoteEntry)
+    steps/               The pipeline steps, numbered by the step they log as (1-6 init, 7-9 initRemoteEntry, 0 rollbackChanges)
     driver-ports/        Contracts the steps fulfil (composed by the flows, driven by the entry points)
     driving-ports/       Contracts the steps consume (fulfilled by adapters)
     config/              Configuration contracts
@@ -646,6 +646,7 @@ Enforced by ESLint (`no-restricted-imports` in `eslint.config.js`):
 | The init step: plan, elect, log, write; throws under `strictExternalCompatibility`     | `2.app/steps/pooling/pool-shared-externals.ts`, port `for-pooling-shared-externals.port.ts`   |
 | The dynamic step: judge the loaded remote, rewrite its actions, write its moved copies | `2.app/steps/pooling/pool-dynamic-externals.ts`, port `for-pooling-dynamic-externals.port.ts` |
 | Mapping a subpool's copies onto its build (`servedBy`)                                 | `2.app/steps/generate-import-map.ts`                                                          |
+| A pooled package's serving build: its pool's winner if shipped, else the widest copy   | `1.domain/externals/serving.ts` (`servingBuildOf`)                                            |
 | Which copy publishes each specifier: the serving build's copy alone, else record order | `1.domain/externals/claims.ts` (`claimTable`, `versionClaims`)                                |
 | Marking a pool's other members dirty when removing a remote empties a member           | `3.adapters/storage/shared-externals.repository.ts`                                           |
 
