@@ -1,6 +1,11 @@
 import type { RemoteName } from '../remote/remote-info.contract';
 import type { AcceptsTag } from './compatibility';
-import type { SharedVersion, SharedVersionAction, VersionName } from './version.contract';
+import type {
+  SharedVersion,
+  SharedVersionAction,
+  SharedVersionMeta,
+  VersionName,
+} from './version.contract';
 
 // Newest tag first, as `write()` orders a record. Leaves a tag's rows in their order (`sort` is stable).
 export const byTag =
@@ -73,28 +78,58 @@ export function redirectRow(
   return [version, { tag: version.tag, host: false, action: 'scope', remotes: [...objecting] }];
 }
 
-// Moves `remote`'s copies out of every `share` and `skip` row into the `scope` row of their tag; a new scope row
-// goes right after its source, so the record stays newest-first. Mutates the source rows, returns the new list.
-export function scopeRemote(versions: SharedVersion[], remote: RemoteName): SharedVersion[] {
-  const rows = [...versions];
-  for (const source of versions) {
-    if (source.action === 'scope') continue;
-    const copies = source.remotes.filter(r => r.name === remote);
-    if (copies.length === 0) continue;
-    // The host leads its row and a later election finds the host's tag by the flag, so both move with it.
-    const host = source.host && copies.includes(source.remotes[0]!);
-    source.remotes = source.remotes.filter(r => r.name !== remote);
-    if (host) source.host = false;
-
-    let scoped = rowAt(rows, source.tag, 'scope');
-    if (!scoped) {
-      scoped = { tag: source.tag, host: false, action: 'scope', remotes: [] };
-      rows.splice(rows.indexOf(source) + 1, 0, scoped);
+// Moves each of `remotes`' copies out of every `share` and `skip` row into the `scope` row of their tag; a new scope
+// row goes right after its source, so the record stays newest-first. In one pass, yet ordered as if each remote
+// moved in turn: copies by remote then by row, a host's in front. Mutates the source rows, returns the new list.
+export function scopeRemotes(
+  versions: SharedVersion[],
+  remotes: readonly RemoteName[]
+): SharedVersion[] {
+  if (remotes.length === 0) return versions;
+  const turn = new Map(remotes.map((remote, i) => [remote, i]));
+  const moves = new Map<VersionName, Move[]>();
+  versions.forEach((source, at) => {
+    if (source.action === 'scope') return;
+    const byTurn = new Map<number, SharedVersionMeta[]>();
+    for (const copy of source.remotes) {
+      const i = turn.get(copy.name);
+      if (i === undefined) continue;
+      const copies = byTurn.get(i);
+      if (copies) copies.push(copy);
+      else byTurn.set(i, [copy]);
     }
-    if (host) {
-      scoped.host = true;
-      scoped.remotes.unshift(...copies);
-    } else scoped.remotes.push(...copies);
+    if (byTurn.size === 0) return;
+    // The host leads its row and a later election finds the host's tag by the flag, so both move with it.
+    const hostTurn = source.host ? turn.get(source.remotes[0]!.name) : undefined;
+    source.remotes = source.remotes.filter(r => !turn.has(r.name));
+    if (hostTurn !== undefined) source.host = false;
+    const tagMoves = moves.get(source.tag) ?? [];
+    for (const [i, copies] of byTurn)
+      tagMoves.push({ turn: i, at, source, copies, host: i === hostTurn });
+    moves.set(source.tag, tagMoves);
+  });
+
+  const rows = [...versions];
+  for (const [tag, tagMoves] of moves) {
+    tagMoves.sort((a, b) => a.turn - b.turn || a.at - b.at);
+    let scoped = rowAt(rows, tag, 'scope');
+    if (!scoped) {
+      scoped = { tag, host: false, action: 'scope', remotes: [] };
+      rows.splice(rows.indexOf(tagMoves[0]!.source) + 1, 0, scoped);
+    }
+    for (const { copies, host } of tagMoves)
+      if (host) {
+        scoped.host = true;
+        scoped.remotes.unshift(...copies);
+      } else scoped.remotes.push(...copies);
   }
   return rows.filter(v => v.remotes.length > 0);
 }
+
+type Move = {
+  turn: number;
+  at: number;
+  source: SharedVersion;
+  copies: SharedVersionMeta[];
+  host: boolean;
+};

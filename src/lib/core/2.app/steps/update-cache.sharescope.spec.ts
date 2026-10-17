@@ -14,9 +14,17 @@ import {
   mockRemoteInfo_MFE2,
 } from 'lib/testing/domain/remote-info/remote-info.mock';
 import { mockExternal } from 'lib/testing/domain/externals/external.mock';
-import { mockVersion_A, mockVersion_B } from 'lib/testing/domain/externals/version.mock';
+import {
+  mockVersion,
+  mockVersion_A,
+  mockVersion_B,
+} from 'lib/testing/domain/externals/version.mock';
 import { mockRemoteEntry_MFE1 } from 'lib/testing/domain/remote-entry/remote-entry.mock';
-import { mockSharedInfoA, mockSharedInfoB } from 'lib/testing/domain/remote-entry/shared-info.mock';
+import {
+  mockSharedInfo,
+  mockSharedInfoA,
+  mockSharedInfoB,
+} from 'lib/testing/domain/remote-entry/shared-info.mock';
 import { mockScopeUrl_MFE2 } from 'lib/testing/domain/scope-url.mock';
 
 describe('createProcessDynamicRemoteEntry - scoped', () => {
@@ -215,6 +223,85 @@ describe('createProcessDynamicRemoteEntry - scoped', () => {
 
     expect(actual.actions).toEqual({
       'dep-a': { action: 'share' },
+    });
+  });
+
+  describe('a strict load joining a committed row of its tag', () => {
+    // The committed map and getShared serve each strict row from its `remotes[0]`. The loader is stored
+    // `cached` like that basis, so `isBetterBasis` would fall through to coverage and then to the name.
+    let stored: Record<string, SharedExternal>;
+
+    const committedRow = (external: string, entries: Record<string, string>): SharedExternal =>
+      mockExternal.shared(
+        [
+          mockVersion.shared('2.1.2', external, {
+            remotes: { 'team/mfe2': { cached: true, requiredVersion: '2.1.2', entries } },
+            action: 'share',
+          }),
+        ],
+        { dirty: false }
+      );
+
+    const rowsOf = (external: string) =>
+      stored[external]!.versions.map(v => [v.tag, v.action, v.remotes.map(r => r.name)]);
+
+    beforeEach(() => {
+      adapters.sharedExternalsRepo.scopeType = vi.fn(() => 'strict');
+      adapters.sharedExternalsRepo.tryGet = vi.fn((name: string) => Optional.of(stored[name]!));
+      adapters.sharedExternalsRepo.addOrUpdate = vi.fn((name: string, external: SharedExternal) => {
+        stored[name] = external;
+        return adapters.sharedExternalsRepo;
+      });
+    });
+
+    // Before the fix, mfe1's two entrypoints outranked mfe2's one and it took the basis.
+    it('should keep the committed basis when the loader ships more of the package', async () => {
+      stored = { 'dep-a': committedRow('dep-a', { 'dep-a': 'dep-a.js' }) };
+
+      const actual = await updateCache(
+        mockRemoteEntry_MFE1({
+          shared: [
+            mockSharedInfoA.v2_1_2({
+              shareScope: 'strict',
+              entries: { 'dep-a': 'dep-a.js', 'dep-a/sub': 'dep-a-sub.js' },
+            }),
+          ],
+          exposes: [],
+        })
+      );
+
+      expect(rowsOf('dep-a')).toEqual([['2.1.2', 'share', ['team/mfe2', 'team/mfe1']]]);
+      expect(actual.actions).toEqual({ 'dep-a': { action: 'share' } });
+    });
+
+    // Flat: one entrypoint per external, so coverage ties and before the fix 'team/mfe1' won every row on its name.
+    it('should keep the committed basis of every flat external on a coverage tie', async () => {
+      stored = {
+        'dep-a': committedRow('dep-a', { 'dep-a': 'dep-a.js' }),
+        'dep-a/sub': committedRow('dep-a/sub', { 'dep-a/sub': 'dep-a-sub.js' }),
+      };
+      const flat = (packageName: string, file: string) =>
+        mockSharedInfo(packageName, {
+          singleton: true,
+          shareScope: 'strict',
+          requiredVersion: '2.1.2',
+          version: '2.1.2',
+          outFileName: file,
+        });
+
+      const actual = await updateCache(
+        mockRemoteEntry_MFE1({
+          shared: [flat('dep-a', 'dep-a.js'), flat('dep-a/sub', 'dep-a-sub.js')],
+          exposes: [],
+        })
+      );
+
+      expect(rowsOf('dep-a')).toEqual([['2.1.2', 'share', ['team/mfe2', 'team/mfe1']]]);
+      expect(rowsOf('dep-a/sub')).toEqual([['2.1.2', 'share', ['team/mfe2', 'team/mfe1']]]);
+      expect(actual.actions).toEqual({
+        'dep-a': { action: 'share' },
+        'dep-a/sub': { action: 'share' },
+      });
     });
   });
 

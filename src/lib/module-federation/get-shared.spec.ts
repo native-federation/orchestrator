@@ -427,6 +427,55 @@ describe('createGetShared', () => {
       expect(entries).toHaveLength(2);
       entries!.forEach(entry => expect(entry.shareConfig!.singleton).toBe(false));
     });
+
+    // One build serves a package at each tag, as in the import map: the basis of the root's row there.
+    const strictScope = (externals: Record<string, SharedExternal>) =>
+      setup({
+        scopes: { [STRICT_SCOPE]: externals },
+        remotes: { 'team/a': 'https://cdn.test/a/', 'team/b': 'https://cdn.test/b/' },
+      });
+    const strictRow = (name: string, remotes: Record<string, Record<string, string>>) =>
+      mockExternal.shared([
+        mockSharedVersion('17.0.0', name, {
+          remotes: Object.fromEntries(
+            Object.entries(remotes).map(([remote, entries]) => [
+              remote,
+              { requiredVersion: '17.0.0', entries },
+            ])
+          ),
+          action: 'share',
+        }),
+      ]);
+
+    it("offers no flat secondary the root row's basis lacks at its tag", async () => {
+      const ports = strictScope({
+        'ui-lib': strictRow('ui-lib', {
+          'team/a': { 'ui-lib': 'ui-lib.js' },
+          'team/b': { 'ui-lib': 'ui-lib.js' },
+        }),
+        'ui-lib/sub': strictRow('ui-lib/sub', { 'team/b': { 'ui-lib/sub': 'ui-lib-sub.js' } }),
+      });
+      ports.browser.importModule.mockResolvedValue({});
+
+      const shared = createGetShared(ports)();
+      await shared['ui-lib']![0]!.get();
+
+      expect(Object.keys(shared)).toEqual(['ui-lib']);
+      expect(ports.browser.importModule).toHaveBeenCalledWith('https://cdn.test/a/ui-lib.js');
+    });
+
+    it('offers every entrypoint of a basis that covers the copies beside it', () => {
+      const shared = createGetShared(
+        strictScope({
+          'ui-lib': strictRow('ui-lib', {
+            'team/b': { 'ui-lib': 'ui-lib.js', 'ui-lib/sub': 'ui-lib-sub.js' },
+            'team/a': { 'ui-lib': 'ui-lib.js' },
+          }),
+        })
+      )();
+
+      expect(Object.keys(shared)).toEqual(['ui-lib', 'ui-lib/sub']);
+    });
   });
 
   describe('secondary entrypoints', () => {

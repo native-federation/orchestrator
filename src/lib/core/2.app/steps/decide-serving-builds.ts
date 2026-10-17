@@ -1,12 +1,11 @@
 import type { ForDecidingServingBuilds } from '../driver-ports/init/for-deciding-serving-builds.port';
 import type { ExternalName, RemoteName, SharedExternal, SharedVersion } from 'lib/core/1.domain';
 import { type AcceptsTag, createAcceptsTag } from 'lib/core/1.domain/externals/compatibility';
-import { scopeRemote } from 'lib/core/1.domain/externals/rows';
 import {
-  fallbacksOf,
   followServingBuild,
   isPooled,
   packagesOf,
+  scopeFallbacks,
   servingBuildOf,
   shareServingCopies,
   strictObjectorOf,
@@ -105,9 +104,7 @@ export function createDecideServingBuilds(
           `${pkg}@${serving.tag}`
         );
     }
-    for (const remote of fallbacksOf(externals, serving, accepts))
-      for (const [, external] of externals)
-        external.versions = scopeRemote(external.versions, remote);
+    scopeFallbacks(externals, serving, accepts);
   }
 }
 
