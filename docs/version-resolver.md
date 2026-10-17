@@ -318,8 +318,8 @@ coverage and tearing](#entrypoint-coverage-and-tearing)). The version's other `s
 so a page that starts warm after a dynamic load still runs the package from the one build that serves it. An
 external without a serving build publishes its `share`-row copies in record order, each specifier from the first
 copy that declares it. The `strict` scope elects no serving build: each tag of a package is served by the basis of
-its root's `share` row there, never across tags (see [Entrypoint coverage and
-tearing](#entrypoint-coverage-and-tearing)).
+its root's `share` row there, or of the package's first row there when no build ships the root, never across tags
+(see [Entrypoint coverage and tearing](#entrypoint-coverage-and-tearing)).
 
 Only copies that publish their own files can serve a version. A copy pooling has placed in a foreign build's
 subpool (`servedBy`, see [How pooling resolves](#how-pooling-resolves)) runs that build's files, named in its
@@ -356,7 +356,12 @@ root's `share` row at that tag serves the package, or the basis of the package's
 ships the root at that tag. A remote whose copies declare a specifier that build lacks at that tag runs the package
 from its own build. Each tag is judged alone, so no copy is ever refused here: a strict copy's range is its own tag.
 The basis favours the host and copies a committed map already serves, so a warm page can serve a tag from another
-build than a cold page would; either way each remote runs the package from one build.
+build than a cold page would; either way each remote runs the package from one build. Unlike a serving build
+elsewhere, the basis is not ranked by how many remotes fall back: where flat copies tie on coverage the name
+decides, so a remote can run its own build that another copy's build would have covered. Row order is what a
+runtime load leaves in place, which keeps the serving build put while the page runs. Nothing elects in the
+`strict` scope: neither determine nor the serving-build step touches it, so every tag keeps its `share` row, also
+after an override evicts a copy.
 
 **Inside a pool the unit is the family.** Pooling tests coverage **per specifier**, and a remote no build
 covers takes its whole family from its own build (see [How pooling resolves](#how-pooling-resolves)): leaving

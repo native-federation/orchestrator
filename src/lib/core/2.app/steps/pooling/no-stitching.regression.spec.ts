@@ -742,7 +742,9 @@ describe('the strict scope runs a package at one tag from one build', () => {
       then: entry('b', rootless(A, B)),
       expectMap: map => expect(resolve(map, A, 'http://b/expose.js')).toBe('http://b/fw_core_a.js'),
     }),
-    // Guards that pass today. b covers a, so a runs b's files rather than its own: no copy falls back needlessly.
+    // Guards, not regressions. b covers a, so a runs b's files rather than its own: no copy falls back needlessly.
+    // Init only: loaded at runtime, b joins a's committed row behind it, so a keeps serving and b runs its own
+    // build.
     ...pages({
       name: 'serves a covered copy from the basis',
       first: entry('a', s(CORE)),
@@ -770,9 +772,9 @@ describe('the strict scope runs a package at one tag from one build', () => {
       entries: [entry('m', s(A), s(B)), entry('n', s(A)), entry('k', s(B))],
       expectMap: map => expect(resolve(map, B, 'http://k/expose.js')).toBe('http://m/fw_core_b.js'),
     },
-    // A strict copy's range is its own tag, so a fallback never refuses.
+    // A strict copy's range is its own tag, so strictExternalCompatibility never refuses a copy that falls back.
     {
-      name: 'refuses no strict copy that falls back',
+      name: 'runs strictVersion copies that fall back without a refusal',
       scope: STRICT,
       strict: true,
       entries: [
