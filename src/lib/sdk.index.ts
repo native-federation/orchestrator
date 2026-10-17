@@ -1,3 +1,8 @@
+/**
+ * @packageDocumentation
+ * Not covered by semver: these internals (domain types, ports, the init flow) can change in a minor release.
+ */
+
 export * from './core/1.domain';
 
 export * from './core/2.app/driving-ports';

@@ -25,7 +25,15 @@ export type ModeConfig = {
 };
 
 export type ModeOptions = {
-  strict?: Partial<ModeStrictnessConfig> | boolean;
-  profile?: Partial<ModeProfileConfig>;
+  strict?:
+    | (Partial<ModeStrictnessConfig> & {
+        /** @deprecated Removed in 4.8.0 and ignored: a package always runs from one build. */
+        strictEntryPointCoverage?: boolean;
+      })
+    | boolean;
+  profile?: Partial<ModeProfileConfig> & {
+    /** @deprecated Removed in 4.8.0 and ignored: a package always runs from one build. */
+    scopeUncoveredEntrypoints?: boolean;
+  };
   feature?: Partial<ModeFeatureConfig>;
 };

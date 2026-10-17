@@ -48,4 +48,14 @@ describe('config.mode', () => {
       strictImportMap: true,
     });
   });
+
+  // Both options were removed in 4.8.0; they stay on the options type so 4.7.0 configs still compile.
+  it('should accept and ignore the removed entrypoint-coverage options', () => {
+    const config = createModeConfig({
+      strict: { strictEntryPointCoverage: true },
+      profile: { scopeUncoveredEntrypoints: true },
+    });
+    expect(config.strict).toEqual(createModeConfig({}).strict);
+    expect(config.strict).not.toHaveProperty('strictEntryPointCoverage');
+  });
 });
