@@ -283,7 +283,8 @@ export function createUpdateCache(
     const row =
       action === 'share' ? shared : cached.versions.find(v => v.tag === tag && v.action === action);
     if (!row) cached.versions.push({ tag, action, host: false, remotes: [remote] });
-    else if (action === 'share') addRemoteToVersion(row, remote);
+    // A strict row keeps the basis the committed map and getShared serve it from.
+    else if (action === 'share' && ctx.scopeType !== 'strict') addRemoteToVersion(row, remote);
     else row.remotes.push(remote);
     // Only a package the map doesn't serve is shared, so the loader serves it; the strict scope serves every
     // version side by side.
