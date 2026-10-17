@@ -245,14 +245,14 @@ describe('a tie cycle', () => {
   });
 });
 
-describe('chunked copies', () => {
+describe('entrypoints across builds', () => {
   const at = (tag: string, ...specifiers: string[]) => ({ tag, req: `^${tag}`, specifiers });
 
   /**
    * The host ships core alone; x and y ship mat at one tag but each with an entrypoint the other lacks. Round
    * 1 serves neither, and both agree with the host, so extension publishes mat — from one build only, so
-   * every specifier of mat runs from the build that shipped it, chunked or not. Neither copy contains the
-   * other, so the name picks x; y serves itself.
+   * every specifier of mat runs from the build that shipped it. Neither copy contains the other, so the name
+   * picks x; y serves itself.
    */
   it('extends a package that builds ship with different entrypoints from one of them', () => {
     const builds: Build[] = [
@@ -299,9 +299,9 @@ describe('chunked copies', () => {
     expect(election.placements.get('a')).toEqual({ kind: 'self', cause: 'uncovered' });
   });
 
-  // The same entrypoints from every contributor: whichever build's files the map takes, each runs beside its
-  // own build's, so chunked copies still extend.
-  it('extends a package that chunked builds ship with the same entrypoints', () => {
+  // The same entrypoints from every contributor: whichever build's files the map takes, each remote runs
+  // every specifier of mat from it.
+  it('extends a package that builds ship with the same entrypoints', () => {
     const election = electFrom(
       [
         { name: 'host', copies: { core: at('1.0.0', 'core') } },
@@ -321,7 +321,7 @@ describe('chunked copies', () => {
 
   // As above, but x and y ship mat flat: `mat` and `mat/a` are members of their own. Both ship the same
   // entrypoints, so whichever build's copy the map takes, each runs every specifier of mat from it.
-  it('extends a package flat builds ship with the same entrypoints, chunked or not', () => {
+  it('extends a package flat builds ship with the same entrypoints', () => {
     const flat = (name: string): Build => ({
       name,
       copies: {
@@ -348,7 +348,7 @@ describe('chunked copies', () => {
 
   /**
    * The host ships core alone; l ships core with rxjs-interop at the host's tag. Round 1 serves a build on
-   * its own tags, so the host borrows no entrypoint, from a flat build or a chunked one: l serves itself.
+   * its own tags, so the host borrows no entrypoint from another build: l serves itself.
    */
   it('borrows no entrypoint from another build of the same tag', () => {
     const builds: Build[] = [
@@ -469,7 +469,7 @@ describe('host fill', () => {
   });
 
   // As for contributors, one member's copy is published: neither contains the other, so the name picks r1, and
-  // r2 stays in o's subpool, chunked or not.
+  // r2 stays in o's subpool.
   it('fills a package members ship with different entrypoints from one of them', () => {
     const builds = [
       host,
@@ -487,7 +487,7 @@ describe('host fill', () => {
   /**
    * c serves itself and contributes mat with mat/a; r, in o's subpool, ships mat alone at the same tag. A
    * contributor ships mat, so no fill member is asked; r's copy is contained in c's, so r goes global and
-   * runs c's mat, chunked or not.
+   * runs c's mat.
    */
   it("moves a fill member onto a contributor's copy that contains its own", () => {
     const mat = (...specifiers: string[]) => at('2.0.0', '^2.0.0', ...specifiers);

@@ -610,6 +610,26 @@ describe('island warnings (contract)', () => {
           shared: sharedInfo,
         }) as RemoteEntry;
 
+      it('gap: a remote ships an entrypoint of a mapped package the map lacks', async () => {
+        // r takes the host's core and forms as they are; its interop, an entrypoint of core the map lacks,
+        // would come from r's build beside the map's core, so the gate never covers core in part.
+        p = portfolio(
+          {},
+          { storage: 'nf-island-warnings-gap', realRepositories: true, hosts: ['host'] }
+        );
+        await p.runInit([whole('host', shared('@fw/core'), shared('@fw/forms'))]);
+        vi.mocked(p.config.log.warn).mockClear();
+
+        await p.runDynamic(
+          whole('r', shared('@fw/core'), shared('@fw/core/interop'), shared('@fw/forms'))
+        );
+
+        expect(p.islands()).toEqual({ r: 'uncovered' });
+        expect(warnings()).toEqual([
+          "[__GLOBAL__] 'r' serves its own family: no committed build offers every entrypoint it imports at a version it accepts (gap '@fw/core/interop'). All 3 of its entrypoints are scoped for it.",
+        ]);
+      });
+
       it('bound: a committed file binds a specifier to the map, the load to its own', async () => {
         // The host ships http's testing entrypoint as a package of its own; m ships it inside http, which
         // nobody serves. A named scope under `strictImportMap` refuses the self-fill, so m would run its own
