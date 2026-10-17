@@ -274,7 +274,8 @@ export function createUpdateCache(
   // build it follows. A scoped one stays inside a shareable version, where a later import-map build would
   // redirect it to the basis.
   function storeCopy(ctx: SharedExternalContext, action: SharedVersionAction): void {
-    const { tag, remote, cached } = ctx;
+    const { tag, remote } = ctx;
+    const cached = ctx.readRecord();
     const shared = cached.versions.find(v => v.tag === tag && v.action === 'share');
     if (shared && action !== 'scope') ctx.assertSameVersionCompatibility(shared);
 

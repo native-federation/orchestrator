@@ -6,9 +6,12 @@ import type { AcceptsTag } from './compatibility';
 import type { ExternalName, SharedExternal } from './external.contract';
 import {
   byServingRank,
+  consumersOf,
+  costTable,
   fallbacksOf,
   followServingBuild,
   packagesOf,
+  SCANNED_SURFACES_PER_TAG,
   servingBuildOf,
   shareServingCopies,
   strictObjectorOf,
@@ -597,6 +600,19 @@ describe('servingBuildOf', () => {
     expect(tie('k', 'm')).toEqual<ServingBuild>({ remote: 'k', tag: '1.0.0' });
   });
 
+  // A host leading share rows at two tags is a candidate at each, and with no other consumer the two rank equal
+  // down to the name. The pick keeps the first in record order, as the stable sort it replaced did.
+  it('keeps the first of two equally ranked candidates of one remote', () => {
+    const hostAt = (...tags: string[]) =>
+      serving([
+        'fw',
+        external(...tags.map(tag => version('share', [copy('h', ['fw'])], tag, true))),
+      ]);
+
+    expect(hostAt('2.0.0', '1.0.0')).toEqual<ServingBuild>({ remote: 'h', tag: '2.0.0' });
+    expect(hostAt('1.0.0', '2.0.0')).toEqual<ServingBuild>({ remote: 'h', tag: '1.0.0' });
+  });
+
   it('never serves a copy pooling placed on another build', () => {
     const result = serving([
       'fw',
@@ -698,6 +714,80 @@ describe('servingBuildOf', () => {
       }),
       { seed: 20261013, numRuns: 1000 }
     );
+  });
+});
+
+describe('costTable', () => {
+  // Every subset of the secondaries gives twice as many distinct surfaces at one tag as the scanned list holds,
+  // so pricing runs the sorted-key path past it as well; sized from the cap so raising it keeps that coverage.
+  // The second-to-last build repeats a surface tolled past the list, the last one on it. Strict consumers at an
+  // older tag make the tolls differ by surface.
+  it('prices every build as a fresh table would, past the scanned surfaces too', () => {
+    const count = 2 * SCANNED_SURFACES_PER_TAG;
+    const secondaries = Array.from(
+      { length: Math.ceil(Math.log2(count)) },
+      (_, bit) => `fw/${String.fromCharCode(97 + bit)}`
+    );
+    const subsets = Array.from({ length: count }, (_, i) =>
+      secondaries.filter((_, bit) => i & (1 << bit))
+    );
+    const candidates = [...subsets, subsets[SCANNED_SURFACES_PER_TAG + 4]!, subsets[3]!].map(
+      (ships, i) => copy(`r${String(i).padStart(2, '0')}`, ['fw', ...ships])
+    );
+    const strict = { strictVersion: true, requiredVersion: '~0.9.0' };
+    const record: [ExternalName, SharedExternal][] = [
+      [
+        'fw',
+        external(
+          version('share', candidates, '1.0.0'),
+          version(
+            'skip',
+            [copy('s1', ['fw', 'fw/a'], strict), copy('s2', ['fw/c'], strict)],
+            '0.9.0'
+          )
+        ),
+      ],
+    ];
+    const consumers = consumersOf(record);
+    const builds = candidates.map(c => ({ remote: c.name, tag: '1.0.0' }));
+
+    const shared = costTable(consumers, accepts);
+    const priced = builds.map(build => shared(build));
+
+    expect(priced).toEqual(builds.map(build => costTable(consumers, accepts)(build)));
+    expect(new Set(priced.map(cost => JSON.stringify(cost))).size).toBeGreaterThan(1);
+  });
+
+  // Hosts are exempt from shipsTwoTags, so a host leading share rows at two tags publishes a surface that mixes
+  // them. h1 and h2 ship fw and fw/a at 2.0.0 but swap which one comes from the 1.0.0 row; only h1 serves fw at
+  // 2.0.0, which strict s1 rejects. Sharing a toll on specifiers alone would price h2 as h1.
+  it('tolls surfaces with the same specifiers at different tags apart', () => {
+    const strict = { strictVersion: true, requiredVersion: '^1.0.0' };
+    const record: [ExternalName, SharedExternal][] = [
+      [
+        'fw',
+        external(
+          version('share', [copy('h1', ['fw'])], '2.0.0', true),
+          version('share', [copy('h2', ['fw'])], '1.0.0', true),
+          version('skip', [copy('s1', ['fw'], strict)], '1.0.1')
+        ),
+      ],
+      [
+        'fw/a',
+        external(
+          version('share', [copy('h2', ['fw/a'])], '2.0.0', true),
+          version('share', [copy('h1', ['fw/a'])], '1.0.0', true)
+        ),
+      ],
+    ];
+    const consumers = consumersOf(record);
+    const builds = ['h1', 'h2'].map(remote => ({ remote, tag: '2.0.0' }));
+
+    const shared = costTable(consumers, accepts);
+    const priced = builds.map(build => shared(build));
+
+    expect(priced).toEqual(builds.map(build => costTable(consumers, accepts)(build)));
+    expect(priced[0]).not.toEqual(priced[1]);
   });
 });
 
