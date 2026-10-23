@@ -1,5 +1,5 @@
 import fc from 'fast-check';
-import type { DenseSharedInfo, RemoteEntry } from 'lib/core/1.domain';
+import type { RemoteEntry, RemoteSharedInfo } from 'lib/core/1.domain';
 import type { ImportsOf } from './page-graph';
 
 /**
@@ -41,6 +41,9 @@ export type RemoteSpec = {
   // Ships each secondary entrypoint as a package of its own (flat), as a build without
   // `feature.convertFlatSharedInfo` emits it, rather than as an entry of its package (dense).
   flat?: boolean;
+  // Ships each member's root and secondary entrypoint as dense packages of their own, as a build with
+  // `build: 'paths'` declares them; wins over `flat`.
+  dense?: boolean;
   // Its build imports internal chunks: per bundle (`dense`, a `bundle` per shared info and `chunks`) or as
   // `@nf-internal/` externals (`flat`, flat chunking).
   chunks?: 'dense' | 'flat';
@@ -127,8 +130,9 @@ const freshRemoteArbitrary = (poolSizes: number[]): fc.Arbitrary<RemoteSpec> =>
  * byte-identical (the subpool tie) and lets a remote join another's subpool. One pool in five is a
  * straggler's build of its own, which keeps ragged one-off families in the mix. `labelNoise` has one remote
  * in five mislabel a member (`Relabel`); off, the portfolios are the ones the seeds have always produced.
- * `flat` has each remote ship flat or dense at random; `shareScope` puts every shared external in that named
- * scope, and `mixedScope` puts each remote in that named scope or the global one at random. All three draw
+ * `flat` has each remote ship flat or dense at random, and `dense` has each remote declare its entrypoints as
+ * packages (`RemoteSpec.dense`) or not; `shareScope` puts every shared external in that named scope, and
+ * `mixedScope` puts each remote in that named scope or the global one at random. All of these draw
  * nothing when absent, so the default stream is unchanged. `latestSharedExternal` turns the
  * profile flag on or off at random, drawn last, so the portfolio itself is the one the seed draws without it.
  */
@@ -138,6 +142,7 @@ export const portfolioArbitrary = (
     maxRemotes?: number;
     labelNoise?: boolean;
     flat?: boolean;
+    dense?: boolean;
     chunks?: boolean;
     shareScope?: string;
     mixedScope?: string;
@@ -193,6 +198,7 @@ export const portfolioArbitrary = (
                   }
                 : {}),
               ...(o.flat ? { flat: fc.boolean() } : {}),
+              ...(o.dense ? { dense: fc.boolean() } : {}),
               ...(o.chunks
                 ? { chunks: fc.constantFrom<RemoteSpec['chunks']>(undefined, 'dense', 'flat') }
                 : {}),
@@ -426,7 +432,7 @@ export function toRemoteEntry(
 ): RemoteEntry {
   const name = remoteName(index);
   const shareScope = spec.shareScope ?? portfolioScope;
-  const shared: DenseSharedInfo[] = [];
+  const shared: RemoteSharedInfo[] = [];
   const shipped = spec.pools.flatMap((pool, p) => (pool ? [p] : []));
   const relabelled =
     spec.relabel && shipped.length > 0 ? shipped[spec.relabel.pool % shipped.length] : -1;
@@ -447,7 +453,8 @@ export function toRemoteEntry(
     members.forEach((drawn, m) => {
       if (drawn === null) return;
       // A flat secondary without its package's root is a broken build: a flat remote ships the root beside it.
-      const shape = spec.flat && drawn === 'sub' ? 'root+sub' : drawn;
+      // A declared secondary is a package of its own, so it needs none.
+      const shape = spec.flat && !spec.dense && drawn === 'sub' ? 'root+sub' : drawn;
       const pkg = memberName(p, m);
       const entries: Record<string, string> = {};
       if (shape !== 'sub') entries[pkg] = `${pkg.slice(1).replace('/', '_')}.js`;
@@ -462,8 +469,8 @@ export function toRemoteEntry(
           pool: labelOf(m),
           ...(shareScope === undefined ? {} : { shareScope }),
           entries,
-        } as DenseSharedInfo);
-      if (!spec.flat) return void info(pkg, entries);
+        } as RemoteSharedInfo);
+      if (!spec.flat && !spec.dense) return void info(pkg, entries);
       for (const [specifier, file] of Object.entries(entries))
         info(specifier, { [specifier]: file });
     });
@@ -478,17 +485,17 @@ export function toRemoteEntry(
       strictVersion: spec.strictVersion,
       ...(shareScope === undefined ? {} : { shareScope }),
       entries: { extra: 'extra.js' },
-    } as DenseSharedInfo);
+    } as RemoteSharedInfo);
   }
 
   // A chunk's name is its content's: one package at one tag builds the same chunk.
-  // A flat secondary entrypoint is bundled with its package, as a build bundles per package.
-  const slug = (info: DenseSharedInfo) =>
-    info.packageName
-      .replace(/\/sub$/, '')
+  // A flat secondary entrypoint is bundled with its package, as a build bundles per package; a declared one is
+  // a package of its own.
+  const slug = (info: RemoteSharedInfo) =>
+    (spec.dense ? info.packageName : info.packageName.replace(/\/sub$/, ''))
       .replace(/^@/, '')
       .replace(/\//g, '_');
-  const chunkOf = (info: DenseSharedInfo) => `chunk-${slug(info)}-${info.version}`;
+  const chunkOf = (info: RemoteSharedInfo) => `chunk-${slug(info)}-${info.version}`;
   const chunks: Record<string, string[]> = {};
   if (spec.chunks) for (const info of shared) info.bundle = `browser-${slug(info)}`;
   if (spec.chunks === 'dense')
@@ -505,8 +512,11 @@ export function toRemoteEntry(
         strictVersion: false,
         ...(shareScope === undefined ? {} : { shareScope }),
         entries: { [`@nf-internal/${chunkOf(info)}`]: `${chunkOf(info)}.js` },
-      } as DenseSharedInfo);
+      } as RemoteSharedInfo);
   }
+
+  // Marked as intake marks a remoteEntry that publishes dense: the portfolio's provider skips intake.
+  if (spec.dense || !spec.flat) for (const info of shared) info.dense = true;
 
   return {
     name,
