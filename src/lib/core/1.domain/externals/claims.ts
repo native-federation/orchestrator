@@ -2,7 +2,7 @@ import type { DeepReadonly } from 'lib/utils/deep-readonly';
 import type { RemoteName } from '../remote/remote-info.contract';
 import { type ExternalName, GLOBAL_SCOPE, type SharedExternal } from './external.contract';
 import type { SharedVersion, SharedVersionMeta, VersionName } from './version.contract';
-import { groupByPackage, type Specifier } from './specifier';
+import { groupByPackage, type PackageOf, type Specifier } from './specifier';
 import { forEachVersionEntry } from './basis';
 
 export type Claim = {
@@ -87,8 +87,10 @@ export function committedClaims(
 }
 
 export const claimsByPackage = (
-  claims: ReadonlyMap<Specifier, Claim>
-): Map<ExternalName, [Specifier, Claim][]> => groupByPackage(claims, ([specifier]) => specifier);
+  claims: ReadonlyMap<Specifier, Claim>,
+  packageOf: PackageOf
+): Map<ExternalName, [Specifier, Claim][]> =>
+  groupByPackage(claims, ([specifier]) => specifier, packageOf);
 
 // One version's claims as `claimTable` makes them: the serving copy alone when there is one, else every copy in
 // record order.

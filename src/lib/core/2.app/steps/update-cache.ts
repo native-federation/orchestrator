@@ -13,7 +13,7 @@ import { createAcceptsTag } from 'lib/core/1.domain/externals/compatibility';
 import { addRemoteToVersion } from 'lib/core/1.domain/externals/basis';
 import { loadSplitsPackage } from 'lib/core/1.domain/externals/serving';
 import { type Claim, claimsByPackage, committedClaims } from 'lib/core/1.domain/externals/claims';
-import { packageOf, type Specifier } from 'lib/core/1.domain/externals/specifier';
+import { type PackageOf, packageOfIn, type Specifier } from 'lib/core/1.domain/externals/specifier';
 import { type LabelledCopy, pooledPackagesWith } from 'lib/core/1.domain/pooling/membership';
 import type { DrivingContract } from '../driving-ports/driving.contract';
 import type { LoggingConfig } from '../config/log.contract';
@@ -30,6 +30,7 @@ type PackageClaims = readonly [Specifier, Claim][];
 
 // Indexes the record as decidePackages reads it, so it must not outlive it: applyDecision writes that record.
 type LoadView = {
+  packageOf: PackageOf;
   claims: CommittedClaims;
   claimsOf(pkg: ExternalName): PackageClaims;
   inPool(pkg: ExternalName): boolean;
@@ -84,7 +85,7 @@ export function createUpdateCache(
   function decidePackages(remoteEntry: RemoteEntry, pending: Pending[]): Map<Pending, Decision> {
     const decisions = new Map<Pending, Decision>();
     const viewOf = loadViewOf(remoteEntry, pending);
-    for (const group of pendingPerPackage(pending)) {
+    for (const group of pendingPerPackage(pending, viewOf)) {
       // The strict scope shares every version side by side.
       const decision =
         group[0]!.ctx.scopeType === 'strict'
@@ -96,11 +97,17 @@ export function createUpdateCache(
     return decisions;
   }
 
-  function pendingPerPackage(pending: Pending[]): Pending[][] {
+  function pendingPerPackage(
+    pending: Pending[],
+    viewOf: (shareScope: string | undefined) => LoadView
+  ): Pending[][] {
     const packages = new Map<string, Pending[]>();
     for (const item of pending) {
       const { shareScope, packageName } = item.external;
-      const key = `${shareScope ?? GLOBAL_SCOPE}\0${packageOf(packageName)}`;
+      // The strict scope shares each external whatever its package, so it needs no view.
+      const pkg =
+        item.ctx.scopeType === 'strict' ? packageName : viewOf(shareScope).packageOf(packageName);
+      const key = `${shareScope ?? GLOBAL_SCOPE}\0${pkg}`;
       const group = packages.get(key);
       if (group) group.push(item);
       else packages.set(key, [item]);
@@ -122,12 +129,16 @@ export function createUpdateCache(
           shareScope: scope,
           without: remoteEntry.name,
         });
-        const claimsIn = claimsByPackage(claims);
+        // The load's copies count as stored: they can only merge packages the committed map serves apart.
+        const packageOf = packageOfIn(record, loadingIn(pending, scope));
+        const claimsIn = claimsByPackage(claims, packageOf);
         let pooled: Set<ExternalName> | undefined;
         view = {
+          packageOf,
           claims,
           claimsOf: pkg => claimsIn.get(pkg) ?? [],
-          inPool: pkg => (pooled ??= pooledPackagesWith(record, copiesIn(pending, scope))).has(pkg),
+          inPool: pkg =>
+            (pooled ??= pooledPackagesWith(record, copiesIn(pending, scope), packageOf)).has(pkg),
         };
         views.set(scope, view);
       }
@@ -135,11 +146,20 @@ export function createUpdateCache(
     };
   }
 
+  function inScope(pending: Pending[], scope: string): Pending[] {
+    return pending.filter(({ external }) => (external.shareScope ?? GLOBAL_SCOPE) === scope);
+  }
+
+  function loadingIn(pending: Pending[], scope: string): [ExternalName, SharedVersionMeta][] {
+    return inScope(pending, scope).map(({ external, ctx }) => [external.packageName, ctx.remote]);
+  }
+
   // The load's copies count as stored, so a pool only their labels form is judged as the gate will see it.
   function copiesIn(pending: Pending[], scope: string): LabelledCopy[] {
-    return pending
-      .filter(({ external }) => (external.shareScope ?? GLOBAL_SCOPE) === scope)
-      .map(({ external, ctx }) => ({ name: external.packageName, pool: ctx.remote.pool }));
+    return inScope(pending, scope).map(({ external, ctx }) => ({
+      name: external.packageName,
+      pool: ctx.remote.pool,
+    }));
   }
 
   function scopeOpenedPackages(decisions: Map<Pending, Decision>): void {
@@ -151,7 +171,7 @@ export function createUpdateCache(
   }
 
   function decidePackage(remoteEntry: RemoteEntry, group: Pending[], view: LoadView): Decision {
-    const pkg = packageOf(group[0]!.external.packageName);
+    const pkg = view.packageOf(group[0]!.external.packageName);
     const claims = view.claimsOf(pkg);
     if (claims.length === 0) return { action: 'share' };
 
@@ -162,8 +182,11 @@ export function createUpdateCache(
 
     const rejections = group.flatMap(item => rejectionsOf(item, view.claims));
     if (rejections.length > 0) {
-      const fromTwoBuilds = builds !== undefined && builds.size > 1;
-      for (const rejection of refused(group, rejections, fromTwoBuilds, claims, view.inPool(pkg)))
+      const copies = group.map(({ ctx }) => ({ tag: ctx.tag, copy: ctx.remote }));
+      const splits =
+        (builds !== undefined && builds.size > 1) ||
+        loadSplitsPackage(pkg, copies, claims, accepts);
+      for (const rejection of refused(rejections, splits, view.inPool(pkg)))
         reportIncompatible(remoteEntry, rejection);
       return { action: 'scope', partlyServed: false };
     }
@@ -198,16 +221,7 @@ export function createUpdateCache(
 
   // The first rejection of each copy that a cold init keeping the committed builds refuses too; see
   // docs/version-resolver.md §"Scope and dynamic init".
-  function refused(
-    group: Pending[],
-    rejections: Rejection[],
-    fromTwoBuilds: boolean,
-    claims: PackageClaims,
-    pooled: boolean
-  ): Rejection[] {
-    const copies = group.map(({ ctx }) => ({ tag: ctx.tag, copy: ctx.remote }));
-    const splits = fromTwoBuilds || loadSplitsPackage(copies, claims, accepts);
-
+  function refused(rejections: Rejection[], splits: boolean, pooled: boolean): Rejection[] {
     const first = new Map<Pending, Rejection>();
     for (const rejection of rejections)
       if (!first.has(rejection.item) && (pooled || !splits || electionKeeps(rejection)))

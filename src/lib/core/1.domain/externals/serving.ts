@@ -4,7 +4,7 @@ import type { RemoteName } from '../remote/remote-info.contract';
 import type { AcceptsTag } from './compatibility';
 import type { ExternalName, SharedExternal, shareScope } from './external.contract';
 import { mergeRows, redirectRow, rowAt, scopeRemotes } from './rows';
-import { groupByPackage, packageOf, type Specifier } from './specifier';
+import { groupByPackage, packageOfIn, type Specifier } from './specifier';
 import type { SharedVersion, SharedVersionMeta, VersionName } from './version.contract';
 
 export type ServingBuild = { remote: RemoteName; tag: VersionName };
@@ -28,18 +28,18 @@ export const byServingRank = (a: ServingCandidate, b: ServingCandidate): number 
   compareStrings(a.remote, b.remote);
 
 export const packagesOf = (scope: DeepReadonly<shareScope>): Map<ExternalName, ExternalName[]> =>
-  groupByPackage(Object.keys(scope), name => name);
+  groupByPackage(Object.keys(scope), name => name, packageOfIn(scope));
 
 export const isPooled = (externals: PackageExternals): boolean =>
   externals.some(([, e]) => e.poolName !== undefined);
 
-// `externals` are one package's, in record order. A share row of the root fixes the tag its secondaries follow.
+// `externals` are package `pkg`'s, in record order. A share row of the root fixes the tag its secondaries follow.
 export function servingBuildOf(
+  pkg: ExternalName,
   externals: PackageExternals,
   accepts: AcceptsTag
 ): ServingBuild | undefined {
   if (externals.length === 0) return undefined;
-  const pkg = packageOf(externals[0]![0]);
   const rootRows = shareRows(externals.find(([name]) => name === pkg)?.[1]);
   const rows = rootRows.length > 0 ? rootRows : externals.flatMap(([, e]) => shareRows(e));
 
@@ -367,11 +367,12 @@ function splitsPackage(
 // Whether a runtime load's copies split the package over the claims the committed map serves of it, as
 // `splitsPackage` judges a remote at init.
 export function loadSplitsPackage(
+  pkg: ExternalName,
   copies: readonly { tag: VersionName; copy: SharedVersionMeta }[],
   claims: readonly (readonly [Specifier, { tag: VersionName }])[],
   accepts: AcceptsTag
 ): boolean {
-  const root = claims.find(([specifier]) => specifier === packageOf(specifier))?.[1];
+  const root = claims.find(([specifier]) => specifier === pkg)?.[1];
   // Without a root claim the serving tag is unknown: every claim counts as at it, so only a gap or two tags
   // split.
   const servingTag = root?.tag ?? claims[0]![1].tag;

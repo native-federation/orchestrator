@@ -29,6 +29,7 @@ import {
 import * as _path from 'lib/utils/path';
 import { copiesByRemote } from 'lib/core/1.domain/pooling/builds';
 import { committedView } from 'lib/core/1.domain/pooling/gate';
+import { packageOfIn } from 'lib/core/1.domain/externals/specifier';
 import { pageFaults, pageTears, resolve } from 'lib/testing/pooling/page-graph';
 import { NFError } from 'lib/core/native-federation.error';
 
@@ -367,7 +368,7 @@ describe('pooling properties: init (generated portfolios)', { timeout: TIMEOUT }
           poolMembers,
           copiesByRemote(poolMembers),
           Object.keys(record),
-          { shareScope: GLOBAL_SCOPE }
+          { shareScope: GLOBAL_SCOPE, packageOf: packageOfIn(record) }
         );
         const view: Record<string, string> = {};
         for (const [specifier, { remote, file }] of global)
