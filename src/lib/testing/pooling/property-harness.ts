@@ -8,7 +8,7 @@ import {
 } from 'lib/core/1.domain';
 import { NFError } from 'lib/core/native-federation.error';
 import { createAcceptsTag } from 'lib/core/1.domain/externals/compatibility';
-import { owningPackage, packageOf } from 'lib/core/1.domain/externals/specifier';
+import { owningPackage } from 'lib/core/1.domain/externals/specifier';
 import { buildPools } from 'lib/core/1.domain/pooling/membership';
 import { createVersionCheck } from 'lib/core/3.adapters/checks/version.check';
 import * as _path from 'lib/utils/path';
@@ -27,6 +27,7 @@ const CI_SEED = 20261007;
 const SEED = Number(process.env['POOLING_PROPERTY_SEED'] ?? CI_SEED);
 const SCALE = Number(process.env['POOLING_PROPERTY_SCALE'] ?? 1);
 const versionCheck = createVersionCheck();
+const packageOf = (specifier: string) => owningPackage(specifier) ?? specifier;
 
 // A deeper search runs proportionally longer.
 export const TIMEOUT = 20_000 * SCALE;
@@ -399,7 +400,6 @@ export function servedOffMap(
     for (const file of Object.values(copy.entries))
       builder.set(_path.join(scopeUrlOf(copy.remote), file), copy.remote);
   const own = copies.filter(c => c.remote === remote);
-  const packageOf = (specifier: string) => owningPackage(specifier) ?? specifier;
   const reachedTag = (specifier: string) =>
     elected.get(specifier) ??
     elected.get(packageOf(specifier)) ??

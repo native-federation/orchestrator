@@ -1,7 +1,14 @@
 import type { DenseSharedInfo, ImportMap, RemoteEntry, SharedExternal } from 'lib/core/1.domain';
 import { mockVersionRemote } from '../domain/externals/version.mock';
-import { findIncoherentRemotes, findSplitRemotes } from './no-tear';
-import { BREAKS, importsFrom, pageFaults, pageTears, resolve } from './page-graph';
+import { findIncoherentRemotes, findSplitRemotes, packageOfInScope } from './no-tear';
+import {
+  BREAKS,
+  importsFrom,
+  packageOfAsShipped,
+  pageFaults,
+  pageTears,
+  resolve,
+} from './page-graph';
 
 const file = (specifier: string) => `${specifier.replace(/\W/g, '_')}.js`;
 
@@ -108,8 +115,9 @@ describe('pageFaults', () => {
     };
     const scopeUrls = { a: 'http://a/', b: 'http://b/' };
 
-    expect(findIncoherentRemotes({ importMap, members, scopeUrls })).toEqual([]);
-    expect(findSplitRemotes({ importMap, members, scopeUrls })).toEqual([]);
+    const packageOf = packageOfInScope(members);
+    expect(findIncoherentRemotes({ importMap, members, scopeUrls, packageOf })).toEqual([]);
+    expect(findSplitRemotes({ importMap, members, scopeUrls, packageOf })).toEqual([]);
     expect(pageFaults({ importMap, entries })).toEqual({
       a: { stitched: ['m1: a b'] },
       b: { stitched: ['m1: a b'] },
@@ -327,5 +335,135 @@ describe('pageTears', () => {
         causes: { dep: ['consumer-scope'] },
       },
     ]);
+  });
+});
+
+describe('packageOfAsShipped', () => {
+  const dense = (packageName: string, specifiers: string[]) => ({
+    packageName,
+    dense: true,
+    specifiers,
+  });
+  const flat = (specifier: string) => ({ packageName: specifier, specifiers: [specifier] });
+  const packages = (copies: Parameters<typeof packageOfAsShipped>[0], specifiers: string[]) => {
+    const packageOf = packageOfAsShipped(copies);
+    return Object.fromEntries(specifiers.map(s => [s, packageOf(s)]));
+  };
+  const SPECIFIERS = ['@s/c', '@s/c/table', '@s/c/collapse', 'lib/sub'];
+
+  it('follows the npm name rule for what no dense copy ships', () => {
+    expect(packages([flat('@s/c/table')], SPECIFIERS)).toEqual({
+      '@s/c': '@s/c',
+      '@s/c/table': '@s/c',
+      '@s/c/collapse': '@s/c',
+      'lib/sub': 'lib',
+    });
+  });
+
+  it('keeps each package dense builds publish deeper than an npm name', () => {
+    expect(
+      packages(
+        [dense('@s/c/table', ['@s/c/table']), dense('@s/c/collapse', ['@s/c/collapse'])],
+        SPECIFIERS
+      )
+    ).toEqual({
+      '@s/c': '@s/c',
+      '@s/c/table': '@s/c/table',
+      '@s/c/collapse': '@s/c/collapse',
+      'lib/sub': 'lib',
+    });
+  });
+
+  it('joins a dense package into the npm package a flat copy of it falls in, and only that one', () => {
+    expect(
+      packages(
+        [
+          dense('@s/c/table', ['@s/c/table']),
+          dense('@s/c/collapse', ['@s/c/collapse']),
+          flat('@s/c/table'),
+        ],
+        SPECIFIERS
+      )
+    ).toEqual({
+      '@s/c': '@s/c',
+      '@s/c/table': '@s/c',
+      '@s/c/collapse': '@s/c/collapse',
+      'lib/sub': 'lib',
+    });
+  });
+
+  it('joins a dense package into a wider dense package that ships one of its entries', () => {
+    expect(
+      packages(
+        [
+          dense('@s/c/table', ['@s/c/table', '@s/c/table/sort']),
+          dense('@s/c', ['@s/c/table/sort']),
+        ],
+        ['@s/c/table', '@s/c/table/sort']
+      )
+    ).toEqual({ '@s/c/table': '@s/c', '@s/c/table/sort': '@s/c' });
+  });
+});
+
+describe('pageFaults with dense packages', () => {
+  // a and b each publish table and collapse dense as packages of their own; the map serves one from each.
+  const importMap = {
+    imports: {
+      '@s/c/table': 'http://a/_s_c_table.js',
+      '@s/c/collapse': 'http://b/_s_c_collapse.js',
+    },
+  };
+
+  it('reads two dense packages from two builds as no stitch', () => {
+    const entries = [
+      entry('a', [
+        { ...info('@s/c/table', ['@s/c/table']), dense: true },
+        { ...info('@s/c/collapse', ['@s/c/collapse']), dense: true },
+      ]),
+      entry('b', [
+        { ...info('@s/c/table', ['@s/c/table']), dense: true },
+        { ...info('@s/c/collapse', ['@s/c/collapse']), dense: true },
+      ]),
+    ];
+    expect(pageFaults({ importMap, entries })).toEqual({});
+  });
+
+  it('reads them as one stitched package once a build ships them flat', () => {
+    // The merged `@s/c` then has two roots, a's dense table and collapse: safe, both only count as internals.
+    const entries = [
+      entry('a', [
+        { ...info('@s/c/table', ['@s/c/table']), dense: true },
+        { ...info('@s/c/collapse', ['@s/c/collapse']), dense: true },
+      ]),
+      entry('b', [info('@s/c/table', ['@s/c/table']), info('@s/c/collapse', ['@s/c/collapse'])]),
+    ];
+    expect(pageFaults({ importMap, entries })).toEqual({
+      a: { stitched: ['@s/c: a b'] },
+      b: { stitched: ['@s/c: a b'] },
+    });
+  });
+  it('merges packages per share scope: a flat build in another scope leaves them apart', () => {
+    const team = (specifier: string) => ({ ...info(specifier, [specifier]), shareScope: 'team' });
+    const entries = [
+      entry('a', [
+        { ...info('@s/c/table', ['@s/c/table']), dense: true },
+        { ...info('@s/c/collapse', ['@s/c/collapse']), dense: true },
+      ]),
+      entry('b', [
+        { ...info('@s/c/table', ['@s/c/table']), dense: true },
+        { ...info('@s/c/collapse', ['@s/c/collapse']), dense: true },
+      ]),
+      entry('c', [team('@s/c/table'), team('@s/c/collapse')]),
+    ];
+    const scoped = {
+      ...importMap,
+      scopes: {
+        'http://c/': {
+          '@s/c/table': 'http://c/_s_c_table.js',
+          '@s/c/collapse': 'http://c/_s_c_collapse.js',
+        },
+      },
+    };
+    expect(pageFaults({ importMap: scoped, entries })).toEqual({});
   });
 });
