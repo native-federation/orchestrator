@@ -19,6 +19,12 @@ const sriOf = async (input: string): Promise<string> => {
   return 'sha384-' + btoa(bin);
 };
 
+// The fixture publishes every shared entry dense, so the provider marks each one.
+const provided = () => {
+  const entry = mockRemoteEntry_MFE1();
+  return { ...entry, shared: entry.shared.map(s => ({ ...s, dense: true })) };
+};
+
 const mockBytesFetch = (body: string) => {
   global.fetch = vi.fn(async () => {
     const bytes = new TextEncoder().encode(body);
@@ -44,7 +50,7 @@ describe('createRemoteEntryProvider (integrity)', () => {
 
     const result = await provider.provide(`${mockScopeUrl_MFE1()}remoteEntry.json`);
 
-    expect(result).toEqual(mockRemoteEntry_MFE1());
+    expect(result).toEqual(provided());
   });
 
   it('should resolve when integrity matches', async () => {
@@ -56,7 +62,7 @@ describe('createRemoteEntryProvider (integrity)', () => {
       integrity,
     });
 
-    expect(result).toEqual(mockRemoteEntry_MFE1());
+    expect(result).toEqual(provided());
   });
 
   it('should reject with NFError when integrity does not match', async () => {

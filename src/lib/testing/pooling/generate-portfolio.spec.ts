@@ -1,5 +1,11 @@
+import fc from 'fast-check';
 import type { RemoteSpec } from './generate-portfolio';
-import { generatedImports, toRemoteEntry } from './generate-portfolio';
+import {
+  generatedImports,
+  portfolioArbitrary,
+  toRemoteEntries,
+  toRemoteEntry,
+} from './generate-portfolio';
 
 // One pool (`@p0/m0` with its `sub`, `@p0/m1` root only) and the unpooled `extra`.
 const remote = (spec: Partial<RemoteSpec> = {}): RemoteSpec => ({
@@ -74,5 +80,77 @@ describe('generatedImports', () => {
     expect(importsOf('r0', '@p0/m0')).toEqual(['extra']);
     expect(importsOf('r0', 'extra')).toEqual([]);
     expect(importsOf('r1', '@p0/m1')).toEqual(['@p0/m0']);
+  });
+});
+
+describe('toRemoteEntry with declared packages', () => {
+  const marked = (spec: Partial<RemoteSpec>) =>
+    toRemoteEntry(remote(spec), 0).shared.map(s => [
+      s.packageName,
+      Object.keys(s.entries),
+      s.dense,
+    ]);
+
+  // The portfolio's provider skips intake, so the generator marks what intake would: every dense entry.
+  it('marks a dense build and leaves a flat one unmarked', () => {
+    expect(marked({})).toEqual([
+      ['@p0/m0', ['@p0/m0', '@p0/m0/sub'], true],
+      ['@p0/m1', ['@p0/m1'], true],
+      ['extra', ['extra'], true],
+    ]);
+    expect(marked({ flat: true }).map(([, , dense]) => dense)).toEqual([
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+    ]);
+  });
+
+  // `build: 'paths'`: each entrypoint its own dense package, a secondary without its root included.
+  it('ships each entrypoint as a package of its own, over flat', () => {
+    expect(
+      marked({
+        dense: true,
+        flat: true,
+        pools: [{ major: 0, minor: 0, patch: 0, range: 'caret', members: ['root+sub', 'sub'] }],
+      })
+    ).toEqual([
+      ['@p0/m0', ['@p0/m0'], true],
+      ['@p0/m0/sub', ['@p0/m0/sub'], true],
+      ['@p0/m1/sub', ['@p0/m1/sub'], true],
+      ['extra', ['extra'], true],
+    ]);
+  });
+
+  it('gives a declared secondary a chunk of its own', () => {
+    const { chunks } = toRemoteEntry(remote({ dense: true, chunks: 'dense' }), 0);
+    expect(Object.keys(chunks!)).toEqual([
+      'browser-p0_m0',
+      'browser-p0_m0_sub',
+      'browser-p0_m1',
+      'browser-extra',
+    ]);
+  });
+
+  // Fixed seed: guards that the opt-in dimension reaches the case the declared-package rule is about, a
+  // declared `/sub` package beside another build's copy of the same `/sub` as an entry of its package.
+  it('draws declared and undeclared copies of one secondary in one portfolio', () => {
+    const portfolios = fc.sample(portfolioArbitrary({ flat: true, dense: true }), {
+      seed: 42,
+      numRuns: 100,
+    });
+    const mixed = portfolios.filter(spec => {
+      const infos = toRemoteEntries(spec).flatMap(e => e.shared);
+      return infos.some(
+        declared =>
+          declared.dense &&
+          declared.packageName.endsWith('/sub') &&
+          infos.some(
+            other =>
+              other.packageName !== declared.packageName && declared.packageName in other.entries
+          )
+      );
+    });
+    expect(mixed.length).toBeGreaterThan(25);
   });
 });

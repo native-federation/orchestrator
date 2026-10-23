@@ -29,6 +29,7 @@ import {
 import * as _path from 'lib/utils/path';
 import { copiesByRemote } from 'lib/core/1.domain/pooling/builds';
 import { committedView } from 'lib/core/1.domain/pooling/gate';
+import { packageOfIn } from 'lib/core/1.domain/externals/specifier';
 import { pageFaults, pageTears, resolve } from 'lib/testing/pooling/page-graph';
 import { NFError } from 'lib/core/native-federation.error';
 
@@ -134,6 +135,8 @@ describe('pooling properties: init (generated portfolios)', { timeout: TIMEOUT }
   // A build without `feature.convertFlatSharedInfo` ships an entrypoint as a package of its own, so one
   // specifier is an entry of one external and a package of another. In a named share scope every remote maps
   // in its own scope, so the import map must still give each the specifier the global path's `imports` would.
+  // A build with `build: 'paths'` declares the entrypoint a package of its own, which holds only while no
+  // other copy ships it as an entry of its package.
   for (const [offset, shareScope] of [
     [20, undefined],
     [21, 'team'],
@@ -141,7 +144,12 @@ describe('pooling properties: init (generated portfolios)', { timeout: TIMEOUT }
     it(`no-tear with flat and dense builds in one pool, ${shareScope ?? 'global'} share scope`, () =>
       run(
         offset,
-        portfolioArbitrary({ flat: true, labelNoise: true, ...(shareScope && { shareScope }) }),
+        portfolioArbitrary({
+          flat: true,
+          dense: true,
+          labelNoise: true,
+          ...(shareScope && { shareScope }),
+        }),
         200,
         async spec => {
           const init = await initOrRefuse(spec);
@@ -157,6 +165,7 @@ describe('pooling properties: init (generated portfolios)', { timeout: TIMEOUT }
   // package's internals from two builds, no specifier at two URLs, nothing unresolved. Leaks (another package's
   // file binding a second build through its scope) are left out. A generated file never imports a root its
   // own build lacks, so a host shipping a secondary without its root (left unresolved) never arises.
+  // Declared packages (`build: 'paths'`) are in the mix: their files are bundled per declared package.
   for (const [offset, shareScope] of [
     [40, undefined],
     [41, 'team'],
@@ -166,6 +175,7 @@ describe('pooling properties: init (generated portfolios)', { timeout: TIMEOUT }
         offset,
         portfolioArbitrary({
           flat: true,
+          dense: true,
           chunks: true,
           labelNoise: true,
           ...(shareScope && { shareScope }),
@@ -367,7 +377,7 @@ describe('pooling properties: init (generated portfolios)', { timeout: TIMEOUT }
           poolMembers,
           copiesByRemote(poolMembers),
           Object.keys(record),
-          { shareScope: GLOBAL_SCOPE }
+          { shareScope: GLOBAL_SCOPE, packageOf: packageOfIn(record) }
         );
         const view: Record<string, string> = {};
         for (const [specifier, { remote, file }] of global)

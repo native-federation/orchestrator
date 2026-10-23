@@ -53,7 +53,7 @@ export function createDecideServingBuilds(
     externals: StoredPackage,
     accepts: AcceptsTag
   ): void {
-    const serving = servingBuildOf(externals, accepts);
+    const serving = servingBuildOf(pkg, externals, accepts);
     // Taken before falling back and following rewrite the stored externals in place.
     const before = externals.map(([, external]) => shapeOf(external));
     // The election already placed a pooled package's rows.

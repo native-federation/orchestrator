@@ -1,5 +1,16 @@
-import type { ImportMap, RemoteEntry, RemoteName } from 'lib/core/1.domain';
-import { owningPackage, packageOf, type Specifier } from 'lib/core/1.domain/externals/specifier';
+import {
+  GLOBAL_SCOPE,
+  type ExternalName,
+  type ImportMap,
+  type RemoteEntry,
+  type RemoteName,
+} from 'lib/core/1.domain';
+import {
+  owningPackage,
+  type PackageOf,
+  type Specifier,
+} from 'lib/core/1.domain/externals/specifier';
+import { compareStrings } from 'lib/utils/compare-strings';
 import { toChunkImport } from '@softarc/native-federation/domain';
 
 type Url = string;
@@ -36,10 +47,53 @@ type PageFile = {
 
 const isInternal = (name: string) => name.startsWith('@nf-internal/');
 
+type ShippedCopy = { packageName: ExternalName; dense?: boolean; specifiers: Specifier[] };
+
+// The package each specifier runs in as its builds bundled it: a dense copy's entries are its `packageName`'s, any
+// other copy's the npm name's, and where builds disagree the packages join. Named by its shortest member.
+export function packageOfAsShipped(copies: Iterable<ShippedCopy>): PackageOf {
+  const parent = new Map<string, string>();
+  const find = (name: string): string => {
+    const up = parent.get(name);
+    if (up === undefined || up === name) return name;
+    const root = find(up);
+    parent.set(name, root);
+    return root;
+  };
+  const union = (a: string, b: string) => {
+    for (const name of [a, b]) if (!parent.has(name)) parent.set(name, name);
+    const [x, y] = [find(a), find(b)];
+    if (x === y) return;
+    const keepX = x.length < y.length || (x.length === y.length && compareStrings(x, y) < 0);
+    if (keepX) parent.set(y, x);
+    else parent.set(x, y);
+  };
+  for (const { packageName, dense, specifiers } of copies)
+    for (const specifier of specifiers)
+      union(specifier, dense ? packageName : (owningPackage(specifier) ?? specifier));
+  return specifier =>
+    find(parent.has(specifier) ? specifier : (owningPackage(specifier) ?? specifier));
+}
+
 // Every file the entries publish, by URL, and per remote where its own code lives and what it imports.
 function indexPage({ entries, scopeUrls = {}, importsOf = () => [] }: PageInput) {
   const files = new Map<Url, PageFile>();
   const remotes = new Map<RemoteName, { scopeUrl: Url; ships: Specifier[] }>();
+  const shippedIn = new Map<string, ShippedCopy[]>();
+  for (const entry of entries)
+    for (const info of entry.shared) {
+      if (isInternal(info.packageName)) continue;
+      const scope = info.shareScope ?? GLOBAL_SCOPE;
+      const copies = shippedIn.get(scope) ?? shippedIn.set(scope, []).get(scope)!;
+      copies.push({
+        packageName: info.packageName,
+        dense: info.dense,
+        specifiers: Object.keys(info.entries),
+      });
+    }
+  const packageOfByScope = new Map(
+    [...shippedIn].map(([scope, copies]) => [scope, packageOfAsShipped(copies)])
+  );
   for (const entry of entries) {
     const scopeUrl = scopeUrls[entry.name] ?? new URL('./', entry.url).href;
     const at = (file: string) => new URL(file, scopeUrl).href;
@@ -47,6 +101,7 @@ function indexPage({ entries, scopeUrls = {}, importsOf = () => [] }: PageInput)
     const shared = entry.shared.filter(info => !isInternal(info.packageName));
     const ships = shared.flatMap(info => Object.keys(info.entries));
     for (const info of shared) {
+      const packageOf = packageOfByScope.get(info.shareScope ?? GLOBAL_SCOPE)!;
       const bundleChunks = (info.bundle && entry.chunks?.[info.bundle]) || [];
       // A flat chunk without a bundle is read as imported by every file of its build.
       const chunks = [
@@ -64,7 +119,9 @@ function indexPage({ entries, scopeUrls = {}, importsOf = () => [] }: PageInput)
           ...ships.filter(sibling => sibling !== specifier && packageOf(sibling) === pkg),
           ...importsOf(entry.name, specifier),
         ];
-        const root = owningPackage(specifier) === undefined;
+        const root = info.dense
+          ? specifier === info.packageName
+          : owningPackage(specifier) === undefined;
         files.set(at(file), {
           build: entry.name,
           pkg,
@@ -205,10 +262,13 @@ function tally(
 ) {
   const { edges, unresolved } = walk(remote, page, resolveHit);
   const urls = new Map<Specifier, Set<Url>>();
+  // The package a specifier's files are in: a file's own share scope decides it, so it is read off the file.
+  const packages = new Map<Specifier, Specifier>();
   const internals = new Map<Specifier, Set<RemoteName>>();
   const builds: Builds = new Map();
   for (const { specifier, hit, file, via } of edges) {
     if (!isInternal(specifier)) add(urls, specifier, hit.url);
+    if (file?.pkg !== undefined && !packages.has(specifier)) packages.set(specifier, file.pkg);
     if (file?.isChunk && via?.pkg !== undefined && !via.isChunk)
       add(internals, via.pkg, file.build);
     if (file?.pkg === undefined || file.isChunk) continue;
@@ -220,12 +280,12 @@ function tally(
       byBuild.set(file.build, (build = { bundleChunked: file.bundleChunked, reaches: [] }));
     build.reaches.push(reachOf(file, via, hit));
   }
-  return { builds, internals, urls, unresolved };
+  return { builds, internals, urls, packages, unresolved };
 }
 
 // The faults of one tally, leaving out the packages in `skip`.
 function faultsOf(
-  { builds, internals, urls, unresolved }: ReturnType<typeof tally>,
+  { builds, internals, urls, packages, unresolved }: ReturnType<typeof tally>,
   skip = new Set<Specifier>()
 ): PageFaults {
   const stitched = new Map(
@@ -241,7 +301,10 @@ function faultsOf(
   return nonEmpty({
     stitched: listed(stitched),
     torn: listed(internals, pkg => !skip.has(pkg)),
-    twice: listed(urls, specifier => !skip.has(packageOf(specifier))),
+    twice: listed(
+      urls,
+      specifier => !skip.has(packages.get(specifier) ?? owningPackage(specifier) ?? specifier)
+    ),
     unresolved,
   });
 }

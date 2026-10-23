@@ -1,6 +1,10 @@
 import type { ExternalName, PoolCause, RemoteName, VersionName } from 'lib/core/1.domain';
 import type { AcceptsTag } from 'lib/core/1.domain/externals/compatibility';
-import { packageOf, type Specifier, SpecifierTags } from 'lib/core/1.domain/externals/specifier';
+import {
+  type PackageOf,
+  type Specifier,
+  SpecifierTags,
+} from 'lib/core/1.domain/externals/specifier';
 import { type Build, buildOf, type Copy, copiesByRemote } from './builds';
 import type { PoolMember } from './membership';
 import { agrees, serves, unwitnessedGap } from './rules';
@@ -10,6 +14,7 @@ import { compareStrings } from 'lib/utils/compare-strings';
 
 type ElectionInput = {
   members: readonly PoolMember[];
+  packageOf: PackageOf;
   acceptsTag: AcceptsTag;
   compare: (a: VersionName, b: VersionName) => number;
   // The stored record's winner, which breaks round-1 ties.
@@ -63,12 +68,14 @@ type State = {
 export function elect(input: ElectionInput): Election {
   const shipped = copiesByRemote(input.members);
   const builds = new Map<RemoteName, Build>();
-  for (const [owner, copies] of shipped) builds.set(owner, buildOf(owner, copies));
+  for (const [owner, copies] of shipped) builds.set(owner, buildOf(owner, copies, input.packageOf));
   const pool: Pool = {
     ...input,
     shipped,
     builds,
-    packages: new Map([...shipped].map(([owner, copies]) => [owner, packageCopies(owner, copies)])),
+    packages: new Map(
+      [...shipped].map(([owner, copies]) => [owner, packageCopies(owner, copies, input.packageOf)])
+    ),
     remotes: [...shipped.keys()],
     servesAt: (remote, tags) => serves(shipped.get(remote)!, tags, input.acceptsTag),
     agreesAt: (remote, tags) => agrees(shipped.get(remote)!, tags),
@@ -153,7 +160,7 @@ function roundOne(pool: Pool, hostRemote: RemoteName | undefined): State {
   ])!;
 
   const winner = round1Winner.build.owner;
-  const globalTags = new SpecifierTags(round1Winner.build.tags);
+  const globalTags = new SpecifierTags(pool.packageOf, round1Winner.build.tags);
   const globalRemotes = new Set([winner, ...round1Winner.served]);
 
   const pending = remotes.filter(r => !globalRemotes.has(r));
@@ -232,7 +239,8 @@ type PackageCopy = { owner: RemoteName; tag: VersionName; specifiers: Set<Specif
 // A remote's copy of each package, or null where it ships the package at two tags.
 function packageCopies(
   owner: RemoteName,
-  copies: readonly Copy[]
+  copies: readonly Copy[],
+  packageOf: PackageOf
 ): Map<string, PackageCopy | null> {
   const packages = new Map<string, PackageCopy | null>();
   for (const copy of copies)
@@ -292,7 +300,7 @@ function settle(pool: Pool, state: State): boolean {
     const dropped = new Set([...extensions].filter(pkg => !publishedWhole(pool, state, pkg)));
     if (dropped.size === 0) return demoted;
     for (const pkg of dropped) extensions.delete(pkg);
-    const kept = [...globalTags].filter(([s]) => !dropped.has(packageOf(s)));
+    const kept = [...globalTags].filter(([s]) => !dropped.has(pool.packageOf(s)));
     globalTags.clear();
     for (const [s, tag] of kept) globalTags.set(s, tag);
     for (const remote of globalRemotes)
@@ -309,7 +317,7 @@ function settle(pool: Pool, state: State): boolean {
 }
 
 function publishedWhole(pool: Pool, state: State, pkg: string): boolean {
-  const published = new Set([...state.globalTags.keys()].filter(s => packageOf(s) === pkg));
+  const published = new Set([...state.globalTags.keys()].filter(s => pool.packageOf(s) === pkg));
   const tag = state.globalTags.pinnedTag(pkg);
   return [...state.globalRemotes].some(remote => {
     const copy = pool.packages.get(remote)!.get(pkg);

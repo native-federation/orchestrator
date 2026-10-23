@@ -5,6 +5,7 @@ import {
   type ScopedVersion,
   type SharedExternal,
   type DenseSharedInfo,
+  type RemoteSharedInfo,
   type SharedVersion,
   type SharedVersionMeta,
 } from 'lib/core/1.domain';
@@ -164,7 +165,7 @@ export function createStoreRemoteEntry(
 
   function sharedExternalContext(
     remoteEntry: RemoteEntry,
-    sharedInfo: DenseSharedInfo,
+    sharedInfo: RemoteSharedInfo,
     tag: string
   ): SharedExternalContext {
     const scopeType = ports.sharedExternalsRepo.scopeType(sharedInfo.shareScope);
@@ -176,6 +177,7 @@ export function createStoreRemoteEntry(
       cached: false,
       requiredVersion: scopeType === 'strict' ? tag : sharedInfo.requiredVersion || tag,
       ...(sharedInfo.pool?.trim() ? { pool: sharedInfo.pool } : {}),
+      ...(sharedInfo.dense ? { dense: true as const } : {}),
       entries: sharedInfo.entries,
     };
 

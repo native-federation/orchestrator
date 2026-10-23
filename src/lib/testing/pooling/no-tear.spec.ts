@@ -1,13 +1,24 @@
 import type { SharedExternal } from 'lib/core/1.domain';
 import { mockVersionRemote } from '../domain/externals/version.mock';
 import {
+  type CoherenceInput,
   emittedUrls,
-  findChunkTornRemotes,
-  findIncoherentRemotes,
-  findSplitRemotes,
+  findChunkTornRemotes as chunkTornIn,
+  findIncoherentRemotes as incoherentIn,
+  findSplitRemotes as splitIn,
+  packageOfInScope,
   tearsByPool,
   withLabelledPools,
 } from './no-tear';
+
+// These fixtures' members are their whole share scope, so the scope's packages are read off them.
+const inScope =
+  <T>(find: (input: CoherenceInput) => T) =>
+  (input: Omit<CoherenceInput, 'packageOf'>): T =>
+    find({ ...input, packageOf: packageOfInScope(input.members) });
+const findIncoherentRemotes = inScope(incoherentIn);
+const findSplitRemotes = inScope(splitIn);
+const findChunkTornRemotes = inScope(chunkTornIn);
 
 /**
  * The guard's own test. A checker that cannot fail is worse than no checker, so the torn case comes
@@ -731,5 +742,130 @@ describe('tearsByPool', () => {
       scopeUrls: SCOPE,
     });
     expect(tears.map(t => t.pool).sort()).toEqual(['custom|fw', 'custom|package:lib']);
+  });
+});
+
+describe('dense packages', () => {
+  const SCOPE = { 'team/mfe-a': 'http://mfe-a/', 'team/mfe-b': 'http://mfe-b/' };
+
+  // One copy per stored external; `dense` as intake marks a copy its build published dense.
+  const copy = (remote: string, specifiers: string[], dense: boolean) => ({
+    ...mockVersionRemote(remote, specifiers[0]!),
+    entries: Object.fromEntries(specifiers.map(s => [s, `${s}.js`])),
+    ...(dense ? { dense: true as const } : {}),
+  });
+  const external = (...versions: [tag: string, ReturnType<typeof copy>][]): SharedExternal => ({
+    dirty: false,
+    versions: versions.map(([tag, meta]) => ({
+      tag,
+      host: false,
+      action: 'skip',
+      remotes: [meta],
+    })),
+  });
+
+  // mfe-a ships table and collapse at 2.0.0, mfe-b at 1.0.0; the map hands mfe-a table@2.0.0 beside
+  // collapse@1.0.0, each from another build.
+  const importMap = {
+    imports: {
+      '@s/c/table': 'http://mfe-a/@s/c/table.js',
+      '@s/c/collapse': 'http://mfe-b/@s/c/collapse.js',
+    },
+  };
+  const tears = (externals: Record<string, SharedExternal>) =>
+    tearsByPool({
+      importMap,
+      externals: { __GLOBAL__: externals },
+      scopeUrls: SCOPE,
+      isChunked: () => true,
+    }).map(t => t.pool);
+
+  it('judges the packages every build ships dense apart: two builds of two packages is no tear', () => {
+    expect(
+      tears({
+        '@s/c/table': external(
+          ['2.0.0', copy('team/mfe-a', ['@s/c/table'], true)],
+          ['1.0.0', copy('team/mfe-b', ['@s/c/table'], true)]
+        ),
+        '@s/c/collapse': external(
+          ['2.0.0', copy('team/mfe-a', ['@s/c/collapse'], true)],
+          ['1.0.0', copy('team/mfe-b', ['@s/c/collapse'], true)]
+        ),
+      })
+    ).toEqual([]);
+  });
+
+  it('judges them as the npm package once one build ships them flat', () => {
+    // mfe-b's flat build bundles table and collapse as one package, whatever mfe-a declares.
+    expect(
+      tears({
+        '@s/c/table': external(
+          ['2.0.0', copy('team/mfe-a', ['@s/c/table'], true)],
+          ['1.0.0', copy('team/mfe-b', ['@s/c/table'], false)]
+        ),
+        '@s/c/collapse': external(
+          ['2.0.0', copy('team/mfe-a', ['@s/c/collapse'], true)],
+          ['1.0.0', copy('team/mfe-b', ['@s/c/collapse'], false)]
+        ),
+      })
+    ).toEqual(['__GLOBAL__|package:@s/c']);
+  });
+
+  it('judges the chunks of a package flat in one build as one package, at one tag too', () => {
+    // At one tag the tag finders see nothing: only the chunk finder's grouping can catch mfe-b's internals
+    // loading beside mfe-a's.
+    const oneTag = (specifier: string): SharedExternal => ({
+      dirty: false,
+      versions: [
+        {
+          tag: '1.0.0',
+          host: false,
+          action: 'skip',
+          remotes: [copy('team/mfe-a', [specifier], true), copy('team/mfe-b', [specifier], false)],
+        },
+      ],
+    });
+    const torn = tearsByPool({
+      importMap,
+      externals: {
+        __GLOBAL__: {
+          '@s/c/table': oneTag('@s/c/table'),
+          '@s/c/collapse': oneTag('@s/c/collapse'),
+        },
+      },
+      scopeUrls: SCOPE,
+      isChunked: () => true,
+    });
+
+    expect(torn.map(t => t.pool)).toEqual(['__GLOBAL__|package:@s/c']);
+    expect(torn[0]).toMatchObject({ incoherent: [], split: [] });
+  });
+
+  it('reads two dense packages chunked from two builds as no chunk tear, judged together', () => {
+    // tearsByPool would group them apart already; judged as one group (as one pool would be), only the chunk
+    // finder's own grouping keeps them apart.
+    const members = {
+      '@s/c/table': external(
+        ['2.0.0', copy('team/mfe-a', ['@s/c/table'], true)],
+        ['1.0.0', copy('team/mfe-b', ['@s/c/table'], true)]
+      ),
+      '@s/c/collapse': external(
+        ['2.0.0', copy('team/mfe-a', ['@s/c/collapse'], true)],
+        ['1.0.0', copy('team/mfe-b', ['@s/c/collapse'], true)]
+      ),
+    };
+    expect(
+      findChunkTornRemotes({ importMap, members, scopeUrls: SCOPE, isChunked: () => true })
+    ).toEqual([]);
+  });
+
+  it('judges them as the wider package a dense build ships them in', () => {
+    expect(
+      tears({
+        '@s/c/table': external(['2.0.0', copy('team/mfe-a', ['@s/c/table'], true)]),
+        '@s/c/collapse': external(['2.0.0', copy('team/mfe-a', ['@s/c/collapse'], true)]),
+        '@s/c': external(['1.0.0', copy('team/mfe-b', ['@s/c/table', '@s/c/collapse'], true)]),
+      })
+    ).toEqual(['__GLOBAL__|package:@s/c']);
   });
 });
