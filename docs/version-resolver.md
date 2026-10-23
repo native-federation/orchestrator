@@ -251,6 +251,19 @@ external of the package in that scope. A dynamic load that opens a package the c
 stores the loaded remote as its serving build, as an election would (see
 [Scope and dynamic init](#scope-and-dynamic-init)).
 
+Which specifiers make up a package follows their npm name: `@angular/core/testing` belongs to `@angular/core`,
+and `@shared/components/table` to `@shared/components`. A build can publish a library deeper than its npm name as
+a package of its own: with core's `build: 'paths'` and `denseExternals`, `@shared/components/table` and
+`@shared/components/collapse` are each bundled apart and published as a dense external under that name. Per share
+scope, such an external is its own package only while every copy there that ships it, or anything under it, is a
+dense copy of exactly that external, whichever row or tag it sits in. A copy published flat, or dense under any
+other name, comes from a build that groups the library differently, so it falls back to its npm name and the page
+is served as it would be without the split. Only that library falls back: a sibling no such copy ships stays its
+own package. A runtime load counts its own copies too, so a load from an older build never takes split libraries
+from two builds: it follows the build that serves them all, or else runs the merged package from its own build;
+the next init decides it again. A dense external at npm depth (`@angular/core`) is the package the npm name gives
+anyway.
+
 - A **pooled** package takes its pool's winner, the build its election made global, when the winner has a copy
   in the primary's share row (or in any share row of the package when the primary has none). It is not ranked
   again: without such a copy it takes the widest copy in those rows that publishes its own files (the most
@@ -763,11 +776,13 @@ is the usual way to pool a framework family. To pull a cross-scope sibling in, l
 `@design-system/ui` labelled `framework` joins the framework pool.
 
 One edge needs no label: a secondary entrypoint is always joined to its package (`@framework/core/testing` →
-`@framework/core`), whoever declares either. A package and its entrypoints are one artefact, so they must not
-be separable — they genuinely tear when they are, with one remote's `@framework/forms` served beside another's
-`@framework/forms/signals`. The edge is not itself a reason to pool: with no label, a package and its entrypoints
-form no pool. A member carrying a label that pools with nothing is almost always a typo or a missing sibling, so
-it is logged at `debug`.
+`@framework/core`), whoever declares either. The package is the one [One build per package](#one-build-per-package)
+groups it into, so a library served as its own package joins no sibling under the same npm name: a label on
+`@shared/components/table` pulls in no `@shared/components/collapse`. A package and its entrypoints are one
+artefact, so they must not be separable — they genuinely tear when they are, with one remote's `@framework/forms`
+served beside another's `@framework/forms/signals`. The edge is not itself a reason to pool: with no label, a
+package and its entrypoints form no pool. A member carrying a label that pools with nothing is almost always a typo
+or a missing sibling, so it is logged at `debug`.
 
 **A pool is named after the label most of its copies declare** (ties break alphabetically), so a family labelled
 `framework` logs and stores as `framework` whatever else some remote called it. A name belongs to exactly one
