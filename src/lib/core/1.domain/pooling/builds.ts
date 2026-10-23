@@ -1,5 +1,9 @@
 import type { ExternalName, RemoteName, VersionName } from 'lib/core/1.domain';
-import { type Specifier, SpecifierTags } from 'lib/core/1.domain/externals/specifier';
+import {
+  type PackageOf,
+  type Specifier,
+  SpecifierTags,
+} from 'lib/core/1.domain/externals/specifier';
 import type { PoolMember } from './membership';
 
 // Keyed by specifier so flat and dense builds of one package compare.
@@ -49,8 +53,8 @@ export function copiesByRemote(members: readonly PoolMember[]): Map<RemoteName, 
 export const specifierCount = (copies: readonly Copy[]): number =>
   copies.reduce((n, copy) => n + copy.specifiers.length, 0);
 
-export function buildOf(owner: RemoteName, copies: readonly Copy[]): Build {
-  const tags = new SpecifierTags();
+export function buildOf(owner: RemoteName, copies: readonly Copy[], packageOf: PackageOf): Build {
+  const tags = new SpecifierTags(packageOf);
   const tagByMember = new Map<ExternalName, VersionName>();
   for (const copy of copies) {
     for (const specifier of copy.specifiers)

@@ -8,7 +8,7 @@ import {
 } from 'lib/core/1.domain';
 import { NFError } from 'lib/core/native-federation.error';
 import { createAcceptsTag } from 'lib/core/1.domain/externals/compatibility';
-import { owningPackage } from 'lib/core/1.domain/externals/specifier';
+import { owningPackage, packageOfIn } from 'lib/core/1.domain/externals/specifier';
 import { buildPools } from 'lib/core/1.domain/pooling/membership';
 import { createVersionCheck } from 'lib/core/3.adapters/checks/version.check';
 import * as _path from 'lib/utils/path';
@@ -483,7 +483,7 @@ export function strayNames(record: shareScope): string[] {
 // `pooledOnly` skips externals in no pool: a dynamic load leaves their stale names for the next init.
 export function poolNameDrift(record: shareScope, { pooledOnly = false } = {}): string[] {
   const computed = new Map<string, string>();
-  for (const [pool, members] of buildPools(record).pools)
+  for (const [pool, members] of buildPools(record, packageOfIn(record)).pools)
     for (const { name } of members) computed.set(name, pool);
   return Object.entries(record)
     .filter(([name]) => !pooledOnly || computed.has(name))

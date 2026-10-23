@@ -5,7 +5,11 @@ import {
   type RemoteEntry,
   type RemoteName,
 } from 'lib/core/1.domain';
-import { owningPackage, type Specifier } from 'lib/core/1.domain/externals/specifier';
+import {
+  owningPackage,
+  type PackageOf,
+  type Specifier,
+} from 'lib/core/1.domain/externals/specifier';
 import { compareStrings } from 'lib/utils/compare-strings';
 import { toChunkImport } from '@softarc/native-federation/domain';
 
@@ -47,9 +51,7 @@ type ShippedCopy = { packageName: ExternalName; dense?: boolean; specifiers: Spe
 
 // The package each specifier runs in as its builds bundled it: a dense copy's entries are its `packageName`'s, any
 // other copy's the npm name's, and where builds disagree the packages join. Named by its shortest member.
-export function packageOfAsShipped(
-  copies: Iterable<ShippedCopy>
-): (specifier: Specifier) => ExternalName {
+export function packageOfAsShipped(copies: Iterable<ShippedCopy>): PackageOf {
   const parent = new Map<string, string>();
   const find = (name: string): string => {
     const up = parent.get(name);

@@ -4,6 +4,7 @@ import { createAcceptsTag } from 'lib/core/1.domain/externals/compatibility';
 import { createVersionCheck } from 'lib/core/3.adapters/checks/version.check';
 import { type Election, elect } from './election';
 import type { PoolMember } from './membership';
+import { packageOfIn } from 'lib/core/1.domain/externals/specifier';
 
 const versionCheck = createVersionCheck();
 
@@ -44,6 +45,7 @@ const members = (builds: Build[]): PoolMember[] => {
 const electFrom = (builds: Build[], { host }: { host?: string } = {}) =>
   elect({
     members: hosted(members(builds), host),
+    packageOf: packageOfIn({}),
     acceptsTag: createAcceptsTag(versionCheck.isCompatible, versionCheck.compare),
     compare: versionCheck.compare,
     latestFirst: false,

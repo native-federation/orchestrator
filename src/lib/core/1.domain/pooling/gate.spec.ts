@@ -8,6 +8,7 @@ import { mockVersionRemote } from 'lib/testing/domain/externals/version.mock';
 import { copiesByRemote } from './builds';
 import { committedView, coverFromMap } from './gate';
 import type { PoolMember } from './membership';
+import { packageOfIn } from 'lib/core/1.domain/externals/specifier';
 
 /**
  * The projections the runtime path reads off a committed record. Nothing here decides anything, so each test
@@ -80,6 +81,7 @@ const viewOf = (members: PoolMember[], without?: string, shareScope = GLOBAL_SCO
     {
       shareScope,
       without,
+      packageOf: packageOfIn({}),
     }
   );
 
@@ -252,6 +254,7 @@ describe('committedView', () => {
           committedView(members, copiesByRemote(members), recordOrder, {
             shareScope: GLOBAL_SCOPE,
             without: 'loaded',
+            packageOf: packageOfIn({}),
           }).global.get('@ng/core/testing')
         ).toEqual({ tag: '22.0.8', remote: 'dense', file: 't.js' });
       });

@@ -10,6 +10,7 @@ import {
   costTable,
   fallbacksOf,
   followServingBuild,
+  loadSplitsPackage,
   packagesOf,
   SCANNED_SURFACES_PER_TAG,
   servingBuildOf,
@@ -19,6 +20,7 @@ import {
   type ServingBuild,
   type ServingCandidate,
 } from './serving';
+import { packageOfIn } from './specifier';
 import type { SharedVersion, SharedVersionAction, SharedVersionMeta } from './version.contract';
 
 const copy = (name: string, entries: string[], extra: Partial<SharedVersionMeta> = {}) =>
@@ -46,8 +48,15 @@ const accepts: AcceptsTag = (offered, ownTag, requiredVersion) =>
   requiredVersion === '*' ||
   offered.split('.')[0] === requiredVersion.replace(/^\^/, '').split('.')[0];
 
-const serving = (...externals: [ExternalName, SharedExternal][]) =>
-  servingBuildOf(externals, accepts);
+// The package as decide-serving-builds groups it: by the rule of the externals' own scope.
+const servingOf = (externals: [ExternalName, SharedExternal][]) =>
+  servingBuildOf(
+    externals.length > 0 ? packageOfIn(Object.fromEntries(externals))(externals[0]![0]) : 'fw',
+    externals,
+    accepts
+  );
+
+const serving = (...externals: [ExternalName, SharedExternal][]) => servingOf(externals);
 
 describe('byServingRank', () => {
   const candidate = (extra: Partial<ServingCandidate>): ServingCandidate => ({
@@ -132,6 +141,18 @@ describe('servingBuildOf', () => {
 
     // r2 is already downloaded and covers r1; r1 would cost a download and leave r2 on its own build.
     expect(result).toEqual<ServingBuild>({ remote: 'r2', tag: '2.0.0' });
+  });
+
+  it("ranks a dense library's own basis as its root's", () => {
+    // Two copies that tie on every cost: the basis of the library's root row decides, not the name.
+    const library = external(
+      version('share', [
+        copy('z', ['@s/c/t', '@s/c/t/sort'], { dense: true }),
+        copy('a', ['@s/c/t', '@s/c/t/sort'], { dense: true }),
+      ])
+    );
+
+    expect(serving(['@s/c/t', library])).toEqual<ServingBuild>({ remote: 'z', tag: '1.0.0' });
   });
 
   describe('a pooled package', () => {
@@ -709,9 +730,7 @@ describe('servingBuildOf', () => {
             [name, { ...e, versions: shuffle(e.versions, i + 1) }] as [ExternalName, SharedExternal]
         );
 
-        expect(servingBuildOf(shuffled, accepts)).toEqual(
-          servingBuildOf(toRecord(builds, first), accepts)
-        );
+        expect(servingOf(shuffled)).toEqual(servingOf(toRecord(builds, first)));
       }),
       { seed: 20261013, numRuns: 1000 }
     );
@@ -974,5 +993,25 @@ describe('servedScopes in the strict scope', () => {
 
     expect(tagScope!['core']!.servingBuild).toBeUndefined();
     expect(tagScope!['core']!.versions).toEqual([version('skip', [copy('x', ['core'])])]);
+  });
+});
+
+describe('loadSplitsPackage', () => {
+  // The map serves a dense library's root at 1.0.0 and its secondary at 2.0.0. The loader's strict range
+  // rejects 2.0.0, so it splits the library: the root's claim fixes the serving tag, as for an npm root.
+  it("reads a dense library's root by the library, not by its npm name", () => {
+    const claims = [
+      ['@s/c/t/sort', { tag: '2.0.0' }],
+      ['@s/c/t', { tag: '1.0.0' }],
+    ] as const;
+    const loader = copy('r1', ['@s/c/t', '@s/c/t/sort'], {
+      dense: true,
+      strictVersion: true,
+      requiredVersion: '~1.0.0',
+    });
+
+    expect(loadSplitsPackage('@s/c/t', [{ tag: '1.0.0', copy: loader }], claims, accepts)).toBe(
+      true
+    );
   });
 });

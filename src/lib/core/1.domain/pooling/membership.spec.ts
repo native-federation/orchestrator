@@ -1,8 +1,8 @@
 import type { SharedExternal, shareScope } from 'lib/core/1.domain';
 import { mockVersionRemote } from 'lib/testing/domain/externals/version.mock';
-import { packageOf } from 'lib/core/1.domain/externals/specifier';
+import { packageOfIn } from 'lib/core/1.domain/externals/specifier';
 import {
-  buildPools,
+  buildPools as buildPoolsWith,
   type LabelledCopy,
   pooledPackagesWith,
   type PoolMember,
@@ -24,6 +24,9 @@ const ext = (remotes: { remote: string; pool?: string }[]): SharedExternal => ({
 
 const scope = (entries: Record<string, { remote: string; pool?: string }[]>): shareScope =>
   Object.fromEntries(Object.entries(entries).map(([name, rs]) => [name, ext(rs)]));
+
+// Each scope with its own package rule, as `planElection` builds it.
+const buildPools = (record: shareScope) => buildPoolsWith(record, packageOfIn(record));
 
 const shape = (pools: Map<PoolName, PoolMember[]>): [PoolName, string[]][] =>
   [...pools.entries()].map(([name, members]) => [name, members.map(m => m.name)]);
@@ -263,12 +266,14 @@ describe('pooledPackagesWith', () => {
     }
     return out;
   };
-  const pooledOnceStored = (record: shareScope, copies: LabelledCopy[]) =>
-    new Set(
+  const pooledOnceStored = (record: shareScope, copies: LabelledCopy[]) => {
+    const packageOf = packageOfIn(stored(record, copies));
+    return new Set(
       [...buildPools(stored(record, copies)).pools.values()].flatMap(members =>
         members.map(m => packageOf(m.name))
       )
     );
+  };
 
   // Each record's labels sit on a `skip` row (see `ext`), so a label off the share rows counts too.
   const cases: Record<string, { record: shareScope; copies: LabelledCopy[]; pooled: string[] }> = {
@@ -330,9 +335,37 @@ describe('pooledPackagesWith', () => {
   for (const [name, { record, copies, pooled }] of Object.entries(cases))
     it(name, () => {
       const before = structuredClone(record);
-      const actual = pooledPackagesWith(record, copies);
+      const actual = pooledPackagesWith(record, copies, packageOfIn(stored(record, copies)));
       expect(actual).toEqual(pooledOnceStored(record, copies));
       expect([...actual].sort()).toEqual(pooled);
       expect(record).toStrictEqual(before);
     });
+});
+
+describe('a dense library deeper than its npm name', () => {
+  // `'paths'` libraries under one npm name: the label on `@s/c/t` pools it with `@s/fw`, not `@s/c/u`.
+  const library = (name: string, pool?: string): SharedExternal => ({
+    dirty: false,
+    versions: [
+      {
+        tag: '1.0.0',
+        host: false,
+        action: 'share',
+        remotes: [{ ...mockVersionRemote('a', name, { pool }), dense: true }],
+      },
+    ],
+  });
+  const record: shareScope = {
+    '@s/fw': library('@s/fw', 'ui'),
+    '@s/c/t': library('@s/c/t', 'ui'),
+    '@s/c/u': library('@s/c/u'),
+  };
+
+  it('pools the library the label is on, by its own name', () => {
+    expect(shape(buildPools(record).pools)).toEqual([['ui', ['@s/c/t', '@s/fw']]]);
+    expect([...pooledPackagesWith(record, [], packageOfIn(record))].sort()).toEqual([
+      '@s/c/t',
+      '@s/fw',
+    ]);
+  });
 });

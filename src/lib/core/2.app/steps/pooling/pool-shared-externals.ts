@@ -5,6 +5,7 @@ import type { DrivingContract } from '../../driving-ports/driving.contract';
 import type { LoggingConfig } from '../../config/log.contract';
 import type { ModeConfig } from '../../config/mode.contract';
 import { createAcceptsTag } from 'lib/core/1.domain/externals/compatibility';
+import type { PackageOf } from 'lib/core/1.domain/externals/specifier';
 import { type Copy, copiesByRemote, specifierCount } from 'lib/core/1.domain/pooling/builds';
 import { elect, type PoolMiss, previousWinner } from 'lib/core/1.domain/pooling/election';
 import type { PoolMember, PoolName } from 'lib/core/1.domain/pooling/membership';
@@ -26,7 +27,7 @@ export function createPoolSharedExternals(
         const plan = planElection(sharedExternals, repo.scopeType(scope) !== 'strict');
         logPlan(plan, sharedExternals, scope);
         for (const [poolName, members] of plan.pools)
-          for (const [name, record] of poolRecords(poolName, members, scope))
+          for (const [name, record] of poolRecords(poolName, members, plan.packageOf, scope))
             repo.addOrUpdate(name, record, scope);
         for (const [name, external] of plan.stripped) repo.addOrUpdate(name, external, scope);
       } catch (error) {
@@ -66,10 +67,12 @@ export function createPoolSharedExternals(
   function poolRecords(
     poolName: PoolName,
     members: PoolMember[],
+    packageOf: PackageOf,
     scope: string
   ): [ExternalName, SharedExternal][] {
     const election = elect({
       members,
+      packageOf,
       acceptsTag: createAcceptsTag(ports.versionCheck.isCompatible, compare),
       compare,
       previousWinner: previousWinner(members),
