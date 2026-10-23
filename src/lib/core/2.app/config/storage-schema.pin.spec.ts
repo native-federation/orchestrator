@@ -1,6 +1,6 @@
 import type {
-  DenseSharedInfo,
   RemoteEntry,
+  RemoteSharedInfo,
   RemoteInfo,
   SharedExternal,
   SharedExternals,
@@ -17,8 +17,8 @@ import { globalThisStorageEntry } from 'lib/core/4.config/storage/global-this.st
  * drops one fails here, and the fix is to update the list and say so in the release notes.
  *
  * The keys are read off what a real page commits, so the portfolio below must exercise every optional
- * field: a host with exposes, integrity and chunks, a scoped external with a bundle, a subpool
- * (`servedBy`), an island (`poolCause`) and a stored election (`poolName`, `poolWinner`).
+ * field: a host with exposes, integrity and chunks, a scoped external with a bundle, a copy published dense
+ * (`dense`), a subpool (`servedBy`), an island (`poolCause`) and a stored election (`poolName`, `poolWinner`).
  */
 describe('stored shape', () => {
   const NAMESPACE = 'nf-storage-schema-pin';
@@ -27,8 +27,8 @@ describe('stored shape', () => {
     packageName: string,
     version: string,
     requiredVersion: string,
-    o: Partial<DenseSharedInfo> = {}
-  ): DenseSharedInfo =>
+    o: Partial<RemoteSharedInfo> = {}
+  ): RemoteSharedInfo =>
     ({
       packageName,
       version,
@@ -38,12 +38,12 @@ describe('stored shape', () => {
       pool: 'fw',
       entries: { [packageName]: `${packageName.slice(1).replace('/', '_')}.js` },
       ...o,
-    }) as DenseSharedInfo;
+    }) as RemoteSharedInfo;
 
   const entry = (
     name: string,
     extra: Partial<RemoteEntry>,
-    ...sharedInfo: DenseSharedInfo[]
+    ...sharedInfo: RemoteSharedInfo[]
   ): RemoteEntry =>
     ({
       name,
@@ -71,7 +71,7 @@ describe('stored shape', () => {
           integrity: { 'fw_core.js': 'sha384-pinned' },
           chunks: { 'browser-shared': ['chunk-1.js'] },
         },
-        shared('@fw/core', '19.2.0', '^19.2.0', { bundle: 'browser-shared' }),
+        shared('@fw/core', '19.2.0', '^19.2.0', { bundle: 'browser-shared', dense: true }),
         shared('@fw/common', '19.2.0', '^19.2.0'),
         shared('tslib', '2.0.0', '^2.0.0', { singleton: false, pool: undefined, bundle: 'b' })
       ),
@@ -118,6 +118,7 @@ describe('stored shape', () => {
       sharedVersionMeta: [
         'bundle',
         'cached',
+        'dense',
         'entries',
         'name',
         'pool',

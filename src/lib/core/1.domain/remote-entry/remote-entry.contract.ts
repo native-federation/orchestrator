@@ -9,8 +9,12 @@ import type {
 
 type RawRemoteEntry = FederationInfo;
 
+// `dense`: the remoteEntry published the entry dense, so its packageName is the build's own grouping. A flat
+// entry is wrapped into the same shape, keyed by its specifier.
+type RemoteSharedInfo = DenseSharedInfo & { dense?: true };
+
 type RemoteEntry = Omit<FederationInfo, 'shared'> & {
-  shared: DenseSharedInfo[];
+  shared: RemoteSharedInfo[];
   url: RemoteEntryUrl;
   host?: boolean;
   override?: boolean;
@@ -31,5 +35,6 @@ export {
   ExposesInfo,
   SharedInfo,
   DenseSharedInfo,
+  RemoteSharedInfo,
   SharedInfoActions,
 };
