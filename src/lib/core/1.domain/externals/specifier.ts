@@ -1,4 +1,6 @@
 import type { DeepReadonly } from 'lib/utils/deep-readonly';
+import { compareStrings } from 'lib/utils/compare-strings';
+import { unionFind } from 'lib/utils/union-find';
 import type { ExternalName, shareScope } from './external.contract';
 import type { SharedVersionMeta, VersionName } from './version.contract';
 
@@ -28,24 +30,36 @@ export function packageOfIn(
   scope: DeepReadonly<shareScope>,
   loading: readonly StoredCopy[] = []
 ): PackageOf {
-  const candidates = new Set<ExternalName>();
-  for (const [name, copy] of copiesIn(scope, loading))
-    if (copy.dense && npmPackageOf(name) !== name) candidates.add(name);
-  if (candidates.size === 0) return npmPackageOf;
+  if (!declaresLibrary(scope, loading)) return npmPackageOf;
 
-  const untrusted = new Set<ExternalName>();
+  const { find, union } = unionFind();
   for (const [name, copy] of copiesIn(scope, loading))
-    for (const specifier in copy.entries)
-      for (const pkg of prefixesOf(specifier))
-        if (candidates.has(pkg) && !(copy.dense && name === pkg)) untrusted.add(pkg);
-  if (untrusted.size === candidates.size) return npmPackageOf;
+    for (const specifier in copy.entries) union(anchorOf(name, copy), specifier);
 
-  return specifier => {
-    for (const pkg of prefixesOf(specifier))
-      if (candidates.has(pkg) && !untrusted.has(pkg)) return pkg;
-    return npmPackageOf(specifier);
-  };
+  const shortest = new Map<string, ExternalName>();
+  for (const [name, copy] of copiesIn(scope, loading))
+    for (const member of [anchorOf(name, copy), ...Object.keys(copy.entries)]) {
+      const root = find(member);
+      const best = shortest.get(root);
+      if (
+        best === undefined ||
+        member.length < best.length ||
+        (member.length === best.length && compareStrings(member, best) < 0)
+      )
+        shortest.set(root, member);
+    }
+  return specifier => shortest.get(find(specifier)) ?? npmPackageOf(specifier);
 }
+
+function declaresLibrary(scope: DeepReadonly<shareScope>, loading: readonly StoredCopy[]): boolean {
+  for (const [name, copy] of copiesIn(scope, loading))
+    if (copy.dense && npmPackageOf(name) !== name) return true;
+  return false;
+}
+
+// A flat copy joins its npm name: an older core bundles flat mappings together, with shared chunks.
+const anchorOf = (name: ExternalName, copy: DeepReadonly<SharedVersionMeta>): ExternalName =>
+  copy.dense ? name : npmPackageOf(name);
 
 function* copiesIn(
   scope: DeepReadonly<shareScope>,
@@ -56,13 +70,7 @@ function* copiesIn(
     for (const version of external.versions) for (const copy of version.remotes) yield [name, copy];
 }
 
-// The specifier itself first, then each shorter path above it.
-function* prefixesOf(specifier: Specifier): Generator<ExternalName> {
-  for (let cut = specifier.length; cut > 0; cut = specifier.lastIndexOf('/', cut - 1))
-    yield specifier.slice(0, cut);
-}
-
-// Tags per specifier that also pin an entrypoint nobody lists: a package is one version, so its tag is the
+// Tags per specifier that also pin the rest of their package: a package is one version, so its tag is the
 // root's, else the first entrypoint's — a package can ship entrypoints only (`material/table`, no root).
 export class SpecifierTags extends Map<Specifier, VersionName> {
   private readonly packages = new Map<ExternalName, VersionName>();

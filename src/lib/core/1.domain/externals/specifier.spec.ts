@@ -1,5 +1,6 @@
 import type { shareScope } from './external.contract';
-import { packageOfIn, SpecifierTags } from './specifier';
+import fc from 'fast-check';
+import { npmPackageOf, packageOfIn, SpecifierTags } from './specifier';
 import type { SharedVersionAction, SharedVersionMeta } from './version.contract';
 
 // One stored copy: `dense` when its remoteEntry published the external dense (`'paths'` mappings with
@@ -84,7 +85,7 @@ describe('packageOfIn', () => {
     expect(packageOfIn(record)).toBe(packageOfIn({}));
   });
 
-  it('serves each dense library as its own package when every copy of it agrees', () => {
+  it('serves each dense record no other record overlaps as its own package', () => {
     const record = scope({
       ...paths('a', ['@s/c/t', ['@s/c/t', '@s/c/t/sort']], ['@s/c/u', ['@s/c/u']]),
       '@s/c/u': [
@@ -101,8 +102,43 @@ describe('packageOfIn', () => {
     });
   });
 
-  it('falls back to the npm name for a library a flat copy also ships', () => {
-    // An older core's flat secondary is stored under the same key as the dense library.
+  it('keeps nested records that share nothing apart', () => {
+    // Exact tsconfig keys: core publishes `t` and `sort` as two records; only a pool couples them.
+    const record = scope(paths('a', ['@s/c/t', ['@s/c/t']], ['@s/c/t/sort', ['@s/c/t/sort']]));
+    expect(packages(record)).toMatchObject({ '@s/c/t': '@s/c/t', '@s/c/t/sort': '@s/c/t/sort' });
+  });
+
+  it('merges dense records that list the same specifier, named by the shortest name', () => {
+    // A `.package('@s/c/t')` build beside one still on exact keys.
+    const record = scope({
+      '@s/c/t': [
+        { remote: 'a', entries: ['@s/c/t', '@s/c/t/sort'], dense: true },
+        { remote: 'b', entries: ['@s/c/t'], dense: true },
+      ],
+      '@s/c/t/sort': [{ remote: 'b', entries: ['@s/c/t/sort'], dense: true }],
+    });
+    expect(packages(record)).toMatchObject({ '@s/c/t': '@s/c/t', '@s/c/t/sort': '@s/c/t' });
+  });
+
+  it("merges a record that lists another record's name", () => {
+    // One build with tsconfig keys `@s/c/d/*` and `@s/c/d/t/*`: record `d/t` does not list itself.
+    const packageOf = packageOfIn(
+      scope(paths('a', ['@s/c/d', ['@s/c/d/t', '@s/c/d/u']], ['@s/c/d/t', ['@s/c/d/t/sort']]))
+    );
+    expect(['@s/c/d/t', '@s/c/d/u', '@s/c/d/t/sort'].map(packageOf)).toEqual([
+      '@s/c/d',
+      '@s/c/d',
+      '@s/c/d',
+    ]);
+  });
+
+  it('serves a record that lists only entrypoints as its own package', () => {
+    const packageOf = packageOfIn(scope(paths('a', ['m/table', ['m/table/x']])));
+    expect([packageOf('m/table'), packageOf('m/table/x')]).toEqual(['m/table', 'm/table']);
+  });
+
+  it('merges a dense record with a flat copy of any of its specifiers into the npm name', () => {
+    // An older core's flat secondary: its build bundles every mapping, so it is at least the npm package.
     const record = scope({
       '@s/c/t': [
         { remote: 'a', entries: ['@s/c/t', '@s/c/t/sort'], dense: true },
@@ -110,23 +146,20 @@ describe('packageOfIn', () => {
       ],
       ...paths('a', ['@s/c/u', ['@s/c/u']]),
     });
-    // The other library under the prefix stays its own: the flat build does not ship it.
-    expect(packages(record)).toEqual({ ...BY_NAME, '@s/c/u': '@s/c/u', '@s/c/u/y': '@s/c/u' });
+    expect(packages(record)).toEqual({ ...BY_NAME, '@s/c/u': '@s/c/u' });
   });
 
-  it('falls back to the npm name for a library a coarser dense external lists among its entries', () => {
+  it('merges a dense record a coarser dense external overlaps into it', () => {
     const record = scope({
       ...paths('a', ['@s/c/t', ['@s/c/t']], ['@s/c/u', ['@s/c/u']]),
       '@s/c': [{ remote: 'old', entries: ['@s/c', '@s/c/t'], dense: true }],
     });
-    expect(packages(record)).toEqual({ ...BY_NAME, '@s/c/u': '@s/c/u', '@s/c/u/y': '@s/c/u' });
+    expect(packages(record)).toEqual({ ...BY_NAME, '@s/c/u': '@s/c/u' });
   });
 
-  it('falls back to the npm name for dense libraries nested in each other', () => {
-    const record = scope(
-      paths('a', ['@s/c/t', ['@s/c/t', '@s/c/t/sort']], ['@s/c/t/sort', ['@s/c/t/sort']])
-    );
-    expect(packages(record)).toEqual(BY_NAME);
+  it('gives a specifier no copy lists its npm name', () => {
+    const record = scope(paths('a', ['@s/c/t', ['@s/c/t']]));
+    expect(packages(record)).toEqual({ ...BY_NAME, '@s/c/t': '@s/c/t' });
   });
 
   it('counts copies of every action, not only the shared ones', () => {
@@ -157,20 +190,122 @@ describe('packageOfIn', () => {
   it('never splits a load: a dense load of a fresh library stays its own package', () => {
     const committed = scope({ '@s/c': [{ remote: 'old', entries: ['@s/c/u'], dense: true }] });
     const loading = [['@s/c/t', meta({ remote: 'a', entries: ['@s/c/t'], dense: true })]] as const;
-    expect(packages(committed, loading)).toEqual({
-      ...BY_NAME,
-      '@s/c/t': '@s/c/t',
-      '@s/c/t/sort': '@s/c/t',
+    expect(packages(committed, loading)).toEqual({ ...BY_NAME, '@s/c/t': '@s/c/t' });
+  });
+
+  describe('over core-shaped records', () => {
+    // Core names a dense record by a prefix of its entries, never coarser than the npm name; a flat copy is
+    // stored under its one specifier. Entries-only records (a name the record does not list) are drawn too.
+    const PATHS = [
+      '@s/c',
+      '@s/c/t',
+      '@s/c/t/sort',
+      '@s/c/t/sort/x',
+      '@s/c/u',
+      '@s/c/u/y',
+      'm',
+      'm/n',
+      'm/n/o',
+    ];
+    const under = (s: string, name: string) => s === name || s.startsWith(name + '/');
+
+    type Drawn = { name: string; copy: SharedVersionMeta };
+    const drawnCopy: fc.Arbitrary<Drawn> = fc
+      .record({
+        name: fc.constantFrom(...PATHS),
+        dense: fc.boolean(),
+        remote: fc.constantFrom('a', 'b', 'c'),
+        pick: fc.array(fc.constantFrom(...PATHS), { maxLength: 4 }),
+      })
+      .map(({ name, dense, remote, pick }) => {
+        const listed = dense ? [...new Set(pick.filter(s => under(s, name)))] : [name];
+        const entries = listed.length > 0 ? listed : [name];
+        return { name, copy: meta({ remote, entries, dense }) };
+      });
+    const copies = fc.array(drawnCopy, { maxLength: 8 });
+
+    const toScope = (drawn: Drawn[]): shareScope => {
+      const record: shareScope = {};
+      for (const { name, copy } of drawn)
+        (record[name] ??= { dirty: false, versions: [] }).versions.push({
+          tag: '1.0.0',
+          host: false,
+          action: 'share',
+          remotes: [copy],
+        });
+      return record;
+    };
+    const anchor = ({ name, copy }: Drawn) => (copy.dense ? name : npmPackageOf(name));
+    const run = (property: fc.IProperty<[Drawn[]]> | fc.IProperty<[Drawn[], Drawn[]]>) =>
+      fc.assert(property, { seed: 1, numRuns: 2000 });
+
+    it('puts every record whole in one package', () => {
+      run(
+        fc.property(copies, drawn => {
+          const packageOf = packageOfIn(toScope(drawn));
+          for (const d of drawn) {
+            const members = [anchor(d), ...Object.keys(d.copy.entries)];
+            expect(new Set(members.map(packageOf)).size).toBe(1);
+          }
+        })
+      );
+    });
+
+    it('is never coarser than the npm name, and a package is a path above its specifiers', () => {
+      run(
+        fc.property(copies, drawn => {
+          const packageOf = packageOfIn(toScope(drawn));
+          for (const s of PATHS) {
+            expect(npmPackageOf(packageOf(s))).toBe(npmPackageOf(s));
+            expect(under(s, packageOf(s))).toBe(true);
+          }
+        })
+      );
+    });
+
+    it('never splits a committed package on a load', () => {
+      run(
+        fc.property(copies, copies, (committed, loading) => {
+          const before = packageOfIn(toScope(committed));
+          const after = packageOfIn(
+            toScope(committed),
+            loading.map(({ name, copy }) => [name, copy] as const)
+          );
+          const shipped = [...new Set(committed.flatMap(d => Object.keys(d.copy.entries)))];
+          for (const a of shipped)
+            for (const b of shipped) if (before(a) === before(b)) expect(after(a)).toBe(after(b));
+        })
+      );
+    });
+
+    it('does not depend on record order', () => {
+      run(
+        fc.property(copies, drawn => {
+          const forward = packageOfIn(toScope(drawn));
+          const reversed = packageOfIn(toScope([...drawn].reverse()));
+          expect(PATHS.map(reversed)).toEqual(PATHS.map(forward));
+        })
+      );
+    });
+
+    it('serves every specifier a flat copy ships in its npm package', () => {
+      run(
+        fc.property(copies, drawn => {
+          const packageOf = packageOfIn(toScope(drawn));
+          for (const { name, copy } of drawn)
+            if (!copy.dense) expect(packageOf(name)).toBe(npmPackageOf(name));
+        })
+      );
     });
   });
 });
 
 describe('SpecifierTags', () => {
   const twoLibraries = packageOfIn(
-    scope(paths('w', ['@s/c/t', ['@s/c/t']], ['@s/c/u', ['@s/c/u']]))
+    scope(paths('w', ['@s/c/t', ['@s/c/t', '@s/c/t/sort']], ['@s/c/u', ['@s/c/u']]))
   );
 
-  it("pins an entrypoint nobody lists by its own package's tag", () => {
+  it("pins an entrypoint the tags do not list by its own package's tag", () => {
     // `@s/c/u` is set first: under the npm-name rule it would pin `@s/c/t/sort` at 2.0.0, beside `@s/c/t`@1.0.0.
     const tags = new SpecifierTags(twoLibraries, [
       ['@s/c/u', '2.0.0'],

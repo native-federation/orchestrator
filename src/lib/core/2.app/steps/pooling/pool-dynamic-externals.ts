@@ -26,7 +26,7 @@ import {
 } from 'lib/core/1.domain/pooling/gate';
 import { type CopyMove, movedRecord, renamedRecords } from 'lib/core/1.domain/pooling/records';
 import { createAcceptsTag } from 'lib/core/1.domain/externals/compatibility';
-import { type PackageOf, packageOfIn } from 'lib/core/1.domain/externals/specifier';
+import type { PackageOf } from 'lib/core/1.domain/externals/specifier';
 
 export function createPoolDynamicExternals(
   config: LoggingConfig & ModeConfig,
@@ -48,8 +48,7 @@ export function createPoolDynamicExternals(
       const committed = ports.sharedExternalsRepo.getFromScope(scope);
       if (!scopeHasPoolState(committed)) continue;
 
-      const packageOf = packageOfIn(committed);
-      const { pools } = buildPools(committed, packageOf);
+      const { pools, packageOf } = buildPools(committed);
       const moves = judgeScope(
         entry.name,
         names,
