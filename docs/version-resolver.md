@@ -257,8 +257,8 @@ shortest name among them. A specifier no record lists follows its npm name. So `
 `@angular/core`, flat or dense, while with core's `build: 'paths'` and `denseExternals`, `@shared/components/table`
 and `@shared/components/collapse` are published as two records and are two packages. A build that ships them
 together, flat or dense under `@shared/components`, merges both into `@shared/components`. Per share scope every
-copy counts, whichever row or tag it sits in. A runtime load counts its own copies too, so a load from an older
-build never takes merged libraries from two builds: it follows the build that serves them all, or else runs the
+copy counts, whichever row or tag it sits in. A runtime load counts its own copies too, so a load whose records
+merge libraries never takes them from two builds: it follows the build that serves them all, or else runs the
 merged package from its own build; the next init decides it again. Packages that import each other, npm packages
 and declared libraries alike, run from one build only when they share a `pool` label (see
 [Enabling pooling](#enabling-pooling)).
@@ -1114,7 +1114,7 @@ it in that scope, read as the map was generated (the serving build's copy, see
 
 A rejecting range warns, and under `strictExternalCompatibility` fails the load, only where a cold init that kept
 the builds the committed map serves would refuse it: the package is in a pool once the load's copies are stored (a
-label that joins no other external forms no pool, as at init; a dense build ships a package as one external), the
+label that joins no other external forms no pool, as at init; a dense build ships each record as one external), the
 file is at the serving tag of a package the map would otherwise serve the remote wholly from one build, or the file
 is of the copy's own external at the tag that external's own election would keep with the remote in it (a host's
 row, or under `latestSharedExternal` the newest tag), or of the copy's own external where no tag pleases every
