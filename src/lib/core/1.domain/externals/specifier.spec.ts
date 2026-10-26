@@ -72,7 +72,7 @@ describe('packageOfIn', () => {
       '@s/c/t': [{ remote: 'old', entries: ['@s/c/t'] }],
       'rxjs/operators': [{ remote: 'old', entries: ['rxjs/operators'] }],
     });
-    expect(packageOfIn(record)).toBe(packageOfIn({}));
+    expect(packageOfIn(record)).toBe(npmPackageOf);
     expect(packages(record)).toEqual(BY_NAME);
   });
 
@@ -82,7 +82,7 @@ describe('packageOfIn', () => {
       '@s/c': [{ remote: 'old', entries: ['@s/c/t', '@s/c/u'], dense: true }],
       rxjs: [{ remote: 'old', entries: ['rxjs', 'rxjs/operators'], dense: true }],
     });
-    expect(packageOfIn(record)).toBe(packageOfIn({}));
+    expect(packageOfIn(record)).toBe(npmPackageOf);
   });
 
   it('serves each dense record no other record overlaps as its own package', () => {

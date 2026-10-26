@@ -1,6 +1,4 @@
-import { packageOfIn, SpecifierTags } from 'lib/core/1.domain/externals/specifier';
-
-const byName = packageOfIn({});
+import { npmPackageOf, SpecifierTags } from 'lib/core/1.domain/externals/specifier';
 import { buildOf, type Copy } from './builds';
 import { unwitnessedGap } from './rules';
 
@@ -20,7 +18,7 @@ describe('unwitnessedGap', () => {
     buildOf(
       'team/mfe-s',
       [copy('@fw/core', '1.0.1', ['@fw/core']), copy('@fw/common', '1.0.0', ['@fw/common'])],
-      byName
+      npmPackageOf
     ),
   ];
   const loaded = [
@@ -29,7 +27,7 @@ describe('unwitnessedGap', () => {
   ];
 
   it("witnesses an entrypoint a build does not list by its package's tag", () => {
-    const tags = new SpecifierTags(byName, [
+    const tags = new SpecifierTags(npmPackageOf, [
       ['@fw/core/testing', '1.0.1'],
       ['@fw/common', '1.0.0'],
     ]);
@@ -37,7 +35,7 @@ describe('unwitnessedGap', () => {
   });
 
   it("does not witness it at another tag than the package's", () => {
-    const tags = new SpecifierTags(byName, [
+    const tags = new SpecifierTags(npmPackageOf, [
       ['@fw/core/testing', '1.0.0'],
       ['@fw/common', '1.0.0'],
     ]);

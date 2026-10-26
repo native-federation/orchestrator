@@ -1,10 +1,7 @@
 import { claimTable, committedClaims, versionClaims, type Claim } from './claims';
 import { GLOBAL_SCOPE, type SharedExternal } from './external.contract';
 import type { SharedVersion, SharedVersionAction, SharedVersionMeta } from './version.contract';
-import { groupByPackage, packageOfIn } from './specifier';
-
-// No dense copy anywhere: the npm-name rule.
-const byName = packageOfIn({});
+import { groupByPackage, npmPackageOf } from './specifier';
 
 const copy = (name: string, entries: string[], extra: Partial<SharedVersionMeta> = {}) =>
   ({
@@ -249,13 +246,13 @@ describe('versionClaims', () => {
 });
 
 describe('claims grouped by package', () => {
-  const claimsByPackage = (claims: Map<string, Claim>, packageOf: typeof byName) =>
-    groupByPackage(claims, ([specifier]) => specifier, packageOf);
+  const claimsByPackage = (claims: Map<string, Claim>) =>
+    groupByPackage(claims, ([specifier]) => specifier, npmPackageOf);
 
   // Package -> its specifiers in bucket order, each with the tag it is claimed at.
   const buckets = (claims: Map<string, Claim>) =>
     Object.fromEntries(
-      [...claimsByPackage(claims, byName)].map(([pkg, bucket]) => [
+      [...claimsByPackage(claims)].map(([pkg, bucket]) => [
         pkg,
         bucket.map(([s, c]) => `${s}@${c.tag}`),
       ])
@@ -304,6 +301,6 @@ describe('claims grouped by package', () => {
   it('hands back the table entries themselves', () => {
     const table = claimTable([['fw', external(version('share', [copy('r1', ['fw'])]))]]);
 
-    expect(claimsByPackage(table.claims, byName).get('fw')![0]![1]).toBe(table.claims.get('fw'));
+    expect(claimsByPackage(table.claims).get('fw')![0]![1]).toBe(table.claims.get('fw'));
   });
 });
