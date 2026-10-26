@@ -12,8 +12,13 @@ import type { LoadActions } from 'lib/core/1.domain/remote-entry/load-actions.co
 import { createAcceptsTag } from 'lib/core/1.domain/externals/compatibility';
 import { addRemoteToVersion } from 'lib/core/1.domain/externals/basis';
 import { loadSplitsPackage } from 'lib/core/1.domain/externals/serving';
-import { type Claim, claimsByPackage, committedClaims } from 'lib/core/1.domain/externals/claims';
-import { type PackageOf, packageOfIn, type Specifier } from 'lib/core/1.domain/externals/specifier';
+import { type Claim, committedClaims } from 'lib/core/1.domain/externals/claims';
+import {
+  groupByPackage,
+  type PackageOf,
+  packageOfIn,
+  type Specifier,
+} from 'lib/core/1.domain/externals/specifier';
 import { type LabelledCopy, pooledPackagesWith } from 'lib/core/1.domain/pooling/membership';
 import type { DrivingContract } from '../driving-ports/driving.contract';
 import type { LoggingConfig } from '../config/log.contract';
@@ -131,14 +136,16 @@ export function createUpdateCache(
         });
         // The load's copies count as stored: they can only merge packages the committed map serves apart.
         const packageOf = packageOfIn(record, loadingIn(pending, scope));
-        const claimsIn = claimsByPackage(claims, packageOf);
+        const claimsIn = groupByPackage(claims, ([specifier]) => specifier, packageOf);
         let pooled: Set<ExternalName> | undefined;
         view = {
           packageOf,
           claims,
           claimsOf: pkg => claimsIn.get(pkg) ?? [],
-          inPool: pkg =>
-            (pooled ??= pooledPackagesWith(record, copiesIn(pending, scope), packageOf)).has(pkg),
+          inPool: pkg => {
+            pooled ??= pooledPackagesWith(record, labelledCopiesIn(pending, scope), packageOf);
+            return pooled.has(pkg);
+          },
         };
         views.set(scope, view);
       }
@@ -155,7 +162,7 @@ export function createUpdateCache(
   }
 
   // The load's copies count as stored, so a pool only their labels form is judged as the gate will see it.
-  function copiesIn(pending: Pending[], scope: string): LabelledCopy[] {
+  function labelledCopiesIn(pending: Pending[], scope: string): LabelledCopy[] {
     return inScope(pending, scope).map(({ external, ctx }) => ({
       name: external.packageName,
       pool: ctx.remote.pool,
