@@ -336,6 +336,44 @@ describe('pageTears', () => {
       },
     ]);
   });
+
+  // Exact `paths` keys publish `@s/c/t` and `@s/c/t/sort` as two dense records, so they are two packages, and
+  // `sort` importing `t` crosses packages. Scoping `t` alone for r leaves the global `sort` binding the shell's
+  // `t`: the double instance a shared `pool` label (or core's `.package()`, one record) prevents.
+  it('names a consumer-scope leak between nested declared libraries', () => {
+    const declared = (version?: string) => [
+      { ...info('@s/c/t', ['@s/c/t'], { version }), dense: true },
+      { ...info('@s/c/t/sort', ['@s/c/t/sort'], { version }), dense: true },
+    ];
+    const shell = entry('shell', declared());
+    const r = entry('r', declared('2.0.0'));
+    const importsOf = importsFrom({ '@s/c/t/sort': ['@s/c/t'] });
+    const imports = {
+      '@s/c/t': 'http://shell/_s_c_t.js',
+      '@s/c/t/sort': 'http://shell/_s_c_t_sort.js',
+    };
+
+    const tAlone = { imports, scopes: { 'http://r/': { '@s/c/t': 'http://r/_s_c_t.js' } } };
+    expect(pageTears({ importMap: tAlone, entries: [shell, r], importsOf })).toEqual([
+      {
+        remote: 'r',
+        host: false,
+        stitched: ['@s/c/t: r shell'],
+        torn: ['@s/c/t: r shell'],
+        twice: ['@s/c/t: http://r/_s_c_t.js http://shell/_s_c_t.js'],
+        causes: { '@s/c/t': ['consumer-scope'] },
+      },
+    ]);
+
+    // Scoped together, r's own `sort` binds r's own `t`.
+    const together = {
+      imports,
+      scopes: {
+        'http://r/': { '@s/c/t': 'http://r/_s_c_t.js', '@s/c/t/sort': 'http://r/_s_c_t_sort.js' },
+      },
+    };
+    expect(pageTears({ importMap: together, entries: [shell, r], importsOf })).toEqual([]);
+  });
 });
 
 describe('packageOfAsShipped', () => {
