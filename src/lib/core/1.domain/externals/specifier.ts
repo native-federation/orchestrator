@@ -32,29 +32,35 @@ export function packageOfIn(
 ): PackageOf {
   if (!declaresLibrary(scope, loading)) return npmPackageOf;
 
+  // Each root keeps its component's shortest name.
   const { find, union } = unionFind();
-  for (const [name, copy] of copiesIn(scope, loading))
-    for (const specifier in copy.entries) union(anchorOf(name, copy), specifier);
-
   const shortest = new Map<ExternalName, ExternalName>();
-  for (const [name, copy] of copiesIn(scope, loading))
-    for (const member of [anchorOf(name, copy), ...Object.keys(copy.entries)]) {
-      const root = find(member);
-      const best = shortest.get(root);
-      if (
-        best === undefined ||
-        member.length < best.length ||
-        (member.length === best.length && compareStrings(member, best) < 0)
-      )
-        shortest.set(root, member);
+  for (const [name, copy] of copiesIn(scope, loading)) {
+    const anchor = anchorOf(name, copy);
+    for (const specifier in copy.entries) {
+      const best = shorter(
+        shortest.get(find(anchor)) ?? anchor,
+        shortest.get(find(specifier)) ?? specifier
+      );
+      union(anchor, specifier);
+      shortest.set(find(anchor), best);
     }
+  }
   return specifier => shortest.get(find(specifier)) ?? npmPackageOf(specifier);
 }
 
+const shorter = (a: ExternalName, b: ExternalName): ExternalName =>
+  b.length < a.length || (b.length === a.length && compareStrings(b, a) < 0) ? b : a;
+
 function declaresLibrary(scope: DeepReadonly<shareScope>, loading: readonly StoredCopy[]): boolean {
-  for (const [name, copy] of copiesIn(scope, loading))
-    if (copy.dense && npmPackageOf(name) !== name) return true;
-  return false;
+  const isLibrary = (name: ExternalName, copies: readonly DeepReadonly<SharedVersionMeta>[]) =>
+    npmPackageOf(name) !== name && copies.some(copy => copy.dense);
+  return (
+    loading.some(([name, copy]) => isLibrary(name, [copy])) ||
+    Object.entries(scope).some(([name, external]) =>
+      external.versions.some(version => isLibrary(name, version.remotes))
+    )
+  );
 }
 
 // A flat copy is at least its npm package: an older core bundles flat mappings together, with shared chunks.
