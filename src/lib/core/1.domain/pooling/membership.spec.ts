@@ -2,7 +2,7 @@ import type { SharedExternal, shareScope } from 'lib/core/1.domain';
 import { mockVersionRemote } from 'lib/testing/domain/externals/version.mock';
 import { packageOfIn } from 'lib/core/1.domain/externals/specifier';
 import {
-  buildPools as buildPoolsWith,
+  buildPools,
   type LabelledCopy,
   pooledPackagesWith,
   type PoolMember,
@@ -24,9 +24,6 @@ const ext = (remotes: { remote: string; pool?: string }[]): SharedExternal => ({
 
 const scope = (entries: Record<string, { remote: string; pool?: string }[]>): shareScope =>
   Object.fromEntries(Object.entries(entries).map(([name, rs]) => [name, ext(rs)]));
-
-// Each scope with its own package rule, as `planElection` builds it.
-const buildPools = (record: shareScope) => buildPoolsWith(record, packageOfIn(record));
 
 const shape = (pools: Map<PoolName, PoolMember[]>): [PoolName, string[]][] =>
   [...pools.entries()].map(([name, members]) => [name, members.map(m => m.name)]);

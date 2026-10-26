@@ -24,8 +24,7 @@ export function planElection(scope: DeepReadonly<shareScope>, poolable: boolean)
   )
     return { pools: new Map(), stripped: new Map(), labelledAlone: [], packageOf: packageOfIn({}) };
 
-  const packageOf = packageOfIn(scope);
-  const { pools, labelledAlone } = buildPools(scope, packageOf);
+  const { pools, labelledAlone, packageOf } = buildPools(scope);
   const pooled = new Set([...pools.values()].flatMap(members => members.map(m => m.name)));
   const stripped = new Map<ExternalName, SharedExternal>();
   for (const [name, external] of Object.entries(scope))

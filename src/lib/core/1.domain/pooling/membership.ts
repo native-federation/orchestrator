@@ -1,5 +1,5 @@
 import type { ExternalName, SharedExternal, shareScope } from 'lib/core/1.domain';
-import type { PackageOf } from 'lib/core/1.domain/externals/specifier';
+import { type PackageOf, packageOfIn } from 'lib/core/1.domain/externals/specifier';
 import type { DeepReadonly } from 'lib/utils/deep-readonly';
 import { compareStrings } from 'lib/utils/compare-strings';
 import { unionFind } from 'lib/utils/union-find';
@@ -16,6 +16,7 @@ export type Membership = {
   pools: Map<PoolName, PoolMember[]>;
   // In scope order.
   labelledAlone: ExternalName[];
+  packageOf: PackageOf;
 };
 
 // A copy the record doesn't hold yet: its external and its `pool` label.
@@ -70,7 +71,7 @@ function labelledComponents(
 
 export function buildPools(
   sharedExternals: DeepReadonly<shareScope>,
-  packageOf: PackageOf
+  packageOf: PackageOf = packageOfIn(sharedExternals)
 ): Membership {
   const labelsOf = labelsIn(sharedExternals);
   // Unique without suffixing: a label belongs to exactly one component, so two pools never pick the same one.
@@ -86,7 +87,7 @@ export function buildPools(
       );
     }
   }
-  return { pools, labelledAlone };
+  return { pools, labelledAlone, packageOf };
 }
 
 // The packages `buildPools` pools once `copies` are stored in the scope.
