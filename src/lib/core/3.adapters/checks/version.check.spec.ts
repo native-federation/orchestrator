@@ -2,6 +2,7 @@ import { ForVersionChecking } from 'lib/core/2.app/driving-ports/for-version-che
 import { createVersionCheck } from './version.check';
 import semverSatisfies from 'semver/functions/satisfies';
 import semverCompare from 'semver/functions/compare';
+import semverValid from 'semver/functions/valid';
 /**
  *   === VERSION RULES ===
  *   ^               = patch AND minor can be higher
@@ -279,8 +280,8 @@ describe('versionCheck', () => {
     });
   });
 
-  // Both checks are memoized per instance; a repeated (or reversed) call must still return what semver
-  // itself returns, so each pair is asked twice. `compare` parses loosely, as `semverCompare(a, b, true)`.
+  // The checks are memoized per instance; a repeated (or reversed) call must still return what semver
+  // itself returns, so each question is asked twice. `compare` parses loosely, as `semverCompare(a, b, true)`.
   describe('memoization', () => {
     const versions = ['1.2.3', 'v1.2.3', '1.2.4-rc.1', '1.2.4', '2.0.0-beta.0', '2.0.0'];
     const ranges = ['^1.2.3', '~1.2.3', '>=1.2.4-rc.0 <2.0.0', '1.2.3', '^2.0.0-beta.0', '*'];
@@ -292,6 +293,12 @@ describe('versionCheck', () => {
             expect(versionCheck.isCompatible(version, range), `${version} ${range}`).toBe(
               semverSatisfies(version, range)
             );
+    });
+
+    it('should answer isValidSemver exactly as semver valid does, on every repeat', () => {
+      for (let round = 0; round < 2; round++)
+        for (const version of [...versions, ...ranges, '', 'invalid'])
+          expect(versionCheck.isValidSemver(version), version).toBe(semverValid(version) !== null);
     });
 
     it('should answer compare exactly as a loose semver compare does, on every repeat', () => {

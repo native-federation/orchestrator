@@ -12,10 +12,13 @@ const createVersionCheck = (): ForVersionChecking => {
     if (!hit) parsed.set(v, (hit = new SemVer(v, true)));
     return hit;
   };
+  const valid = new Map<string, boolean>();
   const satisfied = new Map<string, Map<string, boolean>>();
   return {
     isValidSemver: function (version: string) {
-      return semverValid(version) !== null;
+      let hit = valid.get(version);
+      if (hit === undefined) valid.set(version, (hit = semverValid(version) !== null));
+      return hit;
     },
     isCompatible: function (version: string, range: string) {
       let byVersion = satisfied.get(range);
