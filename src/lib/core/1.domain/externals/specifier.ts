@@ -36,7 +36,7 @@ export function packageOfIn(
   for (const [name, copy] of copiesIn(scope, loading))
     for (const specifier in copy.entries) union(anchorOf(name, copy), specifier);
 
-  const shortest = new Map<string, ExternalName>();
+  const shortest = new Map<ExternalName, ExternalName>();
   for (const [name, copy] of copiesIn(scope, loading))
     for (const member of [anchorOf(name, copy), ...Object.keys(copy.entries)]) {
       const root = find(member);
@@ -57,7 +57,7 @@ function declaresLibrary(scope: DeepReadonly<shareScope>, loading: readonly Stor
   return false;
 }
 
-// A flat copy joins its npm name: an older core bundles flat mappings together, with shared chunks.
+// A flat copy is at least its npm package: an older core bundles flat mappings together, with shared chunks.
 const anchorOf = (name: ExternalName, copy: DeepReadonly<SharedVersionMeta>): ExternalName =>
   copy.dense ? name : npmPackageOf(name);
 
