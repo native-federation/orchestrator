@@ -236,7 +236,7 @@ describe('packageOfIn', () => {
       return record;
     };
     const anchor = ({ name, copy }: Drawn) => (copy.dense ? name : npmPackageOf(name));
-    const run = (property: fc.IProperty<[Drawn[]]> | fc.IProperty<[Drawn[], Drawn[]]>) =>
+    const run = <T extends unknown[]>(property: fc.IProperty<T>) =>
       fc.assert(property, { seed: 1, numRuns: 2000 });
 
     it('puts every record whole in one package', () => {

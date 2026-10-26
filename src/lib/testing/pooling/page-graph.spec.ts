@@ -1,4 +1,4 @@
-import type { DenseSharedInfo, ImportMap, RemoteEntry, SharedExternal } from 'lib/core/1.domain';
+import type { ImportMap, RemoteEntry, RemoteSharedInfo, SharedExternal } from 'lib/core/1.domain';
 import { mockVersionRemote } from '../domain/externals/version.mock';
 import { findIncoherentRemotes, findSplitRemotes, packageOfInScope } from './no-tear';
 import {
@@ -16,7 +16,7 @@ const info = (
   packageName: string,
   entries: string[],
   { bundle, version = '1.0.0' }: { bundle?: string; version?: string } = {}
-): DenseSharedInfo =>
+): RemoteSharedInfo =>
   ({
     packageName,
     version,
@@ -25,11 +25,11 @@ const info = (
     strictVersion: false,
     ...(bundle && { bundle }),
     entries: Object.fromEntries(entries.map(s => [s, file(s)])),
-  }) as DenseSharedInfo;
+  }) as RemoteSharedInfo;
 
 const entry = (
   name: string,
-  shared: DenseSharedInfo[],
+  shared: RemoteSharedInfo[],
   chunks?: Record<string, string[]>
 ): RemoteEntry =>
   ({
@@ -341,7 +341,7 @@ describe('pageTears', () => {
   // `sort` importing `t` crosses packages. Scoping `t` alone for r leaves the global `sort` binding the shell's
   // `t`: the double instance a shared `pool` label (or core's `.package()`, one record) prevents.
   it('names a consumer-scope leak between nested declared libraries', () => {
-    const declared = (version?: string) => [
+    const declared = (version?: string): RemoteSharedInfo[] => [
       { ...info('@s/c/t', ['@s/c/t'], { version }), dense: true },
       { ...info('@s/c/t/sort', ['@s/c/t/sort'], { version }), dense: true },
     ];
