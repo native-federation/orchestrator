@@ -3,7 +3,7 @@ import { buildPools, type PoolMember, type PoolName } from './membership';
 import { hasPoolResults, scopeHasPoolState } from './pool-state';
 import { withoutPoolResults } from './records';
 import type { DeepReadonly } from 'lib/utils/deep-readonly';
-import { type PackageOf, packageOfIn } from '../externals/specifier';
+import { type PackageOf, npmPackageOf } from '../externals/specifier';
 
 export type ElectionPlan = {
   pools: Map<PoolName, PoolMember[]>;
@@ -22,7 +22,7 @@ export function planElection(scope: DeepReadonly<shareScope>, poolable: boolean)
     !Object.values(scope).some(external => external.dirty) ||
     !scopeHasPoolState(scope)
   )
-    return { pools: new Map(), stripped: new Map(), labelledAlone: [], packageOf: packageOfIn({}) };
+    return { pools: new Map(), stripped: new Map(), labelledAlone: [], packageOf: npmPackageOf };
 
   const { pools, labelledAlone, packageOf } = buildPools(scope);
   const pooled = new Set([...pools.values()].flatMap(members => members.map(m => m.name)));

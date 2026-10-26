@@ -8,9 +8,8 @@ import { dep, remote, shape, SCOPE } from '../harness/portfolio';
  * `@shared/components`, so a remote whose serving build lacks one library would run all of them from its own
  * build.
  *
- * A dense package deeper than its npm name is served as its own package only while every copy of it on the
- * page, and every copy of anything under it, is dense with exactly that name; otherwise it is grouped by npm
- * name, as before. See docs/version-resolver.md §"One build per package".
+ * Records that share a specifier merge into one package, named by the shortest name; see
+ * docs/version-resolver.md §"One build per package".
  */
 const C = '@shared/components';
 const TABLE = `${C}/table`;

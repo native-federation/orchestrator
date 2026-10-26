@@ -2,7 +2,7 @@ import type { SharedExternal, SharedVersion, SharedVersionAction } from 'lib/cor
 import { mockVersionRemote } from 'lib/testing/domain/externals/version.mock';
 import { buildOf, copiesByRemote } from './builds';
 import type { PoolMember } from './membership';
-import { packageOfIn } from 'lib/core/1.domain/externals/specifier';
+import { npmPackageOf } from 'lib/core/1.domain/externals/specifier';
 
 /**
  * What one remote's build ships, read off the stored record. The election and the dynamic gate both read
@@ -40,7 +40,7 @@ const member = (
 });
 
 const buildFor = (owner: string, members: PoolMember[]) =>
-  buildOf(owner, copiesByRemote(members).get(owner)!, packageOfIn({}));
+  buildOf(owner, copiesByRemote(members).get(owner)!, npmPackageOf);
 
 describe('a build read from the record', () => {
   // A record the orchestrator never writes itself: b lists `x` twice, and only the second row carries

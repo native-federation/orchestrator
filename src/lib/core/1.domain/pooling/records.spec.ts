@@ -5,7 +5,7 @@ import { createVersionCheck } from 'lib/core/3.adapters/checks/version.check';
 import { elect } from './election';
 import type { PoolMember } from './membership';
 import { memberRecord, renamedRecords } from './records';
-import { packageOfIn } from 'lib/core/1.domain/externals/specifier';
+import { npmPackageOf } from 'lib/core/1.domain/externals/specifier';
 
 /**
  * The records the init step writes are computed here, before any write, and nothing here may change what it
@@ -54,7 +54,7 @@ describe('memberRecord', () => {
     const before = structuredClone(members);
     const election = elect({
       members,
-      packageOf: packageOfIn({}),
+      packageOf: npmPackageOf,
       acceptsTag: createAcceptsTag(isCompatible, compare),
       compare,
       latestFirst: false,
@@ -80,7 +80,7 @@ describe('memberRecord', () => {
         for (const meta of version.remotes) meta.cached = true;
     const election = elect({
       members,
-      packageOf: packageOfIn({}),
+      packageOf: npmPackageOf,
       acceptsTag: createAcceptsTag(isCompatible, compare),
       compare,
       latestFirst: false,
@@ -138,7 +138,7 @@ describe('memberRecord of a package whose copies ship different entrypoints', ()
     const pool = members();
     const election = elect({
       members: pool,
-      packageOf: packageOfIn({}),
+      packageOf: npmPackageOf,
       acceptsTag: createAcceptsTag(isCompatible, compare),
       compare,
       latestFirst: false,
@@ -244,7 +244,7 @@ describe('a remote that leaves the pool for its family', () => {
     for (const order of [members, [...members].reverse()]) {
       const election = elect({
         members: order,
-        packageOf: packageOfIn({}),
+        packageOf: npmPackageOf,
         acceptsTag: createAcceptsTag(isCompatible, compare),
         compare,
         latestFirst: false,
