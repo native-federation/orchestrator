@@ -1,7 +1,7 @@
-import { claimTable, claimsByPackage, committedClaims, versionClaims, type Claim } from './claims';
+import { claimTable, committedClaims, versionClaims, type Claim } from './claims';
 import { GLOBAL_SCOPE, type SharedExternal } from './external.contract';
 import type { SharedVersion, SharedVersionAction, SharedVersionMeta } from './version.contract';
-import { packageOfIn } from './specifier';
+import { groupByPackage, packageOfIn } from './specifier';
 
 // No dense copy anywhere: the npm-name rule.
 const byName = packageOfIn({});
@@ -248,7 +248,10 @@ describe('versionClaims', () => {
   });
 });
 
-describe('claimsByPackage', () => {
+describe('claims grouped by package', () => {
+  const claimsByPackage = (claims: Map<string, Claim>, packageOf: typeof byName) =>
+    groupByPackage(claims, ([specifier]) => specifier, packageOf);
+
   // Package -> its specifiers in bucket order, each with the tag it is claimed at.
   const buckets = (claims: Map<string, Claim>) =>
     Object.fromEntries(

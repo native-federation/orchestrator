@@ -6,7 +6,7 @@ import {
   type RemoteName,
 } from 'lib/core/1.domain';
 import {
-  owningPackage,
+  npmPackageOf,
   type PackageOf,
   type Specifier,
 } from 'lib/core/1.domain/externals/specifier';
@@ -70,9 +70,8 @@ export function packageOfAsShipped(copies: Iterable<ShippedCopy>): PackageOf {
   };
   for (const { packageName, dense, specifiers } of copies)
     for (const specifier of specifiers)
-      union(specifier, dense ? packageName : (owningPackage(specifier) ?? specifier));
-  return specifier =>
-    find(parent.has(specifier) ? specifier : (owningPackage(specifier) ?? specifier));
+      union(specifier, dense ? packageName : npmPackageOf(specifier));
+  return specifier => find(parent.has(specifier) ? specifier : npmPackageOf(specifier));
 }
 
 // Every file the entries publish, by URL, and per remote where its own code lives and what it imports.
@@ -121,7 +120,7 @@ function indexPage({ entries, scopeUrls = {}, importsOf = () => [] }: PageInput)
         ];
         const root = info.dense
           ? specifier === info.packageName
-          : owningPackage(specifier) === undefined;
+          : npmPackageOf(specifier) === specifier;
         files.set(at(file), {
           build: entry.name,
           pkg,
@@ -301,10 +300,7 @@ function faultsOf(
   return nonEmpty({
     stitched: listed(stitched),
     torn: listed(internals, pkg => !skip.has(pkg)),
-    twice: listed(
-      urls,
-      specifier => !skip.has(packages.get(specifier) ?? owningPackage(specifier) ?? specifier)
-    ),
+    twice: listed(urls, specifier => !skip.has(packages.get(specifier) ?? npmPackageOf(specifier))),
     unresolved,
   });
 }

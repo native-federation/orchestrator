@@ -47,7 +47,7 @@ type Subpool = { owner: RemoteName; remotes: RemoteName[] };
 type Pool = ElectionInput & {
   shipped: Map<RemoteName, Copy[]>;
   builds: Map<RemoteName, Build>;
-  packages: Map<RemoteName, Map<string, PackageCopy | null>>;
+  packages: Map<RemoteName, Map<ExternalName, PackageCopy | null>>;
   // In record order: the order remotes first appear in the pool's versions.
   remotes: RemoteName[];
   servesAt: (remote: RemoteName, tags: SpecifierTags) => boolean;
@@ -60,7 +60,7 @@ type State = {
   globalTags: SpecifierTags;
   globalRemotes: Set<RemoteName>;
   // The packages the winner does not ship that the global tags publish.
-  extensions: Set<string>;
+  extensions: Set<ExternalName>;
   subpools: Subpool[];
   pending: RemoteName[];
 };
@@ -241,8 +241,8 @@ function packageCopies(
   owner: RemoteName,
   copies: readonly Copy[],
   packageOf: PackageOf
-): Map<string, PackageCopy | null> {
-  const packages = new Map<string, PackageCopy | null>();
+): Map<ExternalName, PackageCopy | null> {
+  const packages = new Map<ExternalName, PackageCopy | null>();
   for (const copy of copies)
     for (const s of copy.specifiers) {
       const pkg = packageOf(s);
@@ -257,12 +257,12 @@ function packageCopies(
 // Per package the remotes ship and the global tags do not pin: the copy chosen to publish it, or null when
 // they ship it at two tags.
 function offers(pool: Pool, globalTags: SpecifierTags, remotes: RemoteName[]) {
-  const candidates = new Map<string, (PackageCopy | null)[]>();
+  const candidates = new Map<ExternalName, (PackageCopy | null)[]>();
   for (const owner of remotes)
     for (const [pkg, copy] of pool.packages.get(owner)!)
       if (globalTags.pinnedTag(pkg) === undefined)
         candidates.set(pkg, [...(candidates.get(pkg) ?? []), copy]);
-  const offered = new Map<string, PackageCopy | null>();
+  const offered = new Map<ExternalName, PackageCopy | null>();
   for (const [pkg, copies] of candidates)
     offered.set(pkg, oneTag(copies) ? coveringCopy(copies) : null);
   return offered;

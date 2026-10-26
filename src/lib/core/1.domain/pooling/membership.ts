@@ -2,6 +2,7 @@ import type { ExternalName, SharedExternal, shareScope } from 'lib/core/1.domain
 import type { PackageOf } from 'lib/core/1.domain/externals/specifier';
 import type { DeepReadonly } from 'lib/utils/deep-readonly';
 import { compareStrings } from 'lib/utils/compare-strings';
+import { unionFind } from 'lib/utils/union-find';
 
 // Unique per share scope: the most-declared of the labels merged into the pool.
 export type PoolName = string;
@@ -19,26 +20,6 @@ export type Membership = {
 
 // A copy the record doesn't hold yet: its external and its `pool` label.
 export type LabelledCopy = { name: ExternalName; pool?: string };
-
-// Iterative path halving: no stack growth in the browser.
-function unionFind() {
-  const parent = new Map<string, string>();
-  const find = (node: string): string => {
-    for (let up = parent.get(node); up !== undefined; up = parent.get(node)) {
-      const grand = parent.get(up);
-      if (grand === undefined) return up;
-      parent.set(node, grand);
-      node = grand;
-    }
-    return node;
-  };
-  const union = (a: string, b: string): void => {
-    const rootA = find(a);
-    const rootB = find(b);
-    if (rootA !== rootB) parent.set(rootB, rootA);
-  };
-  return { find, union };
-}
 
 // A label is one node across every remote: the label is the pool's identity.
 // NUL-separated so a label can never alias an external.
