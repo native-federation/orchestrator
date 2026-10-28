@@ -145,4 +145,33 @@ describe('initNodeFederation', () => {
 
     expect(mockNodeLoader.setMap).toHaveBeenCalled();
   });
+  // Flat is core's default output (`denseExternals` off); it used to reach the domain without `entries`.
+  it('inits from flat remote entries and serves the host its own copy', async () => {
+    const flat = (outFileName: string) => ({
+      packageName: '@fw/core',
+      outFileName,
+      singleton: true,
+      strictVersion: false,
+      requiredVersion: '^17.0.0',
+      version: '17.0.0',
+    });
+    await writeJson(hostEntryPath, {
+      name: '__NF-HOST__',
+      exposes: [],
+      shared: [flat('_fw_core.host.js')],
+    });
+    await writeJson(remoteEntryPath, {
+      name: 'team/remote-a',
+      exposes: [{ key: './Hello', outFileName: 'hello.mjs' }],
+      shared: [flat('_fw_core.remote.js')],
+    });
+
+    await initNodeFederation(manifestPath, {
+      hostRemoteEntry: pathToFileURL(hostEntryPath).href,
+      loadModuleFn: vi.fn(),
+    });
+
+    const map = mockNodeLoader.setMap.mock.calls.at(-1)![0];
+    expect(map.imports['@fw/core']).toMatch(/\/host\/_fw_core\.host\.js$/);
+  });
 });

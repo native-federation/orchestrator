@@ -59,7 +59,7 @@ const HOST_INSTANCES_GLOBAL = '__NF_HOST_INSTANCES__';
 const buildNodeAdapters = (config: ConfigContract): DrivingContract => ({
   versionCheck: createVersionCheck(),
   manifestProvider: createFsManifestProvider(),
-  remoteEntryProvider: createFsRemoteEntryProvider(),
+  remoteEntryProvider: createFsRemoteEntryProvider(config),
   remoteInfoRepo: createRemoteInfoRepository(config),
   scopedExternalsRepo: createScopedExternalsRepository(config),
   sharedExternalsRepo: createSharedExternalsRepository(config),
