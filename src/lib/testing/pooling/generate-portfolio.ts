@@ -461,7 +461,7 @@ export function toRemoteEntry(
       const to = spec.relabel!.to;
       return to === 'alias' ? `p${p}-alias` : `p${to % spec.pools.length}`;
     };
-    // An older dense build groups siblings by npm name, as core's name rule did.
+    // A dense build that declares nothing groups siblings by npm name, as core's name rule does.
     let npmGroup: RemoteSharedInfo | undefined;
     members.forEach((drawn, m) => {
       if (drawn === null) return;

@@ -309,12 +309,18 @@ describe('packageOfIn', () => {
       );
     });
 
-    // The 4.8.0 grouping whenever no build declares a library: no page changes until one does.
-    it('is the npm-name rule itself when no dense record sits deeper than its npm name', () => {
+    // The 4.8.0 grouping whenever no build declares a library: no page changes until one does. An unrelated
+    // declared library (`z/q`) takes the merging path, so this holds without the fast path that skips it.
+    it('is the npm-name rule itself for every package no dense record sits deeper in', () => {
+      const unrelated: Drawn = {
+        name: 'z/q',
+        copy: meta({ remote: 'z', entries: ['z/q'], dense: true }),
+      };
       run(
         fc.property(copies, drawn => {
           const atNpmDepth = drawn.filter(d => !d.copy.dense || npmPackageOf(d.name) === d.name);
-          expect(PATHS.map(packageOfIn(toScope(atNpmDepth)))).toEqual(PATHS.map(npmPackageOf));
+          const packageOf = packageOfIn(toScope([...atNpmDepth, unrelated]));
+          expect(PATHS.map(packageOf)).toEqual(PATHS.map(npmPackageOf));
         })
       );
     });

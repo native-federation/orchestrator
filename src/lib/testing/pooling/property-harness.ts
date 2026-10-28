@@ -43,11 +43,13 @@ export const run = <T>(
   seedOffset: number,
   arbitrary: fc.Arbitrary<T>,
   numRuns: number,
-  predicate: (v: T) => Promise<void>
+  predicate: (v: T) => Promise<void>,
+  examples: T[] = []
 ) =>
   fc.assert(fc.asyncProperty(arbitrary, predicate), {
     seed: SEED + seedOffset,
     numRuns: Math.ceil(numRuns * SCALE),
+    examples: examples.map(example => [example]),
   });
 
 export const scopeUrlsOf = (entries: RemoteEntry[]) =>

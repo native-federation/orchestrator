@@ -171,8 +171,8 @@ describe('toRemoteEntry with siblings', () => {
       0
     ).shared.map(s => [s.packageName, Object.keys(s.entries), s.bundle]);
 
-  // What core's name rule gave before `.package()`: one dense record per npm name.
-  it('groups siblings into their npm package in an older dense build', () => {
+  // Core's name rule for what no `.package()` declares: one dense record per npm name.
+  it('groups siblings into their npm package in a dense build that declares nothing', () => {
     expect(siblings({})).toEqual([
       ['@p0/m0', ['@p0/m0'], undefined],
       ['@p0/c', ['@p0/c/m1', '@p0/c/m1/sub', '@p0/c/m2'], undefined],

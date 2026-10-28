@@ -4,10 +4,10 @@ import { pageTears, type ImportsOf } from 'lib/testing/pooling/page-graph';
 import { packageOfIn } from 'lib/core/1.domain/externals/specifier';
 
 /**
- * Libraries a build declares with `.package()` publishes as dense externals of their own (`@s/c/t`, `@s/c/u`) are packages of
- * their own, through init, pooling, a runtime load and the next page. The test provider hands entries over as
- * intake leaves them, so `dense` is set here. Every page runs the portfolio's no-tear oracle, which groups by
- * what each build bundled, not by the rule under test.
+ * Libraries a build declares with `.package()` publish as dense externals of their own (`@s/c/t`, `@s/c/u`)
+ * and are packages of their own, through init, pooling, a runtime load and the next page. The test provider
+ * hands entries over as intake leaves them, so `dense` is set here. Every page runs the portfolio's no-tear
+ * oracle, which groups by what each build bundled, not by the rule under test.
  */
 
 let storage = 0;
@@ -15,8 +15,8 @@ let storage = 0;
 const url = (remote: string) => `http://${remote}/`;
 const file = (s: string) => `${s.replace(/^@/, '').replace(/\//g, '_')}.js`;
 
-// One library as a build that declares it publishes it, or (`dense: false`) as an older core's flat entry. `strict` pins
-// that version with a strict `~` range.
+// One library as a build that declares it publishes it, or (`dense: false`) as an older core's flat entry.
+// `strict` pins that version with a strict `~` range.
 const lib = (
   name: string,
   o: { with?: string[]; pool?: string; dense?: boolean; version?: string; strict?: string } = {}
@@ -315,7 +315,7 @@ describe('dense records that share a specifier', () => {
     });
   });
 
-  it('merges a family into an older dense record at npm depth that lists one of it', async () => {
+  it('merges a family into an undeclared dense record at npm depth that lists one of it', async () => {
     const { init, load, packages } = await pages([
       entry('shell', lib('@s/c', { with: [T] })),
       entry('mfe', lib(T, { with: [SORT] }), lib(U)),
@@ -406,10 +406,12 @@ describe('dense records that share a specifier', () => {
     expect(scopeOf(load.merged, 'late')).toMatchObject({ [T]: at('late', T), [U]: at('late', U) });
   });
 
-  it('serves a pooled load itself when the libraries it merges sit at two tags on the map', async () => {
-    // A flat build ships its npm package at one tag, here the shell's. The tag oracle is off: once late's
-    // record merges `t` and `u`, it reads mfe's committed `u@1.2.0` beside the shell's `t@1.0.0` as one package at
-    // two tags, a page the load cannot change and the next init regroups. `pageTears` still checks the files.
+  it('serves a pooled load itself when the libraries it merges sit at two tags on the map (control)', async () => {
+    // A control beside the case above: the tags already disagree, so the gate refused this load before it
+    // checked which builds serve a merged package. A flat build ships its npm package at one tag, here the
+    // shell's. The tag oracle is off: once late's record merges `t` and `u`, it reads mfe's committed `u@1.2.0`
+    // beside the shell's `t@1.0.0` as one package at two tags, a page the load cannot change and the next init
+    // regroups. `pageTears` still checks the files.
     const { load } = await pooledLoad(
       [lib(T, { pool: 'ui', dense: false }), lib(U, { pool: 'ui', dense: false })],
       { version: '1.2.0' },

@@ -3,9 +3,10 @@ import { dep, remote, shape, SCOPE } from '../harness/portfolio';
 
 /**
  * Libraries deeper than their npm name. A build that declares `@shared/components/table` and
- * `@shared/components/collapse` as packages with core's `.package()` publishes each dense under that name. Grouped by npm name, both would be the package
- * `@shared/components`, so a remote whose serving build lacks one library would run all of them from its own
- * build.
+ * `@shared/components/collapse` as packages with core's `.package()` publishes each dense under that name.
+ * Grouped by npm name, both would be the package `@shared/components`, so a remote whose serving build lacks
+ * one library would run all of them from its own build. A runtime load is observable only under
+ * es-module-shims (`shim: true`), so the runtime case runs there.
  *
  * Records that share a specifier merge into one package, named by the shortest name; see
  * docs/version-resolver.md §"One build per package".

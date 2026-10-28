@@ -155,8 +155,8 @@ describe('servingBuildOf', () => {
     expect(serving(['@s/c/t', library])).toEqual<ServingBuild>({ remote: 'z', tag: '1.0.0' });
   });
 
-  // An older dense build names its record by npm name (`@s/c`) for the one library it ships, `@s/c/b`. Taken
-  // as the root's row, it was the only candidate, and the flat build's `@s/c/a` was mapped nowhere.
+  // A dense build that declares nothing names its record by npm name (`@s/c`) for the one library it ships,
+  // `@s/c/b`. Taken as the root's row, it was the only candidate, and the flat build's `@s/c/a` was mapped nowhere.
   it('ranks every share row when the record named after the package lacks its root', () => {
     const result = serving(
       ['@s/c', external(version('share', [copy('old', ['@s/c/b'], { dense: true })]))],
