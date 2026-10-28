@@ -91,7 +91,7 @@ A strict copy loaded at runtime joins its tag's row behind the basis, so `getSha
 committed map serves. A load that brings a row the tag lacked can lead it, though: the root at a tag that had only
 secondaries, or a row of an external earlier in the record. A `getShared` call on that same page then offers the
 loader's build while the committed map still serves the old one; the next page serves both from the loader's build.
-A load from an older build can also merge libraries the strict scope served as separate packages (see
+A load from an older build can also merge declared packages the strict scope served separately (see
 [One build per package](./version-resolver.md#one-build-per-package)): on that page, `getShared` can offer such a
 specifier from another build or drop it, while the committed map keeps serving it from its own.
 A remote the import map runs from its own build instead has no place in `ShareInfos`, which offers one location

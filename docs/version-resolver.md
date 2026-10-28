@@ -143,6 +143,10 @@ Import maps provide **scopes** as solutions for dependency management:
 
 The order of precedence is based on the specificity of the scope, with the global import having the lowest precedence.
 
+So don't serve a remote under the host's URL path when the host has a scope of its own (for example a named
+shareScope, the `strict` scope or a `singleton: false` external): a specifier the remote's own scope doesn't map
+falls back to the host's scope before the global imports, so the remote binds the host's copy.
+
 > **Note:** With the "shareScope" grouping (3rd example), the import map is being tricked in loading the same file for 2 different scopes. This is handled by the orchestrator internally and provides a way to share an external over a select set of scopes. More on this later.
 
 ## Shared vs Scoped Dependencies
@@ -257,18 +261,20 @@ Which specifiers make up a package follows the records the builds publish. A rec
 lists are one package, as are a flat entry and its npm name; records that share any of these merge, named by the
 shortest name among them. A specifier no record lists goes where its npm name went. So `@angular/core/testing`
 belongs to `@angular/core`, flat or dense, while a build that declares `.package('@shared/components/table')`
-and `.package('@shared/components/collapse')` (core's `mappingsFromWorkspace()`, with `denseExternals`)
+and `.package('@shared/components/collapse')` (`mappingsFromWorkspace()` in core 4.9+, with `denseExternals`)
 publishes two records, which are two packages. A build that ships them together, flat or dense under
 `@shared/components`, merges both into `@shared/components`. Each build declares for itself, so remotes can
-disagree: an estate that moves to `.package()` one remote at a time runs older builds beside newer ones. Per
-share scope every copy counts, whichever row or tag it sits in. A runtime load counts its own copies too, so a
-load whose records merge libraries never takes them from two builds: it follows the build that serves them all,
-or else runs the merged package from its own build; the next init decides it again. Packages that import each
-other, npm packages and declared libraries alike, run from one build only when they share a `pool` label (see
-[Enabling pooling](#enabling-pooling)); declare libraries that import each other in one `pool`, or one of them
-can load twice. A declared package gets no bundle of its own: code no mapping owns sits in a chunk, which a
-remote runs once for each build it takes the packages from, so state shared between packages belongs in a
-mapping.
+disagree: an estate that moves to `.package()` one remote at a time runs older builds beside newer ones.
+
+Per share scope every copy counts, whichever row or tag it sits in. A runtime load counts its own copies too, so a
+load whose records merge packages never takes them from two builds: it follows the build that serves them all,
+or else runs the merged package from its own build; the next init decides it again.
+
+Packages that import each other, npm packages and declared packages alike, run from one build only when they
+share a `pool` label (see [Enabling pooling](#enabling-pooling)); put declared packages that import each other in
+one `pool`, or one of them can load twice. A declared package gets no bundle of its own: code no mapping owns sits
+in a chunk, which a remote runs once for each build it takes the packages from, so state shared between packages
+belongs in a mapping.
 
 - A **pooled** package takes its pool's winner, the build its election made global, when the winner has a copy
   in the primary's share row (or in any share row of the package when the primary has none). It is not ranked
@@ -414,16 +420,19 @@ with `sessionStorage`, in a new tab), not on a warm page.
 The host's files can import a specifier its build never declared: an entrypoint the build skipped, or one a
 shared package loads through a dynamic `import()` that the build's unused-dependency pruning does not see. Init
 reads only what builds declare, never what their files import, so it cannot tell this from an entrypoint nobody
-needs. The host is never repointed and never borrows the specifier from another build, even one at the same tag,
-so the host's import of it does not resolve. It comes in two shapes:
+needs. Whether the host's import of it resolves depends on the shape:
 
 - **The host lacks a secondary entrypoint a remote ships** (`@fw/core/rxjs-interop` beside the host's
   `@fw/core`). The global map leaves the specifier unmapped, and the remote that ships it runs the package —
   pooled, its whole family — from its own build.
 - **The host ships a secondary entrypoint without its root** (`@fw/core/rxjs-interop`, no `@fw/core`). Pooled,
   the root stays unmapped and the host's import of it unresolved; the remotes run the root off the map. Unpooled,
-  the serving remote publishes its root globally and the host's secondary moves to the host's own scope, where
-  its import of the root binds the remote's: no build ships both, so the host runs the package from two builds.
+  a copy without the root never serves the package, so a remote that ships the root serves it. When that build also
+  ships the host's secondary, the map takes the secondary from it too: the host runs the whole package from one
+  build that isn't its own. When it doesn't, the host's secondary moves to the host's own scope. In the
+  global scope its import of the root binds the remote's, so the host runs the package from two builds; in a
+  named shareScope or the `strict` scope the root is mapped only in the remote's scope, and the host's import of
+  it does not resolve.
 
 Neither is repaired at runtime; the fix is in the host's build:
 
@@ -652,7 +661,7 @@ flowchart TD
     G1 --> G2{Does EVERY copy accept<br/>the shared version?}
     G2 -->|Yes| G3[Action: SKIP<br/>the whole version uses the shared one]
     G2 -->|No| G4{Any copy rejecting it<br/>with strictVersion: true?}
-    G4 -->|No| G6[Action: SKIP<br/>Use incompatible shared version + warning]
+    G4 -->|No| G6[Action: SKIP<br/>Use incompatible shared version]
     G4 -->|Yes| G5{strictExternalCompatibility enabled?}
     G5 -->|Yes| G7[Throw NFError]
     G5 -->|No| G8[Split the version per copy:<br/>the rejecting ones SCOPE,<br/>the rest SKIP]
@@ -1531,7 +1540,7 @@ The `strictVersion` flag applies to shared dependencies (`singleton: true`) and 
 
 ### strictVersion: false (default)
 
-The user will be notified about the incompatible version, but the resolver will skip this version since another version was already shared in the scope.
+The resolver will skip this version without a warning, since another version was already shared in the scope.
 
 ```json
 // MFE needs ui-lib ~4.16.0, but team-a scope shares 4.17.0
@@ -1544,7 +1553,7 @@ The user will be notified about the incompatible version, but the resolver will 
   "strictVersion": false
 }
 
-// Result: SKIP + WARNING
+// Result: SKIP
 // The MFE will use the shared 4.17.0 version URL from team-a scope
 // May cause runtime compatibility issues
 ```
@@ -1673,6 +1682,11 @@ sequenceDiagram
     Storage-->>Resolver: Cached versions found per scope
     Resolver->>Page2: Prioritize cached versions within scopes
 ```
+
+A warm page keeps what it has downloaded. When a runtime load gives a remote its own copy of a package, the next
+pages keep that copy: a downloaded copy costs no extra download, so a warm init does not decide the package again
+the way a cold init would. Clearing storage (`clearStorage`, an orchestrator version change or, with
+`sessionStorage`, a new tab) lets the next init decide it from scratch.
 
 ## Remote Cache Override Behavior
 

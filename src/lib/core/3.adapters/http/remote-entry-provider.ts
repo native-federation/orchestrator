@@ -28,6 +28,7 @@ const createRemoteEntryProvider = (config: ModeConfig): ForProvidingRemoteEntrie
 
   const normalizeRemoteEntry = (raw: RawRemoteEntry): RemoteEntry => {
     const marked = markDense(raw.shared ?? []);
+    // Flat entries carry no package declaration, so densifying groups them by npm name.
     const shared = config.feature.convertFlatSharedInfo
       ? densifyExternals(marked, new Map())
       : toDenseSharedInfoFormat(marked);

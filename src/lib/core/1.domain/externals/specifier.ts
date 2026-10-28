@@ -32,7 +32,7 @@ export function packageOfIn(
   // A fast path, measured: without a declared library the records group by npm name anyway.
   if (!declaresLibrary(scope, loading)) return npmPackageOf;
 
-  // Each root keeps its component's shortest name.
+  // Each component keeps its shortest name.
   const { find, union } = unionFind();
   const shortest = new Map<ExternalName, ExternalName>();
   for (const [name, copy] of copiesIn(scope, loading)) {
