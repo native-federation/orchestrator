@@ -40,7 +40,7 @@ export function servingBuildOf(
   accepts: AcceptsTag
 ): ServingBuild | undefined {
   if (externals.length === 0) return undefined;
-  // An older dense build names a record by npm name without shipping that root, so the name alone is no root.
+  // A dense build names the record of secondaries it does not declare by npm name, without shipping that root.
   const rootRows = shareRows(externals.find(([name]) => name === pkg)?.[1]).filter(row =>
     row.remotes.some(copy => pkg in copy.entries)
   );
