@@ -30,6 +30,8 @@ export type SharedVersionMeta = {
   bundle?: string;
   // The `pool` label this remote declared, as it declared it. Pooling's input, never rewritten.
   pool?: string;
+  // See `RemoteSharedInfo`.
+  dense?: true;
   entries: Record<string, string>;
   // The build of the subpool this copy runs in, when pooling placed it in one rather than on the version's
   // own basis. Lives here rather than on `SharedVersion` because two consumers of the *same tag* can

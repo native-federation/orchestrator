@@ -6,6 +6,7 @@ import type { ForProvidingRemoteEntries } from 'lib/core/2.app/driving-ports/for
 import { NFError } from 'lib/core/native-federation.error';
 import type { ModeConfig } from 'lib/core/2.app/config/mode.contract';
 import { verifyIntegrity } from 'lib/utils/integrity';
+import { markDense } from 'lib/core/1.domain/remote-entry/mark-dense';
 import {
   densifyExternals,
   toDenseSharedInfoFormat,
@@ -26,9 +27,10 @@ const createRemoteEntryProvider = (config: ModeConfig): ForProvidingRemoteEntrie
   };
 
   const normalizeRemoteEntry = (raw: RawRemoteEntry): RemoteEntry => {
+    const marked = markDense(raw.shared ?? []);
     const shared = config.feature.convertFlatSharedInfo
-      ? densifyExternals(raw.shared ?? [])
-      : toDenseSharedInfoFormat(raw.shared ?? []);
+      ? densifyExternals(marked, new Map())
+      : toDenseSharedInfoFormat(marked);
     return { ...raw, shared } as RemoteEntry;
   };
 

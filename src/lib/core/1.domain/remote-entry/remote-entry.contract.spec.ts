@@ -53,17 +53,20 @@ describe('remote-entry.contract normalization', () => {
 
   describe('denseExternals ON (densifyExternals)', () => {
     it('[+denseChunking OFF] converts an inline @nf-internal chunk to dense, keyed by full name', () => {
-      const [result] = densifyExternals([CHUNK()]);
+      const [result] = densifyExternals([CHUNK()], new Map());
 
       expect(result).toEqual(DENSE_CHUNK);
       expect(result).not.toHaveProperty('outFileName');
     });
 
     it('[+denseChunking OFF] never groups distinct chunks under a shared @nf-internal parent', () => {
-      const result = densifyExternals([
-        flat('@nf-internal/a-chunk', { outFileName: 'a.js' }),
-        flat('@nf-internal/b-chunk', { outFileName: 'b.js' }),
-      ]);
+      const result = densifyExternals(
+        [
+          flat('@nf-internal/a-chunk', { outFileName: 'a.js' }),
+          flat('@nf-internal/b-chunk', { outFileName: 'b.js' }),
+        ],
+        new Map()
+      );
 
       expect(result).toHaveLength(2);
       expect(result.map(e => e.packageName)).toEqual([
@@ -76,10 +79,13 @@ describe('remote-entry.contract normalization', () => {
 
     it('[+denseChunking ON] passes a chunk-free shared array through the grouping logic only', () => {
       // No @nf-internal entries: the chunk branch must never fire; real externals still densify.
-      const result = densifyExternals([
-        flat('@ng/common', { outFileName: 'common.js' }),
-        flat('@ng/common/http', { outFileName: 'http.js' }),
-      ]);
+      const result = densifyExternals(
+        [
+          flat('@ng/common', { outFileName: 'common.js' }),
+          flat('@ng/common/http', { outFileName: 'http.js' }),
+        ],
+        new Map()
+      );
 
       // Secondary entrypoint folds into its parent package.
       expect(result).toHaveLength(1);
@@ -91,11 +97,14 @@ describe('remote-entry.contract normalization', () => {
     });
 
     it('groups real externals while keeping an inline chunk separate and ungrouped', () => {
-      const result = densifyExternals([
-        flat('@ng/common', { outFileName: 'common.js' }),
-        CHUNK(),
-        flat('@ng/common/http', { outFileName: 'http.js' }),
-      ]);
+      const result = densifyExternals(
+        [
+          flat('@ng/common', { outFileName: 'common.js' }),
+          CHUNK(),
+          flat('@ng/common/http', { outFileName: 'http.js' }),
+        ],
+        new Map()
+      );
 
       expect(result).toHaveLength(2);
       const chunk = result.find(e => e.packageName === '@nf-internal/x-chunk');
@@ -108,7 +117,7 @@ describe('remote-entry.contract normalization', () => {
     });
 
     it('passes already-dense entries through unchanged', () => {
-      const [result] = densifyExternals([DENSE_CHUNK]);
+      const [result] = densifyExternals([DENSE_CHUNK], new Map());
       expect(result).toBe(DENSE_CHUNK);
     });
   });
@@ -140,7 +149,7 @@ describe('remote-entry.contract normalization', () => {
   });
 
   it('both branches densify an inline chunk to an identical shape (denseExternals-agnostic)', () => {
-    const [viaDensify] = densifyExternals([CHUNK()]);
+    const [viaDensify] = densifyExternals([CHUNK()], new Map());
     const [viaToDense] = toDenseSharedInfoFormat([CHUNK()]);
 
     expect(viaDensify).toEqual(viaToDense);

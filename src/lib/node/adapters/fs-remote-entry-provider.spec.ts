@@ -52,6 +52,34 @@ describe('createFsRemoteEntryProvider', () => {
     expect(result.url).toBe('http://canonical/remoteEntry.json');
   });
 
+  // Node serves the raw entry without normalizing it, but marks it as the browser does.
+  it('marks the shared entries the remote entry publishes dense', async () => {
+    const meta = {
+      singleton: true,
+      strictVersion: true,
+      requiredVersion: '^1.0.0',
+      version: '1.0.0',
+    };
+    readBytes.mockResolvedValue(
+      new TextEncoder().encode(
+        JSON.stringify({
+          name: 'r',
+          shared: [
+            { ...meta, packageName: '@s/c/table', entries: { '@s/c/table': 'table.js' } },
+            { ...meta, packageName: 'rxjs', outFileName: 'rxjs.js' },
+          ],
+        })
+      ).buffer
+    );
+
+    const result = await createFsRemoteEntryProvider().provide('/local/remoteEntry.json');
+
+    expect(result.shared.map(s => [s.packageName, s.dense])).toEqual([
+      ['@s/c/table', true],
+      ['rxjs', undefined],
+    ]);
+  });
+
   it('wraps fs/fetch errors in NFError', async () => {
     readBytes.mockRejectedValue(new Error('ENOENT'));
 
