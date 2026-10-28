@@ -404,7 +404,10 @@ To minimise tears the resolver also uses coverage as a **tiebreaker** when choos
 the shared version: among candidates that tie on the extra-downloads heuristic, it prefers the one whose
 copies together leave the fewest specifiers uncovered across the versions it would skip. It counts every copy of
 the candidate's tag, as the serving build is decided later and may be any of them. A decisive
-extra-downloads winner is never overridden, and an exact tie still keeps the highest version.
+extra-downloads winner is never overridden. The order is: fewest extra downloads, then the version a warm page
+already shares (keeping it saves a download), then coverage, then the highest version. So a newer non-strict
+version an added remote ships is adopted on a cold init (after `clearStorage`, an orchestrator version change or,
+with `sessionStorage`, in a new tab), not on a warm page.
 
 #### When the host's build lacks an entrypoint
 
@@ -1636,9 +1639,10 @@ is why it prices copies rather than versions. Pricing the whole version would ch
 dedup for a download they never make, and can prefer a candidate that is dearer once resolved.
 
 > **Consequence.** A large group of remotes sitting on an older tag can win over a smaller group on a newer
-> one — that is what "fewest extra downloads" asks for. Ties break toward the newest tag, and they are common,
-> since a version costs only its objectors and prices are therefore small. Host precedence (`remoteEntry` of
-> the host) and `profile.latestSharedExternal` are decided before this objective runs and are unaffected.
+> one — that is what "fewest extra downloads" asks for. Ties break toward the version already shared, then the
+> newest tag, and they are common, since a version costs only its objectors and prices are therefore small. Host
+> precedence (`remoteEntry` of the host) and `profile.latestSharedExternal` are decided before this objective
+> runs and are unaffected.
 >
 > Two approximations, both deliberate. A cached copy is priced at zero, so the same portfolio can elect
 > different equal-cost winners assembled cold and assembled incrementally. And the sum leaves the *winner's*
@@ -1677,6 +1681,21 @@ When a remote is already present in the cache, the orchestrator will skip the re
 ### Override Flag Detection
 
 The orchestrator checks when a remote should be overridden or skipped by comparing the provided remoteName with the cached remoteName. If they match, the requested `remoteEntry.json` URL will be compared with the cached `remoteEntry.json` URL. By default, on initialization, the remote will be skipped if the URLs match and overridden if the URLs differ. A dynamic init (`initRemoteEntry`) never overrides a remote that is already initialized, since the committed import map cannot drop that remote's imports: a URL the remote was initialized from is not fetched again, and another URL for it is omitted with a warning.
+
+### Remotes a manifest no longer lists
+
+By default (`profile.mergeManifests: true`) storage keeps what every page's init stored: pages may pass their
+own manifests (an SSR or multi-page host), and a remote loaded through `initRemoteEntry` stays stored for the
+next page. Each page elects from what it has stored. A remote removed from every manifest therefore stays
+stored, and served, until `clearStorage`, an orchestrator version change or, with `sessionStorage`, the end of
+the tab.
+
+With `profile.mergeManifests: false`, an init removes every stored remote its manifest doesn't list, remotes
+loaded through `initRemoteEntry` included, and chooses again the shared versions they took part in. It is meant
+for apps that pass one manifest on every page. Such an app calls `initRemoteEntry` for a dynamic remote before
+loading its modules on every page, which fetches it again. With per-page manifests, each page removes the other
+pages' remotes and fetches them again on the next navigation, and tabs on different manifests remove each
+other's remotes from a shared `localStorage`.
 
 ### Skip Cached Remotes Configuration
 

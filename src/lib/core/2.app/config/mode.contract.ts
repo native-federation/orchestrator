@@ -4,6 +4,7 @@ export type ModeProfileConfig = {
   overrideCachedRemotes: 'always' | 'never' | 'init-only';
   overrideCachedRemotesIfURLMatches: boolean;
   cacheTag?: string;
+  mergeManifests?: boolean;
 };
 
 export type ModeFeatureConfig = {

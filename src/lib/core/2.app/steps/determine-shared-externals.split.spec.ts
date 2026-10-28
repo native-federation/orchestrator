@@ -359,6 +359,109 @@ describe('determine: splitting a version on election', () => {
 
       expect(rows()).toEqual(['17.1.1:share:[a1,b1]', '17.0.0:skip:[c1]']);
     });
+
+    // r0 ships a strict 1.0.0 (`~1.0.0`) that r1's `^1.0.0` accepts: a cold init shares r0's 1.0.0, since electing
+    // 1.1.0 would cost r0's own download. Re-marked dirty on a warm init (a dropped or overridden sibling does
+    // that), every copy is cached and costs nothing, so both tags tie; the newer one used to win, scoping r0, or
+    // throwing under strictExternalCompatibility where the cold init passed.
+    describe('a warm re-election', () => {
+      const warmRecord = (r1Entries: Record<string, string> = { 'dep-a': 'a.js' }) => {
+        const shared = version('1.0.0', [
+          { remote: 'r0', req: '~1.0.0', cached: true, entries: { 'dep-a': 'a.js' } },
+        ]);
+        shared.action = 'share';
+        return [
+          version('1.1.0', [
+            { remote: 'r1', req: '^1.0.0', strict: false, cached: true, entries: r1Entries },
+          ]),
+          shared,
+        ];
+      };
+
+      it('keeps the version a cold init shared', async () => {
+        seed(warmRecord());
+
+        await createDetermineSharedExternals(config, adapters)();
+
+        expect(rows()).toEqual(['1.1.0:skip:[r1]', '1.0.0:share:[r0]']);
+      });
+
+      it('does not throw under strictExternalCompatibility', async () => {
+        config.strict.strictExternalCompatibility = true;
+        seed(warmRecord());
+
+        await createDetermineSharedExternals(config, adapters)();
+
+        expect(rows()).toEqual(['1.1.0:skip:[r1]', '1.0.0:share:[r0]']);
+      });
+
+      // r1 also ships dep-a/sub, which 1.0.0 lacks, so coverage favours 1.1.0. A cold init never got that far
+      // (1.1.0 costs r0's download), so the version already shared has to win the warm tie before coverage is
+      // asked, or r0 is scoped and strictExternalCompatibility throws.
+      it('keeps the version already shared before coverage breaks the tie', async () => {
+        config.strict.strictExternalCompatibility = true;
+        seed(warmRecord({ 'dep-a': 'a.js', 'dep-a/sub': 'sub.js' }));
+
+        await createDetermineSharedExternals(config, adapters)();
+
+        expect(rows()).toEqual(['1.1.0:skip:[r1]', '1.0.0:share:[r0]']);
+      });
+
+      // Least downloads: r1 is added on a warm page with a newer non-strict version. Both tags cost no download,
+      // and keeping the cached 7.0.0 saves the new one, so the page keeps 7.0.0 and r1 runs below its range, as
+      // native federation allows a non-strict copy. A cold init, where nothing is cached and
+      // the tie goes to the newest, shares 7.1.0: the newer version is adopted on a cold init.
+      it('keeps the version already shared when an added remote ships a newer non-strict one', async () => {
+        const shared = version('7.0.0', [
+          { remote: 'r0', req: '^7.0.0', strict: false, cached: true },
+        ]);
+        shared.action = 'share';
+        seed([version('7.1.0', [{ remote: 'r1', req: '^7.1.0', strict: false }]), shared]);
+
+        await createDetermineSharedExternals(config, adapters)();
+
+        expect(rows()).toEqual(['7.1.0:skip:[r1]', '7.0.0:share:[r0]']);
+
+        seed([
+          version('7.1.0', [{ remote: 'r1', req: '^7.1.0', strict: false }]),
+          version('7.0.0', [{ remote: 'r0', req: '^7.0.0', strict: false }]),
+        ]);
+        await createDetermineSharedExternals(config, adapters)();
+
+        expect(rows()).toEqual(['7.1.0:share:[r1]', '7.0.0:skip:[r0]']);
+      });
+
+      // The shared 1.1.0 leads the tie, and the skipped 1.0.0 would tear fewer entrypoints (r0's dep-a/sub, which
+      // 1.1.0 lacks): once the version already shared leads, no later tie on tears takes it over.
+      it('keeps the version already shared when it leads a tie against fewer tears', async () => {
+        const shared = version('1.1.0', [
+          {
+            remote: 'r1',
+            req: '^1.0.0',
+            strict: false,
+            cached: true,
+            entries: { 'dep-a': 'a.js' },
+          },
+        ]);
+        shared.action = 'share';
+        seed([
+          shared,
+          version('1.0.0', [
+            {
+              remote: 'r0',
+              req: '^1.0.0',
+              strict: false,
+              cached: true,
+              entries: { 'dep-a': 'a.js', 'dep-a/sub': 'sub.js' },
+            },
+          ]),
+        ]);
+
+        await createDetermineSharedExternals(config, adapters)();
+
+        expect(rows()).toEqual(['1.1.0:share:[r1]', '1.0.0:skip:[r0]']);
+      });
+    });
   });
 
   it("keeps the winner's share row when it is the second row at its tag", async () => {

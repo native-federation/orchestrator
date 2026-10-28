@@ -57,6 +57,8 @@ export type PortfolioOptions = {
   strict?: boolean;
   /** `profile.latestSharedExternal`. */
   latestSharedExternal?: boolean;
+  /** `profile.mergeManifests`. */
+  mergeManifests?: boolean;
   /**
    * Remote info, scoped externals and chunks real on the namespace too, rather than mocked off `scopeUrls`:
    * needed to init from remote entries and to `reload`.
@@ -92,6 +94,7 @@ export const portfolio = (
     assertNoTear: checkTear = true,
     strict = false,
     latestSharedExternal = false,
+    mergeManifests = true,
     realRepositories = false,
     scope = GLOBAL_SCOPE,
     decideEveryScope = false,
@@ -115,6 +118,7 @@ export const portfolio = (
     const config: ConfigContract = mockConfig();
     config.strict.strictExternalCompatibility = strict;
     config.profile.latestSharedExternal = latestSharedExternal;
+    config.profile.mergeManifests = mergeManifests;
     const adapters: DrivingContract = mockAdapters();
     const storageConfig = { storage: globalThisStorageEntry(storage), clearStorage };
     adapters.versionCheck = createVersionCheck();
@@ -291,7 +295,8 @@ export const portfolio = (
   /**
    * The init flow, start to commit. `entries` are served as the manifest's remotes, a host among them
    * appended last as get-remote-entries appends the configured host; a remote this page already has
-   * cached is skipped, as on a real warm page. Without entries it elects whatever was seeded.
+   * cached is skipped, as on a real warm page. Without entries the manifest lists every stored remote, as a warm
+   * page's does, and the init elects whatever was seeded.
    */
   const runInit = async (entries: RemoteEntry[] = []): Promise<ImportMap> => {
     if (entries.length > 0 && !realRepositories)
@@ -299,7 +304,15 @@ export const portfolio = (
     for (const entry of entries) publish(entry);
     const host = entries.find(e => hosts.includes(e.name));
     config.hostRemoteEntry = host ? { name: host.name, url: host.url } : false;
-    const manifest = Object.fromEntries(entries.filter(e => e !== host).map(e => [e.name, e.url]));
+    const manifest =
+      entries.length > 0
+        ? Object.fromEntries(entries.filter(e => e !== host).map(e => [e.name, e.url]))
+        : Object.fromEntries(
+            Object.entries(adapters.remoteInfoRepo.getAll()).map(([name, info]) => [
+              name,
+              `${info.scopeUrl}remoteEntry.json`,
+            ])
+          );
 
     installed = undefined;
     await createInitFlow({ flow: drivers, adapters, config })(manifest);

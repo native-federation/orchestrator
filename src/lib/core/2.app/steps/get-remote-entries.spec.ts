@@ -21,10 +21,7 @@ import {
 describe('createGetRemoteEntries', () => {
   let getRemoteEntries: ForGettingRemoteEntries;
   let config: any;
-  let adapters: Pick<
-    DrivingContract,
-    'remoteEntryProvider' | 'manifestProvider' | 'remoteInfoRepo' | 'sse'
-  >;
+  let adapters: DrivingContract;
 
   beforeEach(() => {
     config = mockConfig();
@@ -282,6 +279,111 @@ describe('createGetRemoteEntries', () => {
       expect(adapters.remoteEntryProvider.provide).toHaveBeenCalledWith(
         `${mockScopeUrl_MFE1({ folder: 'v2', file: 'remoteEntry.json' })}`
       );
+    });
+  });
+
+  describe('dropping remotes the manifest does not list (profile.mergeManifests: false)', () => {
+    beforeEach(() => {
+      config.profile.mergeManifests = false;
+    });
+
+    const stored = (remotes: Record<string, string>) => {
+      adapters.remoteInfoRepo.getAll = vi.fn(() =>
+        Object.fromEntries(
+          Object.entries(remotes).map(([name, scopeUrl]) => [name, { scopeUrl, exposes: [] }])
+        )
+      );
+      adapters.remoteInfoRepo.tryGet = vi.fn(name =>
+        Optional.of(name in remotes ? { scopeUrl: remotes[name]!, exposes: [] } : undefined)
+      ) as any;
+    };
+
+    const expectEvicted = (names: string[]) => {
+      expect(adapters.remoteInfoRepo.remove.mock.calls.map(([n]) => n)).toEqual(names);
+      expect(adapters.scopedExternalsRepo.remove.mock.calls.map(([n]) => n)).toEqual(names);
+      expect(adapters.sharedChunksRepo.remove.mock.calls.map(([n]) => n)).toEqual(names);
+      if (names.length === 0)
+        expect(adapters.sharedExternalsRepo.removeFromAllScopes).not.toHaveBeenCalled();
+      else
+        expect(adapters.sharedExternalsRepo.removeFromAllScopes).toHaveBeenCalledWith(
+          new Set(names)
+        );
+    };
+
+    it('should drop a stored remote the manifest no longer lists', async () => {
+      stored({ 'team/mfe1': mockScopeUrl_MFE1(), 'team/mfe2': mockScopeUrl_MFE2() });
+
+      const actual = await getRemoteEntries({
+        'team/mfe2': `${mockScopeUrl_MFE2()}remoteEntry.json`,
+      });
+
+      expectEvicted(['team/mfe1']);
+      expect(actual).toEqual([]);
+      expect(config.log.debug).toHaveBeenCalledWith(
+        1,
+        `Removing stored remotes the manifest doesn't list: team/mfe1.`
+      );
+    });
+
+    // Pages may each pass their own manifest, and storage merges them on purpose.
+    it('should neither read nor drop stored remotes when merging manifests', async () => {
+      config.profile.mergeManifests = true;
+      stored({ 'team/mfe1': mockScopeUrl_MFE1(), 'team/mfe2': mockScopeUrl_MFE2() });
+
+      await getRemoteEntries({ 'team/mfe2': `${mockScopeUrl_MFE2()}remoteEntry.json` });
+
+      expect(adapters.remoteInfoRepo.getAll).not.toHaveBeenCalled();
+      expectEvicted([]);
+    });
+
+    it('should drop nothing when the manifest lists every stored remote', async () => {
+      stored({ 'team/mfe1': mockScopeUrl_MFE1() });
+
+      await getRemoteEntries(mockManifest());
+
+      expectEvicted([]);
+    });
+
+    it('should keep the host, which the manifest does not list itself', async () => {
+      config.hostRemoteEntry = { name: 'team/host', url: `${mockScopeUrl_HOST()}remoteEntry.json` };
+      stored({ 'team/host': mockScopeUrl_HOST(), 'team/mfe1': mockScopeUrl_MFE1() });
+
+      await getRemoteEntries({});
+
+      expectEvicted(['team/mfe1']);
+    });
+
+    // prepareRemoteEntry stores a remote under its fetched name when it differs from the manifest key; matching
+    // keys alone would drop and refetch it on every warm init.
+    it('should keep a remote stored under another name than its manifest key', async () => {
+      stored({ 'team/mfe1': mockScopeUrl_MFE1() });
+
+      await getRemoteEntries({ 'other/name': `${mockScopeUrl_MFE1()}remoteEntry.json` });
+
+      expectEvicted([]);
+    });
+
+    it('should keep a listed remote whose fetch fails', async () => {
+      config.profile.overrideCachedRemotesIfURLMatches = true;
+      stored({ 'team/mfe1': mockScopeUrl_MFE1() });
+      adapters.remoteEntryProvider.provide = vi.fn(() => Promise.reject(new NFError('404')));
+
+      await getRemoteEntries({ 'team/mfe1': `${mockScopeUrl_MFE1()}remoteEntry.json` });
+
+      expectEvicted([]);
+    });
+
+    // Storage is written by commit-changes only, so a later failing step persists no drop.
+    it('should not commit any repository', async () => {
+      stored({ 'team/mfe1': mockScopeUrl_MFE1() });
+
+      await getRemoteEntries({});
+
+      expectEvicted(['team/mfe1']);
+      expect(adapters.remoteInfoRepo.commit).not.toHaveBeenCalled();
+      expect(adapters.scopedExternalsRepo.commit).not.toHaveBeenCalled();
+      expect(adapters.sharedExternalsRepo.commit).not.toHaveBeenCalled();
+      expect(adapters.sharedChunksRepo.commit).not.toHaveBeenCalled();
     });
   });
 
