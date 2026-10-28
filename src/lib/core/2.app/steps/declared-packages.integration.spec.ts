@@ -375,6 +375,59 @@ describe('dense records that share a specifier', () => {
     expect(scopeOf(next, 'mfe2')).toEqual({ [T]: at('mfe2', T), [SORT]: at('mfe2', SORT) });
   });
 
+  // A pooled scope where the shell serves `t` and mfe serves `u`, and an older flat build loads both. Its flat
+  // copies merge them into `@s/c`, so the map serves late's one package from two builds.
+  const pooledLoad = (
+    late: RemoteSharedInfo[],
+    mfe: { version?: string } = {},
+    assertNoTear = true
+  ) => {
+    const pooled = (name: string, ...shared: RemoteSharedInfo[]) =>
+      entry(name, lib('@s/fw', { pool: 'ui' }), ...shared);
+    return pages(
+      [
+        pooled('shell', lib(T, { pool: 'ui' })),
+        pooled('mfe', lib(U, { pool: 'ui', ...mfe })),
+        pooled('late', ...late),
+      ],
+      { assertNoTear }
+    );
+  };
+
+  it('serves a pooled load itself when the map serves the libraries it merges from two builds', async () => {
+    // Every tag agrees, but no build shipped `t` and `u` together: following the map would tear late's `@s/c`.
+    const { load } = await pooledLoad([
+      lib(T, { pool: 'ui', dense: false }),
+      lib(U, { pool: 'ui', dense: false }),
+    ]);
+
+    expect(load.actions[T]!.action).toBe('scope');
+    expect(load.actions[U]!.action).toBe('scope');
+    expect(scopeOf(load.merged, 'late')).toMatchObject({ [T]: at('late', T), [U]: at('late', U) });
+  });
+
+  it('serves a pooled load itself when the libraries it merges sit at two tags on the map', async () => {
+    // A flat build ships its npm package at one tag, here the shell's. The tag oracle is off: once late's
+    // record merges `t` and `u`, it reads mfe's committed `u@1.2.0` beside the shell's `t@1.0.0` as one package at
+    // two tags, a page the load cannot change and the next init regroups. `pageTears` still checks the files.
+    const { load } = await pooledLoad(
+      [lib(T, { pool: 'ui', dense: false }), lib(U, { pool: 'ui', dense: false })],
+      { version: '1.2.0' },
+      false
+    );
+
+    expect(load.actions[T]!.action).toBe('scope');
+    expect(load.actions[U]!.action).toBe('scope');
+  });
+
+  it('lets a pooled load that declares the libraries apart follow the map for both', async () => {
+    const { load } = await pooledLoad([lib(T, { pool: 'ui' }), lib(U, { pool: 'ui' })]);
+
+    expect(load.actions[T]!.action).toBe('skip');
+    expect(load.actions[U]!.action).toBe('skip');
+    expect(load.merged.scopes ?? {}).toEqual({});
+  });
+
   it('keeps a record that lists only entrypoints under its name with them', async () => {
     // `material/table` publishes `material/table/x` and no root of that name.
     const table = (version?: string) => ({

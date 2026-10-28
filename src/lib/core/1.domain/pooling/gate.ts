@@ -161,12 +161,28 @@ export function judgeRemote(
   );
   const binding = offMapBinding(copies, view, globalTags);
   if (binding) return { cause: 'uncovered', ...binding };
+  // A package the map serves from two builds is a combination no build shipped, whatever the tags say: the
+  // load's own copies can merge libraries the committed builds keep apart.
+  if (servedSplit(copies, view)) return { cause: 'uncovered', unshipped: true };
   // The map's tags must be a combination one build shipped: agreeing is its own witness, otherwise one
   // committed build must be.
   if (agrees(copies, globalTags)) return 'global';
   if (missing !== undefined) return { cause: 'uncovered', specifier: missing };
   if (unwitnessedGap(copies, globalTags, view.builds.values()) === undefined) return 'global';
   return { cause: 'uncovered', unshipped: true };
+}
+
+function servedSplit(copies: readonly Copy[], view: CommittedView): boolean {
+  const loaded = new Set(copies.flatMap(copy => copy.specifiers.map(view.packageOf)));
+  const servedBy = new Map<ExternalName, RemoteName>();
+  for (const [specifier, { remote }] of view.global) {
+    const pkg = view.packageOf(specifier);
+    if (!loaded.has(pkg)) continue;
+    const first = servedBy.get(pkg);
+    if (first === undefined) servedBy.set(pkg, remote);
+    else if (first !== remote) return true;
+  }
+  return false;
 }
 
 type Binding = { owner: RemoteName; specifier: Specifier; tag: VersionName };
