@@ -245,7 +245,9 @@ ships (see [One build per package](#one-build-per-package) for the build that th
 #### One build per package
 
 A package is its primary external plus any flat secondary externals (`@angular/core/testing` reported as an
-external of its own). Per share scope — global and each named shareScope — every package is served from
+external of its own). The primary is the external named after the package, as long as it ships that root: an older
+dense build names a record by npm name for the secondaries it ships (`@angular/material` listing only
+`@angular/material/sort`), and such a record is no primary. Per share scope — global and each named shareScope — every package is served from
 **one build**, picked after the shared versions are determined and stored as `servingBuild` on every
 external of the package in that scope. A dynamic load that opens a package the committed map does not serve
 stores the loaded remote as its serving build, as an election would (see
@@ -254,14 +256,17 @@ stores the loaded remote as its serving build, as an election would (see
 Which specifiers make up a package follows the records the builds publish. A record's name and the specifiers it
 lists are one package, as are a flat entry and its npm name; records that share any of these merge, named by the
 shortest name among them. A specifier no record lists follows its npm name. So `@angular/core/testing` belongs to
-`@angular/core`, flat or dense, while with core's `build: 'paths'` and `denseExternals`, `@shared/components/table`
-and `@shared/components/collapse` are published as two records and are two packages. A build that ships them
-together, flat or dense under `@shared/components`, merges both into `@shared/components`. Per share scope every
-copy counts, whichever row or tag it sits in. A runtime load counts its own copies too, so a load whose records
+`@angular/core`, flat or dense, while a build that declares `.package('@shared/components/table')` and
+`.package('@shared/components/collapse')` (core's `mappingsFromWorkspace()`, with `denseExternals`) publishes two
+records, which are two packages. A build that ships them together, flat or dense under `@shared/components`, merges
+both into `@shared/components`. Each build declares for itself, so remotes can disagree: an estate that moves to
+`.package()` one remote at a time runs older builds beside newer ones. Per share scope every copy counts, whichever row or tag it sits in. A runtime load counts its own copies too, so a load whose records
 merge libraries never takes them from two builds: it follows the build that serves them all, or else runs the
 merged package from its own build; the next init decides it again. Packages that import each other, npm packages
 and declared libraries alike, run from one build only when they share a `pool` label (see
-[Enabling pooling](#enabling-pooling)).
+[Enabling pooling](#enabling-pooling)). A declared package gets no bundle of its own: code no mapping owns sits in
+a chunk, which a remote runs once for each build it takes the packages from, so state shared between packages
+belongs in a mapping.
 
 - A **pooled** package takes its pool's winner, the build its election made global, when the winner has a copy
   in the primary's share row (or in any share row of the package when the primary has none). It is not ranked

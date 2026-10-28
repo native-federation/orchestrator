@@ -4,7 +4,7 @@ import { npmPackageOf, packageOfIn, SpecifierTags } from './specifier';
 import type { SharedVersionAction, SharedVersionMeta } from './version.contract';
 import { packageOfAsShipped } from 'lib/testing/pooling/page-graph';
 
-// One stored copy: `dense` when its remoteEntry published the external dense (`'paths'` mappings with
+// One stored copy: `dense` when its remoteEntry published the external dense (declared mappings with
 // `denseExternals`, or any dense entry of an older core); flat copies are stored under their specifier.
 type Stored = { remote: string; entries: string[]; dense?: boolean; action?: SharedVersionAction };
 
@@ -63,7 +63,7 @@ const BY_NAME = {
   'rxjs/operators': 'rxjs',
 };
 
-// `paths` remotes: each library a dense external of its own, deeper than its npm name.
+// Declaring remotes: each library a dense external of its own, deeper than its npm name.
 const paths = (remote: string, ...libs: [string, string[]][]): Record<string, Stored[]> =>
   Object.fromEntries(libs.map(([pkg, entries]) => [pkg, [{ remote, entries, dense: true }]]));
 

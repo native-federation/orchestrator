@@ -4,7 +4,7 @@ import { pageTears, type ImportsOf } from 'lib/testing/pooling/page-graph';
 import { packageOfIn } from 'lib/core/1.domain/externals/specifier';
 
 /**
- * Libraries a `'paths'` build publishes as dense externals of their own (`@s/c/t`, `@s/c/u`) are packages of
+ * Libraries a build declares with `.package()` publishes as dense externals of their own (`@s/c/t`, `@s/c/u`) are packages of
  * their own, through init, pooling, a runtime load and the next page. The test provider hands entries over as
  * intake leaves them, so `dense` is set here. Every page runs the portfolio's no-tear oracle, which groups by
  * what each build bundled, not by the rule under test.
@@ -15,7 +15,7 @@ let storage = 0;
 const url = (remote: string) => `http://${remote}/`;
 const file = (s: string) => `${s.replace(/^@/, '').replace(/\//g, '_')}.js`;
 
-// One library as a `'paths'` build publishes it, or (`dense: false`) as an older core's flat entry. `strict` pins
+// One library as a build that declares it publishes it, or (`dense: false`) as an older core's flat entry. `strict` pins
 // that version with a strict `~` range.
 const lib = (
   name: string,
@@ -226,8 +226,8 @@ describe('dense records that share a specifier', () => {
     return { p, init, load, packages };
   }
 
-  it('serves nested libraries exact keys publish apart as packages of their own', async () => {
-    // Exact `paths` keys: `t` and `t/sort` are two dense records, so two packages, as `u` and `u/y` are.
+  it('serves nested libraries declared apart as packages of their own', async () => {
+    // Declared apart, `t` and `t/sort` are two dense records, so two packages, as `u` and `u/y` are.
     const { init, load, packages } = await pages([
       entry('shell', lib(T), lib(SORT)),
       entry('mfe', lib(T), lib(SORT), lib(U), lib(Y)),

@@ -139,7 +139,8 @@ describe('pooling properties: dynamic loads (generated portfolios)', { timeout: 
   // 101 with flat and dense builds in one pool: a specifier can be an entry of the loaded remote's package
   // and a package of its own in the committed map, so what serves the load is read per specifier, not per
   // external. In a named share scope the load maps in its own scope, with no `imports` to inherit.
-  // Builds that declare their entrypoints packages (`build: 'paths'`) are in the mix too.
+  // Builds that declare their entrypoints packages (`.package()`) are in the mix too, and sibling libraries
+  // under one npm name.
   for (const [offset, shareScope, { mode, loads, runs }] of [
     [107, undefined, pageModes[0]],
     [108, 'team', pageModes[0]],

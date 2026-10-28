@@ -2,9 +2,8 @@ import { test, expect, type Federation } from '../harness/federation';
 import { dep, remote, shape, SCOPE } from '../harness/portfolio';
 
 /**
- * Libraries deeper than their npm name. A workspace whose tsconfig `paths` name libraries like
- * `@shared/components/table` and `@shared/components/collapse` builds each as its own package with core's
- * `build: 'paths'` and publishes it dense under that name. Grouped by npm name, both would be the package
+ * Libraries deeper than their npm name. A build that declares `@shared/components/table` and
+ * `@shared/components/collapse` as packages with core's `.package()` publishes each dense under that name. Grouped by npm name, both would be the package
  * `@shared/components`, so a remote whose serving build lacks one library would run all of them from its own
  * build.
  *
@@ -15,8 +14,8 @@ const C = '@shared/components';
 const TABLE = `${C}/table`;
 const COLLAPSE = `${C}/collapse`;
 
-// One library per package, as a `build: 'paths'` remote publishes it.
-const paths = (version: string) => [
+// One library per package, as a remote that declares them publishes it.
+const declared = (version: string) => [
   dep(TABLE, version, { req: '^1.0.0' }),
   dep(COLLAPSE, version, { req: '^1.0.0' }),
 ];
@@ -51,7 +50,7 @@ test.describe('dense packages deeper than their npm name', () => {
             externals,
             chunking: 'dense',
           }),
-          remote('team/mfe2', SCOPE.mfe2, paths('1.0.1')),
+          remote('team/mfe2', SCOPE.mfe2, declared('1.0.1')),
         ],
         { hostEntry: remote('host', SCOPE.host, [dep(TABLE, '1.0.1', { req: '^1.0.0' })]) }
       );
@@ -65,8 +64,8 @@ test.describe('dense packages deeper than their npm name', () => {
   test('serves a library the host does not import as its own package', async ({ nf }) => {
     await nf.init(
       [
-        remote('team/mfe1', SCOPE.mfe1, paths('1.0.0')),
-        remote('team/mfe2', SCOPE.mfe2, paths('1.0.0')),
+        remote('team/mfe1', SCOPE.mfe1, declared('1.0.0')),
+        remote('team/mfe2', SCOPE.mfe2, declared('1.0.0')),
       ],
       { hostEntry: remote('host', SCOPE.host, [dep(TABLE, '1.0.0')]) }
     );

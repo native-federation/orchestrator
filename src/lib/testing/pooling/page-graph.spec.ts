@@ -337,7 +337,7 @@ describe('pageTears', () => {
     ]);
   });
 
-  // Exact `paths` keys publish `@s/c/t` and `@s/c/t/sort` as two dense records, so they are two packages, and
+  // Declared apart, `@s/c/t` and `@s/c/t/sort` are two dense records, so they are two packages, and
   // `sort` importing `t` crosses packages. Scoping `t` alone for r leaves the global `sort` binding the shell's
   // `t`: the double instance a shared `pool` label (or core's `.package()`, one record) prevents.
   it('names a consumer-scope leak between nested declared libraries', () => {

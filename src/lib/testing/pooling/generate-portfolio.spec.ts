@@ -107,7 +107,7 @@ describe('toRemoteEntry with declared packages', () => {
     ]);
   });
 
-  // `build: 'paths'`: each entrypoint its own dense package, a secondary without its root included.
+  // `.package()` on every mapping: each entrypoint its own dense package, a secondary without its root included.
   it('ships each entrypoint as a package of its own, over flat', () => {
     expect(
       marked({

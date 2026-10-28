@@ -340,7 +340,7 @@ describe('pooledPackagesWith', () => {
 });
 
 describe('a dense library deeper than its npm name', () => {
-  // `'paths'` libraries under one npm name: the label on `@s/c/t` pools it with `@s/fw`, not `@s/c/u`.
+  // Declared libraries under one npm name: the label on `@s/c/t` pools it with `@s/fw`, not `@s/c/u`.
   const library = (name: string, pool?: string): SharedExternal => ({
     dirty: false,
     versions: [
