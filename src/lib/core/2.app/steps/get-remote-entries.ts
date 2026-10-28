@@ -4,7 +4,7 @@ import type {
   RemoteEntryDescriptor,
   RemoteEntryUrl,
 } from 'lib/core/1.domain/remote-entry/manifest.contract';
-import type { RemoteName } from 'lib/core/1.domain/remote/remote-info.contract';
+import type { RemoteInfo, RemoteName } from 'lib/core/1.domain/remote/remote-info.contract';
 import type { ForGettingRemoteEntries } from '../driver-ports/init/for-getting-remote-entries.port';
 import type { DrivingContract } from '../driving-ports/driving.contract';
 import type { LoggingConfig } from '../config/log.contract';
@@ -12,20 +12,30 @@ import { NFError } from 'lib/core/native-federation.error';
 import type { ModeConfig } from '../config/mode.contract';
 import type { HostConfig } from '../config/host.contract';
 import * as _path from 'lib/utils/path';
+import { createRemoveCachedRemoteEntries } from './store-remote-entry';
 
 export function createGetRemoteEntries(
   config: LoggingConfig & ModeConfig & HostConfig,
   ports: Pick<
     DrivingContract,
-    'remoteEntryProvider' | 'manifestProvider' | 'remoteInfoRepo' | 'sse'
+    | 'remoteEntryProvider'
+    | 'manifestProvider'
+    | 'remoteInfoRepo'
+    | 'scopedExternalsRepo'
+    | 'sharedExternalsRepo'
+    | 'sharedChunksRepo'
+    | 'sse'
   >
 ): ForGettingRemoteEntries {
+  const removeCachedRemoteEntries = createRemoveCachedRemoteEntries(ports);
+
   /**
    * Step 1: Fetch the remoteEntry JSON objects:
    *
    * A Manifest or URL to a Manifest is used as the input.  Based on the defined remotes
    * in the manifest, the library will download the remoteEntry.json files which contain the
-   * metadata of the defined remotes (name, exposed modules and required dependencies a.k.a. externals)
+   * metadata of the defined remotes (name, exposed modules and required dependencies a.k.a. externals).
+   * With `profile.mergeManifests: false`, stored remotes the manifest doesn't list are dropped first.
    *
    * @param config
    * @param adapters
@@ -44,6 +54,7 @@ export function createGetRemoteEntries(
         return Promise.reject(new NFError('Failed to fetch manifest'));
       })
       .then(addHostRemoteEntry)
+      .then(dropUnlistedRemotes)
       .then(fetchRemoteEntries)
       .then(removeSkippedRemotes)
       .then(checkForSSE);
@@ -58,6 +69,36 @@ export function createGetRemoteEntries(
       ...manifest,
       [name]: integrity ? { url, integrity } : url,
     };
+  }
+
+  // Here rather than with the overrides in process-remote-entries: an unlisted remote has no fetched entry, and
+  // only this step knows the manifest.
+  function dropUnlistedRemotes(manifest: FederationManifest): FederationManifest {
+    if (config.profile.mergeManifests !== false) return manifest;
+
+    const listedUrls = new Set(
+      Object.values(manifest).map(descriptor => normalizeEntry(descriptor).url)
+    );
+    // A remote fetched under another name than its manifest key is stored under the fetched one.
+    const isListed = (remoteName: RemoteName, info: RemoteInfo) =>
+      Object.hasOwn(manifest, remoteName) || listedUrls.has(storedEntryUrl(info));
+
+    const unlisted = new Set(
+      Object.entries(ports.remoteInfoRepo.getAll())
+        .filter(([remoteName, info]) => !isListed(remoteName, info))
+        .map(([remoteName]) => remoteName)
+    );
+    if (unlisted.size > 0)
+      config.log.debug(
+        1,
+        `Removing stored remotes the manifest doesn't list: ${[...unlisted].join(', ')}.`
+      );
+    removeCachedRemoteEntries(unlisted);
+    return manifest;
+  }
+
+  function storedEntryUrl(info: RemoteInfo): RemoteEntryUrl {
+    return _path.join(info.scopeUrl, 'remoteEntry.json');
   }
 
   function normalizeEntry(descriptor: RemoteEntryDescriptor): {
@@ -103,7 +144,7 @@ export function createGetRemoteEntries(
     ports.remoteInfoRepo.tryGet(remoteName).ifPresent(cachedRemoteInfo => {
       if (
         config.profile.overrideCachedRemotes !== 'never' &&
-        (remoteEntryUrl !== _path.join(cachedRemoteInfo.scopeUrl, 'remoteEntry.json') ||
+        (remoteEntryUrl !== storedEntryUrl(cachedRemoteInfo) ||
           config.profile.overrideCachedRemotesIfURLMatches)
       ) {
         config.log.debug(1, `Overriding existing remote '${remoteName}' with '${remoteEntryUrl}'.`);

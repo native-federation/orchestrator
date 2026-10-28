@@ -444,13 +444,19 @@ describe('pooling properties: redeploys (generated portfolios)', { timeout: TIME
   // Not a cold page of the final portfolio: cold breaks ties by name where warm keeps the stored winner
   // instead; that is no partial re-election. `outcome` leaves `poolWinner` out, which a stale election keeps
   // when a split pool keeps its name, so the winners are compared too.
-  const warmEqualsReelected = async ([spec, redeployed]: [PortfolioSpec, Redeploy[]]) => {
+  const warmEqualsReelected = async (
+    spec: PortfolioSpec,
+    next: RemoteEntry[],
+    mergeManifests = true
+  ) => {
     const rig = openPortfolio({
       host: hostOf(spec),
       latestSharedExternal: spec.latestSharedExternal,
+      strict: spec.strict,
+      mergeManifests,
     });
     await rig.init(toRemoteEntries(spec));
-    const warm = await rig.init(redeployedEntries(spec, redeployed));
+    const warm = await rig.init(next);
     expect(poolNameDrift(warm.record)).toEqual([]);
     expect(strayNames(warm.record)).toEqual([]);
     const reelected = await rig.reelect();
@@ -462,6 +468,7 @@ describe('pooling properties: redeploys (generated portfolios)', { timeout: TIME
       ),
     });
     expect(settled(warm)).toEqual(settled(reelected));
+    return warm;
   };
 
   it('redeploy: a warm init runs and places what re-electing every pool of its state does', () =>
@@ -471,7 +478,51 @@ describe('pooling properties: redeploys (generated portfolios)', { timeout: TIME
         spec => fc.tuple(fc.constant(lenient(spec)), redeployArbitrary(spec))
       ),
       100,
-      warmEqualsReelected
+      async ([spec, redeployed]) => {
+        await warmEqualsReelected(spec, redeployedEntries(spec, redeployed));
+      }
+    ));
+
+  const refusesCold = async (spec: PortfolioSpec, entries: RemoteEntry[]) => {
+    const rig = openPortfolio({
+      host: hostOf(spec),
+      strict: true,
+      latestSharedExternal: spec.latestSharedExternal,
+    });
+    try {
+      await rig.init(entries);
+      return false;
+    } catch {
+      return true;
+    }
+  };
+
+  // A manifest that drops remotes, with `mergeManifests: false`: the warm init drops them, so neither the record
+  // nor the map names them.
+  it('drop: a warm init forgets the remotes its manifest dropped', () =>
+    run(
+      45,
+      portfolioArbitrary({ maxRemotes: 12, labelNoise: true, latestSharedExternal: true }).chain(
+        spec => fc.tuple(fc.constant(spec), fc.subarray(toRemoteEntries(spec), { minLength: 1 }))
+      ),
+      100,
+      async ([spec, kept]) => {
+        const keptNames = new Set(kept.map(e => e.name));
+        const host = hostOf(spec);
+        const all = toRemoteEntries(spec);
+        const next = all.filter(e => keptNames.has(e.name) || e.name === host);
+        const dropped = all.filter(e => !next.includes(e)).map(e => e.name);
+        // A strict portfolio a cold init refuses, before or after the drop, says nothing about the drop.
+        if (spec.strict && ((await refusesCold(spec, all)) || (await refusesCold(spec, next))))
+          return;
+        const warm = await warmEqualsReelected(spec, next, false);
+        const record = JSON.stringify(warm.record);
+        const map = JSON.stringify(warm.importMap);
+        for (const name of dropped) {
+          expect(record).not.toContain(`"${name}"`);
+          expect(map).not.toContain(scopeUrlOf(name));
+        }
+      }
     ));
 });
 

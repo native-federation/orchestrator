@@ -23,9 +23,9 @@ export type StoreRemoteEntry = (
 export type RemoveCachedRemoteEntries = (remoteNames: ReadonlySet<RemoteName>) => void;
 
 /**
- * Evict overridden remotes before their replacements are merged in. Kept out of `storeRemoteEntry`
- * because `removeFromAllScopes` costs a full traversal of the shared-externals graph: the init
- * pipeline evicts its whole override set at once, the dynamic pipeline passes a single name.
+ * Evict stored remotes: overridden ones before their replacements are merged in, and ones the manifest
+ * doesn't list. Kept out of `storeRemoteEntry` because `removeFromAllScopes` costs a full traversal of the
+ * shared-externals graph, so each caller evicts its whole set at once.
  */
 export function createRemoveCachedRemoteEntries(
   ports: Pick<

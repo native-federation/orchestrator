@@ -169,6 +169,7 @@ export function openPortfolio(
     strict?: boolean;
     scope?: string;
     latestSharedExternal?: boolean;
+    mergeManifests?: boolean;
   } = {}
 ) {
   const p = portfolio(
@@ -177,6 +178,7 @@ export function openPortfolio(
       hosts: o.host === undefined ? [] : [o.host],
       strict: o.strict,
       latestSharedExternal: o.latestSharedExternal,
+      mergeManifests: o.mergeManifests,
       ...(o.scope === undefined ? {} : { scope: o.scope }),
       storage: `nf-pooling-property-${namespaces++}`,
       realRepositories: true,

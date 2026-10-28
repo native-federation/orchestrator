@@ -56,6 +56,7 @@ describe('DefaultConfig', () => {
           skipInvalidExternalVersions: false,
           overrideCachedRemotes: 'init-only',
           overrideCachedRemotesIfURLMatches: false,
+          mergeManifests: true,
         },
         feature: {
           convertFlatSharedInfo: false,
