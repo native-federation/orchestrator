@@ -143,9 +143,9 @@ Import maps provide **scopes** as solutions for dependency management:
 
 The order of precedence is based on the specificity of the scope, with the global import having the lowest precedence.
 
-So don't serve a remote under the host's URL path when the host has a scope of its own (a named shareScope, the
-`strict` scope or a `singleton: false` external): a specifier the remote's own scope doesn't map falls back to the
-host's scope before the global imports, so the remote binds the host's copy.
+So don't serve a remote under the host's URL path when the host has a scope of its own (for example a named
+shareScope, the `strict` scope or a `singleton: false` external): a specifier the remote's own scope doesn't map
+falls back to the host's scope before the global imports, so the remote binds the host's copy.
 
 > **Note:** With the "shareScope" grouping (3rd example), the import map is being tricked in loading the same file for 2 different scopes. This is handled by the orchestrator internally and provides a way to share an external over a select set of scopes. More on this later.
 
@@ -420,18 +420,16 @@ with `sessionStorage`, in a new tab), not on a warm page.
 The host's files can import a specifier its build never declared: an entrypoint the build skipped, or one a
 shared package loads through a dynamic `import()` that the build's unused-dependency pruning does not see. Init
 reads only what builds declare, never what their files import, so it cannot tell this from an entrypoint nobody
-needs. Nothing maps the specifier for the host, even where another build ships it at the same tag, so the host's
-import of it resolves only where the map serves its package from another build anyway (the second shape). It
-comes in two shapes:
+needs. Whether the host's import of it resolves depends on the shape:
 
 - **The host lacks a secondary entrypoint a remote ships** (`@fw/core/rxjs-interop` beside the host's
   `@fw/core`). The global map leaves the specifier unmapped, and the remote that ships it runs the package —
   pooled, its whole family — from its own build.
 - **The host ships a secondary entrypoint without its root** (`@fw/core/rxjs-interop`, no `@fw/core`). Pooled,
   the root stays unmapped and the host's import of it unresolved; the remotes run the root off the map. Unpooled,
-  a copy without the root never serves the package, so a remote that ships the root does. When that build also
+  a copy without the root never serves the package, so a remote that ships the root serves it. When that build also
   ships the host's secondary, the map takes the secondary from it too: the host runs the whole package from one
-  build that isn't its own. When no build ships both, the host's secondary moves to the host's own scope. In the
+  build that isn't its own. When it doesn't, the host's secondary moves to the host's own scope. In the
   global scope its import of the root binds the remote's, so the host runs the package from two builds; in a
   named shareScope or the `strict` scope the root is mapped only in the remote's scope, and the host's import of
   it does not resolve.
