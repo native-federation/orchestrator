@@ -9,6 +9,7 @@ import type {
   StorageEntryHandler,
   StorageType,
 } from 'lib/core/2.app/config/storage.contract';
+import { createMockLogHandler } from 'lib/testing/handlers/log.handler';
 
 // In-memory handler so `get` can be exercised without touching real storage.
 const memoryHandler = (data: Record<string, unknown>): StorageEntryHandler =>
@@ -171,7 +172,7 @@ describe('createStorageConfig', () => {
   });
 
   it('publishes the default globalThis storage under the default namespace', () => {
-    createStorageConfig({});
+    createStorageConfig({}, createMockLogHandler());
 
     expect(globalThis.__NF_ORCHESTRATOR__!.storage).toEqual({
       __NATIVE_FEDERATION__: expect.objectContaining({
@@ -182,14 +183,17 @@ describe('createStorageConfig', () => {
   });
 
   it('publishes the configured storage and namespace', () => {
-    createStorageConfig({ storage: sessionStorageEntry, storageNamespace: '__mine__' });
+    createStorageConfig(
+      { storage: sessionStorageEntry, storageNamespace: '__mine__' },
+      createMockLogHandler()
+    );
 
     expect(globalThis.__NF_ORCHESTRATOR__!.storage['__mine__']!.type).toBe('sessionStorage');
   });
 
   it('reports untagged storages as custom', () => {
     const custom: StorageEntryCreator = () => memoryHandler({});
-    createStorageConfig({ storage: custom, storageNamespace: 'ns' });
+    createStorageConfig({ storage: custom, storageNamespace: 'ns' }, createMockLogHandler());
 
     expect(globalThis.__NF_ORCHESTRATOR__!.storage['ns']!.type).toBe('custom');
   });
@@ -198,14 +202,17 @@ describe('createStorageConfig', () => {
     const custom: StorageEntryCreator = Object.assign(() => memoryHandler({}), {
       type: 'localStorage' as const,
     });
-    createStorageConfig({ storage: custom, storageNamespace: 'ns' });
+    createStorageConfig({ storage: custom, storageNamespace: 'ns' }, createMockLogHandler());
 
     expect(globalThis.__NF_ORCHESTRATOR__!.storage['ns']!.type).toBe('localStorage');
   });
 
   it('exposes get unless exposeStorageGetter is false', () => {
-    createStorageConfig({ storageNamespace: 'on' });
-    createStorageConfig({ storageNamespace: 'off', exposeStorageGetter: false });
+    createStorageConfig({ storageNamespace: 'on' }, createMockLogHandler());
+    createStorageConfig(
+      { storageNamespace: 'off', exposeStorageGetter: false },
+      createMockLogHandler()
+    );
 
     expect(globalThis.__NF_ORCHESTRATOR__!.storage['on']!.get).toEqual(expect.any(Function));
     expect(globalThis.__NF_ORCHESTRATOR__!.storage['off']!.get).toBeUndefined();
@@ -218,7 +225,10 @@ describe('createStorageConfig', () => {
   });
 
   it('get reads what the orchestrator committed to the configured storage', () => {
-    const { storage } = createStorageConfig({ storage: globalThisStorageEntry });
+    const { storage } = createStorageConfig(
+      { storage: globalThisStorageEntry },
+      createMockLogHandler()
+    );
     storage('remotes', {}).set({ 'team/mfe1': { scopeUrl: 'http://a/' } });
 
     expect(

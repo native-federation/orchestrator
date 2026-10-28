@@ -5,10 +5,13 @@ import { createLogConfig } from 'lib/core/4.config/logging/log.config';
 import { createStorageConfig } from 'lib/core/4.config/storage/storage.config';
 import { createModeConfig } from 'lib/core/4.config/mode/mode.config';
 
-export const createConfigHandlers = (overrides: NFOptions): ConfigContract => ({
-  ...createImportMapConfig(overrides),
-  ...createHostConfig(overrides),
-  ...createLogConfig(overrides),
-  ...createStorageConfig(overrides),
-  ...createModeConfig(overrides),
-});
+export const createConfigHandlers = (overrides: NFOptions): ConfigContract => {
+  const logConfig = createLogConfig(overrides);
+  return {
+    ...createImportMapConfig(overrides),
+    ...createHostConfig(overrides),
+    ...logConfig,
+    ...createStorageConfig(overrides, logConfig.log),
+    ...createModeConfig(overrides),
+  };
+};
