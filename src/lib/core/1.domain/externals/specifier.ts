@@ -29,6 +29,7 @@ export function packageOfIn(
   scope: DeepReadonly<shareScope>,
   loading: readonly StoredCopy[] = []
 ): PackageOf {
+  // A fast path, measured: without a declared library the records group by npm name anyway.
   if (!declaresLibrary(scope, loading)) return npmPackageOf;
 
   // Each root keeps its component's shortest name.
