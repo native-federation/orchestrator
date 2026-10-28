@@ -14,6 +14,15 @@ const shared = (packageName: string, singleton: boolean): DenseSharedInfo =>
     requiredVersion: '*',
   }) as DenseSharedInfo;
 
+// A dense record, as a remote entry publishes one package with its secondary entrypoints.
+const dense = (packageName: string, singleton: boolean, specifiers: string[]): DenseSharedInfo =>
+  ({
+    packageName,
+    singleton,
+    entries: Object.fromEntries(specifiers.map(s => [s, `${s}.js`])),
+    requiredVersion: '*',
+  }) as DenseSharedInfo;
+
 const makeDeps = (
   sharedInfos: DenseSharedInfo[],
   hostRemoteEntry: Parameters<
@@ -141,5 +150,49 @@ describe('resolveHostInstances', () => {
     await resolveHostInstances({ load }, deps);
 
     expect(provide).toHaveBeenCalledWith('file:///remoteEntry.json', { integrity: 'sha384-abc' });
+  });
+  // A remote bound to the host's rxjs-interop file but the app's own core runs two Angular cores (NG0203).
+  it("bridges every entrypoint of a dense singleton record under 'all'", async () => {
+    const { deps } = makeDeps([
+      dense('@angular/core', true, ['@angular/core', '@angular/core/rxjs-interop']),
+    ]);
+    const load = vi.fn(async (s: string) => ({ name: s }));
+
+    const result = await resolveHostInstances({ load }, deps);
+
+    expect(Object.keys(result!)).toEqual(['@angular/core', '@angular/core/rxjs-interop']);
+  });
+
+  it('filters the entrypoints of a dense record one by one', async () => {
+    const { deps } = makeDeps([
+      dense('@angular/core', true, ['@angular/core', '@angular/core/rxjs-interop']),
+    ]);
+    const load = vi.fn(async (s: string) => ({ name: s }));
+
+    const result = await resolveHostInstances({ include: ['@angular/core/rxjs'], load }, deps);
+
+    expect(Object.keys(result!)).toEqual(['@angular/core/rxjs-interop']);
+  });
+
+  it('bridges no entrypoint of a dense record that is not a singleton', async () => {
+    const { deps } = makeDeps([dense('@s/ui', false, ['@s/ui', '@s/ui/table'])]);
+    const load = vi.fn(async (s: string) => ({ name: s }));
+
+    const result = await resolveHostInstances({ load }, deps);
+
+    expect(result).toEqual({});
+    expect(load).not.toHaveBeenCalled();
+  });
+
+  it('bridges a specifier two singleton records list once', async () => {
+    const { deps } = makeDeps([
+      dense('@angular/core', true, ['@angular/core', '@angular/core/rxjs-interop']),
+      dense('@angular/core/rxjs-interop', true, ['@angular/core/rxjs-interop']),
+    ]);
+    const load = vi.fn(async (s: string) => ({ name: s }));
+
+    await resolveHostInstances({ load }, deps);
+
+    expect(load.mock.calls.map(([s]) => s)).toEqual(['@angular/core', '@angular/core/rxjs-interop']);
   });
 });

@@ -87,7 +87,9 @@ export const resolveHostInstances = async (
   const load = auto.load ?? ((specifier: string) => import(specifier));
 
   const specifiers = [
-    ...new Set((entry.shared ?? []).filter(s => s.singleton).map(s => s.packageName)),
+    ...new Set(
+      (entry.shared ?? []).filter(s => s.singleton).flatMap(s => Object.keys(s.entries))
+    ),
   ]
     .filter(s => (auto.include ? matches(s, auto.include) : true))
     .filter(s => (auto.exclude ? !matches(s, auto.exclude) : true));
