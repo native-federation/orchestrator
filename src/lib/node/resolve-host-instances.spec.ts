@@ -5,6 +5,8 @@ import type { DenseSharedInfo, RemoteEntry } from 'lib/core/1.domain';
 import type { LogHandler } from 'lib/core/2.app/config/log.contract';
 import type { ForProvidingRemoteEntries } from 'lib/core/2.app/driving-ports/for-providing-remote-entries.port';
 import { resolveHostInstances } from './resolve-host-instances';
+import { normalizeRemoteEntry } from 'lib/core/3.adapters/remote-entry/normalize-remote-entry';
+import { mockConfig } from 'lib/testing/config.mock';
 
 const shared = (packageName: string, singleton: boolean): DenseSharedInfo =>
   ({
@@ -163,7 +165,7 @@ describe('resolveHostInstances', () => {
     expect(Object.keys(result!)).toEqual(['@angular/core', '@angular/core/rxjs-interop']);
   });
 
-  it('filters the entrypoints of a dense record one by one', async () => {
+  it('filters the entrypoints of a dense record one by one, with a prefix include', async () => {
     const { deps } = makeDeps([
       dense('@angular/core', true, ['@angular/core', '@angular/core/rxjs-interop']),
     ]);
@@ -194,5 +196,31 @@ describe('resolveHostInstances', () => {
     await resolveHostInstances({ load }, deps);
 
     expect(load.mock.calls.map(([s]) => s)).toEqual(['@angular/core', '@angular/core/rxjs-interop']);
+  });
+  it('bridges a flat singleton record by its own specifier once it is normalized', async () => {
+    const { shared: records } = normalizeRemoteEntry(
+      {
+        name: 'host',
+        exposes: [],
+        shared: [
+          {
+            packageName: 'rxjs',
+            outFileName: 'rxjs.js',
+            singleton: true,
+            strictVersion: false,
+            requiredVersion: '^7.0.0',
+            version: '7.8.0',
+          },
+        ],
+      },
+      './remoteEntry.json',
+      mockConfig()
+    );
+    const { deps } = makeDeps(records);
+    const load = vi.fn(async (s: string) => ({ name: s }));
+
+    const result = await resolveHostInstances({ load }, deps);
+
+    expect(Object.keys(result!)).toEqual(['rxjs']);
   });
 });
