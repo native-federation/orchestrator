@@ -1540,7 +1540,7 @@ The `strictVersion` flag applies to shared dependencies (`singleton: true`) and 
 
 ### strictVersion: false (default)
 
-The user will be notified about the incompatible version, but the resolver will skip this version since another version was already shared in the scope.
+The resolver will skip this version without a warning, since another version was already shared in the scope.
 
 ```json
 // MFE needs ui-lib ~4.16.0, but team-a scope shares 4.17.0
@@ -1553,7 +1553,7 @@ The user will be notified about the incompatible version, but the resolver will 
   "strictVersion": false
 }
 
-// Result: SKIP + WARNING
+// Result: SKIP
 // The MFE will use the shared 4.17.0 version URL from team-a scope
 // May cause runtime compatibility issues
 ```
