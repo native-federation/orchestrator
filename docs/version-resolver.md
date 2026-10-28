@@ -406,7 +406,8 @@ copies together leave the fewest specifiers uncovered across the versions it wou
 the candidate's tag, as the serving build is decided later and may be any of them. A decisive
 extra-downloads winner is never overridden. The order is: fewest extra downloads, then the version a warm page
 already shares (keeping it saves a download), then coverage, then the highest version. So a newer non-strict
-version an added remote ships is adopted on a fresh session, not on a warm page.
+version an added remote ships is adopted on a cold init (after `clearStorage`, an orchestrator version change or,
+with `sessionStorage`, in a new tab), not on a warm page.
 
 #### When the host's build lacks an entrypoint
 
