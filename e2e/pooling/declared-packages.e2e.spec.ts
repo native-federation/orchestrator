@@ -93,4 +93,27 @@ test.describe('dense packages deeper than their npm name', () => {
     await nf.loadAll();
     expect(await copiesOf(nf, COLLAPSE)).toBe(2);
   });
+
+  // The host serves table and mfe2 collapse, both declared in one pool. An older flat build loaded at runtime
+  // bundles both as `@shared/components`: every tag agrees, but following the map would run its one package
+  // from two builds.
+  test('runs a pooled older build loaded at runtime from its own build when the map serves its package from two', async ({
+    nf,
+  }) => {
+    const ui = (pkg: string) => dep(pkg, '1.0.0', { req: '^1.0.0', pool: 'ui' });
+    const late = shape(remote('team/mfe3', SCOPE.mfe3, [ui('@s/fw'), ui(TABLE), ui(COLLAPSE)]), {
+      externals: 'flat',
+      chunking: 'dense',
+    });
+    await nf.init([remote('team/mfe2', SCOPE.mfe2, [ui('@s/fw'), ui(COLLAPSE)])], {
+      hostEntry: remote('host', SCOPE.host, [ui('@s/fw'), ui(TABLE)]),
+      unlisted: [late],
+      shim: true,
+    });
+    await nf.initRemoteEntry(late.url);
+
+    const { seen } = await nf.load('team/mfe3');
+    expect(seen[TABLE]!.split('|')[0]).toBe('mfe3');
+    expect(seen[COLLAPSE]!.split('|')[0]).toBe('mfe3');
+  });
 });

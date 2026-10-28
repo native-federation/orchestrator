@@ -466,6 +466,29 @@ describe('dense records that share a specifier', () => {
     expect(scopeOf(load.merged, 'mfe')).toEqual({ [T]: at('mfe', T), [U]: at('mfe', U) });
   });
 
+  it('scopes only the library a remote rejects when siblings that import each other share no label', async () => {
+    // The trade-off the `pool` label exists for: unlabelled, `u` and `t` are two packages decided apart, so mfe
+    // runs its own `t` and takes the shell's `u`, whose `t` is the shell's: a consumer-scope leak.
+    const entries = [
+      entry('shell', lib(T), lib(U)),
+      entry('mfe', lib(T, { strict: '1.1.0' }), lib(U, { version: '1.1.0' })),
+    ];
+    const p = fresh(['shell']);
+    const init = await p.runInit(entries);
+
+    expect(scopeOf(init, 'mfe')).toEqual({ [T]: at('mfe', T) });
+    expect(init.imports[U]).toBe(at('shell', U));
+    const leaks = pageTears({
+      importMap: init,
+      entries,
+      hosts: ['shell'],
+      importsOf: importsIn(entries, { [U]: T }),
+    });
+    expect(leaks.map(({ remote, causes }) => [remote, causes])).toEqual([
+      ['mfe', { [T]: ['consumer-scope'] }],
+    ]);
+  });
+
   it('runs a pooled library under an older flat build of the one it imports from one build', async () => {
     // The flat `t` is the npm package `@s/c`; the declared `t/sort` is a package of its own that imports it.
     const { init, load } = await pages([
