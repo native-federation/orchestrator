@@ -41,9 +41,12 @@ export type RemoteSpec = {
   // Ships each secondary entrypoint as a package of its own (flat), as a build without
   // `feature.convertFlatSharedInfo` emits it, rather than as an entry of its package (dense).
   flat?: boolean;
-  // Ships each member's root and secondary entrypoint as dense packages of their own, as a build with
-  // `build: 'paths'` declares them; wins over `flat`.
+  // Ships each member's root and secondary entrypoint as dense packages of their own, as a build that declares
+  // every mapping with `.package()` does; wins over `flat`.
   dense?: boolean;
+  // Names every member but the framework root under one npm name (`@p0/c/m1`, `@p0/c/m2`): independent
+  // libraries a dense build ships apart and a flat build bundles as one npm package. Set on every remote alike.
+  siblings?: boolean;
   // Its build imports internal chunks: per bundle (`dense`, a `bundle` per shared info and `chunks`) or as
   // `@nf-internal/` externals (`flat`, flat chunking).
   chunks?: 'dense' | 'flat';
@@ -143,6 +146,7 @@ export const portfolioArbitrary = (
     labelNoise?: boolean;
     flat?: boolean;
     dense?: boolean;
+    siblings?: boolean;
     chunks?: boolean;
     shareScope?: string;
     mixedScope?: string;
@@ -153,8 +157,9 @@ export const portfolioArbitrary = (
     .record({
       poolSizes: fc.array(fc.integer({ min: 2, max: 6 }), { minLength: 1, maxLength: 3 }),
       strict: fc.boolean(),
+      ...(o.siblings ? { siblings: fc.boolean() } : {}),
     })
-    .chain(({ poolSizes, strict }) =>
+    .chain(({ poolSizes, strict, siblings }) =>
       fc
         .record({
           templates: fc.tuple(
@@ -228,6 +233,7 @@ export const portfolioArbitrary = (
           remotes: remotes.map(({ shareScope, ...remote }) => ({
             ...remote,
             ...(shareScope === undefined ? {} : { shareScope }),
+            ...(siblings ? { siblings } : {}),
             pools: remote.pools.map((pick, p) => {
               if (pick === null) return null;
               const builds = templates[p]!;
@@ -301,13 +307,17 @@ const derivedRemoteArbitrary = (sources: RemoteSpec[]): fc.Arbitrary<RemoteSpec>
  * One more remote for an existing spec, for the dynamic path: a redeploy of a remote the page has (a clone),
  * the same remote one change later, or a remote with builds of its own.
  */
-export const extraRemoteArbitrary = (spec: PortfolioSpec): fc.Arbitrary<RemoteSpec> =>
-  spec.remotes.length === 0
-    ? freshRemoteArbitrary(spec.poolSizes)
+export const extraRemoteArbitrary = (spec: PortfolioSpec): fc.Arbitrary<RemoteSpec> => {
+  const fresh = spec.remotes.some(r => r.siblings)
+    ? freshRemoteArbitrary(spec.poolSizes).map(r => ({ ...r, siblings: true }))
+    : freshRemoteArbitrary(spec.poolSizes);
+  return spec.remotes.length === 0
+    ? fresh
     : fc.oneof(
         { arbitrary: derivedRemoteArbitrary(spec.remotes), weight: 2 },
-        { arbitrary: freshRemoteArbitrary(spec.poolSizes), weight: 1 }
+        { arbitrary: fresh, weight: 1 }
       );
+};
 
 // A remote loaded after `first`: often derived from it, so it can join a subpool or a row the first load
 // created, or need an entrypoint only the first load ships.
@@ -421,7 +431,8 @@ function rangeOf(p: RemotePoolSpec): string {
   }
 }
 
-export const memberName = (pool: number, member: number): string => `@p${pool}/m${member}`;
+export const memberName = (pool: number, member: number, siblings = false): string =>
+  siblings && member > 0 ? `@p${pool}/c/m${member}` : `@p${pool}/m${member}`;
 
 // `deploy` > 0 serves the remote from a new URL (`Redeploy`).
 export function toRemoteEntry(
@@ -450,15 +461,17 @@ export function toRemoteEntry(
       const to = spec.relabel!.to;
       return to === 'alias' ? `p${p}-alias` : `p${to % spec.pools.length}`;
     };
+    // An older dense build groups siblings by npm name, as core's name rule did.
+    let npmGroup: RemoteSharedInfo | undefined;
     members.forEach((drawn, m) => {
       if (drawn === null) return;
       // A flat secondary without its package's root is a broken build: a flat remote ships the root beside it.
       // A declared secondary is a package of its own, so it needs none.
       const shape = spec.flat && !spec.dense && drawn === 'sub' ? 'root+sub' : drawn;
-      const pkg = memberName(p, m);
+      const pkg = memberName(p, m, spec.siblings);
       const entries: Record<string, string> = {};
-      if (shape !== 'sub') entries[pkg] = `${pkg.slice(1).replace('/', '_')}.js`;
-      if (shape !== 'root') entries[`${pkg}/sub`] = `${pkg.slice(1).replace('/', '_')}_sub.js`;
+      if (shape !== 'sub') entries[pkg] = `${pkg.slice(1).replace(/\//g, '_')}.js`;
+      if (shape !== 'root') entries[`${pkg}/sub`] = `${pkg.slice(1).replace(/\//g, '_')}_sub.js`;
       const info = (packageName: string, entries: Record<string, string>) =>
         shared.push({
           packageName,
@@ -470,7 +483,14 @@ export function toRemoteEntry(
           ...(shareScope === undefined ? {} : { shareScope }),
           entries,
         } as RemoteSharedInfo);
-      if (!spec.flat && !spec.dense) return void info(pkg, entries);
+      const sibling = spec.siblings && m > 0;
+      if (!spec.flat && !spec.dense && sibling) {
+        if (npmGroup) return void Object.assign(npmGroup.entries, entries);
+        info(`@p${p}/c`, entries);
+        return void (npmGroup = shared.at(-1));
+      }
+      // `.package()` declares a sibling with its secondary entrypoint, one package of its own.
+      if ((!spec.flat && !spec.dense) || (spec.dense && sibling)) return void info(pkg, entries);
       for (const [specifier, file] of Object.entries(entries))
         info(specifier, { [specifier]: file });
     });
@@ -489,10 +509,13 @@ export function toRemoteEntry(
   }
 
   // A chunk's name is its content's: one package at one tag builds the same chunk.
-  // A flat secondary entrypoint is bundled with its package, as a build bundles per package; a declared one is
-  // a package of its own.
+  // A flat secondary entrypoint is bundled with its npm package, as a build bundles per package; a declared one
+  // is a package of its own.
   const slug = (info: RemoteSharedInfo) =>
-    (spec.dense ? info.packageName : info.packageName.replace(/\/sub$/, ''))
+    (spec.flat && !spec.dense
+      ? info.packageName.split('/').slice(0, 2).join('/')
+      : info.packageName
+    )
       .replace(/^@/, '')
       .replace(/\//g, '_');
   const chunkOf = (info: RemoteSharedInfo) => `chunk-${slug(info)}-${info.version}`;

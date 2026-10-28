@@ -13,7 +13,14 @@ import { buildPools } from 'lib/core/1.domain/pooling/membership';
 import { createVersionCheck } from 'lib/core/3.adapters/checks/version.check';
 import * as _path from 'lib/utils/path';
 import { type GroupTear, tearsByPool, withLabelledPools } from './no-tear';
-import { hostOf, scopeUrlOf, toRemoteEntries, type PortfolioSpec } from './generate-portfolio';
+import {
+  generatedImports,
+  hostOf,
+  scopeUrlOf,
+  toRemoteEntries,
+  type PortfolioSpec,
+} from './generate-portfolio';
+import { pageTears } from './page-graph';
 import { portfolio } from './portfolio';
 
 /**
@@ -91,6 +98,24 @@ export function torn(
       ...split.map(({ remote }) => `${pool}|${remote}|split`),
       ...chunks.map(({ remote }) => `${pool}|${remote}|chunks`),
     ])
+    .sort();
+}
+
+// Every `remote: package` whose own specifiers resolve to two builds, read off the files each remote reaches
+// (`pageTears`), which sees what the tag oracle cannot: a package served from two builds at one tag. Leaks
+// (another package's file binding a second build through its scope) are left out.
+export function fileSplits(importMap: ImportMap, entries: RemoteEntry[], host?: string): string[] {
+  return pageTears({
+    importMap,
+    entries,
+    hosts: host === undefined ? [] : [host],
+    importsOf: generatedImports(entries),
+  })
+    .flatMap(({ remote, causes }) =>
+      Object.entries(causes)
+        .filter(([, how]) => how.includes('direct'))
+        .map(([pkg]) => `${remote}: ${pkg}`)
+    )
     .sort();
 }
 

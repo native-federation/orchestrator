@@ -14,6 +14,7 @@ import {
 import {
   TIMEOUT,
   copiesOf,
+  fileSplits,
   initOrRefuse,
   lenient,
   openPortfolio,
@@ -30,7 +31,7 @@ import * as _path from 'lib/utils/path';
 import { copiesByRemote } from 'lib/core/1.domain/pooling/builds';
 import { committedView } from 'lib/core/1.domain/pooling/gate';
 import { packageOfIn } from 'lib/core/1.domain/externals/specifier';
-import { pageFaults, pageTears, resolve } from 'lib/testing/pooling/page-graph';
+import { pageFaults, resolve } from 'lib/testing/pooling/page-graph';
 import { NFError } from 'lib/core/native-federation.error';
 
 /**
@@ -147,6 +148,7 @@ describe('pooling properties: init (generated portfolios)', { timeout: TIMEOUT }
         portfolioArbitrary({
           flat: true,
           dense: true,
+          siblings: true,
           labelNoise: true,
           ...(shareScope && { shareScope }),
         }),
@@ -176,6 +178,7 @@ describe('pooling properties: init (generated portfolios)', { timeout: TIMEOUT }
         portfolioArbitrary({
           flat: true,
           dense: true,
+          siblings: true,
           chunks: true,
           labelNoise: true,
           ...(shareScope && { shareScope }),
@@ -207,7 +210,13 @@ describe('pooling properties: init (generated portfolios)', { timeout: TIMEOUT }
     it(`page: no unpooled remote resolves its own specifiers of a package to two builds, ${shareScope ?? 'global'} share scope`, () =>
       run(
         offset,
-        portfolioArbitrary({ flat: true, chunks: true, ...(shareScope && { shareScope }) }),
+        portfolioArbitrary({
+          flat: true,
+          dense: true,
+          siblings: true,
+          chunks: true,
+          ...(shareScope && { shareScope }),
+        }),
         300,
         async spec => {
           const entries = toRemoteEntries(spec).map(unpooled);
@@ -229,17 +238,7 @@ describe('pooling properties: init (generated portfolios)', { timeout: TIMEOUT }
             if (!refused) throw error;
             return;
           }
-          const split = pageTears({
-            importMap,
-            entries,
-            hosts: host === undefined ? [] : [host],
-            importsOf: generatedImports(entries),
-          }).flatMap(({ remote, causes }) =>
-            Object.entries(causes)
-              .filter(([, how]) => how.includes('direct'))
-              .map(([pkg]) => `${remote}: ${pkg}`)
-          );
-          expect(split).toEqual([]);
+          expect(fileSplits(importMap, entries, host)).toEqual([]);
         }
       ));
 

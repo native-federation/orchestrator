@@ -1,6 +1,7 @@
 import fc from 'fast-check';
 import type { RemoteSpec } from './generate-portfolio';
 import {
+  extraRemoteArbitrary,
   generatedImports,
   portfolioArbitrary,
   toRemoteEntries,
@@ -152,5 +153,63 @@ describe('toRemoteEntry with declared packages', () => {
       );
     });
     expect(mixed.length).toBeGreaterThan(25);
+  });
+});
+
+describe('toRemoteEntry with siblings', () => {
+  // `@p0/m0` (the framework root) and two independent libraries under the npm name `@p0/c`.
+  const siblings = (spec: Partial<RemoteSpec>) =>
+    toRemoteEntry(
+      remote({
+        siblings: true,
+        pools: [
+          { major: 0, minor: 0, patch: 0, range: 'caret', members: ['root', 'root+sub', 'root'] },
+        ],
+        extra: null,
+        ...spec,
+      }),
+      0
+    ).shared.map(s => [s.packageName, Object.keys(s.entries), s.bundle]);
+
+  // What core's name rule gave before `.package()`: one dense record per npm name.
+  it('groups siblings into their npm package in an older dense build', () => {
+    expect(siblings({})).toEqual([
+      ['@p0/m0', ['@p0/m0'], undefined],
+      ['@p0/c', ['@p0/c/m1', '@p0/c/m1/sub', '@p0/c/m2'], undefined],
+    ]);
+  });
+
+  it('ships each sibling as a declared package with its secondary entrypoint', () => {
+    expect(siblings({ dense: true })).toEqual([
+      ['@p0/m0', ['@p0/m0'], undefined],
+      ['@p0/c/m1', ['@p0/c/m1', '@p0/c/m1/sub'], undefined],
+      ['@p0/c/m2', ['@p0/c/m2'], undefined],
+    ]);
+  });
+
+  // A flat build bundles per npm package, so siblings share its chunk.
+  it('bundles flat siblings as one npm package', () => {
+    expect(
+      siblings({ flat: true, chunks: 'flat' }).filter(
+        ([name]) => !String(name).startsWith('@nf-internal/')
+      )
+    ).toEqual([
+      ['@p0/m0', ['@p0/m0'], 'browser-p0_m0'],
+      ['@p0/c/m1', ['@p0/c/m1'], 'browser-p0_c'],
+      ['@p0/c/m1/sub', ['@p0/c/m1/sub'], 'browser-p0_c'],
+      ['@p0/c/m2', ['@p0/c/m2'], 'browser-p0_c'],
+    ]);
+  });
+
+  it('names a fresh remote loaded later like the portfolio', () => {
+    const [spec] = fc.sample(
+      portfolioArbitrary({ siblings: true }).filter(s => !!s.remotes[0]!.siblings),
+      {
+        seed: 7,
+        numRuns: 1,
+      }
+    );
+    const extras = fc.sample(extraRemoteArbitrary(spec!), { seed: 7, numRuns: 20 });
+    expect(extras.every(r => r.siblings)).toBe(true);
   });
 });

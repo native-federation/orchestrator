@@ -16,6 +16,7 @@ import {
   byPooling,
   copiesOf,
   electedTags,
+  fileSplits,
   initOrRefuse,
   oracleVerdict,
   lenient,
@@ -153,6 +154,7 @@ describe('pooling properties: dynamic loads (generated portfolios)', { timeout: 
           labelNoise: true,
           flat: true,
           dense: true,
+          siblings: true,
           ...(shareScope && { shareScope }),
         }).chain(spec => fc.tuple(fc.constant(lenient(spec)), loads(spec))),
         runs,
@@ -184,9 +186,15 @@ describe('pooling properties: dynamic loads (generated portfolios)', { timeout: 
                 }).toEqual({ scope, key, committed: false });
 
             const before = torn(committed, record, scopeUrlsOf(loaded), host, shareScope);
+            // Like `torn`, both pages under the grouping after the load: a load whose record merges packages the
+            // committed map serves apart cannot change that map, and the next init regroups it.
+            const filesBefore = fileSplits(committed, [...loaded, added], host);
             loaded.push(added);
             const after = torn(merged, record, scopeUrlsOf(loaded), host, shareScope);
             expect(after.filter(t => !before.includes(t))).toEqual([]);
+            // The tag oracle reads a package at one tag as one build; the files show two.
+            const filesAfter = fileSplits(merged, loaded, host);
+            expect(filesAfter.filter(t => !filesBefore.includes(t))).toEqual([]);
           }
         }
       ));
