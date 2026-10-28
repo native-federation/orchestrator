@@ -2,6 +2,7 @@ import type { shareScope } from './external.contract';
 import fc from 'fast-check';
 import { npmPackageOf, packageOfIn, SpecifierTags } from './specifier';
 import type { SharedVersionAction, SharedVersionMeta } from './version.contract';
+import { packageOfAsShipped } from 'lib/testing/pooling/page-graph';
 
 // One stored copy: `dense` when its remoteEntry published the external dense (`'paths'` mappings with
 // `denseExternals`, or any dense entry of an older core); flat copies are stored under their specifier.
@@ -294,6 +295,33 @@ describe('packageOfIn', () => {
           const packageOf = packageOfIn(toScope(drawn));
           for (const { name, copy } of drawn)
             if (!copy.dense) expect(packageOf(name)).toBe(npmPackageOf(name));
+        })
+      );
+    });
+
+    // The 4.8.0 grouping whenever no build declares a library: no page changes until one does.
+    it('is the npm-name rule itself when no dense record sits deeper than its npm name', () => {
+      run(
+        fc.property(copies, drawn => {
+          const atNpmDepth = drawn.filter(d => !d.copy.dense || npmPackageOf(d.name) === d.name);
+          expect(PATHS.map(packageOfIn(toScope(atNpmDepth)))).toEqual(PATHS.map(npmPackageOf));
+        })
+      );
+    });
+
+    // The page oracle groups by what each build shipped with its own union-find, so it can catch the production
+    // rule; on the records core emits the two must agree.
+    it("agrees with the page oracle's grouping", () => {
+      run(
+        fc.property(copies, drawn => {
+          const shipped = packageOfAsShipped(
+            drawn.map(({ name, copy }) => ({
+              packageName: name,
+              dense: copy.dense,
+              specifiers: Object.keys(copy.entries),
+            }))
+          );
+          expect(PATHS.map(packageOfIn(toScope(drawn)))).toEqual(PATHS.map(shipped));
         })
       );
     });
