@@ -40,7 +40,10 @@ export function servingBuildOf(
   accepts: AcceptsTag
 ): ServingBuild | undefined {
   if (externals.length === 0) return undefined;
-  const rootRows = shareRows(externals.find(([name]) => name === pkg)?.[1]);
+  // An older dense build names a record by npm name without shipping that root, so the name alone is no root.
+  const rootRows = shareRows(externals.find(([name]) => name === pkg)?.[1]).filter(row =>
+    row.remotes.some(copy => pkg in copy.entries)
+  );
   const rows = rootRows.length > 0 ? rootRows : externals.flatMap(([, e]) => shareRows(e));
 
   // The election already chose the global build; ranking again per package could split a pool.

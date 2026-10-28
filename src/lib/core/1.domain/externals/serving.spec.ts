@@ -155,11 +155,33 @@ describe('servingBuildOf', () => {
     expect(serving(['@s/c/t', library])).toEqual<ServingBuild>({ remote: 'z', tag: '1.0.0' });
   });
 
+  // An older dense build names its record by npm name (`@s/c`) for the one library it ships, `@s/c/b`. Taken
+  // as the root's row, it was the only candidate, and the flat build's `@s/c/a` was mapped nowhere.
+  it('ranks every share row when the record named after the package lacks its root', () => {
+    const result = serving(
+      ['@s/c', external(version('share', [copy('old', ['@s/c/b'], { dense: true })]))],
+      ['@s/c/a', external(version('share', [copy('flat', ['@s/c/a'])]))],
+      ['@s/c/b', external(version('share', [copy('flat', ['@s/c/b'])]))]
+    );
+
+    expect(result).toEqual<ServingBuild>({ remote: 'flat', tag: '1.0.0' });
+  });
+
   describe('a pooled package', () => {
     const pooled = (winner: string | undefined, ...versions: SharedVersion[]): SharedExternal => ({
       ...external(...versions),
       poolName: 'team',
       ...(winner ? { poolWinner: winner } : {}),
+    });
+
+    it('takes its pool winner when the record named after the package lacks its root', () => {
+      const result = serving(
+        ['@s/c', pooled('flat', version('share', [copy('old', ['@s/c/b'], { dense: true })]))],
+        ['@s/c/a', pooled('flat', version('share', [copy('flat', ['@s/c/a'])]))],
+        ['@s/c/b', pooled('flat', version('share', [copy('flat', ['@s/c/b'])]))]
+      );
+
+      expect(result).toEqual<ServingBuild>({ remote: 'flat', tag: '1.0.0' });
     });
 
     it("takes its pool winner's build, unranked, even when another copy is cached", () => {
