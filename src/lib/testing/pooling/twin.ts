@@ -1,5 +1,5 @@
 import { GLOBAL_SCOPE, type ImportMap, type shareScope } from 'lib/core/1.domain';
-import { packageOf } from 'lib/core/1.domain/externals/specifier';
+import { owningPackage } from 'lib/core/1.domain/externals/specifier';
 import {
   hostOf,
   scopeUrlOf,
@@ -8,6 +8,8 @@ import {
   type PortfolioSpec,
 } from './generate-portfolio';
 import { openPortfolio, rangeViolations, scopeUrlsOf, torn } from './property-harness';
+
+const packageOf = (name: string) => owningPackage(name) ?? name;
 
 /**
  * The twin oracle for dynamic pooling (global-or-self). A twin T is a renamed clone of a committed remote R,

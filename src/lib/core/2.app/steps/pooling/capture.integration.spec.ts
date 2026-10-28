@@ -4,7 +4,12 @@ import type { ImportMap, RemoteEntry, SharedExternal } from 'lib/core/1.domain';
 import { initFederation } from 'lib/core/init-federation';
 import { globalThisStorageEntry } from 'lib/core/4.config/storage/global-this.storage';
 import { labelSharedInfoByNpmScope } from 'lib/testing/pooling/label-by-npm-scope';
-import { emittedUrls, findIncoherentRemotes, findSplitRemotes } from 'lib/testing/pooling/no-tear';
+import {
+  emittedUrls,
+  findIncoherentRemotes,
+  findSplitRemotes,
+  packageOfInScope,
+} from 'lib/testing/pooling/no-tear';
 
 /**
  * The recorded portfolios from `e2e/fixtures`, through the real init flow in jsdom, judged by both no-tear
@@ -71,7 +76,7 @@ async function init(names: string[]) {
   }
   const scopeUrls = Object.fromEntries(names.map(n => [`team/${n}`, `http://${n}/`]));
 
-  return { importMap, pools, scopeUrls };
+  return { importMap, pools, scopeUrls, packageOf: packageOfInScope(stored) };
 }
 
 const angularDownloads = (importMap: ImportMap) => {
@@ -98,15 +103,18 @@ describe('recorded portfolios (integration)', () => {
   ])(
     '%s: no remote resolves or binds a combination no build shipped',
     async (_, names, downloads) => {
-      const { importMap, pools, scopeUrls } = await init(names);
+      const { importMap, pools, scopeUrls, packageOf } = await init(names);
 
       expect(pools.size).toBeGreaterThan(0);
       for (const [pool, members] of pools) {
         expect({
           pool,
-          incoherent: findIncoherentRemotes({ importMap, members, scopeUrls }),
+          incoherent: findIncoherentRemotes({ importMap, members, scopeUrls, packageOf }),
         }).toEqual({ pool, incoherent: [] });
-        expect({ pool, split: findSplitRemotes({ importMap, members, scopeUrls }) }).toEqual({
+        expect({
+          pool,
+          split: findSplitRemotes({ importMap, members, scopeUrls, packageOf }),
+        }).toEqual({
           pool,
           split: [],
         });

@@ -7,12 +7,8 @@ import type {
   VersionName,
 } from 'lib/core/1.domain';
 import * as _path from 'lib/utils/path';
-import { owningPackage, packageOf } from 'lib/core/1.domain/externals/specifier';
 import { buildPools } from 'lib/core/1.domain/pooling/membership';
-import { resolverOf } from './page-graph';
-
-// Re-exported so harnesses outside `src` depend on `lib/testing` only, not on where the step code lives.
-export { owningPackage };
+import { packageOfAsShipped, resolverOf } from './page-graph';
 
 type Specifier = string;
 
@@ -36,7 +32,22 @@ export type CoherenceInput = {
   hosts?: RemoteName[];
   /** Whether a copy's files import its build's internal chunks; none do when left out. */
   isChunked?: (remote: RemoteName, bundle: string | undefined) => boolean;
+  /** The package each specifier runs in across the whole share scope (`packageOfInScope`), not just the pool. */
+  packageOf: (specifier: Specifier) => ExternalName;
 };
+
+export const packageOfInScope = (record: shareScope): ((specifier: Specifier) => ExternalName) =>
+  packageOfAsShipped(
+    Object.entries(record).flatMap(([packageName, external]) =>
+      external.versions.flatMap(version =>
+        version.remotes.map(meta => ({
+          packageName,
+          dense: meta.dense,
+          specifiers: Object.keys(meta.entries),
+        }))
+      )
+    )
+  );
 
 /**
  * The no-tear invariant, checked off the emitted import map rather than off the stored verdicts:
@@ -53,6 +64,7 @@ export function findIncoherentRemotes({
   members,
   scopeUrls,
   hosts = [],
+  packageOf,
 }: CoherenceInput): Incoherence[] {
   const builds: Builds = new Map();
   // Every URL the record can emit, with the tag it carries, so a resolved URL can be read back as a tag.
@@ -85,8 +97,8 @@ export function findIncoherentRemotes({
   for (const [build, ships] of builds) {
     const packages = new Map<Specifier, VersionName>();
     for (const [specifier, tag] of ships) {
-      const pkg = owningPackage(specifier);
-      if (pkg === undefined) packages.set(specifier, tag);
+      const pkg = packageOf(specifier);
+      if (pkg === specifier) packages.set(specifier, tag);
       else if (!packages.has(pkg)) packages.set(pkg, tag);
     }
     packageTags.set(build, packages);
@@ -170,6 +182,7 @@ export type Split = {
  * leaves to the portfolio by design (docs/version-resolver.md §"Declare the coupling you actually have").
  */
 export function findSplitRemotes(input: CoherenceInput): Split[] {
+  const { packageOf } = input;
   const exempt = new Set(input.hosts ?? []);
   const index = indexFiles(input);
   const split: Split[] = [];
@@ -193,8 +206,8 @@ export function findSplitRemotes(input: CoherenceInput): Split[] {
     // Reported under the package name.
     const packages = new Map<Specifier, Set<VersionName>>();
     for (const [specifier, tags] of reached) {
-      const pkg = owningPackage(specifier);
-      if (pkg === undefined) continue;
+      const pkg = packageOf(specifier);
+      if (pkg === specifier) continue;
       let all = packages.get(pkg);
       if (!all) packages.set(pkg, (all = new Set(reached.get(pkg))));
       for (const tag of tags) all.add(tag);
@@ -228,6 +241,7 @@ export type ChunkTear = {
  * exempt for the same reason as in `findIncoherentRemotes`.
  */
 export function findChunkTornRemotes(input: CoherenceInput): ChunkTear[] {
+  const { packageOf } = input;
   const exempt = new Set(input.hosts ?? []);
   const index = indexFiles(input);
   const torn: ChunkTear[] = [];
@@ -347,19 +361,27 @@ export function tearsByPool({
   hosts = [],
   isChunked,
 }: TearsInput): GroupTear[] {
-  const groups = new Map<string, Record<ExternalName, SharedExternal>>();
-  for (const [scope, record] of Object.entries(externals))
+  const groups = new Map<
+    string,
+    { members: Record<ExternalName, SharedExternal>; packageOf: CoherenceInput['packageOf'] }
+  >();
+  for (const [scope, record] of Object.entries(externals)) {
+    const packageOf = packageOfInScope(record);
     for (const [name, external] of Object.entries(record)) {
       const group =
         external.poolName !== undefined
           ? `${scope}|${external.poolName}`
           : `${scope}|package:${packageOf(name)}`;
-      groups.set(group, { ...groups.get(group), [name]: external });
+      groups.set(group, {
+        members: { ...groups.get(group)?.members, [name]: external },
+        packageOf,
+      });
     }
+  }
 
   const tears: GroupTear[] = [];
-  for (const [pool, members] of groups) {
-    const input = { importMap, members, scopeUrls, hosts, isChunked };
+  for (const [pool, { members, packageOf }] of groups) {
+    const input = { importMap, members, scopeUrls, hosts, isChunked, packageOf };
     const tear = {
       pool,
       incoherent: findIncoherentRemotes(input),
