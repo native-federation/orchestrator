@@ -420,16 +420,20 @@ with `sessionStorage`, in a new tab), not on a warm page.
 The host's files can import a specifier its build never declared: an entrypoint the build skipped, or one a
 shared package loads through a dynamic `import()` that the build's unused-dependency pruning does not see. Init
 reads only what builds declare, never what their files import, so it cannot tell this from an entrypoint nobody
-needs. The host is never repointed and never borrows the specifier from another build, even one at the same tag,
-so the host's import of it does not resolve. It comes in two shapes:
+needs. The host never borrows the specifier from another build, even one at the same tag, so the host's import of
+it resolves only where the map serves its package from another build (the second shape). It comes in two shapes:
 
 - **The host lacks a secondary entrypoint a remote ships** (`@fw/core/rxjs-interop` beside the host's
   `@fw/core`). The global map leaves the specifier unmapped, and the remote that ships it runs the package —
   pooled, its whole family — from its own build.
 - **The host ships a secondary entrypoint without its root** (`@fw/core/rxjs-interop`, no `@fw/core`). Pooled,
   the root stays unmapped and the host's import of it unresolved; the remotes run the root off the map. Unpooled,
-  the serving remote publishes its root globally and the host's secondary moves to the host's own scope, where
-  its import of the root binds the remote's: no build ships both, so the host runs the package from two builds.
+  a copy without the root never serves the package, so a remote that ships the root does. When that build also
+  ships the host's secondary, the map takes the secondary from it too: the host runs the whole package from one
+  build that isn't its own. When no build ships both, the host's secondary moves to the host's own scope. In the
+  global scope its import of the root binds the remote's, so the host runs the package from two builds; in a
+  named shareScope or the `strict` scope the root is mapped only in the remote's scope, and the host's import of
+  it does not resolve.
 
 Neither is repaired at runtime; the fix is in the host's build:
 
