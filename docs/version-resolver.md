@@ -420,8 +420,9 @@ with `sessionStorage`, in a new tab), not on a warm page.
 The host's files can import a specifier its build never declared: an entrypoint the build skipped, or one a
 shared package loads through a dynamic `import()` that the build's unused-dependency pruning does not see. Init
 reads only what builds declare, never what their files import, so it cannot tell this from an entrypoint nobody
-needs. The host never borrows the specifier from another build, even one at the same tag, so the host's import of
-it resolves only where the map serves its package from another build (the second shape). It comes in two shapes:
+needs. Nothing maps the specifier for the host, even where another build ships it at the same tag, so the host's
+import of it resolves only where the map serves its package from another build anyway (the second shape). It
+comes in two shapes:
 
 - **The host lacks a secondary entrypoint a remote ships** (`@fw/core/rxjs-interop` beside the host's
   `@fw/core`). The global map leaves the specifier unmapped, and the remote that ships it runs the package —
