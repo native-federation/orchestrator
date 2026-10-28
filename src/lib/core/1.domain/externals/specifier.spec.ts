@@ -163,6 +163,16 @@ describe('packageOfIn', () => {
     expect(packages(record)).toEqual({ ...BY_NAME, '@s/c/t': '@s/c/t' });
   });
 
+  it('puts a specifier no copy lists in the package its npm name joined', () => {
+    // Not a shape core emits: a record named `m` that lists `@s/c`, so `@s/c` is in package `m`.
+    const record = scope({
+      m: [{ remote: 'a', entries: ['m', '@s/c'], dense: true }],
+      ...paths('b', ['@s/c/t', ['@s/c/t']]),
+    });
+    const packageOf = packageOfIn(record);
+    expect(packageOf('@s/c/u')).toBe('m');
+  });
+
   it('counts copies of every action, not only the shared ones', () => {
     const record = scope({
       '@s/c/t': [

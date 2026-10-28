@@ -22,7 +22,6 @@ export function npmPackageOf(name: ExternalName): ExternalName {
 
 export type PackageOf = (specifier: Specifier) => ExternalName;
 
-// A dense copy published that external as its package.
 type StoredCopy = readonly [ExternalName, DeepReadonly<SharedVersionMeta>];
 
 // See docs/version-resolver.md §"One build per package".
@@ -46,7 +45,11 @@ export function packageOfIn(
       shortest.set(find(anchor), best);
     }
   }
-  return specifier => shortest.get(find(specifier)) ?? npmPackageOf(specifier);
+  // An unlisted specifier joins whatever its npm name joined.
+  return specifier => {
+    const npm = npmPackageOf(specifier);
+    return shortest.get(find(specifier)) ?? shortest.get(find(npm)) ?? npm;
+  };
 }
 
 const shorter = (a: ExternalName, b: ExternalName): ExternalName =>
@@ -63,7 +66,7 @@ function declaresLibrary(scope: DeepReadonly<shareScope>, loading: readonly Stor
   );
 }
 
-// A flat copy is at least its npm package: an older core bundles flat mappings together, with shared chunks.
+// A flat copy declares no package, so it is at least its npm package.
 const anchorOf = (name: ExternalName, copy: DeepReadonly<SharedVersionMeta>): ExternalName =>
   copy.dense ? name : npmPackageOf(name);
 
