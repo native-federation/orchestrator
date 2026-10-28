@@ -8,12 +8,19 @@ import {
 } from 'lib/core/1.domain';
 import { NFError } from 'lib/core/native-federation.error';
 import { createAcceptsTag } from 'lib/core/1.domain/externals/compatibility';
-import { owningPackage } from 'lib/core/1.domain/externals/specifier';
+import { npmPackageOf } from 'lib/core/1.domain/externals/specifier';
 import { buildPools } from 'lib/core/1.domain/pooling/membership';
 import { createVersionCheck } from 'lib/core/3.adapters/checks/version.check';
 import * as _path from 'lib/utils/path';
 import { type GroupTear, tearsByPool, withLabelledPools } from './no-tear';
-import { hostOf, scopeUrlOf, toRemoteEntries, type PortfolioSpec } from './generate-portfolio';
+import {
+  generatedImports,
+  hostOf,
+  scopeUrlOf,
+  toRemoteEntries,
+  type PortfolioSpec,
+} from './generate-portfolio';
+import { pageTears } from './page-graph';
 import { portfolio } from './portfolio';
 
 /**
@@ -27,7 +34,6 @@ const CI_SEED = 20261007;
 const SEED = Number(process.env['POOLING_PROPERTY_SEED'] ?? CI_SEED);
 const SCALE = Number(process.env['POOLING_PROPERTY_SCALE'] ?? 1);
 const versionCheck = createVersionCheck();
-const packageOf = (specifier: string) => owningPackage(specifier) ?? specifier;
 
 // A deeper search runs proportionally longer.
 export const TIMEOUT = 20_000 * SCALE;
@@ -37,11 +43,13 @@ export const run = <T>(
   seedOffset: number,
   arbitrary: fc.Arbitrary<T>,
   numRuns: number,
-  predicate: (v: T) => Promise<void>
+  predicate: (v: T) => Promise<void>,
+  examples: T[] = []
 ) =>
   fc.assert(fc.asyncProperty(arbitrary, predicate), {
     seed: SEED + seedOffset,
     numRuns: Math.ceil(numRuns * SCALE),
+    examples: examples.map(example => [example]),
   });
 
 export const scopeUrlsOf = (entries: RemoteEntry[]) =>
@@ -92,6 +100,24 @@ export function torn(
       ...split.map(({ remote }) => `${pool}|${remote}|split`),
       ...chunks.map(({ remote }) => `${pool}|${remote}|chunks`),
     ])
+    .sort();
+}
+
+// Every `remote: package` whose own specifiers resolve to two builds, read off the files each remote reaches
+// (`pageTears`), which sees what the tag oracle cannot: a package served from two builds at one tag. Leaks
+// (another package's file binding a second build through its scope) are left out.
+export function fileSplits(importMap: ImportMap, entries: RemoteEntry[], host?: string): string[] {
+  return pageTears({
+    importMap,
+    entries,
+    hosts: host === undefined ? [] : [host],
+    importsOf: generatedImports(entries),
+  })
+    .flatMap(({ remote, causes }) =>
+      Object.entries(causes)
+        .filter(([, how]) => how.includes('direct'))
+        .map(([pkg]) => `${remote}: ${pkg}`)
+    )
     .sort();
 }
 
@@ -359,7 +385,7 @@ export function oracleVerdict(
   const buildTag = (build: string, member: string) =>
     copies.find(c => c.remote === build && c.member === member)?.tag;
 
-  const servedPackages = new Set([...elected.keys()].map(packageOf));
+  const servedPackages = new Set([...elected.keys()].map(npmPackageOf));
 
   return {
     rejects: own.some(c =>
@@ -367,7 +393,7 @@ export function oracleVerdict(
     ),
     missing: own.some(c => c.specifiers.some(s => !elected.has(s))),
     partial: own.some(c =>
-      c.specifiers.some(s => !elected.has(s) && servedPackages.has(packageOf(s)))
+      c.specifiers.some(s => !elected.has(s) && servedPackages.has(npmPackageOf(s)))
     ),
     witnessed: builds.some(build =>
       own.every(c => c.specifiers.every(s => buildTag(build, c.member) === elected.get(s)))
@@ -402,10 +428,10 @@ export function servedOffMap(
   const own = copies.filter(c => c.remote === remote);
   const reachedTag = (specifier: string) =>
     elected.get(specifier) ??
-    elected.get(packageOf(specifier)) ??
-    [...elected].find(([s]) => packageOf(s) === packageOf(specifier))?.[1] ??
+    elected.get(npmPackageOf(specifier)) ??
+    [...elected].find(([s]) => npmPackageOf(s) === npmPackageOf(specifier))?.[1] ??
     own.find(c => c.specifiers.includes(specifier))?.tag ??
-    own.find(c => c.specifiers.some(s => packageOf(s) === packageOf(specifier)))?.tag;
+    own.find(c => c.specifiers.some(s => npmPackageOf(s) === npmPackageOf(specifier)))?.tag;
   const runTag = (copy: PoolCopy) =>
     copy.servedBy === undefined
       ? copy.tag
@@ -427,7 +453,7 @@ export function servedOffMap(
     const reached = reachedTag(specifier);
     if (reached !== undefined && [...tags].some(t => t !== reached)) return true;
     if (reached === undefined) {
-      const pkg = packageOf(specifier);
+      const pkg = npmPackageOf(specifier);
       unreached.set(pkg, new Set([...(unreached.get(pkg) ?? []), ...tags]));
     }
   }

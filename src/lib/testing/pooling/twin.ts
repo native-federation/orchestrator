@@ -1,5 +1,5 @@
 import { GLOBAL_SCOPE, type ImportMap, type shareScope } from 'lib/core/1.domain';
-import { owningPackage } from 'lib/core/1.domain/externals/specifier';
+import { npmPackageOf } from 'lib/core/1.domain/externals/specifier';
 import {
   hostOf,
   scopeUrlOf,
@@ -8,8 +8,6 @@ import {
   type PortfolioSpec,
 } from './generate-portfolio';
 import { openPortfolio, rangeViolations, scopeUrlsOf, torn } from './property-harness';
-
-const packageOf = (name: string) => owningPackage(name) ?? name;
 
 /**
  * The twin oracle for dynamic pooling (global-or-self). A twin T is a renamed clone of a committed remote R,
@@ -117,12 +115,12 @@ export async function twinGate(
         for (const meta of version.remotes)
           if (meta.name === T)
             for (const s of Object.keys(meta.entries))
-              memberOf.set(s, { pool: external.poolName, member: packageOf(name) });
+              memberOf.set(s, { pool: external.poolName, member: npmPackageOf(name) });
   const tagOfUrl = new Map<string, string>();
   // remote -> package -> the tag its build ships; a flat build's `@p1/m1/sub` is the same member as a dense `@p1/m1`
   const buildTags = new Map<string, Map<string, string>>();
   for (const [name, external] of Object.entries(record)) {
-    const member = packageOf(name);
+    const member = npmPackageOf(name);
     for (const version of external.versions)
       for (const meta of version.remotes) {
         for (const file of Object.values(meta.entries))

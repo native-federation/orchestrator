@@ -26,6 +26,7 @@ import {
 } from 'lib/core/1.domain/pooling/gate';
 import { type CopyMove, movedRecord, renamedRecords } from 'lib/core/1.domain/pooling/records';
 import { createAcceptsTag } from 'lib/core/1.domain/externals/compatibility';
+import type { PackageOf } from 'lib/core/1.domain/externals/specifier';
 
 export function createPoolDynamicExternals(
   config: LoggingConfig & ModeConfig,
@@ -47,8 +48,16 @@ export function createPoolDynamicExternals(
       const committed = ports.sharedExternalsRepo.getFromScope(scope);
       if (!scopeHasPoolState(committed)) continue;
 
-      const { pools } = buildPools(committed);
-      const moves = judgeScope(entry.name, names, actions, pools, Object.keys(committed), scope);
+      const { pools, packageOf } = buildPools(committed);
+      const moves = judgeScope(
+        entry.name,
+        names,
+        actions,
+        pools,
+        packageOf,
+        Object.keys(committed),
+        scope
+      );
       writeMoves(entry.name, names, moves, committed, pools, scope);
     }
 
@@ -60,6 +69,7 @@ export function createPoolDynamicExternals(
     names: ReadonlySet<ExternalName>,
     actions: LoadActions,
     pools: ReadonlyMap<PoolName, PoolMember[]>,
+    packageOf: PackageOf,
     recordOrder: ExternalName[],
     scope: string
   ): Map<ExternalName, CopyMove> {
@@ -83,6 +93,7 @@ export function createPoolDynamicExternals(
       const view = committedView(pool, shipped, recordOrder, {
         shareScope: scope,
         without: remote,
+        packageOf,
       });
       const own = shipped.get(remote) ?? [];
       const verdict = judgeRemote(own, view, accepts);

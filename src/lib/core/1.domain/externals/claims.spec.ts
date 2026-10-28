@@ -1,6 +1,7 @@
-import { claimTable, claimsByPackage, committedClaims, versionClaims, type Claim } from './claims';
+import { claimTable, committedClaims, versionClaims, type Claim } from './claims';
 import { GLOBAL_SCOPE, type SharedExternal } from './external.contract';
 import type { SharedVersion, SharedVersionAction, SharedVersionMeta } from './version.contract';
+import { groupByPackage, npmPackageOf } from './specifier';
 
 const copy = (name: string, entries: string[], extra: Partial<SharedVersionMeta> = {}) =>
   ({
@@ -244,7 +245,10 @@ describe('versionClaims', () => {
   });
 });
 
-describe('claimsByPackage', () => {
+describe('claims grouped by package', () => {
+  const claimsByPackage = (claims: Map<string, Claim>) =>
+    groupByPackage(claims, ([specifier]) => specifier, npmPackageOf);
+
   // Package -> its specifiers in bucket order, each with the tag it is claimed at.
   const buckets = (claims: Map<string, Claim>) =>
     Object.fromEntries(

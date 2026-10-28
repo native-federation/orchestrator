@@ -344,6 +344,7 @@ classDiagram
         name: string
         bundle?: string
         pool?: string
+        dense?: true
         servedBy?: string
         poolCause?: 'incompatible'|'uncovered'
     }

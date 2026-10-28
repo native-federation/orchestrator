@@ -8,7 +8,11 @@ import {
 import type { LoadActions } from 'lib/core/1.domain/remote-entry/load-actions.contract';
 import { committedClaims } from 'lib/core/1.domain/externals/claims';
 import type { AcceptsTag } from 'lib/core/1.domain/externals/compatibility';
-import { packageOf, type Specifier, SpecifierTags } from 'lib/core/1.domain/externals/specifier';
+import {
+  type PackageOf,
+  type Specifier,
+  SpecifierTags,
+} from 'lib/core/1.domain/externals/specifier';
 import * as _path from 'lib/utils/path';
 import { type Build, buildOf, type Copy } from './builds';
 import type { PoolMember } from './membership';
@@ -20,6 +24,7 @@ import { agrees, unwitnessedGap } from './rules';
 type Served = { tag: VersionName; remote: RemoteName; file: string };
 
 type CommittedView = {
+  packageOf: PackageOf;
   builds: Map<RemoteName, Build>;
   // What the committed global map serves per specifier: `imports`, or the shareScope's scopes.
   global: Map<Specifier, Served>;
@@ -63,7 +68,11 @@ export function committedView(
   members: PoolMember[],
   shipped: ReadonlyMap<RemoteName, readonly Copy[]>,
   recordOrder: ExternalName[],
-  { shareScope, without }: { shareScope: string; without?: RemoteName }
+  {
+    shareScope,
+    without,
+    packageOf,
+  }: { shareScope: string; without?: RemoteName; packageOf: PackageOf }
 ): CommittedView {
   const global: CommittedView['global'] = new Map();
 
@@ -74,10 +83,15 @@ export function committedView(
 
   const builds = new Map<RemoteName, Build>();
   for (const [owner, copies] of shipped)
-    if (owner !== without) builds.set(owner, buildOf(owner, copies));
+    if (owner !== without) builds.set(owner, buildOf(owner, copies, packageOf));
 
   const fileOf = subpoolFilesOf(members);
-  return { builds, global, runsOffMap: runsOffMapOf(members, global, builds, fileOf) };
+  return {
+    packageOf,
+    builds,
+    global,
+    runsOffMap: runsOffMapOf(members, global, builds, fileOf),
+  };
 }
 
 function subpoolFilesOf(members: PoolMember[]): Map<RemoteName, Map<Specifier, string>> {
@@ -141,15 +155,34 @@ export function judgeRemote(
 ): 'global' | GateMiss {
   const { rejected, missing } = scan(copies, view, accepts);
   if (rejected) return { cause: 'incompatible', ...rejected };
-  const globalTags = new SpecifierTags([...view.global].map(([s, { tag }]) => [s, tag] as const));
+  const globalTags = new SpecifierTags(
+    view.packageOf,
+    [...view.global].map(([s, { tag }]) => [s, tag] as const)
+  );
   const binding = offMapBinding(copies, view, globalTags);
   if (binding) return { cause: 'uncovered', ...binding };
+  // A package the map serves from two builds is a combination no build shipped, whatever the tags say: the
+  // load's own copies can merge libraries the committed builds keep apart.
+  if (servedSplit(copies, view)) return { cause: 'uncovered', unshipped: true };
   // The map's tags must be a combination one build shipped: agreeing is its own witness, otherwise one
   // committed build must be.
   if (agrees(copies, globalTags)) return 'global';
   if (missing !== undefined) return { cause: 'uncovered', specifier: missing };
   if (unwitnessedGap(copies, globalTags, view.builds.values()) === undefined) return 'global';
   return { cause: 'uncovered', unshipped: true };
+}
+
+function servedSplit(copies: readonly Copy[], view: CommittedView): boolean {
+  const loaded = new Set(copies.flatMap(copy => copy.specifiers.map(view.packageOf)));
+  const servedBy = new Map<ExternalName, RemoteName>();
+  for (const [specifier, { remote }] of view.global) {
+    const pkg = view.packageOf(specifier);
+    if (!loaded.has(pkg)) continue;
+    const first = servedBy.get(pkg);
+    if (first === undefined) servedBy.set(pkg, remote);
+    else if (first !== remote) return true;
+  }
+  return false;
 }
 
 type Binding = { owner: RemoteName; specifier: Specifier; tag: VersionName };
@@ -183,9 +216,9 @@ export function coverFromMap(
   const reaches = reachesOf(remote, files, view);
   const bound = boundByFile(reaches, view);
   if (bound !== undefined) return { bound };
-  const servedPackages = new Set([...view.global.keys()].map(packageOf));
+  const servedPackages = new Set([...view.global.keys()].map(view.packageOf));
   const gap = files
-    .map(file => gapOf(file, servedPackages))
+    .map(file => gapOf(file, servedPackages, view.packageOf))
     .find(specifier => specifier !== undefined);
   if (gap !== undefined) return { gap };
   return { covers: files.filter(covering).map(coverOf) };
@@ -194,7 +227,8 @@ export function coverFromMap(
 // The first entrypoint a copy ships that the map lacks, when the map serves another entrypoint of its package.
 function gapOf(
   { copy, covered }: Coverable,
-  servedPackages: ReadonlySet<string>
+  servedPackages: ReadonlySet<string>,
+  packageOf: PackageOf
 ): Specifier | undefined {
   const entrypoints = Object.keys(copy.entries);
   const missing = entrypoints.filter(specifier => !covered.has(specifier));
@@ -306,7 +340,10 @@ function scan(copies: readonly Copy[], view: CommittedView, accepts: AcceptsTag)
 // off the map at another tag than the remote reaches elsewhere would split it. That tag is the map's, else the
 // remote's own, else the first serving build's.
 function offMapBinding(copies: readonly Copy[], view: CommittedView, globalTags: SpecifierTags) {
-  const own = new SpecifierTags(copies.flatMap(c => c.specifiers.map(s => [s, c.tag] as const)));
+  const own = new SpecifierTags(
+    view.packageOf,
+    copies.flatMap(c => c.specifiers.map(s => [s, c.tag] as const))
+  );
   const servers = new Set<RemoteName>();
   for (const copy of copies)
     for (const specifier of copy.specifiers) {
@@ -314,7 +351,7 @@ function offMapBinding(copies: readonly Copy[], view: CommittedView, globalTags:
       if (build !== undefined) servers.add(build);
     }
 
-  const firstRun = new SpecifierTags();
+  const firstRun = new SpecifierTags(view.packageOf);
   for (const build of servers)
     for (const [specifier, { tag }] of view.runsOffMap.get(build) ?? []) {
       const reached =

@@ -9,6 +9,9 @@ import {
   toRemoteEntries,
   toRemoteEntry,
   twoLoadsArbitrary,
+  type PortfolioSpec,
+  type RemotePoolSpec,
+  type RemoteSpec,
 } from 'lib/testing/pooling/generate-portfolio';
 import {
   TIMEOUT,
@@ -16,6 +19,7 @@ import {
   byPooling,
   copiesOf,
   electedTags,
+  fileSplits,
   initOrRefuse,
   oracleVerdict,
   lenient,
@@ -135,9 +139,40 @@ describe('pooling properties: dynamic loads (generated portfolios)', { timeout: 
         }
       ));
 
+  // Scenario F, which the drawn portfolios reach only at a deeper scale: two builds declare one sibling each of
+  // a pool, so the map serves them from two builds, and a flat build of both loads at one tag.
+  const siblingsSplitByALoad = (shareScope?: string): [PortfolioSpec, RemoteSpec[]] => {
+    const pool = (members: RemotePoolSpec['members']): RemotePoolSpec => ({
+      major: 0,
+      minor: 0,
+      patch: 0,
+      range: 'caret',
+      members,
+    });
+    const declared = (members: RemotePoolSpec['members']): RemoteSpec => ({
+      pools: [pool(members)],
+      strictVersion: false,
+      extra: null,
+      dense: true,
+      siblings: true,
+    });
+    return [
+      {
+        poolSizes: [3],
+        strict: false,
+        host: 0,
+        ...(shareScope && { shareScope }),
+        remotes: [declared(['root', 'root', null]), declared(['root', null, 'root'])],
+      },
+      [{ ...declared(['root', 'root', 'root']), dense: false, flat: true }],
+    ];
+  };
+
   // 101 with flat and dense builds in one pool: a specifier can be an entry of the loaded remote's package
   // and a package of its own in the committed map, so what serves the load is read per specifier, not per
   // external. In a named share scope the load maps in its own scope, with no `imports` to inherit.
+  // Builds that declare their entrypoints packages (`.package()`) are in the mix too, and sibling libraries
+  // under one npm name.
   for (const [offset, shareScope, { mode, loads, runs }] of [
     [107, undefined, pageModes[0]],
     [108, 'team', pageModes[0]],
@@ -151,6 +186,8 @@ describe('pooling properties: dynamic loads (generated portfolios)', { timeout: 
           maxRemotes: 12,
           labelNoise: true,
           flat: true,
+          dense: true,
+          siblings: true,
           ...(shareScope && { shareScope }),
         }).chain(spec => fc.tuple(fc.constant(lenient(spec)), loads(spec))),
         runs,
@@ -182,11 +219,21 @@ describe('pooling properties: dynamic loads (generated portfolios)', { timeout: 
                 }).toEqual({ scope, key, committed: false });
 
             const before = torn(committed, record, scopeUrlsOf(loaded), host, shareScope);
+            // Like `torn`, both pages under the grouping after the load: a load whose record merges packages the
+            // committed map serves apart cannot change that map, and the next init regroups it. The loaded remote's
+            // own rows are left out: read through the committed map they are what a wrong verdict would publish.
+            const filesBefore = fileSplits(committed, [...loaded, added], host).filter(
+              t => !t.startsWith(`${added.name}: `)
+            );
             loaded.push(added);
             const after = torn(merged, record, scopeUrlsOf(loaded), host, shareScope);
             expect(after.filter(t => !before.includes(t))).toEqual([]);
+            // The tag oracle reads a package at one tag as one build; the files show two.
+            const filesAfter = fileSplits(merged, loaded, host);
+            expect(filesAfter.filter(t => !filesBefore.includes(t))).toEqual([]);
           }
-        }
+        },
+        [siblingsSplitByALoad(shareScope)]
       ));
 
   // 107 without pool labels: no gate places the load, so a flat external whose specifier the committed map

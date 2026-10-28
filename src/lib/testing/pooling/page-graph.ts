@@ -5,7 +5,11 @@ import {
   type RemoteEntry,
   type RemoteName,
 } from 'lib/core/1.domain';
-import { owningPackage, type Specifier } from 'lib/core/1.domain/externals/specifier';
+import {
+  npmPackageOf,
+  type PackageOf,
+  type Specifier,
+} from 'lib/core/1.domain/externals/specifier';
 import { compareStrings } from 'lib/utils/compare-strings';
 import { toChunkImport } from '@softarc/native-federation/domain';
 
@@ -47,9 +51,7 @@ type ShippedCopy = { packageName: ExternalName; dense?: boolean; specifiers: Spe
 
 // The package each specifier runs in as its builds bundled it: a dense copy's entries are its `packageName`'s, any
 // other copy's the npm name's, and where builds disagree the packages join. Named by its shortest member.
-export function packageOfAsShipped(
-  copies: Iterable<ShippedCopy>
-): (specifier: Specifier) => ExternalName {
+export function packageOfAsShipped(copies: Iterable<ShippedCopy>): PackageOf {
   const parent = new Map<string, string>();
   const find = (name: string): string => {
     const up = parent.get(name);
@@ -68,9 +70,8 @@ export function packageOfAsShipped(
   };
   for (const { packageName, dense, specifiers } of copies)
     for (const specifier of specifiers)
-      union(specifier, dense ? packageName : (owningPackage(specifier) ?? specifier));
-  return specifier =>
-    find(parent.has(specifier) ? specifier : (owningPackage(specifier) ?? specifier));
+      union(specifier, dense ? packageName : npmPackageOf(specifier));
+  return specifier => find(parent.has(specifier) ? specifier : npmPackageOf(specifier));
 }
 
 // Every file the entries publish, by URL, and per remote where its own code lives and what it imports.
@@ -119,7 +120,7 @@ function indexPage({ entries, scopeUrls = {}, importsOf = () => [] }: PageInput)
         ];
         const root = info.dense
           ? specifier === info.packageName
-          : owningPackage(specifier) === undefined;
+          : npmPackageOf(specifier) === specifier;
         files.set(at(file), {
           build: entry.name,
           pkg,
@@ -299,10 +300,7 @@ function faultsOf(
   return nonEmpty({
     stitched: listed(stitched),
     torn: listed(internals, pkg => !skip.has(pkg)),
-    twice: listed(
-      urls,
-      specifier => !skip.has(packages.get(specifier) ?? owningPackage(specifier) ?? specifier)
-    ),
+    twice: listed(urls, specifier => !skip.has(packages.get(specifier) ?? npmPackageOf(specifier))),
     unresolved,
   });
 }

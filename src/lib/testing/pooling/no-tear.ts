@@ -7,6 +7,7 @@ import type {
   VersionName,
 } from 'lib/core/1.domain';
 import * as _path from 'lib/utils/path';
+import type { PackageOf } from 'lib/core/1.domain/externals/specifier';
 import { buildPools } from 'lib/core/1.domain/pooling/membership';
 import { packageOfAsShipped, resolverOf } from './page-graph';
 
@@ -33,10 +34,10 @@ export type CoherenceInput = {
   /** Whether a copy's files import its build's internal chunks; none do when left out. */
   isChunked?: (remote: RemoteName, bundle: string | undefined) => boolean;
   /** The package each specifier runs in across the whole share scope (`packageOfInScope`), not just the pool. */
-  packageOf: (specifier: Specifier) => ExternalName;
+  packageOf: PackageOf;
 };
 
-export const packageOfInScope = (record: shareScope): ((specifier: Specifier) => ExternalName) =>
+export const packageOfInScope = (record: shareScope): PackageOf =>
   packageOfAsShipped(
     Object.entries(record).flatMap(([packageName, external]) =>
       external.versions.flatMap(version =>
@@ -398,7 +399,7 @@ export function tearsByPool({
 // the election wrote: a missing or wrong name moves members out of their pool's group and hides their tear.
 export function withLabelledPools(record: shareScope): shareScope {
   const poolOf = new Map<ExternalName, string>();
-  for (const [pool, members] of buildPools(record).pools)
+  for (const [pool, members] of buildPools(record, packageOfInScope(record)).pools)
     for (const { name } of members) poolOf.set(name, pool);
   return Object.fromEntries(
     Object.entries(record).map(([name, { poolName: _stored, ...external }]) => {

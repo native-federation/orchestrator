@@ -1,5 +1,5 @@
 import fc from 'fast-check';
-import type { DenseSharedInfo, RemoteEntry } from 'lib/core/1.domain';
+import type { RemoteEntry, RemoteSharedInfo } from 'lib/core/1.domain';
 import type { ImportsOf } from './page-graph';
 
 /**
@@ -41,6 +41,12 @@ export type RemoteSpec = {
   // Ships each secondary entrypoint as a package of its own (flat), as a build without
   // `feature.convertFlatSharedInfo` emits it, rather than as an entry of its package (dense).
   flat?: boolean;
+  // Ships each member's root and secondary entrypoint as dense packages of their own, as a build that declares
+  // every mapping with `.package()` does; wins over `flat`.
+  dense?: boolean;
+  // Names every member but the framework root under one npm name (`@p0/c/m1`, `@p0/c/m2`): independent
+  // libraries a dense build ships apart and a flat build bundles as one npm package. Set on every remote alike.
+  siblings?: boolean;
   // Its build imports internal chunks: per bundle (`dense`, a `bundle` per shared info and `chunks`) or as
   // `@nf-internal/` externals (`flat`, flat chunking).
   chunks?: 'dense' | 'flat';
@@ -127,8 +133,9 @@ const freshRemoteArbitrary = (poolSizes: number[]): fc.Arbitrary<RemoteSpec> =>
  * byte-identical (the subpool tie) and lets a remote join another's subpool. One pool in five is a
  * straggler's build of its own, which keeps ragged one-off families in the mix. `labelNoise` has one remote
  * in five mislabel a member (`Relabel`); off, the portfolios are the ones the seeds have always produced.
- * `flat` has each remote ship flat or dense at random; `shareScope` puts every shared external in that named
- * scope, and `mixedScope` puts each remote in that named scope or the global one at random. All three draw
+ * `flat` has each remote ship flat or dense at random, and `dense` has each remote declare its entrypoints as
+ * packages (`RemoteSpec.dense`) or not; `shareScope` puts every shared external in that named scope, and
+ * `mixedScope` puts each remote in that named scope or the global one at random. All of these draw
  * nothing when absent, so the default stream is unchanged. `latestSharedExternal` turns the
  * profile flag on or off at random, drawn last, so the portfolio itself is the one the seed draws without it.
  */
@@ -138,6 +145,8 @@ export const portfolioArbitrary = (
     maxRemotes?: number;
     labelNoise?: boolean;
     flat?: boolean;
+    dense?: boolean;
+    siblings?: boolean;
     chunks?: boolean;
     shareScope?: string;
     mixedScope?: string;
@@ -148,8 +157,9 @@ export const portfolioArbitrary = (
     .record({
       poolSizes: fc.array(fc.integer({ min: 2, max: 6 }), { minLength: 1, maxLength: 3 }),
       strict: fc.boolean(),
+      ...(o.siblings ? { siblings: fc.boolean() } : {}),
     })
-    .chain(({ poolSizes, strict }) =>
+    .chain(({ poolSizes, strict, siblings }) =>
       fc
         .record({
           templates: fc.tuple(
@@ -193,6 +203,7 @@ export const portfolioArbitrary = (
                   }
                 : {}),
               ...(o.flat ? { flat: fc.boolean() } : {}),
+              ...(o.dense ? { dense: fc.boolean() } : {}),
               ...(o.chunks
                 ? { chunks: fc.constantFrom<RemoteSpec['chunks']>(undefined, 'dense', 'flat') }
                 : {}),
@@ -222,6 +233,7 @@ export const portfolioArbitrary = (
           remotes: remotes.map(({ shareScope, ...remote }) => ({
             ...remote,
             ...(shareScope === undefined ? {} : { shareScope }),
+            ...(siblings ? { siblings } : {}),
             pools: remote.pools.map((pick, p) => {
               if (pick === null) return null;
               const builds = templates[p]!;
@@ -295,13 +307,17 @@ const derivedRemoteArbitrary = (sources: RemoteSpec[]): fc.Arbitrary<RemoteSpec>
  * One more remote for an existing spec, for the dynamic path: a redeploy of a remote the page has (a clone),
  * the same remote one change later, or a remote with builds of its own.
  */
-export const extraRemoteArbitrary = (spec: PortfolioSpec): fc.Arbitrary<RemoteSpec> =>
-  spec.remotes.length === 0
-    ? freshRemoteArbitrary(spec.poolSizes)
+export const extraRemoteArbitrary = (spec: PortfolioSpec): fc.Arbitrary<RemoteSpec> => {
+  const fresh = spec.remotes.some(r => r.siblings)
+    ? freshRemoteArbitrary(spec.poolSizes).map(r => ({ ...r, siblings: true }))
+    : freshRemoteArbitrary(spec.poolSizes);
+  return spec.remotes.length === 0
+    ? fresh
     : fc.oneof(
         { arbitrary: derivedRemoteArbitrary(spec.remotes), weight: 2 },
-        { arbitrary: freshRemoteArbitrary(spec.poolSizes), weight: 1 }
+        { arbitrary: fresh, weight: 1 }
       );
+};
 
 // A remote loaded after `first`: often derived from it, so it can join a subpool or a row the first load
 // created, or need an entrypoint only the first load ships.
@@ -415,7 +431,8 @@ function rangeOf(p: RemotePoolSpec): string {
   }
 }
 
-export const memberName = (pool: number, member: number): string => `@p${pool}/m${member}`;
+export const memberName = (pool: number, member: number, siblings = false): string =>
+  siblings && member > 0 ? `@p${pool}/c/m${member}` : `@p${pool}/m${member}`;
 
 // `deploy` > 0 serves the remote from a new URL (`Redeploy`).
 export function toRemoteEntry(
@@ -426,7 +443,7 @@ export function toRemoteEntry(
 ): RemoteEntry {
   const name = remoteName(index);
   const shareScope = spec.shareScope ?? portfolioScope;
-  const shared: DenseSharedInfo[] = [];
+  const shared: RemoteSharedInfo[] = [];
   const shipped = spec.pools.flatMap((pool, p) => (pool ? [p] : []));
   const relabelled =
     spec.relabel && shipped.length > 0 ? shipped[spec.relabel.pool % shipped.length] : -1;
@@ -444,14 +461,17 @@ export function toRemoteEntry(
       const to = spec.relabel!.to;
       return to === 'alias' ? `p${p}-alias` : `p${to % spec.pools.length}`;
     };
+    // A dense build that declares nothing groups siblings by npm name, as core's name rule does.
+    let npmGroup: RemoteSharedInfo | undefined;
     members.forEach((drawn, m) => {
       if (drawn === null) return;
       // A flat secondary without its package's root is a broken build: a flat remote ships the root beside it.
-      const shape = spec.flat && drawn === 'sub' ? 'root+sub' : drawn;
-      const pkg = memberName(p, m);
+      // A declared secondary is a package of its own, so it needs none.
+      const shape = spec.flat && !spec.dense && drawn === 'sub' ? 'root+sub' : drawn;
+      const pkg = memberName(p, m, spec.siblings);
       const entries: Record<string, string> = {};
-      if (shape !== 'sub') entries[pkg] = `${pkg.slice(1).replace('/', '_')}.js`;
-      if (shape !== 'root') entries[`${pkg}/sub`] = `${pkg.slice(1).replace('/', '_')}_sub.js`;
+      if (shape !== 'sub') entries[pkg] = `${pkg.slice(1).replace(/\//g, '_')}.js`;
+      if (shape !== 'root') entries[`${pkg}/sub`] = `${pkg.slice(1).replace(/\//g, '_')}_sub.js`;
       const info = (packageName: string, entries: Record<string, string>) =>
         shared.push({
           packageName,
@@ -462,8 +482,15 @@ export function toRemoteEntry(
           pool: labelOf(m),
           ...(shareScope === undefined ? {} : { shareScope }),
           entries,
-        } as DenseSharedInfo);
-      if (!spec.flat) return void info(pkg, entries);
+        } as RemoteSharedInfo);
+      const sibling = spec.siblings && m > 0;
+      if (!spec.flat && !spec.dense && sibling) {
+        if (npmGroup) return void Object.assign(npmGroup.entries, entries);
+        info(`@p${p}/c`, entries);
+        return void (npmGroup = shared.at(-1));
+      }
+      // `.package()` declares a sibling with its secondary entrypoint, one package of its own.
+      if ((!spec.flat && !spec.dense) || (spec.dense && sibling)) return void info(pkg, entries);
       for (const [specifier, file] of Object.entries(entries))
         info(specifier, { [specifier]: file });
     });
@@ -478,17 +505,20 @@ export function toRemoteEntry(
       strictVersion: spec.strictVersion,
       ...(shareScope === undefined ? {} : { shareScope }),
       entries: { extra: 'extra.js' },
-    } as DenseSharedInfo);
+    } as RemoteSharedInfo);
   }
 
   // A chunk's name is its content's: one package at one tag builds the same chunk.
-  // A flat secondary entrypoint is bundled with its package, as a build bundles per package.
-  const slug = (info: DenseSharedInfo) =>
-    info.packageName
-      .replace(/\/sub$/, '')
+  // A flat secondary entrypoint is bundled with its npm package, as a build bundles per package; a declared one
+  // is a package of its own.
+  const slug = (info: RemoteSharedInfo) =>
+    (spec.flat && !spec.dense
+      ? info.packageName.split('/').slice(0, 2).join('/')
+      : info.packageName
+    )
       .replace(/^@/, '')
       .replace(/\//g, '_');
-  const chunkOf = (info: DenseSharedInfo) => `chunk-${slug(info)}-${info.version}`;
+  const chunkOf = (info: RemoteSharedInfo) => `chunk-${slug(info)}-${info.version}`;
   const chunks: Record<string, string[]> = {};
   if (spec.chunks) for (const info of shared) info.bundle = `browser-${slug(info)}`;
   if (spec.chunks === 'dense')
@@ -505,8 +535,11 @@ export function toRemoteEntry(
         strictVersion: false,
         ...(shareScope === undefined ? {} : { shareScope }),
         entries: { [`@nf-internal/${chunkOf(info)}`]: `${chunkOf(info)}.js` },
-      } as DenseSharedInfo);
+      } as RemoteSharedInfo);
   }
+
+  // Marked as intake marks a remoteEntry that publishes dense: the portfolio's provider skips intake.
+  if (spec.dense || !spec.flat) for (const info of shared) info.dense = true;
 
   return {
     name,

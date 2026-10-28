@@ -245,11 +245,30 @@ ships (see [One build per package](#one-build-per-package) for the build that th
 #### One build per package
 
 A package is its primary external plus any flat secondary externals (`@angular/core/testing` reported as an
-external of its own). Per share scope — global and each named shareScope — every package is served from
-**one build**, picked after the shared versions are determined and stored as `servingBuild` on every
-external of the package in that scope. A dynamic load that opens a package the committed map does not serve
-stores the loaded remote as its serving build, as an election would (see
-[Scope and dynamic init](#scope-and-dynamic-init)).
+external of its own). The primary is the external named after the package, as long as it ships that root: a
+dense build names the record of secondaries it does not declare by npm name (`@angular/material` listing only
+`@angular/material/sort`), and such a record is no primary. Per share scope — global and each named shareScope —
+every package is served from **one build**, picked after the shared versions are determined and stored as
+`servingBuild` on every external of the package in that scope. A dynamic load that opens a package the committed
+map does not serve stores the loaded remote as its serving build, as an election would (see [Scope and dynamic
+init](#scope-and-dynamic-init)).
+
+Which specifiers make up a package follows the records the builds publish. A record's name and the specifiers it
+lists are one package, as are a flat entry and its npm name; records that share any of these merge, named by the
+shortest name among them. A specifier no record lists goes where its npm name went. So `@angular/core/testing`
+belongs to `@angular/core`, flat or dense, while a build that declares `.package('@shared/components/table')`
+and `.package('@shared/components/collapse')` (core's `mappingsFromWorkspace()`, with `denseExternals`)
+publishes two records, which are two packages. A build that ships them together, flat or dense under
+`@shared/components`, merges both into `@shared/components`. Each build declares for itself, so remotes can
+disagree: an estate that moves to `.package()` one remote at a time runs older builds beside newer ones. Per
+share scope every copy counts, whichever row or tag it sits in. A runtime load counts its own copies too, so a
+load whose records merge libraries never takes them from two builds: it follows the build that serves them all,
+or else runs the merged package from its own build; the next init decides it again. Packages that import each
+other, npm packages and declared libraries alike, run from one build only when they share a `pool` label (see
+[Enabling pooling](#enabling-pooling)); declare libraries that import each other in one `pool`, or one of them
+can load twice. A declared package gets no bundle of its own: code no mapping owns sits in a chunk, which a
+remote runs once for each build it takes the packages from, so state shared between packages belongs in a
+mapping.
 
 - A **pooled** package takes its pool's winner, the build its election made global, when the winner has a copy
   in the primary's share row (or in any share row of the package when the primary has none). It is not ranked
@@ -763,11 +782,13 @@ is the usual way to pool a framework family. To pull a cross-scope sibling in, l
 `@design-system/ui` labelled `framework` joins the framework pool.
 
 One edge needs no label: a secondary entrypoint is always joined to its package (`@framework/core/testing` →
-`@framework/core`), whoever declares either. A package and its entrypoints are one artefact, so they must not
-be separable — they genuinely tear when they are, with one remote's `@framework/forms` served beside another's
-`@framework/forms/signals`. The edge is not itself a reason to pool: with no label, a package and its entrypoints
-form no pool. A member carrying a label that pools with nothing is almost always a typo or a missing sibling, so
-it is logged at `debug`.
+`@framework/core`), whoever declares either. The package is the one [One build per package](#one-build-per-package)
+groups it into, so a library served as its own package joins no sibling under the same npm name: a label on
+`@shared/components/table` pulls in no `@shared/components/collapse`. A package and its entrypoints are one
+artefact, so they must not be separable — they genuinely tear when they are, with one remote's `@framework/forms`
+served beside another's `@framework/forms/signals`. The edge is not itself a reason to pool: with no label, a
+package and its entrypoints form no pool. A member carrying a label that pools with nothing is almost always a typo
+or a missing sibling, so it is logged at `debug`.
 
 **A pool is named after the label most of its copies declare** (ties break alphabetically), so a family labelled
 `framework` logs and stores as `framework` whatever else some remote called it. A name belongs to exactly one
@@ -1100,7 +1121,7 @@ it in that scope, read as the map was generated (the serving build's copy, see
 
 A rejecting range warns, and under `strictExternalCompatibility` fails the load, only where a cold init that kept
 the builds the committed map serves would refuse it: the package is in a pool once the load's copies are stored (a
-label that joins no other external forms no pool, as at init; a dense build ships a package as one external), the
+label that joins no other external forms no pool, as at init; a dense build ships each record as one external), the
 file is at the serving tag of a package the map would otherwise serve the remote wholly from one build, or the file
 is of the copy's own external at the tag that external's own election would keep with the remote in it (a host's
 row, or under `latestSharedExternal` the newest tag), or of the copy's own external where no tag pleases every
