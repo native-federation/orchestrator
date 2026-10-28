@@ -5,6 +5,7 @@ import { createLogConfig } from './logging/log.config';
 import { createModeConfig } from './mode/mode.config';
 import { createStorageConfig } from './storage/storage.config';
 import { noopLogger } from './logging/noop.logger';
+import { createMockLogHandler } from 'lib/testing/handlers/log.handler';
 
 describe('DefaultConfig', () => {
   afterEach(() => {
@@ -68,7 +69,7 @@ describe('DefaultConfig', () => {
     it('Should apply correct fallback config from options', () => {
       const spy = vi.spyOn(storageHandler, 'globalThisStorageEntry');
 
-      const actual = createStorageConfig({});
+      const actual = createStorageConfig({}, createMockLogHandler());
       actual.storage('entry', {});
 
       expect(spy).toHaveBeenCalled();

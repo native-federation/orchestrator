@@ -8,6 +8,7 @@ import type {
 import { portfolio } from 'lib/testing/pooling/portfolio';
 import { createStorageConfig } from 'lib/core/4.config/storage/storage.config';
 import { globalThisStorageEntry } from 'lib/core/4.config/storage/global-this.storage';
+import { createMockLogHandler } from 'lib/testing/handlers/log.handler';
 
 /**
  * A cache stamped by another orchestrator version is dropped (`cache-state`), so a
@@ -57,11 +58,14 @@ describe('stored shape', () => {
 
   it('lists every stored key', async () => {
     // Stamps the version as a real page's startup does, before the repositories open.
-    createStorageConfig({
-      storage: globalThisStorageEntry,
-      storageNamespace: NAMESPACE,
-      exposeStorageGetter: false,
-    });
+    createStorageConfig(
+      {
+        storage: globalThisStorageEntry,
+        storageNamespace: NAMESPACE,
+        exposeStorageGetter: false,
+      },
+      createMockLogHandler()
+    );
     const p = portfolio({}, { hosts: ['host'], storage: NAMESPACE, realRepositories: true });
     await p.runInit([
       entry(

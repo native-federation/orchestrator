@@ -248,6 +248,8 @@ type StorageOptions = {
 | storageNamespace    | `"__NATIVE_FEDERATION__"` | The namespace under which the cache will be stored. e.g. remotes will be stored under `__NATIVE_FEDERATION__.remotes` in localStorage                                                                                                                                                                                              |
 | exposeStorageGetter | `true`                    | Publishes a read-only `get(key)` on [`globalThis.__NF_ORCHESTRATOR__`](#discovering-the-storage-from-tools). Set to `false` to keep the state of a custom storage unreadable for page scripts.                                                                                                                                     |
 
+A write the storage rejects, for example because `localStorage` or `sessionStorage` is full, is logged as a warning. That page keeps its cache in memory from then on, and the next page starts without one.
+
 ### Example
 
 ```javascript

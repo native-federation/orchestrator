@@ -16,6 +16,7 @@ import { TIMEOUT, run } from 'lib/testing/pooling/property-harness';
 import { portfolio } from 'lib/testing/pooling/portfolio';
 import { createStorageConfig } from 'lib/core/4.config/storage/storage.config';
 import { globalThisStorageEntry } from 'lib/core/4.config/storage/global-this.storage';
+import { createMockLogHandler } from 'lib/testing/handlers/log.handler';
 
 /**
  * The serving-build step decides only the share scopes something wrote: this init before deciding, or a runtime
@@ -129,11 +130,14 @@ function rigFor(spec: PortfolioSpec, decideEveryScope: boolean) {
         ]!;
         if (stamp === null) delete namespace['cache-state'];
         else namespace['cache-state'] = { ...(namespace['cache-state'] as object), version: stamp };
-        const { clearStorage } = createStorageConfig({
-          storage: globalThisStorageEntry,
-          storageNamespace: storage,
-          exposeStorageGetter: false,
-        });
+        const { clearStorage } = createStorageConfig(
+          {
+            storage: globalThisStorageEntry,
+            storageNamespace: storage,
+            exposeStorageGetter: false,
+          },
+          createMockLogHandler()
+        );
         expect(clearStorage).toBe(true);
         p.reload(true);
         fresh = false;
