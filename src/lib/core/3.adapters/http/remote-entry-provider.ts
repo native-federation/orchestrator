@@ -29,7 +29,7 @@ const createRemoteEntryProvider = (config: ModeConfig): ForProvidingRemoteEntrie
   const normalizeRemoteEntry = (raw: RawRemoteEntry): RemoteEntry => {
     const marked = markDense(raw.shared ?? []);
     const shared = config.feature.convertFlatSharedInfo
-      ? densifyExternals(marked)
+      ? densifyExternals(marked, new Map())
       : toDenseSharedInfoFormat(marked);
     return { ...raw, shared } as RemoteEntry;
   };

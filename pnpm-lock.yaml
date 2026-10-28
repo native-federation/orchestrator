@@ -19,8 +19,8 @@ importers:
         specifier: 1.63.0
         version: 1.63.0
       '@softarc/native-federation':
-        specifier: ^4.8.0
-        version: 4.8.0
+        specifier: ^4.9.0-next.2
+        version: 4.9.0-next.2
       '@types/node':
         specifier: ^24.19.1
         version: 24.19.2
@@ -748,8 +748,8 @@ packages:
   '@rolldown/pluginutils@1.0.1':
     resolution: {integrity: sha512-2j9bGt5Jh8hj+vPtgzPtl72j0yRxHAyumoo6TNfAjsLB04UtpSvPbPcDcBMxz7n+9CYB0c1GxQFxYRg2jimqGw==, tarball: https://registry.npmjs.org/@rolldown/pluginutils/-/pluginutils-1.0.1.tgz}
 
-  '@softarc/native-federation@4.8.0':
-    resolution: {integrity: sha512-BqkXagXM6N6nNrbPKobevuP4dZOeuQdaIa4vcsA4L9hxyM+jEQvSWT9H6ra/vWFy43Ay0ViXEC9LvuLx+XMD8w==, tarball: https://registry.npmjs.org/@softarc/native-federation/-/native-federation-4.8.0.tgz}
+  '@softarc/native-federation@4.9.0-next.2':
+    resolution: {integrity: sha512-Y3z8P9EY6PJqawSNBgmsY9Au+YdgVpXcatECCy+ApGEdvdvAwgRzZbTLzALPSx2m7pO3PUIurk4+swiYO+YpHA==, tarball: https://registry.npmjs.org/@softarc/native-federation/-/native-federation-4.9.0-next.2.tgz}
 
   '@softarc/sheriff-core@0.20.0':
     resolution: {integrity: sha512-dTm5dOUMOGTV3ql7ZIuI8rE+gZawIcJLEluqRYX3KDVJ215vfUzpC9LlSL4pTW0lAAeNLelmPZBzY57jLvOPpg==, tarball: https://registry.npmjs.org/@softarc/sheriff-core/-/sheriff-core-0.20.0.tgz}
@@ -2241,13 +2241,12 @@ snapshots:
 
   '@rolldown/pluginutils@1.0.1': {}
 
-  '@softarc/native-federation@4.8.0':
+  '@softarc/native-federation@4.9.0-next.2':
     dependencies:
       '@jridgewell/sourcemap-codec': 1.6.0
       '@softarc/sheriff-core': 0.20.0(typescript@6.0.3)
       chalk: 6.0.1
       es-module-lexer: 2.3.2
-      esbuild: 0.28.2
       tinyglobby: 0.2.17
       typescript: 6.0.3
 
