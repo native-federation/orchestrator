@@ -313,18 +313,17 @@ describe('pooling properties: init (generated portfolios)', { timeout: TIMEOUT }
     }));
 
   // Whatever changes in a share scope, the warm init after it re-elects from the state the init left: one
-  // external marked dirty must reproduce every pool's record and the files the map gives their specifiers.
-  // Half the draws pick an external in no pool when there is one, which re-elects no pool unless a dirty
-  // scope re-elects all of them (D-5). Only the pools are compared: determine does not re-resolve every
-  // unpooled external the same way once its copies are cached, and under strictExternalCompatibility it may
-  // refuse one a cold init took (for-later), hence lenient portfolios.
-  it('idempotence: a warm init with any one external dirty reproduces every pool', () =>
+  // external marked dirty must reproduce every pool's record and the whole map. Half the draws pick an external
+  // in no pool when there is one, which re-elects no pool unless a dirty scope re-elects all of them (D-5).
+  // Strict portfolios included: once every copy is cached, versions a cold init priced apart tie, and only
+  // keeping the version already shared on that tie re-elects what the init did instead of refusing a copy it took.
+  it('idempotence: a warm init with any one external dirty reproduces every pool and the map', () =>
     run(
       24,
       fc.tuple(portfolioArbitrary({ latestSharedExternal: true }), fc.boolean(), fc.nat()),
       200,
       async ([spec, unpooled, pick]) => {
-        const init = await initOrRefuse(lenient(spec));
+        const init = await initOrRefuse(spec);
         if (!init.ok) return;
         const all = Object.keys(init.result.record).sort();
         const loose = all.filter(name => init.result.record[name]!.poolName === undefined);
@@ -332,6 +331,7 @@ describe('pooling properties: init (generated portfolios)', { timeout: TIMEOUT }
         if (names.length === 0) return;
         const again = await init.rig.touch(names[pick % names.length]!);
         expect(pooledPart(again)).toEqual(pooledPart(init.result));
+        expect(again.importMap).toEqual(init.result.importMap);
       }
     ));
 

@@ -404,7 +404,9 @@ To minimise tears the resolver also uses coverage as a **tiebreaker** when choos
 the shared version: among candidates that tie on the extra-downloads heuristic, it prefers the one whose
 copies together leave the fewest specifiers uncovered across the versions it would skip. It counts every copy of
 the candidate's tag, as the serving build is decided later and may be any of them. A decisive
-extra-downloads winner is never overridden, and an exact tie still keeps the highest version.
+extra-downloads winner is never overridden, and an exact tie still keeps the highest version. Before coverage, a
+downloads tie goes to the version a warm page already shares: keeping it saves a download. So a newer non-strict
+version an added remote ships is adopted on a fresh session, not on a warm page.
 
 #### When the host's build lacks an entrypoint
 
@@ -1636,9 +1638,10 @@ is why it prices copies rather than versions. Pricing the whole version would ch
 dedup for a download they never make, and can prefer a candidate that is dearer once resolved.
 
 > **Consequence.** A large group of remotes sitting on an older tag can win over a smaller group on a newer
-> one — that is what "fewest extra downloads" asks for. Ties break toward the newest tag, and they are common,
-> since a version costs only its objectors and prices are therefore small. Host precedence (`remoteEntry` of
-> the host) and `profile.latestSharedExternal` are decided before this objective runs and are unaffected.
+> one — that is what "fewest extra downloads" asks for. Ties break toward the version already shared, then the
+> newest tag, and they are common, since a version costs only its objectors and prices are therefore small. Host
+> precedence (`remoteEntry` of the host) and `profile.latestSharedExternal` are decided before this objective
+> runs and are unaffected.
 >
 > Two approximations, both deliberate. A cached copy is priced at zero, so the same portfolio can elect
 > different equal-cost winners assembled cold and assembled incrementally. And the sum leaves the *winner's*

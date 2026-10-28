@@ -118,6 +118,7 @@ export function createDetermineSharedExternals(
       // find version with least extra downloads, sorted by SEMVER version (O^2 complexity)
       let leastExtraDownloads = Number.MAX_VALUE;
       let leastTears = Number.MAX_VALUE;
+      let leaderShared = false;
       // What a rejected version really costs: `applyWinner` splits it, so only the copies that themselves
       // reject the winner keep their own build. Cached copies are already downloaded and non-strict ones take
       // whatever is shared, so neither costs anything. Grouped by range so the O(versions²) selection loop
@@ -149,19 +150,22 @@ export function createDetermineSharedExternals(
 
       external.versions.forEach(vA => {
         const extraDownloads = external.versions.reduce((sum, vB) => sum + costOf(vB, vA.tag), 0);
-        // Tiebreak equal-download candidates toward the one that leaves fewest entrypoints
-        // uncovered across the versions it would skip (fewest tears / scope-promotions).
+        // A downloads tie goes to the version already shared, as keeping it saves a download, then to the one
+        // that leaves fewest entrypoints uncovered across the versions it would skip (tears / scope-promotions).
+        const alreadyShared = vA.action === 'share' && !!vA.remotes[0]?.cached;
         if (extraDownloads < leastExtraDownloads) {
           leastExtraDownloads = extraDownloads;
           leastTears = uncoveredTears(external, vA, accepts);
+          leaderShared = alreadyShared;
           sharedVersion = vA;
           return;
         }
-        if (extraDownloads > leastExtraDownloads) return;
+        if (extraDownloads > leastExtraDownloads || leaderShared) return;
 
         const tears = uncoveredTears(external, vA, accepts);
-        if (tears < leastTears) {
+        if (alreadyShared || tears < leastTears) {
           leastTears = tears;
+          leaderShared = alreadyShared;
           sharedVersion = vA;
         }
       });
