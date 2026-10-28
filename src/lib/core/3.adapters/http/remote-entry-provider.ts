@@ -1,38 +1,15 @@
-import {
-  type RawRemoteEntry,
-  type RemoteEntry,
-} from 'lib/core/1.domain/remote-entry/remote-entry.contract';
+import type { RawRemoteEntry } from 'lib/core/1.domain/remote-entry/remote-entry.contract';
 import type { ForProvidingRemoteEntries } from 'lib/core/2.app/driving-ports/for-providing-remote-entries.port';
 import { NFError } from 'lib/core/native-federation.error';
 import type { ModeConfig } from 'lib/core/2.app/config/mode.contract';
 import { verifyIntegrity } from 'lib/utils/integrity';
-import { markDense } from 'lib/core/1.domain/remote-entry/mark-dense';
-import {
-  densifyExternals,
-  toDenseSharedInfoFormat,
-} from '@softarc/native-federation/internal/browser';
+import { normalizeRemoteEntry } from 'lib/core/3.adapters/remote-entry/normalize-remote-entry';
 
 const createRemoteEntryProvider = (config: ModeConfig): ForProvidingRemoteEntries => {
   const ensureOk = (response: Response) => {
     if (!response.ok)
       return Promise.reject(new Error(`${response.status} - ${response.statusText}`));
     return response;
-  };
-
-  const fillEmptyFields = (remoteEntryUrl: string) => (remoteEntry: RemoteEntry) => {
-    if (!remoteEntry.exposes) remoteEntry.exposes = [];
-    if (!remoteEntry.shared) remoteEntry.shared = [];
-    if (!remoteEntry.url) remoteEntry.url = remoteEntryUrl;
-    return remoteEntry;
-  };
-
-  const normalizeRemoteEntry = (raw: RawRemoteEntry): RemoteEntry => {
-    const marked = markDense(raw.shared ?? []);
-    // Flat entries carry no package declaration, so densifying groups them by npm name.
-    const shared = config.feature.convertFlatSharedInfo
-      ? densifyExternals(marked, new Map())
-      : toDenseSharedInfoFormat(marked);
-    return { ...raw, shared } as RemoteEntry;
   };
 
   const formatError = (remoteEntryUrl: string) => (err: unknown) => {
@@ -52,8 +29,7 @@ const createRemoteEntryProvider = (config: ModeConfig): ForProvidingRemoteEntrie
       return fetch(remoteEntryUrl)
         .then(ensureOk)
         .then(parse)
-        .then(normalizeRemoteEntry)
-        .then(fillEmptyFields(remoteEntryUrl))
+        .then(raw => normalizeRemoteEntry(raw, remoteEntryUrl, config))
         .catch(formatError(remoteEntryUrl));
     },
   };

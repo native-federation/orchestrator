@@ -6,6 +6,7 @@ import { createFsRemoteEntryProvider } from './fs-remote-entry-provider';
 import { NFError } from 'lib/core/native-federation.error';
 import { readSourceBytes } from 'lib/node/utils/read-source';
 import { verifyIntegrity } from 'lib/utils/integrity';
+import { mockConfig } from 'lib/testing/config.mock';
 
 vi.mock('lib/node/utils/read-source', () => ({
   readSourceBytes: vi.fn(),
@@ -29,7 +30,7 @@ describe('createFsRemoteEntryProvider (integrity)', () => {
     readBytes.mockResolvedValue(bytes);
     verify.mockResolvedValue(undefined);
 
-    await createFsRemoteEntryProvider().provide('/r.json', { integrity: 'sha512-abc' });
+    await createFsRemoteEntryProvider(mockConfig()).provide('/r.json', { integrity: 'sha512-abc' });
 
     expect(verify).toHaveBeenCalledWith(bytes, 'sha512-abc');
   });
@@ -37,7 +38,7 @@ describe('createFsRemoteEntryProvider (integrity)', () => {
   it('skips integrity when not supplied', async () => {
     readBytes.mockResolvedValue(new TextEncoder().encode('{"name":"r"}').buffer);
 
-    await createFsRemoteEntryProvider().provide('/r.json');
+    await createFsRemoteEntryProvider(mockConfig()).provide('/r.json');
 
     expect(verify).not.toHaveBeenCalled();
   });
@@ -47,7 +48,7 @@ describe('createFsRemoteEntryProvider (integrity)', () => {
     verify.mockRejectedValue(new Error('Integrity mismatch'));
 
     await expect(
-      createFsRemoteEntryProvider().provide('/r.json', { integrity: 'sha256-x' })
+      createFsRemoteEntryProvider(mockConfig()).provide('/r.json', { integrity: 'sha256-x' })
     ).rejects.toEqual(new NFError("Read of '/r.json' returned Integrity mismatch"));
   });
 });
