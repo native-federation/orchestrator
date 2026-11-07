@@ -38,8 +38,7 @@ export function memberRecord(
     const row = { tag, host: false, action, remotes: [meta] };
     placed.push(row);
     if (meta.name !== pool.winner) return;
-    // The winner's copy leads its row: `remotes[0]` is the basis the global map publishes.
-    winnerRow = row;
+    winnerRow ??= row;
     row.host = pool.winnerIsHost;
   };
 
@@ -56,10 +55,11 @@ export function memberRecord(
       else place(version.tag, 'scope', { ...meta, poolCause: placement.cause });
     }
 
+  // The winner's copies lead their row, every record of a split build (#133): `remotes[0]` is the basis, and
+  // the import map publishes the first copy listing a specifier. Stable, so ties keep their stored order.
+  const rank = (name: RemoteName) => (name === pool.winner ? 0 : claimsGlobally(name) ? 1 : 2);
   const rows = mergeRows(placed, winnerRow);
-  // Stable, so the winner still leads; the import map publishes the first copy listing a specifier.
-  for (const row of rows)
-    row.remotes.sort((a, b) => Number(!claimsGlobally(a.name)) - Number(!claimsGlobally(b.name)));
+  for (const row of rows) row.remotes.sort((a, b) => rank(a.name) - rank(b.name));
 
   const order = { share: 0, skip: 1, scope: 2 };
   const newest = byTag(compare);

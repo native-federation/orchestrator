@@ -1,4 +1,11 @@
-import type { ExternalName, RemoteName, VersionName } from 'lib/core/1.domain';
+import type { DeepReadonly } from 'lib/utils/deep-readonly';
+import type {
+  ExternalName,
+  RemoteName,
+  SharedVersion,
+  SharedVersionMeta,
+  VersionName,
+} from 'lib/core/1.domain';
 import {
   type PackageOf,
   type Specifier,
@@ -27,18 +34,11 @@ export type Build = {
 
 export function copiesByRemote(members: readonly PoolMember[]): Map<RemoteName, Copy[]> {
   const shipped = new Map<RemoteName, Copy[]>();
-  for (const member of members) {
-    const tagOf = new Map<RemoteName, VersionName>();
-    for (const version of member.external.versions)
-      for (const meta of version.remotes) {
-        // A build ships a member at one tag, so a row at a second tag is a record it cannot produce; the first
-        // tag wins whole, so a build never covers a specifier at a tag it does not ship. Several rows at that
-        // tag are one build split across bundles, each its own copy (#133).
-        const first = tagOf.get(meta.name);
-        if (first !== undefined && first !== version.tag) continue;
-        tagOf.set(meta.name, version.tag);
-        let copies = shipped.get(meta.name);
-        if (!copies) shipped.set(meta.name, (copies = []));
+  for (const member of members)
+    for (const [remote, rows] of rowsByRemote(member)) {
+      let copies = shipped.get(remote);
+      if (!copies) shipped.set(remote, (copies = []));
+      for (const { version, meta } of rows)
         copies.push({
           member: member.name,
           tag: version.tag,
@@ -47,9 +47,24 @@ export function copiesByRemote(members: readonly PoolMember[]): Map<RemoteName, 
           host: version.host && meta === version.remotes[0],
           specifiers: Object.keys(meta.entries),
         });
-      }
-  }
+    }
   return shipped;
+}
+
+export type MemberRow = DeepReadonly<{ version: SharedVersion; meta: SharedVersionMeta }>;
+
+// A build ships a member at one tag, so a row at a second tag is a record it cannot produce; the first tag wins
+// whole, so a build never covers a specifier at a tag it does not ship. Several rows at that tag are one build
+// split across bundles, each its own copy (#133).
+export function rowsByRemote(member: PoolMember): Map<RemoteName, MemberRow[]> {
+  const rows = new Map<RemoteName, MemberRow[]>();
+  for (const version of member.external.versions)
+    for (const meta of version.remotes) {
+      const mine = rows.get(meta.name);
+      if (!mine) rows.set(meta.name, [{ version, meta }]);
+      else if (mine[0]!.version.tag === version.tag) mine.push({ version, meta });
+    }
+  return rows;
 }
 
 export const specifierCount = (copies: readonly Copy[]): number =>

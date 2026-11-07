@@ -881,6 +881,31 @@ describe('shareServingCopies', () => {
   });
 });
 
+describe('shareServingCopies of a serving build split across bundles', () => {
+  // The serving build ships the package at one tag in two records (#133), another copy stored between them.
+  // The import map publishes the first copy listing a specifier, so both records must lead the share row.
+  it('puts every record of the serving build in front of the row', () => {
+    const record = external(
+      version(
+        'skip',
+        [
+          copy('serving', ['fw/testing']),
+          copy('other', ['fw/testing', 'fw/testing/l']),
+          copy('serving', ['fw/testing/l']),
+        ],
+        '2.0.0'
+      )
+    );
+
+    shareServingCopies(record, { remote: 'serving', tag: '2.0.0' });
+
+    expect(
+      record.versions[0]!.remotes.map(r => `${r.name}:${Object.keys(r.entries).join(',')}`)
+    ).toEqual(['serving:fw/testing', 'serving:fw/testing/l', 'other:fw/testing,fw/testing/l']);
+    expect(record.versions[0]!.action).toBe('share');
+  });
+});
+
 describe('followServingBuild', () => {
   // `tag:action:[remotes]`, the way the pooling specs read a record.
   const shape = (e: SharedExternal) =>

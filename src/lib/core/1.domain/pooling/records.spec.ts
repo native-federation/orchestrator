@@ -5,7 +5,7 @@ import { createVersionCheck } from 'lib/core/3.adapters/checks/version.check';
 import { elect } from './election';
 import type { PoolMember } from './membership';
 import { memberRecord, movedRecord, renamedRecords } from './records';
-import { npmPackageOf } from 'lib/core/1.domain/externals/specifier';
+import { npmPackageOf, SpecifierTags } from 'lib/core/1.domain/externals/specifier';
 
 /**
  * The records the init step writes are computed here, before any write, and nothing here may change what it
@@ -147,6 +147,52 @@ describe('memberRecord of a package whose copies ship different entrypoints', ()
     const record = memberRecord(pool[0]!, { ...election, poolName: 'y' }, compare);
 
     expect(record.versions.find(v => v.action === 'share')?.tag).toBe('17.2.0');
+  });
+});
+
+describe('memberRecord of a winner split across bundles', () => {
+  // The winner ships `@x/core` at one tag in two records (#133), stored with another global copy between them.
+  // The import map publishes the first copy listing a specifier, so both of the winner's records must lead, or
+  // `other` serves the root while the winner serves only its locale.
+  it('puts every record of the winner in front of the row, in stored order', () => {
+    const member: PoolMember = {
+      name: '@x/core',
+      external: {
+        dirty: true,
+        versions: [
+          {
+            tag: '22.0.0',
+            host: false,
+            action: 'share',
+            remotes: [
+              mockVersionRemote('other', '@x/core', { entries: { '@x/core': 'o.js' } }),
+              mockVersionRemote('w', '@x/core', { entries: { '@x/core': 'c.js' } }),
+              mockVersionRemote('w', '@x/core', { entries: { '@x/core/l': 'l.js' } }),
+            ],
+          },
+        ],
+      },
+    };
+    const placed = {
+      poolName: 'x',
+      winner: 'w',
+      winnerIsHost: false,
+      globalTags: new SpecifierTags(npmPackageOf, [['@x/core', '22.0.0']]),
+      placements: new Map([
+        ['w', { kind: 'global' as const }],
+        ['other', { kind: 'global' as const }],
+      ]),
+      misses: new Map(),
+    };
+
+    const record = memberRecord(member, placed, compare);
+
+    expect(
+      record.versions.map(v => ({
+        at: `${v.tag}:${v.action}`,
+        remotes: v.remotes.map(r => `${r.name}:${Object.keys(r.entries).join(',')}`),
+      }))
+    ).toEqual([{ at: '22.0.0:share', remotes: ['w:@x/core', 'w:@x/core/l', 'other:@x/core'] }]);
   });
 });
 

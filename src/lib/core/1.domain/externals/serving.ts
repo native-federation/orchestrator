@@ -83,12 +83,14 @@ function cheapestBuild(
 // the build ships stays in its surface. Mutates `external` in place.
 export function shareServingCopies(external: SharedExternal, serving: ServingBuild): void {
   for (const row of external.versions) {
-    const copy = row.remotes.find(c => c.name === serving.remote);
-    if (row.action !== 'skip' || !copy || rowAt(external.versions, row.tag, 'share')) continue;
+    if (row.action !== 'skip' || rowAt(external.versions, row.tag, 'share')) continue;
+    const own = row.remotes.filter(c => c.name === serving.remote);
+    if (own.length === 0) continue;
     row.action = 'share';
     // A host leading the row stops being its basis.
-    if (row.remotes[0] !== copy) row.host = false;
-    row.remotes = [copy, ...row.remotes.filter(c => c !== copy)];
+    if (row.remotes[0] !== own[0]) row.host = false;
+    // Every record of a split build leads, or another copy publishes what the second one ships (#133).
+    row.remotes = [...own, ...row.remotes.filter(c => c.name !== serving.remote)];
   }
 }
 

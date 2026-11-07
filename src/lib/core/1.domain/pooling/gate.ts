@@ -14,7 +14,7 @@ import {
   SpecifierTags,
 } from 'lib/core/1.domain/externals/specifier';
 import * as _path from 'lib/utils/path';
-import { type Build, buildOf, type Copy } from './builds';
+import { type Build, buildOf, type Copy, rowsByRemote } from './builds';
 import type { PoolMember } from './membership';
 import { agrees, unwitnessedGap } from './rules';
 
@@ -207,10 +207,15 @@ export function coverFromMap(
   const files: Coverable[] = [];
   for (const member of mine) {
     const action = actions[member.name]!;
-    const rows = rowsOf(member, remote);
-    if (rows.length === 0) continue;
+    const rows = rowsByRemote(member)
+      .get(remote)
+      ?.map(r => r.meta);
+    if (!rows) continue;
 
-    const entries: Record<Specifier, string> = Object.assign({}, ...rows.map(r => r.entries));
+    // First record wins, as in the import map.
+    const entries: Record<Specifier, string> = {};
+    for (const row of rows)
+      for (const [specifier, file] of Object.entries(row.entries)) entries[specifier] ??= file;
     const mapped = mapFiles(entries, view, policy, action);
     if ('unmapped' in mapped) return mapped;
     files.push({ member, action, rows, entries, ...mapped });
@@ -225,15 +230,6 @@ export function coverFromMap(
     .find(specifier => specifier !== undefined);
   if (gap !== undefined) return { gap };
   return { covers: files.filter(covering).map(coverOf) };
-}
-
-// Like `copiesByRemote`: the remote's rows at the first tag it ships the member at.
-function rowsOf(member: PoolMember, remote: RemoteName): SharedVersionMeta[] {
-  for (const version of member.external.versions) {
-    const rows = version.remotes.filter(r => r.name === remote);
-    if (rows.length > 0) return rows;
-  }
-  return [];
 }
 
 // The first entrypoint a copy ships that the map lacks, when the map serves another entrypoint of its package.
