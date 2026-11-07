@@ -516,3 +516,37 @@ describe('host fill', () => {
     }
   });
 });
+
+describe('a build split across bundles', () => {
+  // mfe ships `@fw/common` at one tag in two records, its locale planned into another bundle (#133). The host
+  // wins without the locale, so mfe is islanded on it, not served by a global map that lacks it.
+  it('islands a remote whose second record at the elected tag holds an entrypoint the winner lacks', () => {
+    const common = (specifiers: string[]) => ({
+      '@fw/common': { tag: '22.2.3', req: '^22.2.0', specifiers },
+    });
+    const pool = members([
+      { name: 'shell', copies: common(['@fw/common', '@fw/common/http']) },
+      { name: 'mfe', copies: common(['@fw/common', '@fw/common/http']) },
+    ]);
+    pool[0]!.external.versions[0]!.remotes.push(
+      mockVersionRemote('mfe', '@fw/common', {
+        requiredVersion: '^22.2.0',
+        entries: { '@fw/common/locales/nl': 'nl.js' },
+      })
+    );
+    const election = elect({
+      members: hosted(pool, 'shell'),
+      packageOf: npmPackageOf,
+      acceptsTag: createAcceptsTag(versionCheck.isCompatible, versionCheck.compare),
+      compare: versionCheck.compare,
+      latestFirst: false,
+    });
+
+    expect(election.winner).toBe('shell');
+    expect(election.placements.get('mfe')).toEqual({ kind: 'self', cause: 'uncovered' });
+    expect(election.misses.get('mfe')).toEqual({
+      cause: 'uncovered',
+      gap: '@fw/common/locales/nl',
+    });
+  });
+});

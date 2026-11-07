@@ -151,4 +151,34 @@ describe('a build read from the record', () => {
     expect(build.tags.get('@angular/core')).toBe('22.1.0');
     expect(build.host).toBe(false);
   });
+
+  // Valid core output: `densifyExternals` splits a package into one record per bundle, so one build lists the
+  // same member twice at one tag (#133). Both rows are its copies; the second one's entries count too.
+  it('reads every row of a remote at one tag, a build split across bundles', () => {
+    const members = [
+      member('@ng/common', [
+        {
+          tag: '22.2.3',
+          copies: [
+            { remote: 'mfe', entries: { '@ng/common/locales/nl': 'nl.js' } },
+            { remote: 'mfe', entries: { '@ng/common': 'c.js', '@ng/common/http': 'h.js' } },
+          ],
+        },
+      ]),
+    ];
+
+    expect(
+      copiesByRemote(members)
+        .get('mfe')!
+        .map(({ tag, specifiers }) => ({ tag, specifiers }))
+    ).toEqual([
+      { tag: '22.2.3', specifiers: ['@ng/common/locales/nl'] },
+      { tag: '22.2.3', specifiers: ['@ng/common', '@ng/common/http'] },
+    ]);
+    expect([...buildFor('mfe', members).tags.keys()]).toEqual([
+      '@ng/common/locales/nl',
+      '@ng/common',
+      '@ng/common/http',
+    ]);
+  });
 });

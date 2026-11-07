@@ -47,11 +47,13 @@ type MapCover = {
 
 type MappedFiles = { covered: Set<Specifier>; override: Record<Specifier, string> };
 
-// One of the remote's copies the map may cover, with its action and what the map would serve of it.
+// One member the remote ships, with its action and what the map would serve of it. A build split across
+// bundles ships the member in several rows at one tag, so `entries` joins them (#133).
 type Coverable = MappedFiles & {
   member: PoolMember;
   action: LoadActions[string];
-  copy: SharedVersionMeta;
+  rows: SharedVersionMeta[];
+  entries: Record<Specifier, string>;
 };
 
 // Where the remote resolves a specifier it ships: the map's file, or its own.
@@ -205,12 +207,13 @@ export function coverFromMap(
   const files: Coverable[] = [];
   for (const member of mine) {
     const action = actions[member.name]!;
-    const copy = member.external.versions.flatMap(v => v.remotes).find(r => r.name === remote);
-    if (!copy) continue;
+    const rows = rowsOf(member, remote);
+    if (rows.length === 0) continue;
 
-    const mapped = mapFiles(copy, view, policy, action);
+    const entries: Record<Specifier, string> = Object.assign({}, ...rows.map(r => r.entries));
+    const mapped = mapFiles(entries, view, policy, action);
     if ('unmapped' in mapped) return mapped;
-    files.push({ member, action, copy, ...mapped });
+    files.push({ member, action, rows, entries, ...mapped });
   }
 
   const reaches = reachesOf(remote, files, view);
@@ -224,30 +227,41 @@ export function coverFromMap(
   return { covers: files.filter(covering).map(coverOf) };
 }
 
+// Like `copiesByRemote`: the remote's rows at the first tag it ships the member at.
+function rowsOf(member: PoolMember, remote: RemoteName): SharedVersionMeta[] {
+  for (const version of member.external.versions) {
+    const rows = version.remotes.filter(r => r.name === remote);
+    if (rows.length > 0) return rows;
+  }
+  return [];
+}
+
 // The first entrypoint a copy ships that the map lacks, when the map serves another entrypoint of its package.
 function gapOf(
-  { copy, covered }: Coverable,
+  { entries, covered }: Coverable,
   servedPackages: ReadonlySet<string>,
   packageOf: PackageOf
 ): Specifier | undefined {
-  const entrypoints = Object.keys(copy.entries);
+  const entrypoints = Object.keys(entries);
   const missing = entrypoints.filter(specifier => !covered.has(specifier));
   if (missing.length < entrypoints.length) return missing[0];
   return missing.find(specifier => servedPackages.has(packageOf(specifier)));
 }
 
-function covering({ action, copy, covered }: Coverable): boolean {
+function covering({ action, entries, covered }: Coverable): boolean {
   if (action.action === 'skip') return true;
-  const entrypoints = Object.keys(copy.entries);
+  const entrypoints = Object.keys(entries);
   return entrypoints.length > 0 && entrypoints.every(specifier => covered.has(specifier));
 }
 
-function coverOf({ member, action, copy, covered, override }: Coverable): MapCover {
+function coverOf({ member, action, rows, covered, override }: Coverable): MapCover {
   // A copy that joined a share row would claim, on the next page, what the map serves from another member.
   const toSkip =
     action.action !== 'skip' ||
     (covered.size > action.covered!.length &&
-      member.external.versions.some(v => v.action === 'share' && v.remotes.includes(copy)));
+      member.external.versions.some(
+        v => v.action === 'share' && rows.some(r => v.remotes.includes(r))
+      ));
   return { name: member.name, toSkip, override };
 }
 
@@ -264,7 +278,7 @@ function reachesOf(
   };
   for (const file of files) {
     const takesMap = covering(file);
-    for (const [specifier, own] of Object.entries(file.copy.entries)) {
+    for (const [specifier, own] of Object.entries(file.entries)) {
       if (!takesMap || !file.covered.has(specifier)) reaches.set(specifier, { remote, file: own });
       else {
         const reach = fromMap(specifier);
@@ -303,14 +317,14 @@ function boundByFile(
 }
 
 function mapFiles(
-  copy: SharedVersionMeta,
+  entries: Record<Specifier, string>,
   view: CommittedView,
   policy: MapPolicy,
   action: LoadActions[string]
 ): MappedFiles | { unmapped: RemoteName } {
   const covered = new Set(action.covered);
   const override = { ...action.override };
-  for (const specifier in copy.entries) {
+  for (const specifier in entries) {
     const source = view.global.get(specifier);
     if (!source) continue;
     if (policy.shareScope !== GLOBAL_SCOPE) {

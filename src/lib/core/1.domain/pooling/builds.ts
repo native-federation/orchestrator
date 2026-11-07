@@ -28,13 +28,15 @@ export type Build = {
 export function copiesByRemote(members: readonly PoolMember[]): Map<RemoteName, Copy[]> {
   const shipped = new Map<RemoteName, Copy[]>();
   for (const member of members) {
-    const seen = new Set<RemoteName>();
+    const tagOf = new Map<RemoteName, VersionName>();
     for (const version of member.external.versions)
       for (const meta of version.remotes) {
-        // A remote ships one copy per member, so a second row is a record it cannot produce; the first row
-        // wins whole, entries included, so a build never covers a specifier at a tag it does not ship.
-        if (seen.has(meta.name)) continue;
-        seen.add(meta.name);
+        // A build ships a member at one tag, so a row at a second tag is a record it cannot produce; the first
+        // tag wins whole, so a build never covers a specifier at a tag it does not ship. Several rows at that
+        // tag are one build split across bundles, each its own copy (#133).
+        const first = tagOf.get(meta.name);
+        if (first !== undefined && first !== version.tag) continue;
+        tagOf.set(meta.name, version.tag);
         let copies = shipped.get(meta.name);
         if (!copies) shipped.set(meta.name, (copies = []));
         copies.push({

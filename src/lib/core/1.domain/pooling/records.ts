@@ -101,14 +101,16 @@ function moveCopy(
   const moved: { tag: string; meta: SharedVersionMeta }[] = [];
   const versions = external.versions
     .map(v => {
-      const copy = v.remotes.find(r => r.name === remote);
-      if (!copy) return v;
-      const { servedBy: _servedBy, ...rest } = copy;
-      const meta = { ...rest, cached: true, poolCause: move.cause };
-      if (v.action === 'scope')
-        return { ...v, remotes: v.remotes.map(r => (r === copy ? meta : r)) };
-      moved.push({ tag: v.tag, meta });
-      return { ...v, remotes: v.remotes.filter(r => r !== copy) };
+      const metas = new Map<SharedVersionMeta, SharedVersionMeta>();
+      for (const copy of v.remotes) {
+        if (copy.name !== remote) continue;
+        const { servedBy: _servedBy, ...rest } = copy;
+        metas.set(copy, { ...rest, cached: true, poolCause: move.cause });
+      }
+      if (metas.size === 0) return v;
+      if (v.action === 'scope') return { ...v, remotes: v.remotes.map(r => metas.get(r) ?? r) };
+      for (const meta of metas.values()) moved.push({ tag: v.tag, meta });
+      return { ...v, remotes: v.remotes.filter(r => !metas.has(r)) };
     })
     // A version only the loaded remote held — a `share` it introduced — leaves with it.
     .filter(v => v.remotes.length > 0);
@@ -130,12 +132,12 @@ function recordFromMap(external: SharedExternal, remote: RemoteName): SharedExte
   const opened = external.versions.find(
     v => v.action !== 'skip' && v.remotes.some(r => r.name === remote)
   )!;
-  const meta = { ...opened.remotes.find(r => r.name === remote)!, cached: false };
   const joined = rowAt(external.versions, opened.tag, 'skip');
   const into = joined
     ? { ...joined, remotes: [...joined.remotes] }
     : { ...opened, action: 'skip' as const, remotes: [] };
-  addRemoteToVersion(into, meta);
+  for (const copy of opened.remotes)
+    if (copy.name === remote) addRemoteToVersion(into, { ...copy, cached: false });
 
   const versions = external.versions.flatMap(v => {
     if (v === joined) return [into];
