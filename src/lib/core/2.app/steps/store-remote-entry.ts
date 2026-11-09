@@ -218,7 +218,9 @@ export function createStoreRemoteEntry(
           sharedInfo.packageName,
           {
             ...readRecord(),
-            versions: readRecord().versions.sort((a, b) => ports.versionCheck.compare(b.tag, a.tag)),
+            versions: readRecord().versions.sort((a, b) =>
+              ports.versionCheck.compare(b.tag, a.tag)
+            ),
           },
           sharedInfo.shareScope
         );

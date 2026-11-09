@@ -1,5 +1,6 @@
 import { createSSEHandler } from 'lib/core/3.adapters/browser/sse-handler';
 import type { ForSSE } from 'lib/core/2.app/driving-ports/for-sse.port';
+import { noPreload } from 'lib/core/4.config/import-map/no-preload';
 
 /**
  * Runs in the page. Nothing here substitutes for a part of the adapter: it runs against the
@@ -28,6 +29,7 @@ const api = {
         : () => reloads.push(new Date().toISOString()),
       loadModuleFn: () => Promise.resolve({}),
       setImportMapFn: map => Promise.resolve(map),
+      preloadModulesFn: noPreload,
     });
   },
 
