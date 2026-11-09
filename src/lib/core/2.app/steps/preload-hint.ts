@@ -10,9 +10,10 @@ export function createPreloadHint(
   logStep: number
 ): PreloadHint {
   return collectUrls => {
+    if (!browser.preloadModules) return;
     try {
       const urls = collectUrls();
-      if (urls.length > 0) browser.preloadModules(urls);
+      if (urls.length > 0) browser.preloadModules?.(urls);
     } catch (error) {
       log.debug(logStep, 'Ignored a failing preload hint.', error);
     }
