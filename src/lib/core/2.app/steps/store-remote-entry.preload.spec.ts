@@ -22,7 +22,20 @@ describe('store-remote-entry: preload fields', () => {
     name,
     url: `http://${name}/remoteEntry.json`,
     exposes: [
-      { key: './x', outFileName: 'x.js', chunks: ['chunk-X.js'] },
+      {
+        key: './x',
+        outFileName: 'x.js',
+        // Only the static closure is stored: the lazy row is what the module's own import() fetches.
+        chunks: {
+          '@nf-internal/chunk-LAZY': { file: 'chunk-LAZY.js' },
+          '@nf-internal/chunk-X': { file: 'chunk-X.js', initial: true },
+        },
+      },
+      {
+        key: './z',
+        outFileName: 'z.js',
+        chunks: { '@nf-internal/chunk-Z': { file: 'chunk-Z.js' } },
+      },
       { key: './y', outFileName: 'y.js' },
     ],
     shared: [shared(lib)],
@@ -58,13 +71,14 @@ describe('store-remote-entry: preload fields', () => {
     ]);
   });
 
-  it("keeps a module's chunks and stores none for a module without", async () => {
+  it("keeps a module's initial chunks and stores none for a module without", async () => {
     const p = fresh();
     await p.runInit([entry('a', {})]);
     p.reload();
 
     expect(p.adapters.remoteInfoRepo.tryGet('a').get()!.exposes).toEqual([
       { moduleName: './x', file: 'x.js', chunks: ['chunk-X.js'] },
+      { moduleName: './z', file: 'z.js' },
       { moduleName: './y', file: 'y.js' },
     ]);
   });

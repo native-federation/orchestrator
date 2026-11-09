@@ -90,11 +90,17 @@ export function createStoreRemoteEntry(
   function addRemoteInfoToStorage({ name, url, exposes, integrity }: RemoteEntry): void {
     ports.remoteInfoRepo.addOrUpdate(name, {
       scopeUrl: _path.getScope(url),
-      exposes: Object.values(exposes ?? []).map(m => ({
-        moduleName: m.key,
-        file: m.outFileName,
-        ...(m.chunks?.length ? { chunks: m.chunks } : {}),
-      })),
+      exposes: Object.values(exposes ?? []).map(m => {
+        // Only the static closure is certain to be needed; lazy rows are left to the module's own import().
+        const chunks = Object.values(m.chunks ?? {})
+          .filter(c => c.initial)
+          .map(c => c.file);
+        return {
+          moduleName: m.key,
+          file: m.outFileName,
+          ...(chunks.length ? { chunks } : {}),
+        };
+      }),
       ...(integrity ? { integrity } : {}),
     } as RemoteInfo);
   }

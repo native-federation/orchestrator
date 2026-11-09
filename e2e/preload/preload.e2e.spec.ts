@@ -1,6 +1,7 @@
 import { test, expect, type Federation } from '../harness/federation';
 import { dep, remote, withChunks, SCOPE, EXPOSED } from '../harness/portfolio';
 import type { DenseSharedInfo, RemoteEntry } from 'lib/core/1.domain';
+import { toChunkImport } from '@softarc/native-federation/domain';
 
 /**
  * Preloading in a real browser: what the library hands `preloadInDOM`, checked against what the browser then
@@ -9,11 +10,19 @@ import type { DenseSharedInfo, RemoteEntry } from 'lib/core/1.domain';
  * of a copy the map does not serve is never downloaded at all.
  */
 
-// An exposed module importing two chunks of its own, as a build lists them in `exposes[].chunks`.
-const withExposedChunks = (entry: RemoteEntry, chunks: string[]): RemoteEntry => ({
-  ...entry,
-  exposes: entry.exposes.map(exposed => ({ ...exposed, chunks })),
-});
+// An exposed module importing chunks of its own, as core 4.10 lists them in `exposes[].chunks`: the static
+// ones as `initial` rows, the `lazy` ones without, which the module never imports here.
+const withExposedChunks = (
+  entry: RemoteEntry,
+  chunks: string[],
+  lazy: string[] = []
+): RemoteEntry => {
+  const map = Object.fromEntries([
+    ...lazy.map(file => [toChunkImport(file), { file }]),
+    ...chunks.map(file => [toChunkImport(file), { file, initial: true as const }]),
+  ]);
+  return { ...entry, exposes: entry.exposes.map(exposed => ({ ...exposed, chunks: map })) };
+};
 
 // A shared copy that opted into preloading; it brings every chunk of its bundle (see `withChunks`).
 const preloaded = (shared: DenseSharedInfo): DenseSharedInfo =>
@@ -42,6 +51,29 @@ for (const shim of [false, true]) {
         expect(link).toMatchObject({ rel, head: true, afterMap: true });
         expect(count(nf, link.href)).toBe(1);
       }
+    });
+
+    test("never preloads or downloads the module's lazy chunks", async ({ nf }) => {
+      await nf.init(
+        [
+          withExposedChunks(
+            remote('team/mfe1', SCOPE.mfe1, [dep('rxjs', '7.8.0')]),
+            ['comp-a.js'],
+            ['comp-lazy.js']
+          ),
+        ],
+        { shim }
+      );
+
+      await nf.preload('team/mfe1', EXPOSED);
+      await nf.load('team/mfe1', EXPOSED);
+
+      expect((await nf.links()).map(l => l.href)).toEqual([
+        `${SCOPE.mfe1}comp.js`,
+        `${SCOPE.mfe1}comp-a.js`,
+      ]);
+      expect(count(nf, `${SCOPE.mfe1}comp-a.js`)).toBe(1);
+      expect(count(nf, `${SCOPE.mfe1}comp-lazy.js`)).toBe(0);
     });
 
     // On hover the import has not started yet, so the module itself is preloaded too.

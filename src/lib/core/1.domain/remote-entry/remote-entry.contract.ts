@@ -8,7 +8,9 @@ import type {
 } from '@softarc/native-federation/domain';
 
 // The preload fields core publishes from the release after 4.9; drop these once the devDependency has them.
-type ExposesInfo = CoreExposesInfo & { chunks?: string[] };
+// Keyed by the chunk's import name; `initial` marks the module's static closure, written only when true.
+type ChunkMap = Record<string, { file: string; initial?: true }>;
+type ExposesInfo = CoreExposesInfo & { chunks?: ChunkMap };
 type SharedInfo = CoreSharedInfo & { preload?: true };
 type DenseSharedInfo = CoreDenseSharedInfo & { preload?: true };
 type FederationInfo = Omit<CoreFederationInfo, 'exposes' | 'shared'> & {
@@ -40,6 +42,7 @@ type SharedInfoActions = Record<
 export {
   RawRemoteEntry,
   RemoteEntry,
+  ChunkMap,
   FederationInfo,
   ExposesInfo,
   SharedInfo,

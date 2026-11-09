@@ -1,6 +1,7 @@
 import { initFederation } from './init-federation';
 import { sessionStorageEntry } from './4.config/storage';
-import type { ImportMap } from './1.domain';
+import type { ChunkMap, ImportMap } from './1.domain';
+import { toChunkImport } from '@softarc/native-federation/domain';
 
 /**
  * Preloading end to end, on real repositories and the real map generators: what reaches
@@ -21,7 +22,7 @@ describe('initFederation (preloading)', () => {
   const entry = (
     name: string,
     shared: Record<string, Shared>,
-    exposes: { key: string; chunks?: string[] }[] = [{ key: './x' }]
+    exposes: { key: string; chunks?: ChunkMap }[] = [{ key: './x' }]
   ) => ({
     name,
     url: `http://${name}/remoteEntry.json`,
@@ -44,6 +45,11 @@ describe('initFederation (preloading)', () => {
       entries: { [packageName]: `${packageName}.js` },
     })),
   });
+
+  // An exposed module's static closure, published as core 4.10 does: one `initial` row per chunk, keyed by
+  // its import name.
+  const initial = (...files: string[]): ChunkMap =>
+    Object.fromEntries(files.map(file => [toChunkImport(file), { file, initial: true as const }]));
 
   let entries: ReturnType<typeof entry>[];
   let namespaces = 0;
@@ -90,7 +96,7 @@ describe('initFederation (preloading)', () => {
 
   describe('loadRemoteModule', () => {
     it("preloads the module's chunks, then imports it", async () => {
-      entries = [entry('r0', {}, [{ key: './x', chunks: ['chunk-A.js', 'chunk-B.js'] }])];
+      entries = [entry('r0', {}, [{ key: './x', chunks: initial('chunk-A.js', 'chunk-B.js') }])];
       const fed = await init(entries);
       calls = [];
 
@@ -103,13 +109,67 @@ describe('initFederation (preloading)', () => {
     });
 
     it('preloadRemoteModule on the init result hints the module and its chunks', async () => {
-      entries = [entry('r0', {}, [{ key: './x', chunks: ['chunk-A.js'] }])];
+      entries = [entry('r0', {}, [{ key: './x', chunks: initial('chunk-A.js') }])];
       const fed = await init(entries);
       calls = [];
 
       fed.preloadRemoteModule('r0', './x');
 
       expect(calls).toEqual([{ preload: ['http://r0/x.js', 'http://r0/chunk-A.js'] }]);
+    });
+
+    // Rows without `initial` are lazy: the module reaches them only through its own import(), maybe never.
+    it("preloads only the map's initial rows", async () => {
+      const chunks: ChunkMap = {
+        '@nf-internal/chunk-ROUTE': { file: 'chunk-ROUTE.js' },
+        ...initial('chunk-A.js'),
+        '@nf-internal/chunk-LAZY': { file: 'chunk-LAZY.js' },
+        ...initial('chunk-B.js'),
+      };
+      entries = [entry('r0', {}, [{ key: './x', chunks }])];
+      const fed = await init(entries);
+      calls = [];
+
+      await fed.loadRemoteModule('r0', './x');
+      fed.preloadRemoteModule('r0', './x');
+
+      expect(preloads()).toEqual([
+        ['http://r0/chunk-A.js', 'http://r0/chunk-B.js'],
+        ['http://r0/x.js', 'http://r0/chunk-A.js', 'http://r0/chunk-B.js'],
+      ]);
+    });
+
+    // The map is keyed by import name, so its order carries no meaning; the set of URLs is what counts.
+    it('preloads the same files whatever the order of the keys', async () => {
+      const a = initial('chunk-A.js');
+      const b = initial('chunk-B.js');
+      entries = [
+        entry('r0', {}, [{ key: './x', chunks: { ...a, ...b } }]),
+        entry('r1', {}, [{ key: './x', chunks: { ...b, ...a } }]),
+      ];
+      const fed = await init(entries);
+      calls = [];
+
+      await fed.loadRemoteModule('r0', './x');
+      await fed.loadRemoteModule('r1', './x');
+
+      const [r0, r1] = preloads();
+      expect(new Set(r0)).toEqual(new Set(['http://r0/chunk-A.js', 'http://r0/chunk-B.js']));
+      expect(new Set(r1)).toEqual(new Set(['http://r1/chunk-A.js', 'http://r1/chunk-B.js']));
+    });
+
+    it('sends nothing for a map without initial rows', async () => {
+      entries = [
+        entry('r0', {}, [
+          { key: './x', chunks: { '@nf-internal/chunk-L': { file: 'chunk-L.js' } } },
+        ]),
+      ];
+      const fed = await init(entries);
+      calls = [];
+
+      await fed.loadRemoteModule('r0', './x');
+
+      expect(calls).toEqual([{ import: 'http://r0/x.js' }]);
     });
 
     // A remote built by a core without the field publishes no chunks; nothing is sent rather than [].
@@ -125,7 +185,7 @@ describe('initFederation (preloading)', () => {
 
     // The hint is advice: a host's broken preload function must not turn into a failed load.
     it('loads the module when preloading throws', async () => {
-      entries = [entry('r0', {}, [{ key: './x', chunks: ['chunk-A.js'] }])];
+      entries = [entry('r0', {}, [{ key: './x', chunks: initial('chunk-A.js') }])];
       const fed = await initFederation(
         { r0: entries[0]!.url },
         {

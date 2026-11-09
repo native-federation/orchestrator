@@ -87,7 +87,7 @@ const exposedModule = (entry: RemoteEntry, chunks: readonly string[] = []) => {
     .flatMap(shared => Object.keys(entrypointsOf(shared)));
   const alias = (i: number) => `_${i}`;
   return js(
-    // Relative, as a build writes an exposed module's own chunks; `exposes[].chunks` lists them.
+    // Relative, as a build writes an exposed module's static chunks: the `initial` rows of `exposes[].chunks`.
     chunks.map(chunk => `import ${JSON.stringify(`./${chunk}`)};\n`).join('') +
       specifiers.map((s, i) => `import * as ${alias(i)} from ${JSON.stringify(s)};`).join('\n') +
       `\nexport const remote = ${JSON.stringify(entry.name)};\n` +
@@ -143,14 +143,19 @@ export const compile = (entries: RemoteEntry[]): Portfolio => {
     for (const exposed of entry.exposes ?? [])
       files.set(`/${exposed.outFileName}`, {
         kind: 'module',
-        file: exposedModule(entry, exposed.chunks),
+        file: exposedModule(
+          entry,
+          Object.values(exposed.chunks ?? {}).flatMap(c => (c.initial ? [c.file] : []))
+        ),
       });
 
     // A chunk carries `__id` like an external does, so `nf.resolve` can report which origin a chunk
     // specifier resolved to — the question the per-origin chunk mapping exists to answer.
     const chunkFiles = new Set([
       ...Object.values(bundles).flat(),
-      ...(entry.exposes ?? []).flatMap(exposed => exposed.chunks ?? []),
+      ...(entry.exposes ?? []).flatMap(exposed =>
+        Object.values(exposed.chunks ?? {}).map(c => c.file)
+      ),
       ...entry.shared
         .filter(shared => shared.packageName.startsWith(`${CHUNK_PREFIX}/`))
         .flatMap(shared => Object.values(entrypointsOf(shared))),

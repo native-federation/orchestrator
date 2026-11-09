@@ -127,8 +127,8 @@ initFederation('http://example.org/manifest.json', {
 A browser finds a module's imports only after it has fetched and parsed it, so a first load is a chain of
 requests. The orchestrator shortens it by handing `preloadModulesFn` the files that are certain to be needed:
 
-- **On `loadRemoteModule`**, the exposed module's own chunks, in the same tick as its import. The module itself is
-  not included: its import requests it already.
+- **On `loadRemoteModule`**, the chunks the exposed module imports statically, in the same tick as its import.
+  The module itself is not included: its import requests it already.
 - **On `preloadRemoteModule(remote, exposedModule)`**, called by the app, for example on hover or when a route
   is about to open: the exposed module and its chunks. It never rejects; a module it cannot find is logged at
   debug level.
@@ -137,13 +137,14 @@ requests. The orchestrator shortens it by handing `preloadModulesFn` the files t
   every chunk of the bundle it was built in. Only the copy the import map serves counts: a flag on a copy that
   lost version resolution does nothing.
 
-The lists come from `remoteEntry.json`: `exposes[].chunks`, `shared[].preload`, and the chunks per bundle in the
-top-level `chunks`. A remote built without those fields is simply not preloaded. The bundle rule has costs the
-build warns about: a marked package in the combined shared bundle brings the chunks of every package in it
-(give it `build: 'package'`), and without `features.denseChunking` there is no list per bundle, so only its
-entry files are preloaded. A bundle's list also holds the chunks the package loads lazily, so a library that
-splits languages, themes or diagrams into lazy chunks preloads all of them. Nothing is preloaded before the map that resolves it is in
-place, and a failed `initRemoteEntry` preloads nothing.
+The lists come from `remoteEntry.json`: the `initial` rows of `exposes[].chunks` (the module's lazy chunks are
+left to its own `import()`), `shared[].preload`, and the chunks per bundle in the top-level `chunks`. A remote
+built without those fields is simply not preloaded. The bundle rule has costs the build warns about: a marked
+package in the combined shared bundle brings the chunks of every package in it (give it `build: 'package'`), and
+without `features.denseChunking` there is no list per bundle, so only its entry files are preloaded. A bundle's
+list also holds the chunks the package loads lazily, so a library that splits languages, themes or diagrams into
+lazy chunks preloads all of them. Nothing is preloaded before the map that resolves it is in place, and a failed
+`initRemoteEntry` preloads nothing.
 
 Call `preloadRemoteModule` under the same rule as `loadRemoteModule`: once every remote the module imports is
 initialized. The browser fixes a preloaded file's imports at that moment, so a module that imports another

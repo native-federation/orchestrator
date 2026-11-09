@@ -79,7 +79,13 @@ describe('initNodeFederation', () => {
   it('preloads nothing, and loads a module that lists chunks', async () => {
     await writeJson(remoteEntryPath, {
       name: 'team/remote-a',
-      exposes: [{ key: './Hello', outFileName: 'hello.mjs', chunks: ['chunk-A.mjs'] }],
+      exposes: [
+        {
+          key: './Hello',
+          outFileName: 'hello.mjs',
+          chunks: { '@nf-internal/chunk-A': { file: 'chunk-A.mjs', initial: true } },
+        },
+      ],
       shared: [],
     });
     const logger = { debug: vi.fn(), warn: vi.fn(), error: vi.fn() };
