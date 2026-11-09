@@ -46,6 +46,8 @@ export type InitOptions = Omit<BootOptions, 'host' | 'manifestUrl'> & {
 
 export type Loaded = { remote: string; seen: Record<string, string> };
 
+export type PreloadLink = { rel: string; href: string; head: boolean; afterMap: boolean };
+
 export type Copy = {
   id: string;
   from: string;
@@ -72,6 +74,8 @@ export type Federation = {
 
   /** Load a remote's exposed module, which statically imports every entrypoint it declares. */
   load: (remoteName: string, exposedModule?: string) => Promise<Loaded>;
+  /** `preloadRemoteModule`, as an app calls it on hover or route intent. */
+  preload: (remoteName: string, exposedModule?: string) => Promise<void>;
   /** Load every remote in the last portfolio, keyed by remote name. */
   loadAll: () => Promise<Record<string, Loaded>>;
   /** What `specifier` resolves to for code served from `scopeUrl`. */
@@ -92,6 +96,10 @@ export type Federation = {
   fetches: () => string[];
   /** Chunk files the browser really downloaded since the last init. */
   chunkLoads: () => string[];
+  /** Every URL the browser requested since the last init, in order, repeats included. */
+  requests: () => string[];
+  /** The modulepreload links the library added to the document. */
+  links: () => Promise<PreloadLink[]>;
 
   warns: () => Promise<string[]>;
   debugs: () => Promise<string[]>;
@@ -223,6 +231,8 @@ export const test = base.extend<{ nf: Federation }, Worker>({
 
       load: (remoteName, exposedModule = './comp') =>
         call<Loaded>(page, 'load', remoteName, exposedModule),
+      preload: (remoteName, exposedModule = './comp') =>
+        call<void>(page, 'preload', remoteName, exposedModule),
       loadAll: async () => {
         const loaded: Record<string, Loaded> = {};
         for (const entry of listed)
@@ -256,6 +266,8 @@ export const test = base.extend<{ nf: Federation }, Worker>({
           .slice(mark)
           .filter(r => r.kind === 'chunk')
           .map(r => r.url),
+      requests: () => harness.requests.slice(mark).map(r => r.url),
+      links: () => call<PreloadLink[]>(page, 'links'),
 
       warns: async () => (await session()).warns,
       debugs: async () => (await session()).debugs,

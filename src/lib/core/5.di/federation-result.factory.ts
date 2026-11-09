@@ -5,6 +5,7 @@ import type {
   LoadRemoteModule,
   LoadRemoteModuleOf,
   NativeFederationResult,
+  PreloadRemoteModule,
 } from '../init-federation.contract';
 
 export { createStateDump } from '../2.app/steps/rollback-changes';
@@ -13,12 +14,15 @@ export const createFederationResult = ({
   config,
   adapters,
   loadRemoteModule,
+  // Optional: a host composing init by hand, as before preloading existed, still gets a working result.
+  preloadRemoteModule = () => {},
   initRemoteEntryFlow,
   afterInitRemoteEntry,
 }: {
   config: ConfigContract;
   adapters: DrivingContract;
   loadRemoteModule: LoadRemoteModule;
+  preloadRemoteModule?: PreloadRemoteModule;
   initRemoteEntryFlow: InitRemoteEntryFlow;
   afterInitRemoteEntry?: () => Promise<unknown>;
 }): NativeFederationResult => {
@@ -41,6 +45,7 @@ export const createFederationResult = ({
     adapters,
     loadRemoteModule,
     load: loadRemoteModule,
+    preloadRemoteModule,
     as: <TModule = unknown>() => ({
       loadRemoteModule: loadRemoteModule as LoadRemoteModuleOf<TModule>,
       load: loadRemoteModule as LoadRemoteModuleOf<TModule>,

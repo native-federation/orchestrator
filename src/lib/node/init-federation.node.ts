@@ -82,6 +82,7 @@ const initNodeFederation = (
     loadModuleFn: options.loadModuleFn ?? nodeConfig.loadModuleFn,
     setImportMapFn: options.setImportMapFn ?? nodeConfig.setImportMapFn,
     reloadBrowserFn: options.reloadBrowserFn ?? nodeConfig.reloadBrowserFn,
+    preloadModulesFn: options.preloadModulesFn ?? nodeConfig.preloadModulesFn,
     sse: false,
   });
 
@@ -117,12 +118,12 @@ const initNodeFederation = (
 
   return hostInstancesReady
     .then(() => initFlow(remotesOrManifestUrl))
-    .then(({ loadRemoteModule }) => nodeConfig.nodeLoader.ready().then(() => loadRemoteModule))
-    .then(loadRemoteModule =>
+    .then(access => nodeConfig.nodeLoader.ready().then(() => access))
+    .then(access =>
       createFederationResult({
         config,
         adapters,
-        loadRemoteModule,
+        ...access,
         initRemoteEntryFlow,
         afterInitRemoteEntry: () => nodeConfig.nodeLoader.ready(),
       })

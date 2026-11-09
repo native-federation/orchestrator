@@ -82,6 +82,7 @@ export type ImportMapOptions = {
     loadModuleFn?: (url: string) => Promise<unknown>
     setImportMapFn?: (importMap: ImportMap, opts?: { override?: boolean }) => Promise<ImportMap>
     reloadBrowserFn?: () => void
+    preloadModulesFn?: (urls: string[]) => void
     trustedTypesPolicyName?: string | false
 }
 ```
@@ -93,6 +94,7 @@ export type ImportMapOptions = {
 | setImportMapFn         | `replaceInDOM("importmap")`         | The function that adds the importmap to the host, by default this is the DOM.                                                                                                                                                                 |
 | loadModuleFn           | `url => import(url)`                | This function can mock or alter the 'import' function, necessary for libraries that shim the import function.                                                                                                                                 |
 | reloadBrowserFn        | `() => {window.location.reload();}` | This function can mock or alter the "reload browser" behavior that is triggered when SSE is enabled and an user rebuilds a remote.                                                                                                            |
+| preloadModulesFn       | `preloadInDOM("modulepreload")`     | Receives the URLs to fetch ahead of their import, see [Preloading](#preloading). Supplying `loadModuleFn` turns the default off; pass `preloadModulesFn` as well to keep it.                                                                  |
 | trustedTypesPolicyName | `"nfo"`                             | Name of the [Trusted Types](./security.md) policy that wraps import-map content and dynamic-import URLs in the default `setImportMapFn` and `loadModuleFn`. Pass `false` to opt out. No effect on browsers that do not support Trusted Types. |
 
 ### Example
@@ -119,6 +121,45 @@ initFederation('http://example.org/manifest.json', {
 ```
 
 > See [Security — Trusted Types](./security.md#trusted-types) for the recommended CSP header and how the orchestrator interacts with a host-defined policy.
+
+### <a id="preloading"></a> Preloading
+
+A browser finds a module's imports only after it has fetched and parsed it, so a first load is a chain of
+requests. The orchestrator shortens it by handing `preloadModulesFn` the files that are certain to be needed:
+
+- **On `loadRemoteModule`**, the exposed module's own chunks, in the same tick as its import. The module itself is
+  not included: its import requests it already.
+- **On `preloadRemoteModule(remote, exposedModule)`**, called by the app, for example on hover or when a route
+  is about to open: the exposed module and its chunks. It never rejects; a module it cannot find is logged at
+  debug level.
+- **After the import map is committed**, at init and after `initRemoteEntry`, every shared external whose served
+  copy was built with `preload: true` (a per-package option of the federation config), with its chunks. Only the
+  copy the import map serves counts: a flag on a copy that lost version resolution does nothing.
+
+The list comes from `remoteEntry.json` (`exposes[].chunks`, `shared[].chunks`, `shared[].preload`); a remote
+built without those fields is simply not preloaded. Nothing is preloaded before the map that resolves it is in
+place, and a failed `initRemoteEntry` preloads nothing.
+
+Call `preloadRemoteModule` under the same rule as `loadRemoteModule`: once every remote the module imports is
+initialized. The browser fixes a preloaded file's imports at that moment, so a module that imports another
+remote's exposed module by name, preloaded before `initRemoteEntry` adds that remote, fails to load later.
+
+The same URLs may arrive more than once, for example on every visit to a route, so a custom `preloadModulesFn`
+must not mind repeats. A preload that throws is logged at debug level and never fails the load.
+
+In shim mode, es-module-shims fetches a `modulepreload-shim` link itself and reports a failed fetch as an
+unhandled rejection. A preloaded file that is missing, for example after a partial deploy, therefore shows up
+in error trackers even when the page never imports it.
+
+| Preset                                 | `preloadModulesFn`                                                                       |
+| -------------------------------------- | ---------------------------------------------------------------------------------------- |
+| `useDefaultImportMap()`                | `preloadInDOM('modulepreload')`: one `<link>` per URL in `document.head`.                |
+| `useShimImportMap({ shimMode: true })` | `preloadInDOM('modulepreload-shim')`, the link type es-module-shims reuses in shim mode. |
+| `useShimImportMap()` (polyfill mode)   | `preloadInDOM('modulepreload')`.                                                         |
+| A custom `loadModuleFn`                | `noPreload`: the `<link>` fetches would not be reused by a custom loader.                |
+| Node (`initNodeFederation`)            | `noPreload`.                                                                             |
+
+To turn preloading off, pass `preloadModulesFn: noPreload`.
 
 ## <a id="loggingConfig"></a> 3. Logging configuration
 

@@ -16,6 +16,7 @@ export const mockConfig = (): ConfigContract => ({
   setImportMapFn: vi.fn(),
   loadModuleFn: vi.fn(),
   reloadBrowserFn: vi.fn(),
+  preloadModulesFn: vi.fn(),
   // hostConfig
   hostRemoteEntry: false,
   // ModeConfig

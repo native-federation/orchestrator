@@ -116,6 +116,20 @@ const api = {
     }
   },
 
+  preload: (remoteName: string, exposedModule: string) =>
+    app!.preloadRemoteModule(remoteName, exposedModule),
+
+  /** Every modulepreload link in the document, and whether an import map preceded it. */
+  links: () =>
+    Array.from(document.querySelectorAll('link[rel^="modulepreload"]')).map(link => ({
+      rel: (link as HTMLLinkElement).rel,
+      href: (link as HTMLLinkElement).href,
+      head: link.parentNode === document.head,
+      afterMap: Array.from(document.querySelectorAll('script[type^="importmap"]')).some(
+        map => map.compareDocumentPosition(link) & Node.DOCUMENT_POSITION_FOLLOWING
+      ),
+    })),
+
   /** Every external file the page evaluated, in order, with the build it came from. */
   copies: () => (globalThis as { __nfCopies?: Array<Record<string, unknown>> }).__nfCopies ?? [],
 

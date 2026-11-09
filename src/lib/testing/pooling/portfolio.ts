@@ -155,6 +155,7 @@ export const portfolio = (
     adapters.browser = {
       setImportMapFn: importMap => Promise.resolve((installed = importMap)),
       importModule: () => Promise.resolve({}),
+      preloadModules: () => {},
     };
 
     // Counts what this page writes; a spy installed by a caller still sees every call.

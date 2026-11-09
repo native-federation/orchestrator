@@ -9,6 +9,12 @@ export type Version = {
 export type ScopedVersion = Version & {
   bundle?: string;
   entries: Record<string, string>;
+} & EagerPreload;
+
+// The build's opt-in to preloading this copy once it is served; see docs/config.md §Preloading.
+export type EagerPreload = {
+  preload?: true;
+  chunks?: readonly string[];
 };
 
 export type SharedVersion = Version & {
@@ -38,4 +44,4 @@ export type SharedVersionMeta = {
   // legitimately run in different subpools. Absent means the version's own basis.
   servedBy?: RemoteName;
   poolCause?: PoolCause;
-};
+} & EagerPreload;
