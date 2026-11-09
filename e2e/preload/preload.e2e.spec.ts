@@ -15,9 +15,9 @@ const withExposedChunks = (entry: RemoteEntry, chunks: string[]): RemoteEntry =>
   exposes: entry.exposes.map(exposed => ({ ...exposed, chunks })),
 });
 
-// A shared copy that opted into preloading; its chunks are the bundle's, as core lists them for it.
-const preloaded = (shared: DenseSharedInfo, chunks: string[]): DenseSharedInfo =>
-  Object.assign(shared, { preload: true as const, chunks });
+// A shared copy that opted into preloading; it brings every chunk of its bundle (see `withChunks`).
+const preloaded = (shared: DenseSharedInfo): DenseSharedInfo =>
+  Object.assign(shared, { preload: true as const });
 
 const count = (nf: Federation, url: string) => nf.requests().filter(u => u === url).length;
 
@@ -75,7 +75,7 @@ for (const shim of [false, true]) {
 
     // mfe2 ships the newer copy, so its files serve both remotes and mfe1's never reach the map.
     test('preloads the served copy that opted in, after its map', async ({ nf }) => {
-      const lib = preloaded(dep('lib', '1.1.0', { bundle: 'lib' }), ['lib-chunk.js']);
+      const lib = preloaded(dep('lib', '1.1.0', { bundle: 'lib' }));
       await nf.init(
         [
           remote('team/mfe1', SCOPE.mfe1, [dep('lib', '1.0.0', { req: '^1.0.0' })]),
@@ -95,9 +95,7 @@ for (const shim of [false, true]) {
     });
 
     test('ignores the flag on a copy that lost version resolution', async ({ nf }) => {
-      const lost = preloaded(dep('lib', '1.0.0', { req: '^1.0.0', bundle: 'lib' }), [
-        'lib-chunk.js',
-      ]);
+      const lost = preloaded(dep('lib', '1.0.0', { req: '^1.0.0', bundle: 'lib' }));
       await nf.init(
         [
           withChunks(remote('team/mfe1', SCOPE.mfe1, [lost]), { lib: ['lib-chunk.js'] }),
@@ -123,7 +121,7 @@ for (const shim of [false, true]) {
  */
 test.describe('preloading and a later import map (native)', () => {
   test('keeps an eagerly preloaded copy on the build the committed map gave it', async ({ nf }) => {
-    const lib = preloaded(dep('lib', '1.0.0', { peers: ['rxjs'] }), []);
+    const lib = preloaded(dep('lib', '1.0.0', { peers: ['rxjs'] }));
     const late = remote('team/mfe3', SCOPE.mfe3, [
       dep('rxjs', '6.0.0', { req: '^6.0.0' }),
       dep('forms', '1.0.0'),

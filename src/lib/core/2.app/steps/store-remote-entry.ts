@@ -8,7 +8,6 @@ import {
   type RemoteSharedInfo,
   type SharedVersion,
   type SharedVersionMeta,
-  type EagerPreload,
 } from 'lib/core/1.domain';
 import type { DrivingContract } from '../driving-ports/driving.contract';
 import type { LoggingConfig } from '../config/log.contract';
@@ -144,7 +143,7 @@ export function createStoreRemoteEntry(
       tag,
       bundle: sharedInfo.bundle,
       entries: sharedInfo.entries,
-      ...eagerPreload(sharedInfo),
+      ...(sharedInfo.preload ? { preload: true as const } : {}),
     } as ScopedVersion);
   }
 
@@ -182,7 +181,7 @@ export function createStoreRemoteEntry(
       ...(sharedInfo.pool?.trim() ? { pool: sharedInfo.pool } : {}),
       ...(sharedInfo.dense ? { dense: true as const } : {}),
       entries: sharedInfo.entries,
-      ...eagerPreload(sharedInfo),
+      ...(sharedInfo.preload ? { preload: true as const } : {}),
     };
 
     // Read on first use: a runtime load stores its copies only after deciding them all, and an entry may list
@@ -226,9 +225,4 @@ export function createStoreRemoteEntry(
       },
     };
   }
-}
-
-function eagerPreload({ preload, chunks }: RemoteSharedInfo): EagerPreload {
-  if (!preload) return {};
-  return chunks?.length ? { preload, chunks } : { preload };
 }

@@ -12,7 +12,10 @@ describe('initFederation (preloading)', () => {
     version: string;
     singleton?: boolean;
     preload?: true;
+    // The chunks of the package's bundle, published as core does: `bundle` on the record, the list in the
+    // top-level `chunks`. The bundle is the package's own unless `bundle` names a shared one.
     chunks?: string[];
+    bundle?: string;
   };
 
   const entry = (
@@ -22,6 +25,9 @@ describe('initFederation (preloading)', () => {
   ) => ({
     name,
     url: `http://${name}/remoteEntry.json`,
+    chunks: Object.fromEntries(
+      Object.entries(shared).flatMap(([pkg, s]) => (s.chunks ? [[s.bundle ?? pkg, s.chunks]] : []))
+    ),
     exposes: exposes.map(({ key, chunks }) => ({
       key,
       outFileName: `${key.slice(2)}.js`,
@@ -34,7 +40,7 @@ describe('initFederation (preloading)', () => {
       requiredVersion: `^${s.version.split('.')[0]}.0.0`,
       version: s.version,
       ...(s.preload ? { preload: s.preload } : {}),
-      ...(s.chunks ? { chunks: s.chunks } : {}),
+      ...(s.chunks || s.bundle ? { bundle: s.bundle ?? packageName } : {}),
       entries: { [packageName]: `${packageName}.js` },
     })),
   });
@@ -187,6 +193,33 @@ describe('initFederation (preloading)', () => {
         'Ignored a failing preload hint.',
         expect.anything()
       );
+    });
+
+    // The rule is per bundle: a marked package brings every chunk of the bundle it is built in, here the
+    // shared one it is built in with `other`, and only its own entry files.
+    it("preloads every chunk of a marked package's bundle, and each URL once", async () => {
+      const bundle = ['chunk-1.js', 'chunk-2.js'];
+      entries = [
+        entry('r0', {
+          lib: { version: '1.0.0', preload: true, bundle: 'browser-shared', chunks: bundle },
+          extra: { version: '1.0.0', preload: true, bundle: 'browser-shared' },
+          other: { version: '1.0.0', bundle: 'browser-shared' },
+        }),
+      ];
+
+      await init(entries);
+
+      const urls = preloads().flat();
+      expect(urls.sort()).toEqual(
+        [
+          'http://r0/lib.js',
+          'http://r0/extra.js',
+          'http://r0/chunk-1.js',
+          'http://r0/chunk-2.js',
+        ].sort()
+      );
+      // What the browser is told to fetch is exactly what the committed map resolves to.
+      for (const url of urls) expect(mappedUrls(maps()[0]!)).toContain(url);
     });
 
     it('preloads nothing when no served copy is marked', async () => {

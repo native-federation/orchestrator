@@ -1,5 +1,5 @@
 import type { DrivingContract } from '../driving-ports/driving.contract';
-import type { EagerPreload, ImportMap, RemoteName } from 'lib/core/1.domain';
+import type { ImportMap, RemoteName } from 'lib/core/1.domain';
 import {
   eagerPreloadUrls,
   type PreloadCandidate,
@@ -9,7 +9,10 @@ import * as _path from 'lib/utils/path';
 export type CollectEagerPreloads = (importMap: ImportMap) => string[];
 
 export function createCollectEagerPreloads(
-  ports: Pick<DrivingContract, 'remoteInfoRepo' | 'scopedExternalsRepo' | 'sharedExternalsRepo'>
+  ports: Pick<
+    DrivingContract,
+    'remoteInfoRepo' | 'scopedExternalsRepo' | 'sharedExternalsRepo' | 'sharedChunksRepo'
+  >
 ): CollectEagerPreloads {
   return importMap => eagerPreloadUrls(importMap, candidates());
 
@@ -27,16 +30,20 @@ export function createCollectEagerPreloads(
     }
   }
 
+  // A copy brings every chunk of its own bundle, as the map's CHUNKS scope of its remote lists them.
   function* candidate(
     remoteName: RemoteName,
-    copy: EagerPreload & { entries: Record<string, string> }
+    copy: { preload?: true; bundle?: string; entries: Record<string, string> }
   ): Generator<PreloadCandidate> {
     if (!copy.preload) return;
     const scopeUrl = ports.remoteInfoRepo.tryGet(remoteName).get()?.scopeUrl;
     if (!scopeUrl) return;
+    const chunks = copy.bundle
+      ? (ports.sharedChunksRepo.tryGet(remoteName, copy.bundle).get() ?? [])
+      : [];
     yield {
       entryUrls: Object.values(copy.entries).map(file => _path.join(scopeUrl, file)),
-      chunkUrls: (copy.chunks ?? []).map(file => _path.join(scopeUrl, file)),
+      chunkUrls: chunks.map(file => _path.join(scopeUrl, file)),
     };
   }
 }

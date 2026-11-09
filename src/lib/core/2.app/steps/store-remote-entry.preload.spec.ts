@@ -2,8 +2,8 @@ import type { RemoteEntry, RemoteSharedInfo } from 'lib/core/1.domain';
 import { portfolio } from 'lib/testing/pooling/portfolio';
 
 /**
- * A warm page never refetches a remoteEntry, so what preloading reads (a module's chunks, a copy's opt-in and its
- * chunks) must survive storage. A copy that did not opt in stores no chunk list: nothing would read it.
+ * A warm page never refetches a remoteEntry, so what preloading reads (a module's chunks, a copy's opt-in) must
+ * survive storage. A copy's chunks are its bundle's, kept by the chunk repository, so the copy stores none.
  */
 describe('store-remote-entry: preload fields', () => {
   let storage = 0;
@@ -31,21 +31,18 @@ describe('store-remote-entry: preload fields', () => {
   const fresh = () =>
     portfolio({}, { storage: `nf-store-preload-${storage++}`, realRepositories: true });
 
-  // [remote, preload, chunks] for every stored copy of `lib`.
+  // [remote, preload] for every stored copy of `lib`.
   const copies = (p: ReturnType<typeof fresh>) =>
-    p.stored()['lib']!.versions.flatMap(v => v.remotes.map(r => [r.name, r.preload, r.chunks]));
+    p.stored()['lib']!.versions.flatMap(v => v.remotes.map(r => [r.name, r.preload]));
 
-  it('keeps the opt-in and its chunks on the copy an init stores, across a reload', async () => {
+  it('keeps the opt-in on the copy an init stores, across a reload', async () => {
     const p = fresh();
-    await p.runInit([
-      entry('a', { preload: true, chunks: ['chunk-L.js'] }),
-      entry('b', { version: '1.1.0', chunks: ['chunk-B.js'] }),
-    ]);
+    await p.runInit([entry('a', { preload: true }), entry('b', { version: '1.1.0' })]);
     p.reload();
 
     expect(copies(p)).toEqual([
-      ['b', undefined, undefined],
-      ['a', true, ['chunk-L.js']],
+      ['b', undefined],
+      ['a', true],
     ]);
   });
 
@@ -56,8 +53,8 @@ describe('store-remote-entry: preload fields', () => {
     p.reload();
 
     expect(copies(p)).toEqual([
-      ['a', undefined, undefined],
-      ['b', true, undefined],
+      ['a', undefined],
+      ['b', true],
     ]);
   });
 
@@ -74,12 +71,11 @@ describe('store-remote-entry: preload fields', () => {
 
   it('keeps the opt-in on a scoped copy', async () => {
     const p = fresh();
-    await p.runInit([entry('a', { singleton: false, preload: true, chunks: ['chunk-L.js'] })]);
+    await p.runInit([entry('a', { singleton: false, preload: true })]);
     p.reload();
 
     expect(p.adapters.scopedExternalsRepo.tryGet('a').get()!['lib']).toMatchObject({
       preload: true,
-      chunks: ['chunk-L.js'],
     });
   });
 });

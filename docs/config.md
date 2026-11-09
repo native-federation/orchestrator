@@ -133,11 +133,16 @@ requests. The orchestrator shortens it by handing `preloadModulesFn` the files t
   is about to open: the exposed module and its chunks. It never rejects; a module it cannot find is logged at
   debug level.
 - **After the import map is committed**, at init and after `initRemoteEntry`, every shared external whose served
-  copy was built with `preload: true` (a per-package option of the federation config), with its chunks. Only the
-  copy the import map serves counts: a flag on a copy that lost version resolution does nothing.
+  copy was built with `preload: true` (a per-package option of the federation config): its entry files, and
+  every chunk of the bundle it was built in. Only the copy the import map serves counts: a flag on a copy that
+  lost version resolution does nothing.
 
-The list comes from `remoteEntry.json` (`exposes[].chunks`, `shared[].chunks`, `shared[].preload`); a remote
-built without those fields is simply not preloaded. Nothing is preloaded before the map that resolves it is in
+The lists come from `remoteEntry.json`: `exposes[].chunks`, `shared[].preload`, and the chunks per bundle in the
+top-level `chunks`. A remote built without those fields is simply not preloaded. The bundle rule has costs the
+build warns about: a marked package in the combined shared bundle brings the chunks of every package in it
+(give it `build: 'package'`), and without `features.denseChunking` there is no list per bundle, so only its
+entry files are preloaded. A bundle's list also holds the chunks the package loads lazily, so a library that
+splits languages, themes or diagrams into lazy chunks preloads all of them. Nothing is preloaded before the map that resolves it is in
 place, and a failed `initRemoteEntry` preloads nothing.
 
 Call `preloadRemoteModule` under the same rule as `loadRemoteModule`: once every remote the module imports is
