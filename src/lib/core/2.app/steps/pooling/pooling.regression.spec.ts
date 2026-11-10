@@ -2015,7 +2015,7 @@ describe('pooling regressions', () => {
       '@org/ui/button': `${MFE}button.js`,
     };
 
-    it.fails('maps both records of a version split on init', async () => {
+    it('maps both records of a version split on init', async () => {
       const importMap = await fresh().runInit([shell(), versionSplit()]);
 
       expect(importMap.scopes?.[MFE]).toEqual(versionSplitScope);
@@ -2032,7 +2032,7 @@ describe('pooling regressions', () => {
     });
 
     // The root's record comes second, so its key must not be one the first record already holds.
-    it.fails('maps both records when the root comes last', async () => {
+    it('maps both records when the root comes last', async () => {
       const importMap = await fresh().runInit([
         shell(),
         entry('mfe', [
@@ -2048,7 +2048,7 @@ describe('pooling regressions', () => {
     });
 
     // densify-externals.spec.ts "splits external secondaries planned into different bundles".
-    it.fails('maps both records of a bundle split with the chunks of both bundles', async () => {
+    it('maps both records of a bundle split with the chunks of both bundles', async () => {
       const importMap = await fresh().runInit([
         shell(),
         entry(
@@ -2075,36 +2075,33 @@ describe('pooling regressions', () => {
       });
     });
 
-    it.fails(
-      'stores a record under its package when it holds the root, else under its first entrypoint',
-      async () => {
-        const p = fresh();
+    it('stores a record under its package when it holds the root, else under its first entrypoint', async () => {
+      const p = fresh();
 
-        await p.runInit([
-          shell(),
-          entry('mfe', [
-            scoped('rxjs', '7.8.1', { 'rxjs/ajax': 'rxjs-ajax.js', rxjs: 'rxjs.js' }),
-            scoped('@angular/material', '20.0.0', {
-              '@angular/material/button': 'button.js',
-              '@angular/material/card': 'card.js',
-            }),
-            ...versionSplit().shared,
-          ]),
-        ]);
+      await p.runInit([
+        shell(),
+        entry('mfe', [
+          scoped('rxjs', '7.8.1', { 'rxjs/ajax': 'rxjs-ajax.js', rxjs: 'rxjs.js' }),
+          scoped('@angular/material', '20.0.0', {
+            '@angular/material/button': 'button.js',
+            '@angular/material/card': 'card.js',
+          }),
+          ...versionSplit().shared,
+        ]),
+      ]);
 
-        expect(p.adapters.scopedExternalsRepo.getAll()['mfe']).toEqual({
-          rxjs: { tag: '7.8.1', entries: { 'rxjs/ajax': 'rxjs-ajax.js', rxjs: 'rxjs.js' } },
-          '@angular/material/button': {
-            tag: '20.0.0',
-            entries: {
-              '@angular/material/button': 'button.js',
-              '@angular/material/card': 'card.js',
-            },
+      expect(p.adapters.scopedExternalsRepo.getAll()['mfe']).toEqual({
+        rxjs: { tag: '7.8.1', entries: { 'rxjs/ajax': 'rxjs-ajax.js', rxjs: 'rxjs.js' } },
+        '@angular/material/button': {
+          tag: '20.0.0',
+          entries: {
+            '@angular/material/button': 'button.js',
+            '@angular/material/card': 'card.js',
           },
-          '@org/ui/table': { tag: '1.2.3', entries: { '@org/ui/table': 'table.js' } },
-          '@org/ui/button': { tag: '2.0.0', entries: { '@org/ui/button': 'button.js' } },
-        });
-      }
-    );
+        },
+        '@org/ui/table': { tag: '1.2.3', entries: { '@org/ui/table': 'table.js' } },
+        '@org/ui/button': { tag: '2.0.0', entries: { '@org/ui/button': 'button.js' } },
+      });
+    });
   });
 });
