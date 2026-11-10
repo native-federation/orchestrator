@@ -1,4 +1,7 @@
 import type { DenseSharedInfo, ImportMap, RemoteEntry, SharedVersion } from 'lib/core/1.domain';
+import type { RawRemoteEntry } from 'lib/core/1.domain/remote-entry/remote-entry.contract';
+import { normalizeRemoteEntry } from 'lib/core/3.adapters/remote-entry/normalize-remote-entry';
+import { mockConfig } from 'lib/testing/config.mock';
 import { portfolio } from 'lib/testing/pooling/portfolio';
 
 /**
@@ -1820,5 +1823,288 @@ describe('pooling regressions', () => {
       p.reload();
       expect(await p.runInit([mfe, host])).toEqual(importMap);
     });
+  });
+
+  /**
+   * Densify writes one package as two records of one remote when their metadata differ: here r1's `fw/sub`
+   * asks `~1.0.0` beside `fw` at `^1.0.0`. Before #134 pooling read only the first record, so the second range
+   * was never checked: `fw/sub` resolved globally to r2's 1.1.0 and r1 got no scope entry. The no-tear oracle
+   * did not flag it, since it does not check ranges.
+   */
+  describe('#134: the range of a second record of a package is honoured', () => {
+    const file = (s: string) => `${s.replace(/\//g, '_')}.js`;
+    const shared = (
+      packageName: string,
+      version: string,
+      requiredVersion: string,
+      specifiers: string[],
+      strictVersion = false
+    ): DenseSharedInfo =>
+      ({
+        packageName,
+        version,
+        requiredVersion,
+        singleton: true,
+        strictVersion,
+        pool: 'fw',
+        entries: Object.fromEntries(specifiers.map(s => [s, file(s)])),
+      }) as DenseSharedInfo;
+    const entry = (name: string, ...sharedInfo: DenseSharedInfo[]): RemoteEntry =>
+      ({
+        name,
+        url: `http://${name}/remoteEntry.json`,
+        exposes: [],
+        shared: sharedInfo,
+      }) as unknown as RemoteEntry;
+
+    // `fw2` too, or the pool has one member and nothing is elected.
+    const r2 = entry(
+      'r2',
+      shared('fw', '1.1.0', '^1.1.0', ['fw', 'fw/sub']),
+      shared('fw2', '1.0.0', '^1.0.0', ['fw2'])
+    );
+    const r1 = (narrow: boolean) =>
+      entry(
+        'r1',
+        shared('fw', '1.0.0', '^1.0.0', ['fw']),
+        narrow
+          ? shared('fw', '1.0.0', '~1.0.0', ['fw/sub'], true)
+          : shared('fw', '1.0.0', '^1.0.0', ['fw/sub']),
+        shared('fw2', '1.0.0', '^1.0.0', ['fw2'])
+      );
+    const SPECIFIERS = ['fw', 'fw/sub', 'fw2'];
+    const servedBy = (remote: string) =>
+      Object.fromEntries(SPECIFIERS.map(s => [s, `http://${remote}/${file(s)}`]));
+
+    for (const order of ['r2 first', 'r1 first'] as const)
+      it(`islands the remote whose second record's range rejects the winner (${order})`, async () => {
+        const p = portfolio({}, { storage: 'nf-regression-134', realRepositories: true });
+        const entries = order === 'r2 first' ? [r2, r1(true)] : [r1(true), r2];
+
+        const importMap = await p.runInit(entries);
+
+        expect(p.islands()).toEqual({ r1: 'incompatible' });
+        expect(importMap.imports).toEqual(servedBy('r2'));
+        expect(importMap.scopes?.['http://r1/']).toEqual(servedBy('r1'));
+
+        p.reload();
+        expect(await p.runInit(entries)).toEqual(importMap);
+      });
+
+    it("lets the remote follow the winner when its second record's range accepts it", async () => {
+      const p = portfolio({}, { storage: 'nf-regression-134', realRepositories: true });
+
+      const importMap = await p.runInit([r2, r1(false)]);
+
+      expect(p.islands()).toEqual({});
+      expect(importMap.imports).toEqual(servedBy('r2'));
+      expect(importMap.scopes?.['http://r1/']).toBeUndefined();
+    });
+  });
+
+  /**
+   * A root-less record is filed under its package: core publishes a build that shares only `@p0/m0/sub` as
+   * `{ packageName: '@p0/m0', entries: { '@p0/m0/sub' } }` (`denseExternals`, every v5 build). So the host's sub
+   * and r1's root land in one external at two majors, and the version rules treat them as one package.
+   */
+  describe('a root-less record shares one external with the root of its package', () => {
+    const raw = (
+      name: string,
+      version: string,
+      requiredVersion: string,
+      strictVersion: boolean,
+      specifier: string
+    ): RawRemoteEntry =>
+      ({
+        name,
+        url: `http://${name}/remoteEntry.json`,
+        exposes: [],
+        shared: [
+          {
+            packageName: '@p0/m0',
+            version,
+            requiredVersion,
+            singleton: true,
+            strictVersion,
+            entries: { [specifier]: `${specifier.slice(1).replace(/\//g, '_')}.js` },
+          },
+        ],
+      }) as unknown as RawRemoteEntry;
+    // Natively dense input, normalized as the provider does with `convertFlatSharedInfo` off.
+    const dense = (entry: RawRemoteEntry) => normalizeRemoteEntry(entry, entry.url!, mockConfig());
+    const host = () => dense(raw('host', '18.1.1', '^18.1.1', false, '@p0/m0/sub'));
+    const r1 = () => dense(raw('r1', '17.0.0', '^17.0.0', true, '@p0/m0'));
+
+    it('fails a strict init: the root rejects the major the host shares', async () => {
+      const p = portfolio(
+        {},
+        { strict: true, storage: 'nf-regression-rootless', realRepositories: true, hosts: ['host'] }
+      );
+
+      await expect(p.runInit([r1(), host()])).rejects.toMatchObject({
+        message: 'Could not determine shared externals in scope __GLOBAL__.',
+        cause: { message: 'External @p0/m0@17.0.0 could not be shared.' },
+      });
+    });
+
+    it('runs the root on its own build when not strict', async () => {
+      const p = portfolio(
+        {},
+        { storage: 'nf-regression-rootless', realRepositories: true, hosts: ['host'] }
+      );
+
+      expect(await p.runInit([r1(), host()])).toEqual({
+        imports: { '@p0/m0/sub': 'http://host/p0_m0_sub.js' },
+        scopes: { 'http://r1/': { '@p0/m0': 'http://r1/p0_m0.js' } },
+      });
+    });
+  });
+
+  /**
+   * Densify splits a `singleton: false` package into several records of one name when their version or bundle
+   * differ (core's `densify-externals.spec.ts`). Each record is stored as its own scoped external: one holding
+   * the root under the package name, a root-less one under its first entrypoint, which no other record of the
+   * split ships.
+   */
+  describe('a remote keeps every scoped record of one package', () => {
+    let storage = 0;
+    const MFE = 'http://mfe/';
+    const scoped = (
+      packageName: string,
+      version: string,
+      entries: Record<string, string>,
+      bundle?: string
+    ): DenseSharedInfo =>
+      ({
+        packageName,
+        version,
+        requiredVersion: `^${version}`,
+        singleton: false,
+        strictVersion: false,
+        dense: true,
+        entries,
+        ...(bundle ? { bundle } : {}),
+      }) as DenseSharedInfo;
+    const entry = (
+      name: string,
+      shared: DenseSharedInfo[],
+      chunks?: Record<string, string[]>
+    ): RemoteEntry =>
+      ({
+        name,
+        url: `http://${name}/remoteEntry.json`,
+        exposes: [],
+        shared,
+        ...(chunks ? { chunks } : {}),
+      }) as unknown as RemoteEntry;
+    const shell = () => entry('shell', []);
+    const fresh = () =>
+      portfolio(
+        {},
+        { storage: `nf-regression-scoped-${storage++}`, realRepositories: true, hosts: ['shell'] }
+      );
+
+    // densify-externals.spec.ts "still splits a name-rule package by version".
+    const versionSplit = () =>
+      entry('mfe', [
+        scoped('@org/ui', '1.2.3', { '@org/ui/table': 'table.js' }),
+        scoped('@org/ui', '2.0.0', { '@org/ui/button': 'button.js' }),
+      ]);
+    const versionSplitScope = {
+      '@org/ui/table': `${MFE}table.js`,
+      '@org/ui/button': `${MFE}button.js`,
+    };
+
+    it.fails('maps both records of a version split on init', async () => {
+      const importMap = await fresh().runInit([shell(), versionSplit()]);
+
+      expect(importMap.scopes?.[MFE]).toEqual(versionSplitScope);
+    });
+
+    // A dynamic load reads the remote entry, not the stored scoped externals.
+    it('maps both records of a version split on a dynamic load', async () => {
+      const p = fresh();
+      await p.runInit([shell()]);
+
+      const { importMap } = await p.runDynamic(versionSplit());
+
+      expect(importMap.scopes?.[MFE]).toEqual(versionSplitScope);
+    });
+
+    // The root's record comes second, so its key must not be one the first record already holds.
+    it.fails('maps both records when the root comes last', async () => {
+      const importMap = await fresh().runInit([
+        shell(),
+        entry('mfe', [
+          scoped('rxjs', '7.8.1', { 'rxjs/operators': 'rxjs-operators.js' }, 'browser-operators'),
+          scoped('rxjs', '7.8.1', { rxjs: 'rxjs.js' }, 'browser-rxjs'),
+        ]),
+      ]);
+
+      expect(importMap.scopes?.[MFE]).toEqual({
+        'rxjs/operators': `${MFE}rxjs-operators.js`,
+        rxjs: `${MFE}rxjs.js`,
+      });
+    });
+
+    // densify-externals.spec.ts "splits external secondaries planned into different bundles".
+    it.fails('maps both records of a bundle split with the chunks of both bundles', async () => {
+      const importMap = await fresh().runInit([
+        shell(),
+        entry(
+          'mfe',
+          [
+            scoped(
+              'rxjs',
+              '7.8.1',
+              { rxjs: 'rxjs.js', 'rxjs/ajax': 'rxjs-ajax.js' },
+              'browser-rxjs'
+            ),
+            scoped('rxjs', '7.8.1', { 'rxjs/operators': 'rxjs-operators.js' }, 'browser-operators'),
+          ],
+          { 'browser-rxjs': ['chunk-a.js'], 'browser-operators': ['chunk-b.js'] }
+        ),
+      ]);
+
+      expect(importMap.scopes?.[MFE]).toEqual({
+        rxjs: `${MFE}rxjs.js`,
+        'rxjs/ajax': `${MFE}rxjs-ajax.js`,
+        'rxjs/operators': `${MFE}rxjs-operators.js`,
+        '@nf-internal/chunk-a': `${MFE}chunk-a.js`,
+        '@nf-internal/chunk-b': `${MFE}chunk-b.js`,
+      });
+    });
+
+    it.fails(
+      'stores a record under its package when it holds the root, else under its first entrypoint',
+      async () => {
+        const p = fresh();
+
+        await p.runInit([
+          shell(),
+          entry('mfe', [
+            scoped('rxjs', '7.8.1', { 'rxjs/ajax': 'rxjs-ajax.js', rxjs: 'rxjs.js' }),
+            scoped('@angular/material', '20.0.0', {
+              '@angular/material/button': 'button.js',
+              '@angular/material/card': 'card.js',
+            }),
+            ...versionSplit().shared,
+          ]),
+        ]);
+
+        expect(p.adapters.scopedExternalsRepo.getAll()['mfe']).toEqual({
+          rxjs: { tag: '7.8.1', entries: { 'rxjs/ajax': 'rxjs-ajax.js', rxjs: 'rxjs.js' } },
+          '@angular/material/button': {
+            tag: '20.0.0',
+            entries: {
+              '@angular/material/button': 'button.js',
+              '@angular/material/card': 'card.js',
+            },
+          },
+          '@org/ui/table': { tag: '1.2.3', entries: { '@org/ui/table': 'table.js' } },
+          '@org/ui/button': { tag: '2.0.0', entries: { '@org/ui/button': 'button.js' } },
+        });
+      }
+    );
   });
 });
