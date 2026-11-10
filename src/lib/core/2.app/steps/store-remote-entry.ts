@@ -22,11 +22,8 @@ export type StoreRemoteEntry = (
 
 export type RemoveCachedRemoteEntries = (remoteNames: ReadonlySet<RemoteName>) => void;
 
-/**
- * Evict stored remotes: overridden ones before their replacements are merged in, and ones the manifest
- * doesn't list. Kept out of `storeRemoteEntry` because `removeFromAllScopes` costs a full traversal of the
- * shared-externals graph, so each caller evicts its whole set at once.
- */
+// Kept out of `storeRemoteEntry`: `removeFromAllScopes` traverses the whole shared-externals graph, so each
+// caller evicts its whole set at once.
 export function createRemoveCachedRemoteEntries(
   ports: Pick<
     DrivingContract,
@@ -60,15 +57,9 @@ export type SharedExternalContext = {
   write: () => void;
 };
 
-/**
- * Not a pipeline step but the template both storage steps specialize: it owns the merge sequence
- * for a remoteEntry, and only the resolution of a singleton external differs between the init
- * pipeline (process-remote-entries, step 2) and the dynamic pipeline (update-cache, step 8),
- * injected per call. Evicting an overridden remote is the caller's job, see
- * `createRemoveCachedRemoteEntries` — every entry reaching here is merged additively. The
- * pipelines must not be merged, see docs/version-resolver.md "Dynamic Init". If a change ever
- * needs a flag or parameter here to serve only one caller, inline this back into the steps instead.
- */
+// Shared by the init and dynamic storage steps, which must stay separate (docs/version-resolver.md "Dynamic
+// Init"): if a change needs a flag here to serve only one caller, inline this back into the steps instead.
+// Every entry is merged additively; evicting an overridden remote is the caller's job.
 export function createStoreRemoteEntry(
   config: LoggingConfig & ModeConfig,
   ports: Pick<
@@ -90,10 +81,17 @@ export function createStoreRemoteEntry(
   function addRemoteInfoToStorage({ name, url, exposes, integrity }: RemoteEntry): void {
     ports.remoteInfoRepo.addOrUpdate(name, {
       scopeUrl: _path.getScope(url),
-      exposes: Object.values(exposes ?? []).map(m => ({
-        moduleName: m.key,
-        file: m.outFileName,
-      })),
+      exposes: Object.values(exposes ?? []).map(m => {
+        // Only the static closure is certain to be needed; lazy rows are left to the module's own import().
+        const chunks = Object.values(m.chunks ?? {})
+          .filter(c => c.initial)
+          .map(c => c.file);
+        return {
+          moduleName: m.key,
+          file: m.outFileName,
+          ...(chunks.length ? { chunks } : {}),
+        };
+      }),
       ...(integrity ? { integrity } : {}),
     } as RemoteInfo);
   }
@@ -142,6 +140,7 @@ export function createStoreRemoteEntry(
       tag,
       bundle: sharedInfo.bundle,
       entries: sharedInfo.entries,
+      ...(sharedInfo.preload ? { preload: true as const } : {}),
     } as ScopedVersion);
   }
 
@@ -179,6 +178,7 @@ export function createStoreRemoteEntry(
       ...(sharedInfo.pool?.trim() ? { pool: sharedInfo.pool } : {}),
       ...(sharedInfo.dense ? { dense: true as const } : {}),
       entries: sharedInfo.entries,
+      ...(sharedInfo.preload ? { preload: true as const } : {}),
     };
 
     // Read on first use: a runtime load stores its copies only after deciding them all, and an entry may list
@@ -215,7 +215,9 @@ export function createStoreRemoteEntry(
           sharedInfo.packageName,
           {
             ...readRecord(),
-            versions: readRecord().versions.sort((a, b) => ports.versionCheck.compare(b.tag, a.tag)),
+            versions: readRecord().versions.sort((a, b) =>
+              ports.versionCheck.compare(b.tag, a.tag)
+            ),
           },
           sharedInfo.shareScope
         );

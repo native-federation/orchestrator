@@ -1,9 +1,7 @@
 import type { FederationManifest } from 'lib/core/1.domain';
-import type { LoadRemoteModule } from 'lib/core/init-federation.contract';
+import type { RemoteModuleAccess } from './for-exposing-module-loader.port';
 
-export type InitResult = {
-  loadRemoteModule: LoadRemoteModule;
-};
+export type InitResult = RemoteModuleAccess;
 
 export type InitFlow = (remotesOrManifestUrl: string | FederationManifest) => Promise<InitResult>;
 

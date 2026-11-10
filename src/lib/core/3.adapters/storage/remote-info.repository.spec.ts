@@ -160,6 +160,32 @@ describe('createRemoteInfoRepository', () => {
     });
   });
 
+  describe('getModuleChunkUrls', () => {
+    const withChunks = (chunks?: string[]): RemoteInfo => ({
+      scopeUrl: mockScopeUrl_MFE1(),
+      exposes: [{ moduleName: './wc-comp-a', file: 'component-a.js', ...(chunks && { chunks }) }],
+    });
+
+    // Joined like tryGetModule, so each URL is exactly what the module's import requests.
+    it('returns the chunk URLs under the remote scope', () => {
+      const { remoteInfoRepo } = setupWithCache({ 'team/mfe1': withChunks(['chunk-A.js']) });
+
+      expect(remoteInfoRepo.getModuleChunkUrls('team/mfe1', './wc-comp-a')).toEqual([
+        `${mockScopeUrl_MFE1()}chunk-A.js`,
+      ]);
+    });
+
+    it.each([
+      ['a module without chunks', 'team/mfe1', './wc-comp-a'],
+      ['an unknown module', 'team/mfe1', './wc-comp-c'],
+      ['an unknown remote', 'team/mfe9', './wc-comp-a'],
+    ])('returns nothing for %s', (_name, remote, module) => {
+      const { remoteInfoRepo } = setupWithCache({ 'team/mfe1': withChunks() });
+
+      expect(remoteInfoRepo.getModuleChunkUrls(remote, module)).toEqual([]);
+    });
+  });
+
   describe('tryGetModule', () => {
     it('should return the exposed module', () => {
       const { remoteInfoRepo } = setupWithCache({

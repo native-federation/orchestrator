@@ -9,5 +9,6 @@ export type {
   LoadRemoteModule,
   LoadRemoteModuleOf,
   NativeFederationResult,
+  PreloadRemoteModule,
 } from './core/init-federation.contract';
 export type { FederationManifest } from './core/1.domain/remote-entry/manifest.contract';

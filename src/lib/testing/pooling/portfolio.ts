@@ -49,7 +49,6 @@ export type Island = PoolCause | `subpool ${RemoteName}`;
 export type PortfolioOptions = {
   /** The no-tear check's only exemption: a host cannot be repointed onto another build. */
   hosts?: RemoteName[];
-  /** The `globalThis` namespace the repositories store under. */
   storage?: string;
   /** Off for callers that judge the oracle themselves, e.g. across two maps. */
   assertNoTear?: boolean;
@@ -155,6 +154,7 @@ export const portfolio = (
     adapters.browser = {
       setImportMapFn: importMap => Promise.resolve((installed = importMap)),
       importModule: () => Promise.resolve({}),
+      preloadModules: () => {},
     };
 
     // Counts what this page writes; a spy installed by a caller still sees every call.

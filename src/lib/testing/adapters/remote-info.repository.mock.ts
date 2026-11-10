@@ -5,6 +5,7 @@ export const mockRemoteInfoRepository = (): Mocked<ForRemoteInfoStorage> => ({
   contains: vi.fn(),
   addOrUpdate: vi.fn(),
   tryGetModule: vi.fn(),
+  getModuleChunkUrls: vi.fn(() => []),
   remove: vi.fn(),
   tryGet: vi.fn(),
   getAll: vi.fn(),

@@ -1,5 +1,6 @@
 import type { ImportMap } from 'lib/core/1.domain';
 import type { ImportMapConfig } from 'lib/core/2.app/config/import-map.contract';
+import { noPreload } from 'lib/core/4.config/import-map/no-preload';
 import {
   getNodeLoaderClient,
   type NodeLoaderClient,
@@ -22,6 +23,8 @@ const useNodeImportMap = (): NodeImportMapConfig => {
     reloadBrowserFn: () => {
       /* no-op */
     },
+    // import() would evaluate the module, and the loader thread reads a module only once it is imported.
+    preloadModulesFn: noPreload,
   };
 };
 

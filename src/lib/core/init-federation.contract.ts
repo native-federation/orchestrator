@@ -7,6 +7,9 @@ export type LoadRemoteModule = <TModule = unknown>(
   exposedModule: string
 ) => Promise<TModule>;
 
+// A hint: never rejects, and does nothing for a module it cannot find.
+export type PreloadRemoteModule = (remoteName: string, exposedModule: string) => void;
+
 export type LoadRemoteModuleOf<TModule> = (
   remoteName: string,
   exposedModule: string
@@ -17,6 +20,7 @@ export type NativeFederationResult = DynamicInitResult<{
   adapters: DrivingContract;
   loadRemoteModule: LoadRemoteModule;
   load: LoadRemoteModule;
+  preloadRemoteModule: PreloadRemoteModule;
   as: <TModule = unknown>() => {
     loadRemoteModule: LoadRemoteModuleOf<TModule>;
     load: LoadRemoteModuleOf<TModule>;

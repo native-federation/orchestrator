@@ -126,6 +126,7 @@ The Node entry pre-wires sensible server-side defaults:
 | `setImportMapFn`      | Posts the map to the loader thread over a `MessageChannel` — no DOM mutation.         |
 | `loadModuleFn`        | `(url) => import(url)` — Node's native dynamic import.                                |
 | `reloadBrowserFn`     | No-op.                                                                                |
+| `preloadModulesFn`    | `noPreload`: `import()` would evaluate the module, so nothing is fetched ahead.       |
 | Storage               | In-memory (`globalThisStorageEntry`) — the SSR process is long-lived; no disk needed. |
 | SSE (build watching)  | Disabled and stubbed out — HMR is a browser concern.                                  |
 | Manifest provider     | fs-aware (`file://` or path), falls back to `fetch` for http(s).                      |
@@ -133,7 +134,7 @@ The Node entry pre-wires sensible server-side defaults:
 
 Anything in `options` overrides the default. The `NativeFederationResult`
 returned is identical to the browser one — `loadRemoteModule`, `load`,
-`initRemoteEntry`, `as<T>()`, `config`, and `adapters`.
+`preloadRemoteModule` (a no-op here), `initRemoteEntry`, `as<T>()`, `config`, and `adapters`.
 
 ## How the loader works
 

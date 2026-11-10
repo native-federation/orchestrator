@@ -40,6 +40,11 @@ const createRemoteInfoRepository = (config: StorageConfig): ForRemoteInfoStorage
         m => _path.join(_cache[remoteName]!.scopeUrl, m.file)
       );
     },
+    getModuleChunkUrls: function (remoteName: RemoteName, exposedModule: string) {
+      const remote = _cache[remoteName];
+      const chunks = remote?.exposes.find(m => m.moduleName === exposedModule)?.chunks ?? [];
+      return chunks.map(file => _path.join(remote!.scopeUrl, file));
+    },
     getAll: function () {
       return _cache;
     },
