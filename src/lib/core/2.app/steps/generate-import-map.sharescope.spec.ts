@@ -570,6 +570,59 @@ describe('createGenerateImportMap (shareScope-externals)', () => {
     expect(config.log.error).not.toHaveBeenCalled();
   });
 
+  // The named path maps a subpool member from its build's file in its own scope, as the global path does, with
+  // that file's integrity, and marks the serving copy cached for the dynamic path to read.
+  it("should map a subpool member onto its build's file, with its integrity, and mark that copy cached", async () => {
+    const HASH = 'sha384-MFE2';
+    adapters.remoteInfoRepo.tryGet = vi.fn(remote => {
+      if (remote === 'team/mfe3') return Optional.of(mockRemoteInfo_MFE3({ exposes: [] }));
+      if (remote === 'team/mfe2')
+        return Optional.of({
+          ...mockRemoteInfo_MFE2({ exposes: [] }),
+          integrity: { 'dep-a.js': HASH },
+        });
+      if (remote === 'team/mfe1') return Optional.of(mockRemoteInfo_MFE1({ exposes: [] }));
+      return Optional.empty<RemoteInfo>();
+    });
+    const stored = mockExternal_A({
+      versions: [
+        mockVersion_A.v2_1_3({ action: 'share', remotes: ['team/mfe3'] }),
+        mockVersion_A.v2_1_2({
+          action: 'skip',
+          remotes: {
+            'team/mfe2': { servedBy: 'team/mfe2' },
+            'team/mfe1': { servedBy: 'team/mfe2' },
+          },
+        }),
+      ],
+    });
+    adapters.sharedExternalsRepo.getFromScope = vi.fn((scope?: string): shareScope =>
+      !scope || scope === GLOBAL_SCOPE ? {} : { 'dep-a': stored }
+    );
+
+    const actual = await generateImportMap();
+
+    const served = mockScopeUrl_MFE2({ file: 'dep-a.js' });
+    expect(actual).toEqual({
+      imports: {},
+      scopes: {
+        [mockScopeUrl_MFE3()]: { 'dep-a': mockScopeUrl_MFE3({ file: 'dep-a.js' }) },
+        [mockScopeUrl_MFE2()]: { 'dep-a': served },
+        [mockScopeUrl_MFE1()]: { 'dep-a': served },
+      },
+      integrity: { [served]: HASH },
+    });
+    expect(stored.versions[1]!.remotes.map(r => [r.name, r.cached])).toEqual([
+      ['team/mfe2', true],
+      ['team/mfe1', false],
+    ]);
+    expect(adapters.sharedExternalsRepo.addOrUpdate).toHaveBeenCalledWith(
+      'dep-a',
+      stored,
+      'custom-scope'
+    );
+  });
+
   it('should fallback to scope with the action skip and no shared externals.', async () => {
     adapters.sharedExternalsRepo.getFromScope = vi.fn((scope?: string): shareScope => {
       return !scope || scope === GLOBAL_SCOPE
