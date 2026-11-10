@@ -599,6 +599,11 @@ describe('createGenerateImportMap (shareScope-externals)', () => {
     adapters.sharedExternalsRepo.getFromScope = vi.fn((scope?: string): shareScope =>
       !scope || scope === GLOBAL_SCOPE ? {} : { 'dep-a': stored }
     );
+    // Cloned at call time, as the record is marked in place: a write ahead of the marks shows in it.
+    const written: unknown[] = [];
+    vi.mocked(adapters.sharedExternalsRepo.addOrUpdate).mockImplementation(
+      (...args) => (written.push(structuredClone(args)), adapters.sharedExternalsRepo)
+    );
 
     const actual = await generateImportMap();
 
@@ -616,11 +621,7 @@ describe('createGenerateImportMap (shareScope-externals)', () => {
       ['team/mfe2', true],
       ['team/mfe1', false],
     ]);
-    expect(adapters.sharedExternalsRepo.addOrUpdate).toHaveBeenCalledWith(
-      'dep-a',
-      stored,
-      'custom-scope'
-    );
+    expect(written).toContainEqual(['dep-a', stored, 'custom-scope']);
   });
 
   it('should fallback to scope with the action skip and no shared externals.', async () => {

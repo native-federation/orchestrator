@@ -459,8 +459,14 @@ describe('createGenerateImportMap (shared-externals)', () => {
    */
   describe('servedBy builds', () => {
     const HASH = 'sha384-MFE2';
+    let written: unknown[];
 
     beforeEach(() => {
+      // Cloned at call time, as the record is marked in place: a write ahead of the marks shows in it.
+      written = [];
+      vi.mocked(adapters.sharedExternalsRepo.addOrUpdate).mockImplementation(
+        (...args) => (written.push(structuredClone(args)), adapters.sharedExternalsRepo)
+      );
       adapters.remoteInfoRepo.tryGet = vi.fn(remote => {
         if (remote === 'team/host') return Optional.of(mockRemoteInfo_HOST({ exposes: [] }));
         if (remote === 'team/mfe1') return Optional.of(mockRemoteInfo_MFE1({ exposes: [] }));
@@ -508,10 +514,7 @@ describe('createGenerateImportMap (shared-externals)', () => {
         ['team/mfe2', true],
         ['team/mfe1', false],
       ]);
-      expect(adapters.sharedExternalsRepo.addOrUpdate).toHaveBeenCalledWith(
-        'dep-a',
-        record['dep-a']
-      );
+      expect(written).toContainEqual(['dep-a', record['dep-a']]);
     });
 
     // A hand-built record pinning a defensive branch: one pool run cannot produce it, since a secondary joins
@@ -560,10 +563,7 @@ describe('createGenerateImportMap (shared-externals)', () => {
       // The served source is mfe2's flat copy (first in record order), which `imports` does not publish: a
       // dropped entry must not mark it.
       expect(record['dep-a/sub'].versions[0]!.remotes[0]!.cached).toBe(false);
-      expect(adapters.sharedExternalsRepo.addOrUpdate).toHaveBeenCalledWith(
-        'dep-a',
-        record['dep-a']
-      );
+      expect(written).toContainEqual(['dep-a', record['dep-a']]);
     });
 
     // mfe2 ships `dep-a/sub` in two records with different files: its dense `dep-a` first, its flat
@@ -626,8 +626,8 @@ describe('createGenerateImportMap (shared-externals)', () => {
                 'team/mfe2': { servedBy: 'team/mfe2' },
                 'team/mfe1': {
                   entries: {
-                    'dep-a': 'dep-a.js',
                     'dep-a/sub': 'dep-a-sub.js',
+                    'dep-a': 'dep-a.js',
                     'dep-a/x': 'dep-a-x.js',
                   },
                   servedBy: 'team/mfe2',
