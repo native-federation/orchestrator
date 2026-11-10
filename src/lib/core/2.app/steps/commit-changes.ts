@@ -22,19 +22,8 @@ export function createCommitChanges(
   const preload = createPreloadHint(config.log, ports.browser, 5);
   const collectEagerPreloads = createCollectEagerPreloads(ports);
 
-  /**
-   * Step 5: Commit all changes
-   *
-   * The changes made to the storage/cache are persisted to storage, and the importmap is
-   * inserted into the HTML DOM.
-   *
-   * This step only runs if all previous steps were successful to prevent the persistence of
-   * erroneous changes into storage which can corrupt other pages/routes of the host. A failed
-   * dynamic load is undone by `rollbackChanges` instead.
-   *
-   * Last, it preloads the externals whose served copy opted in, once the map is in place: a
-   * preload issued before the map that resolves it fixes a failed resolution in the browser.
-   */
+  // Runs only after every earlier step succeeded: stored changes are shared with the host's other pages.
+  // Preloads wait for the map, since the browser fixes a preloaded file's resolution when it fetches it.
   return (importMap: ImportMap, { markUndecided = false, ...browserOpts }: CommitOptions = {}) =>
     Promise.resolve(importMap)
       .then(map => addToBrowser(map, browserOpts))
@@ -52,7 +41,7 @@ export function createCommitChanges(
   }
 
   // Not awaited by the commit: a slow setter, such as the node loader's acknowledgement, must not hold up init.
-  // A rejection is logged, then left unhandled as before, so trackers watching for those still see it.
+  // A rejection is logged, then left unhandled so error trackers still see it.
   function preloadOnceAdded({ added }: { added: Promise<unknown> }, importMap: ImportMap) {
     Promise.resolve(added).then(
       () => preload(() => collectEagerPreloads(importMap)),

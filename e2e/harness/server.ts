@@ -100,7 +100,6 @@ const exposedModule = (entry: RemoteEntry, chunks: readonly string[] = []) => {
 const pathOf = (url: string) => new URL(url).pathname;
 const hostOf = (url: string) => new URL(url).host;
 
-/** Compile declared remote entries into the files a browser needs to run them. */
 export const compile = (entries: RemoteEntry[]): Portfolio => {
   const sites = new Map<string, Site>();
   const site = (host: string) => {

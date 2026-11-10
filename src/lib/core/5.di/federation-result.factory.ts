@@ -14,7 +14,7 @@ export const createFederationResult = ({
   config,
   adapters,
   loadRemoteModule,
-  // Optional: a host composing init by hand, as before preloading existed, still gets a working result.
+  // A host composing init by hand may not pass it.
   preloadRemoteModule = () => {},
   initRemoteEntryFlow,
   afterInitRemoteEntry,

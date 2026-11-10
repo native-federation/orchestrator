@@ -9,7 +9,7 @@ export type Version = {
 export type ScopedVersion = Version & {
   bundle?: string;
   entries: Record<string, string>;
-  // The build's opt-in to preloading this copy and its bundle's chunks once served; see docs/config.md §Preloading.
+  // see docs/config.md §Preloading
   preload?: true;
 };
 
@@ -30,16 +30,13 @@ export type SharedVersionMeta = {
   cached: boolean;
   name: RemoteName;
   bundle?: string;
-  // The `pool` label this remote declared, as it declared it. Pooling's input, never rewritten.
+  // Pooling's input, as declared: never rewritten.
   pool?: string;
   // See `RemoteSharedInfo`.
   dense?: true;
   entries: Record<string, string>;
-  // The build of the subpool this copy runs in, when pooling placed it in one rather than on the version's
-  // own basis. Lives here rather than on `SharedVersion` because two consumers of the *same tag* can
-  // legitimately run in different subpools. Absent means the version's own basis.
+  // Per copy, not per version: two consumers of the same tag can run in different subpools.
   servedBy?: RemoteName;
   poolCause?: PoolCause;
-  // See `ScopedVersion`.
   preload?: true;
 };

@@ -38,7 +38,6 @@ export type InitOptions = Omit<BootOptions, 'host' | 'manifestUrl'> & {
   hostEntry?: RemoteEntry;
   /** Fetchable but not listed in the manifest — the dynamic path loads these by URL. */
   unlisted?: RemoteEntry[];
-  /** Hand the library a manifest URL to fetch instead of a manifest object. */
   manifestFromUrl?: boolean;
   /** With `shim`: es-module-shims' `mapOverrides`, on by default. Off, a later map cannot replace a mapped key. */
   mapOverrides?: boolean;
@@ -74,9 +73,8 @@ export type Federation = {
 
   /** Load a remote's exposed module, which statically imports every entrypoint it declares. */
   load: (remoteName: string, exposedModule?: string) => Promise<Loaded>;
-  /** `preloadRemoteModule`, as an app calls it on hover or route intent. */
+  /** `preloadRemoteModule`. */
   preload: (remoteName: string, exposedModule?: string) => Promise<void>;
-  /** Load every remote in the last portfolio, keyed by remote name. */
   loadAll: () => Promise<Record<string, Loaded>>;
   /** What `specifier` resolves to for code served from `scopeUrl`. */
   resolve: (specifier: string, scopeUrl: string) => Promise<string>;
@@ -98,7 +96,6 @@ export type Federation = {
   chunkLoads: () => string[];
   /** Every URL the browser requested since the last init, in order, repeats included. */
   requests: () => string[];
-  /** The modulepreload links the library added to the document. */
   links: () => Promise<PreloadLink[]>;
 
   warns: () => Promise<string[]>;
@@ -126,7 +123,6 @@ export type Federation = {
 
 type Worker = { harness: Harness; boot: string };
 
-/** Call one method of the in-page API. */
 const call = <T>(page: Page, method: string, ...args: unknown[]): Promise<T> =>
   page.evaluate(
     ([m, a]) =>

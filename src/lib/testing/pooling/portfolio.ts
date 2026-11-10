@@ -49,7 +49,6 @@ export type Island = PoolCause | `subpool ${RemoteName}`;
 export type PortfolioOptions = {
   /** The no-tear check's only exemption: a host cannot be repointed onto another build. */
   hosts?: RemoteName[];
-  /** The `globalThis` namespace the repositories store under. */
   storage?: string;
   /** Off for callers that judge the oracle themselves, e.g. across two maps. */
   assertNoTear?: boolean;

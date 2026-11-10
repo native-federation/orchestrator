@@ -22,11 +22,8 @@ export type StoreRemoteEntry = (
 
 export type RemoveCachedRemoteEntries = (remoteNames: ReadonlySet<RemoteName>) => void;
 
-/**
- * Evict stored remotes: overridden ones before their replacements are merged in, and ones the manifest
- * doesn't list. Kept out of `storeRemoteEntry` because `removeFromAllScopes` costs a full traversal of the
- * shared-externals graph, so each caller evicts its whole set at once.
- */
+// Kept out of `storeRemoteEntry`: `removeFromAllScopes` traverses the whole shared-externals graph, so each
+// caller evicts its whole set at once.
 export function createRemoveCachedRemoteEntries(
   ports: Pick<
     DrivingContract,
@@ -60,15 +57,9 @@ export type SharedExternalContext = {
   write: () => void;
 };
 
-/**
- * Not a pipeline step but the template both storage steps specialize: it owns the merge sequence
- * for a remoteEntry, and only the resolution of a singleton external differs between the init
- * pipeline (process-remote-entries, step 2) and the dynamic pipeline (update-cache, step 8),
- * injected per call. Evicting an overridden remote is the caller's job, see
- * `createRemoveCachedRemoteEntries` — every entry reaching here is merged additively. The
- * pipelines must not be merged, see docs/version-resolver.md "Dynamic Init". If a change ever
- * needs a flag or parameter here to serve only one caller, inline this back into the steps instead.
- */
+// Shared by the init and dynamic storage steps, which must stay separate (docs/version-resolver.md "Dynamic
+// Init"): if a change needs a flag here to serve only one caller, inline this back into the steps instead.
+// Every entry is merged additively; evicting an overridden remote is the caller's job.
 export function createStoreRemoteEntry(
   config: LoggingConfig & ModeConfig,
   ports: Pick<

@@ -57,18 +57,5 @@ export function createExposeModuleLoader(
       return [url.get()!, ...ports.remoteInfoRepo.getModuleChunkUrls(remoteName, exposedModule)];
     });
 
-  /**
-   * Step 6: expose module loader
-   *
-   * The module loader can only be used after the importmap was generated and added to
-   * the DOM, hence the module loader fn is exposed to the host after the final commit
-   * step.
-   *
-   * The loadRemoteModule is also a callback that is returned as a promise by the initFederation
-   * function. This way the loadRemoteModule can be shared througout the host application using
-   * CustomEvents or by adding it to the global Window object for easy access.
-   *
-   * @param adapters
-   */
   return () => Promise.resolve({ loadRemoteModule, preloadRemoteModule });
 }

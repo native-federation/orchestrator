@@ -24,7 +24,6 @@ export type BootOptions = {
   strict?: Record<string, unknown>;
   /** Route the import map through es-module-shims in shim mode instead of a native import map. */
   shim?: boolean;
-  /** Pass the manifest as a URL for the library to fetch, instead of as an object. */
   manifestUrl?: string;
 };
 
@@ -119,7 +118,6 @@ const api = {
   preload: (remoteName: string, exposedModule: string) =>
     app!.preloadRemoteModule(remoteName, exposedModule),
 
-  /** Every modulepreload link in the document, and whether an import map preceded it. */
   links: () =>
     Array.from(document.querySelectorAll('link[rel^="modulepreload"]')).map(link => ({
       rel: (link as HTMLLinkElement).rel,
