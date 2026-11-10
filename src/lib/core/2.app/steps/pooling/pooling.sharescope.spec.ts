@@ -11,11 +11,14 @@ import { portfolio } from 'lib/testing/pooling/portfolio';
 
 /**
  * Pooling in a named share scope, through to the import map. `generate-import-map.ts` maps a subpool's
- * `servedBy` copies for named scopes in `processShareScope`, a re-implementation of the global path's
- * `collectServed`/`flushServed`. Nothing else covers it.
+ * `servedBy` copies for named scopes in `addShareScope`, a re-implementation of the global path's
+ * `collectServed`/`flushServed`. This covers it end to end; `generate-import-map.sharescope.spec.ts` pins it
+ * against a hand-built record.
  *
- * This pins today's behaviour, quirks included. Reusing the global helpers there would change the
- * expectations marked QUIRK, and only those.
+ * This pins today's behaviour, quirks included. The paths differ beyond the expectations marked QUIRK: the
+ * named one maps a `servedBy` copy and returns early, adding none of its version's shared mappings to that
+ * scope, while the global one dedupes each entry against `imports` and flushes them after every global
+ * mapping. Reusing the global helpers there would change the QUIRK expectations and that structure.
  */
 describe('pooling in a named share scope', () => {
   const SCOPE = {

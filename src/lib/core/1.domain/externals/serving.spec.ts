@@ -778,19 +778,22 @@ describe('servingBuildOf', () => {
 });
 
 describe('costTable', () => {
+  // `count` distinct subsets of fw's secondaries: a build shipping fw plus one subset has a surface of its
+  // own.
+  const subsetsOf = (count: number) => {
+    const secondaries = Array.from(
+      { length: Math.ceil(Math.log2(count)) },
+      (_, bit) => `fw/${String.fromCharCode(97 + bit)}`
+    );
+    return Array.from({ length: count }, (_, i) => secondaries.filter((_, bit) => i & (1 << bit)));
+  };
+
   // Every subset of the secondaries gives twice as many distinct surfaces at one tag as the scanned list holds,
   // so pricing runs the sorted-key path past it as well; sized from the cap so raising it keeps that coverage.
   // The second-to-last build repeats a surface tolled past the list, the last one on it. Strict consumers at an
   // older tag make the tolls differ by surface.
   it('prices every build as a fresh table would, past the scanned surfaces too', () => {
-    const count = 2 * SCANNED_SURFACES_PER_TAG;
-    const secondaries = Array.from(
-      { length: Math.ceil(Math.log2(count)) },
-      (_, bit) => `fw/${String.fromCharCode(97 + bit)}`
-    );
-    const subsets = Array.from({ length: count }, (_, i) =>
-      secondaries.filter((_, bit) => i & (1 << bit))
-    );
+    const subsets = subsetsOf(2 * SCANNED_SURFACES_PER_TAG);
     const candidates = [...subsets, subsets[SCANNED_SURFACES_PER_TAG + 4]!, subsets[3]!].map(
       (ships, i) => copy(`r${String(i).padStart(2, '0')}`, ['fw', ...ships])
     );
@@ -849,6 +852,47 @@ describe('costTable', () => {
     expect(priced).toEqual(builds.map(build => costTable(consumers, accepts)(build)));
     expect(priced[0]).not.toEqual(priced[1]);
   });
+
+  // A host leading share rows at 2.0.0 and 1.0.0 publishes both rows' copies whichever tag it serves, first in
+  // record order, so its two builds have the very same surface. Strict s1 takes 2.0.0 but not 1.0.0, so only at
+  // 1.0.0 does it run off the map and download its own build: the same surface tolls differently per tag.
+  // Scanned, this pins the per-tag buckets; past the cap (`fill` builds with surfaces of their own at each tag
+  // first), that the lookup key holds the tag. servingBuildOf reaches the scanned case, pricing a host's builds
+  // at two tags, but never the past-the-cap one: it prices one host build per tag, and without a host no two
+  // builds at different tags share a surface. That case pins costTable's own contract, as the test above does.
+  for (const fill of [0, SCANNED_SURFACES_PER_TAG])
+    it(`tolls one surface apart per tag (${fill === 0 ? 'scanned' : 'past the scanned surfaces'})`, () => {
+      const fillers = subsetsOf(fill);
+      const at = (prefix: string) =>
+        fillers.map((ships, i) => copy(`${prefix}${i}`, ['fw', ...ships]));
+      const record: [ExternalName, SharedExternal][] = [
+        [
+          'fw',
+          external(
+            version(
+              'skip',
+              [copy('s1', ['fw'], { strictVersion: true, requiredVersion: '^2.0.0' })],
+              '2.0.1'
+            ),
+            version('share', [copy('h', ['fw', 'fw/z']), ...at('p')], '2.0.0', true),
+            version('share', [copy('h', ['fw', 'fw/z']), ...at('q')], '1.0.0', true)
+          ),
+        ],
+      ];
+      const consumers = consumersOf(record);
+      const builds = [
+        ...fillers.map((_, i) => ({ remote: `p${i}`, tag: '2.0.0' })),
+        ...fillers.map((_, i) => ({ remote: `q${i}`, tag: '1.0.0' })),
+        { remote: 'h', tag: '2.0.0' },
+        { remote: 'h', tag: '1.0.0' },
+      ];
+
+      const shared = costTable(consumers, accepts);
+      const priced = builds.map(build => shared(build));
+
+      expect(priced).toEqual(builds.map(build => costTable(consumers, accepts)(build)));
+      expect(priced.at(-2)).not.toEqual(priced.at(-1));
+    });
 });
 
 describe('shareServingCopies', () => {
