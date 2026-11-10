@@ -25,7 +25,7 @@
   },
   "devDependencies": {
     "@playwright/test": "1.64.1",
-    "@softarc/native-federation": "^4.9.0",
+    "@softarc/native-federation": "^4.10.0",
     "@types/node": "^24.19.1",
     "@types/semver": "^7.7.0",
     "@typescript-eslint/eslint-plugin": "^8.69.0",
