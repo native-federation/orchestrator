@@ -136,10 +136,13 @@ export function createStoreRemoteEntry(
     sharedInfo: DenseSharedInfo,
     tag: string
   ): void {
-    ports.scopedExternalsRepo.addExternal(remoteEntry.name, sharedInfo.packageName, {
+    const { packageName, entries } = sharedInfo;
+    // Split records (#134) never share an entrypoint, so keying a root-less one by its first keeps them all.
+    const key = packageName in entries ? packageName : (Object.keys(entries)[0] ?? packageName);
+    ports.scopedExternalsRepo.addExternal(remoteEntry.name, key, {
       tag,
       bundle: sharedInfo.bundle,
-      entries: sharedInfo.entries,
+      entries,
       ...(sharedInfo.preload ? { preload: true as const } : {}),
     } as ScopedVersion);
   }
