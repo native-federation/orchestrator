@@ -9,13 +9,17 @@ export function createPreloadHint(
   browser: Pick<ForBrowserTasks, 'preloadModules'>,
   logStep: number
 ): PreloadHint {
+  const ignore = (error: unknown) => log.debug(logStep, 'Ignored a failing preload hint.', error);
+
   return collectUrls => {
     if (!browser.preloadModules) return;
     try {
       const urls = collectUrls();
-      if (urls.length > 0) browser.preloadModules?.(urls);
+      if (urls.length === 0) return;
+      // A host's async preloadModulesFn may reject, which this try cannot catch.
+      void Promise.resolve(browser.preloadModules(urls)).catch(ignore);
     } catch (error) {
-      log.debug(logStep, 'Ignored a failing preload hint.', error);
+      ignore(error);
     }
   };
 }

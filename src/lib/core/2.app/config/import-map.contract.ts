@@ -4,7 +4,7 @@ export type ImportMapConfig = {
   loadModuleFn: (url: string) => Promise<unknown>;
   setImportMapFn: SetImportMap;
   reloadBrowserFn: () => void;
-  preloadModulesFn: PreloadModules;
+  preloadModulesFn?: PreloadModules;
 };
 
 export type PreloadModules = (urls: string[]) => void;

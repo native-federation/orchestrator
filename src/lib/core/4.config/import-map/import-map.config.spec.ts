@@ -1,5 +1,7 @@
 import { createImportMapConfig } from './import-map.config';
 import { noPreload } from './no-preload';
+import type { ImportMapConfig } from 'lib/core/2.app/config/import-map.contract';
+import { createBrowser } from 'lib/core/3.adapters/browser/browser';
 
 describe('createImportMapConfig: preloadModulesFn', () => {
   const ownPreload = () => {};
@@ -7,7 +9,7 @@ describe('createImportMapConfig: preloadModulesFn', () => {
   afterEach(() => document.querySelectorAll('link').forEach(link => link.remove()));
 
   it('defaults to the DOM preload with the default loader', () => {
-    createImportMapConfig({}).preloadModulesFn(['http://r0/a.js']);
+    createImportMapConfig({}).preloadModulesFn!(['http://r0/a.js']);
 
     expect([...document.head.querySelectorAll('link')].map(l => [l.rel, l.href])).toEqual([
       ['modulepreload', 'http://r0/a.js'],
@@ -37,5 +39,17 @@ describe('createImportMapConfig: preloadModulesFn', () => {
     expect(
       createImportMapConfig({ ...options, preloadModulesFn: ownPreload }).preloadModulesFn
     ).toBe(ownPreload);
+  });
+
+  // ImportMapConfig is public in /sdk: a config written before preloading existed must still compile and
+  // build a browser adapter, which then has nothing to preload with.
+  it('accepts an ImportMapConfig without preloadModulesFn', () => {
+    const config: ImportMapConfig = {
+      loadModuleFn: async () => ({}),
+      setImportMapFn: async map => map,
+      reloadBrowserFn: () => {},
+    };
+
+    expect(createBrowser(config).preloadModules).toBeUndefined();
   });
 });

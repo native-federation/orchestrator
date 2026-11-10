@@ -26,4 +26,26 @@ describe('createPreloadHint', () => {
 
     expect(adapter.seen).toEqual([['http://r0/a.js']]);
   });
+
+  it('logs a rejecting async preloadModules at debug instead of leaving it unhandled', async () => {
+    const log = createMockLogHandler('debug');
+    const error = new Error('broken async host preload');
+    const unhandled = vi.fn();
+    process.on('unhandledRejection', unhandled);
+    try {
+      createPreloadHint(
+        log,
+        { preloadModules: async () => Promise.reject(error) },
+        6
+      )(() => ['http://r0/a.js']);
+
+      await vi.waitFor(() =>
+        expect(log.debug).toHaveBeenCalledWith(6, 'Ignored a failing preload hint.', error)
+      );
+      await new Promise(r => setTimeout(r, 0));
+      expect(unhandled).not.toHaveBeenCalled();
+    } finally {
+      process.off('unhandledRejection', unhandled);
+    }
+  });
 });

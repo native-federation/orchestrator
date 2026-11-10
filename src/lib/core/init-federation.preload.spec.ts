@@ -201,6 +201,47 @@ describe('initFederation (preloading)', () => {
 
       await expect(fed.loadRemoteModule('r0', './x')).resolves.toEqual({ loaded: true });
     });
+
+    // An async host function rejects after the hint's try has returned, so the hint catches the promise.
+    it('loads and preloads when an async preloadModulesFn rejects, without an unhandled rejection', async () => {
+      const unhandled = vi.fn();
+      process.on('unhandledRejection', unhandled);
+      try {
+        entries = [entry('r0', {}, [{ key: './x', chunks: initial('chunk-A.js') }])];
+        const log = logger();
+        // Not a vi.fn: the mock attaches handlers to the returned promise, which would mark the rejection
+        // handled and make the unhandled check below pass even without the hint's catch.
+        let n = 0;
+        const preloadModulesFn = async () => {
+          n++;
+          throw new Error('broken async host preload');
+        };
+        const fed = await init(entries, {
+          loadModuleFn: async () => ({ loaded: true }),
+          preloadModulesFn,
+          logger: log,
+          logLevel: 'debug',
+        });
+
+        await expect(fed.loadRemoteModule('r0', './x')).resolves.toEqual({ loaded: true });
+        expect(fed.preloadRemoteModule('r0', './x')).toBeUndefined();
+
+        await vi.waitFor(() =>
+          expect(log.debug).toHaveBeenCalledWith(
+            6,
+            'Ignored a failing preload hint.',
+            expect.objectContaining({ message: 'broken async host preload' })
+          )
+        );
+        expect(n).toBe(2);
+        // Give a missed rejection the macrotask Node needs to report it.
+        await new Promise(r => setTimeout(r, 0));
+        expect(unhandled).not.toHaveBeenCalled();
+        expect(log.error).not.toHaveBeenCalled();
+      } finally {
+        process.off('unhandledRejection', unhandled);
+      }
+    });
   });
 
   describe('eager externals at init', () => {

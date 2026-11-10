@@ -7,7 +7,7 @@ import type {
   SharedInfo as CoreSharedInfo,
 } from '@softarc/native-federation/domain';
 
-// The preload fields core publishes from the release after 4.9; drop these once the devDependency has them.
+// Core's preload fields from 4.10; drop these once the @softarc/native-federation peer range starts at 4.10.
 // Keyed by the chunk's import name; `initial` marks the module's static closure, written only when true.
 type ChunkMap = Record<string, { file: string; initial?: true }>;
 type ExposesInfo = CoreExposesInfo & { chunks?: ChunkMap };
