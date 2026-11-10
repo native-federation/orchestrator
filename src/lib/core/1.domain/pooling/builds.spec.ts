@@ -181,4 +181,26 @@ describe('a build read from the record', () => {
       '@ng/common/http',
     ]);
   });
+
+  // The two rules together: both records at the first tag are read, the row at a second tag is still dropped
+  // whole, so the build never covers `@ng/common/extra` at a tag it does not ship `@ng/common` at.
+  it('reads every row at the first tag and drops a row at a second tag', () => {
+    const members = [
+      member('@ng/common', [
+        {
+          tag: '22.2.3',
+          copies: [
+            { remote: 'mfe', entries: { '@ng/common/locales/nl': 'nl.js' } },
+            { remote: 'mfe', entries: { '@ng/common': 'c.js' } },
+          ],
+        },
+        { tag: '22.2.0', copies: [{ remote: 'mfe', entries: { '@ng/common/extra': 'e.js' } }] },
+      ]),
+    ];
+
+    expect([...buildFor('mfe', members).tags.entries()]).toEqual([
+      ['@ng/common/locales/nl', '22.2.3'],
+      ['@ng/common', '22.2.3'],
+    ]);
+  });
 });

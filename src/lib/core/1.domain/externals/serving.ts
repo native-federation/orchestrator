@@ -194,12 +194,10 @@ function pooledBuild(externals: PackageExternals, rows: Row[]): ServingBuild | u
   const own = shipped.find(c => c.remote === winner);
   if (own) return own;
   const width = ({ remote, tag }: ServingBuild) =>
-    externals.reduce((n, [, e]) => {
-      const row = shareRows(e).find(row => row.tag === tag);
-      for (const copy of row?.remotes ?? [])
-        if (copy.name === remote) n += Object.keys(copy.entries).length;
-      return n;
-    }, 0);
+    externals
+      .flatMap(([, e]) => shareRows(e).find(row => row.tag === tag)?.remotes ?? [])
+      .filter(copy => copy.name === remote)
+      .reduce((n, copy) => n + Object.keys(copy.entries).length, 0);
   return shipped
     .map(c => ({ c, width: width(c) }))
     .sort((a, b) => b.width - a.width || compareStrings(a.c.remote, b.c.remote))[0]?.c;

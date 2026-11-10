@@ -235,6 +235,24 @@ describe('servingBuildOf', () => {
       ).toEqual<ServingBuild>({ remote: 'x', tag: '1.0.0' });
     });
 
+    // `split` ships `fw` in two records at one tag (#133), so its width is both records': 3 over `a`'s 2. Reading
+    // only its first record gives 1, and `a` would win.
+    it('counts every record of a build split across bundles', () => {
+      const result = serving([
+        'fw',
+        pooled(
+          'elsewhere',
+          version('share', [
+            copy('split', ['fw/l']),
+            copy('a', ['fw', 'fw/h']),
+            copy('split', ['fw', 'fw/h']),
+          ])
+        ),
+      ]);
+
+      expect(result).toEqual<ServingBuild>({ remote: 'split', tag: '1.0.0' });
+    });
+
     it("takes the root's build when the winner ships only a flat secondary beside it", () => {
       // Seeding the winner would run the root from one build and the secondary from another.
       const result = serving(

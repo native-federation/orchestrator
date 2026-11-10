@@ -101,16 +101,16 @@ function moveCopy(
   const moved: { tag: string; meta: SharedVersionMeta }[] = [];
   const versions = external.versions
     .map(v => {
-      const metas = new Map<SharedVersionMeta, SharedVersionMeta>();
+      const replaced = new Map<SharedVersionMeta, SharedVersionMeta>();
       for (const copy of v.remotes) {
         if (copy.name !== remote) continue;
         const { servedBy: _servedBy, ...rest } = copy;
-        metas.set(copy, { ...rest, cached: true, poolCause: move.cause });
+        replaced.set(copy, { ...rest, cached: true, poolCause: move.cause });
       }
-      if (metas.size === 0) return v;
-      if (v.action === 'scope') return { ...v, remotes: v.remotes.map(r => metas.get(r) ?? r) };
-      for (const meta of metas.values()) moved.push({ tag: v.tag, meta });
-      return { ...v, remotes: v.remotes.filter(r => !metas.has(r)) };
+      if (replaced.size === 0) return v;
+      if (v.action === 'scope') return { ...v, remotes: v.remotes.map(r => replaced.get(r) ?? r) };
+      for (const meta of replaced.values()) moved.push({ tag: v.tag, meta });
+      return { ...v, remotes: v.remotes.filter(r => !replaced.has(r)) };
     })
     // A version only the loaded remote held — a `share` it introduced — leaves with it.
     .filter(v => v.remotes.length > 0);
