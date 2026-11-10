@@ -346,6 +346,10 @@ copy that declares it. The `strict` scope elects no serving build: each tag of a
 its root's `share` row there, or of the package's first row there when no build ships the root, never across tags
 (see [Entrypoint coverage and tearing](#entrypoint-coverage-and-tearing)).
 
+A served file binds its bare imports through the scope of the build that serves it, whoever imports it. When that
+build scopes one of those imports, a consumer of the file can bind the serving build's copy rather than the one it
+runs itself.
+
 Only copies that publish their own files can serve a version. A copy pooling has placed in a foreign build's
 subpool (`servedBy`, see [How pooling resolves](#how-pooling-resolves)) runs that build's files, named in its
 own scope per consumer, so what it bundles answers for itself alone. Pooling keeps a subpool copy out of the
