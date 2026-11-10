@@ -1,6 +1,7 @@
 import type { SharedVersionAction } from '../externals/version.contract';
 import type { RemoteEntryUrl } from './manifest.contract';
 import type {
+  ChunkMap,
   DenseSharedInfo,
   ExposesInfo,
   FederationInfo,
@@ -31,6 +32,7 @@ type SharedInfoActions = Record<
 export {
   RawRemoteEntry,
   RemoteEntry,
+  ChunkMap,
   FederationInfo,
   ExposesInfo,
   SharedInfo,

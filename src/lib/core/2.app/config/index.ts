@@ -1,4 +1,4 @@
-export { ImportMapOptions, ImportMapConfig } from './import-map.contract';
+export { ImportMapOptions, ImportMapConfig, PreloadModules } from './import-map.contract';
 export {
   LoggingOptions,
   LogLevel,

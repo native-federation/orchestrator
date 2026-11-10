@@ -1,5 +1,6 @@
 import type { ImportMapConfig } from 'lib/core/2.app/config/import-map.contract';
 import { replaceInDOM } from './replace-in-dom';
+import { preloadInDOM } from './preload-in-dom';
 import { getTrustedTypesPolicy } from './trusted-types';
 
 const useDefaultImportMap = (trustedTypesPolicyName: string | false = 'nfo'): ImportMapConfig => ({
@@ -8,6 +9,7 @@ const useDefaultImportMap = (trustedTypesPolicyName: string | false = 'nfo'): Im
     return import(/* @vite-ignore */ trusted);
   },
   setImportMapFn: replaceInDOM('importmap', trustedTypesPolicyName),
+  preloadModulesFn: preloadInDOM('modulepreload'),
   reloadBrowserFn: () => {
     window.location.reload();
   },

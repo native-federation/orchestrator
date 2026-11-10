@@ -5,6 +5,7 @@ export {
   LoadRemoteModule,
   LoadRemoteModuleOf,
   NativeFederationResult,
+  PreloadRemoteModule,
 } from './core/init-federation.contract';
 
 export { FederationManifest } from './core/1.domain/remote-entry/manifest.contract';

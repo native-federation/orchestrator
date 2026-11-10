@@ -24,7 +24,6 @@ export type BootOptions = {
   strict?: Record<string, unknown>;
   /** Route the import map through es-module-shims in shim mode instead of a native import map. */
   shim?: boolean;
-  /** Pass the manifest as a URL for the library to fetch, instead of as an object. */
   manifestUrl?: string;
 };
 
@@ -115,6 +114,19 @@ const api = {
       return `UNRESOLVED: ${e instanceof Error ? e.message : String(e)}`;
     }
   },
+
+  preload: (remoteName: string, exposedModule: string) =>
+    app!.preloadRemoteModule(remoteName, exposedModule),
+
+  links: () =>
+    Array.from(document.querySelectorAll('link[rel^="modulepreload"]')).map(link => ({
+      rel: (link as HTMLLinkElement).rel,
+      href: (link as HTMLLinkElement).href,
+      head: link.parentNode === document.head,
+      afterMap: Array.from(document.querySelectorAll('script[type^="importmap"]')).some(
+        map => map.compareDocumentPosition(link) & Node.DOCUMENT_POSITION_FOLLOWING
+      ),
+    })),
 
   /** Every external file the page evaluated, in order, with the build it came from. */
   copies: () => (globalThis as { __nfCopies?: Array<Record<string, unknown>> }).__nfCopies ?? [],

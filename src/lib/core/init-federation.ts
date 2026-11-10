@@ -19,9 +19,7 @@ const initFederation = (
   const initRemoteEntryFlow = createInitRemoteEntryFlow(factory);
 
   return initFlow(remotesOrManifestUrl)
-    .then(({ loadRemoteModule }) =>
-      createFederationResult({ config, adapters, loadRemoteModule, initRemoteEntryFlow })
-    )
+    .then(access => createFederationResult({ config, adapters, ...access, initRemoteEntryFlow }))
     .catch(e => {
       createStateDump(config, adapters)(`[init] STATE DUMP`);
       return Promise.reject(e);

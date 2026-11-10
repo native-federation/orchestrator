@@ -52,4 +52,19 @@ describe('useShimImportMap', () => {
     expect(typeof arg).toBe('string');
     expect(arg).toBe('https://example.test/a.js');
   });
+
+  // es-module-shims reuses only the fetches of the link type of its mode; any other is fetched twice.
+  describe('preloadModulesFn', () => {
+    afterEach(() => document.querySelectorAll('link').forEach(link => link.remove()));
+
+    it.each([
+      ['shim mode', { shimMode: true }, 'modulepreload-shim'],
+      ['polyfill mode', { shimMode: false }, 'modulepreload'],
+      ['the default', undefined, 'modulepreload'],
+    ])('adds a %s link of the right type', (_name, cfg, rel) => {
+      useShimImportMap(cfg).preloadModulesFn(['https://example.test/a.js']);
+
+      expect([...document.head.querySelectorAll('link')].map(l => l.rel)).toEqual([rel]);
+    });
+  });
 });

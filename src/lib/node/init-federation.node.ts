@@ -42,18 +42,12 @@ export type InitNodeFederationOptions = NFOptions & {
    * - **`{ include, exclude }`** — auto-derive, filtered by exact/prefix match,
    *   e.g. `{ include: ['@angular/', 'rxjs', 'zone.js'] }`.
    *
-   * This is an escape hatch that bypasses the version resolver, the import map,
-   * and integrity checks entirely. Exports are value snapshots, not live
-   * bindings — fine for packages whose exports are stable refs (Angular's
-   * classes/functions), not for packages that reassign their exports after init.
-   *
-   * Omit in production: with no `hostInstances`, nothing is published and the
-   * loader never routes to the bridge — resolution is import-map only.
+   * Bypasses the version resolver, the import map and integrity checks. Exports are value snapshots, not
+   * live bindings, so not for packages that reassign their exports after init. Omit in production.
    */
   hostInstances?: HostInstancesOption;
 };
 
-/** Global key the node loader reads at module-eval time on the main thread. */
 const HOST_INSTANCES_GLOBAL = '__NF_HOST_INSTANCES__';
 
 const buildNodeAdapters = (config: ConfigContract): DrivingContract => ({
@@ -82,16 +76,12 @@ const initNodeFederation = (
     loadModuleFn: options.loadModuleFn ?? nodeConfig.loadModuleFn,
     setImportMapFn: options.setImportMapFn ?? nodeConfig.setImportMapFn,
     reloadBrowserFn: options.reloadBrowserFn ?? nodeConfig.reloadBrowserFn,
+    preloadModulesFn: options.preloadModulesFn ?? nodeConfig.preloadModulesFn,
     sse: false,
   });
 
   const adapters = buildNodeAdapters(config);
 
-  // Host-instance bridge (dev): resolve the instance map (explicit, or
-  // auto-derived from the host remoteEntry's shared singletons), publish it on
-  // the global the loader reads, ship the export-key lists to the loader thread,
-  // and wait for its ack before the init flow resolves any remote import. With
-  // no hostInstances this is a no-op and resolution stays import-map only.
   const hostInstancesReady = (async () => {
     const instances = await resolveHostInstances(options.hostInstances, {
       remoteEntryProvider: adapters.remoteEntryProvider,
@@ -117,12 +107,12 @@ const initNodeFederation = (
 
   return hostInstancesReady
     .then(() => initFlow(remotesOrManifestUrl))
-    .then(({ loadRemoteModule }) => nodeConfig.nodeLoader.ready().then(() => loadRemoteModule))
-    .then(loadRemoteModule =>
+    .then(access => nodeConfig.nodeLoader.ready().then(() => access))
+    .then(access =>
       createFederationResult({
         config,
         adapters,
-        loadRemoteModule,
+        ...access,
         initRemoteEntryFlow,
         afterInitRemoteEntry: () => nodeConfig.nodeLoader.ready(),
       })

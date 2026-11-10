@@ -18,6 +18,7 @@ vi.mock('lib/node/adapters/node-loader.client', () => ({
 }));
 
 import { initNodeFederation } from './init-federation.node';
+import { noPreload } from 'lib/core/4.config/import-map/no-preload';
 
 const writeJson = async (path: string, payload: unknown): Promise<void> => {
   await writeFile(path, JSON.stringify(payload), 'utf-8');
@@ -74,6 +75,40 @@ describe('initNodeFederation', () => {
     expect(typeof result.initRemoteEntry).toBe('function');
   });
 
+  // Runs without a DOM: the browser preset would fail on `document` at every load.
+  it('preloads nothing, and loads a module that lists chunks', async () => {
+    await writeJson(remoteEntryPath, {
+      name: 'team/remote-a',
+      exposes: [
+        {
+          key: './Hello',
+          outFileName: 'hello.mjs',
+          chunks: { '@nf-internal/chunk-A': { file: 'chunk-A.mjs', initial: true } },
+        },
+      ],
+      shared: [],
+    });
+    const logger = { debug: vi.fn(), warn: vi.fn(), error: vi.fn() };
+
+    const result = await initNodeFederation(pathToFileURL(manifestPath).href, {
+      hostRemoteEntry: pathToFileURL(hostEntryPath).href,
+      loadModuleFn: vi.fn().mockResolvedValue({ hello: true }),
+      logger,
+      logLevel: 'debug',
+    });
+
+    expect(typeof document).toBe('undefined');
+    expect(result.config.preloadModulesFn).toBe(noPreload);
+    await expect(result.loadRemoteModule('team/remote-a', './Hello')).resolves.toEqual({
+      hello: true,
+    });
+    expect(logger.debug).not.toHaveBeenCalledWith(
+      expect.anything(),
+      'Ignored a failing preload hint.',
+      expect.anything()
+    );
+  });
+
   it('posts the generated import map to the Node loader client', async () => {
     await initNodeFederation(pathToFileURL(manifestPath).href, {
       hostRemoteEntry: pathToFileURL(hostEntryPath).href,
@@ -109,6 +144,28 @@ describe('initNodeFederation', () => {
     resolveReady();
     await pending;
     expect(resolved).toBe(true);
+  });
+
+  it('wires preloadRemoteModule to a preloadModulesFn the host supplies', async () => {
+    const preloadModulesFn = vi.fn();
+    const result = await initNodeFederation(pathToFileURL(manifestPath).href, {
+      hostRemoteEntry: pathToFileURL(hostEntryPath).href,
+      loadModuleFn: vi.fn(),
+      preloadModulesFn,
+    });
+
+    result.preloadRemoteModule('team/remote-a', './Hello');
+
+    expect(preloadModulesFn).toHaveBeenCalledWith([expect.stringMatching(/remote-a\/hello\.mjs$/)]);
+  });
+
+  it('makes preloadRemoteModule a no-op by default', async () => {
+    const result = await initNodeFederation(pathToFileURL(manifestPath).href, {
+      hostRemoteEntry: pathToFileURL(hostEntryPath).href,
+      loadModuleFn: vi.fn(),
+    });
+
+    expect(() => result.preloadRemoteModule('team/remote-a', './Hello')).not.toThrow();
   });
 
   it('loadRemoteModule delegates to the configured loadModuleFn with the resolved URL', async () => {
