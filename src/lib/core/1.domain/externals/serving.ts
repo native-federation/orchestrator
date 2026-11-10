@@ -168,20 +168,20 @@ function buildsOf(
   rootRows: Row[],
   consumers: Map<RemoteName, Placed[]>
 ): UnpricedBuild[] {
-  const candidates = new Map<string, UnpricedBuild>();
+  const builds = new Map<string, UnpricedBuild>();
   for (const row of rows)
     for (const copy of row.remotes) {
       const key = `${row.tag}|${copy.name}`;
-      if (copy.servedBy || candidates.has(key) || shipsTwoTags(consumers.get(copy.name)!)) continue;
+      if (copy.servedBy || builds.has(key) || shipsTwoTags(consumers.get(copy.name)!)) continue;
       const basis = copy === row.remotes[0];
-      candidates.set(key, {
+      builds.set(key, {
         remote: copy.name,
         tag: row.tag,
         host: basis && row.host,
         rootBasis: basis && rootRows.includes(row),
       });
     }
-  return [...candidates.values()];
+  return [...builds.values()];
 }
 
 // The pool's winner, where it ships the root (or, without one, any of the package); otherwise the widest copy:
