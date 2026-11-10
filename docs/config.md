@@ -136,6 +136,8 @@ requests. The orchestrator shortens it by handing `preloadModulesFn` the files t
   copy was built with `preload: true` (a per-package option of the federation config): its entry files, and
   every chunk of the bundle it was built in. Only the copy the import map serves counts: a flag on a copy that
   lost version resolution does nothing.
+  A non-singleton package keeps a copy per remote, and each is served, so marking it fetches every remote's
+  copy at init.
 
 The lists come from `remoteEntry.json`: the `initial` rows of `exposes[].chunks` (the module's lazy chunks are
 left to its own `import()`), `shared[].preload`, and the chunks per bundle in the top-level `chunks`. A remote

@@ -258,6 +258,15 @@ describe('initFederation (preloading)', () => {
       expect(mappedUrls(map!)).toContain('http://r0/lib.js');
     });
 
+    // Without features.denseChunking a remote publishes no chunk list per bundle (docs/config.md §Preloading).
+    it('preloads only the entry of a marked external whose bundle has no chunk list', async () => {
+      entries = [entry('r0', { lib: { version: '1.0.0', preload: true, bundle: 'lib' } })];
+
+      await init(entries);
+
+      await vi.waitFor(() => expect(preloads()).toEqual([['http://r0/lib.js']]));
+    });
+
     // A host may insert its map later than the call; a preload before it would break the resolution.
     it('waits for an async setImportMapFn to insert the map', async () => {
       entries = [entry('r0', { lib: { version: '1.0.0', preload: true } })];
