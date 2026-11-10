@@ -17,9 +17,9 @@ export const createInitFlow = ({
       .then(flow.generateImportMap)
       .then(importMap => flow.commitChanges(importMap, { override: true }))
       .then(flow.exposeModuleLoader)
-      .then(loadRemoteModule => ({
+      .then(access => ({
         config,
         adapters,
-        loadRemoteModule,
+        ...access,
       }));
 };

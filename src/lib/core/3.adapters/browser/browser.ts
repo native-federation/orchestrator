@@ -5,6 +5,7 @@ const createBrowser = (config: ImportMapConfig): ForBrowserTasks => {
   return {
     setImportMapFn: config.setImportMapFn,
     importModule: config.loadModuleFn,
+    preloadModules: config.preloadModulesFn,
   };
 };
 

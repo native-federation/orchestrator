@@ -81,13 +81,15 @@ const externalModule = (
  * so loading it asserts the contract that a remote can resolve everything it shares, and reports
  * which build each specifier landed on — global for a dedup, its own for an island.
  */
-const exposedModule = (entry: RemoteEntry) => {
+const exposedModule = (entry: RemoteEntry, chunks: readonly string[] = []) => {
   const specifiers = entry.shared
     .filter(shared => !shared.packageName.startsWith(`${CHUNK_PREFIX}/`))
     .flatMap(shared => Object.keys(entrypointsOf(shared)));
   const alias = (i: number) => `_${i}`;
   return js(
-    specifiers.map((s, i) => `import * as ${alias(i)} from ${JSON.stringify(s)};`).join('\n') +
+    // Relative, as a build writes an exposed module's static chunks: the `initial` rows of `exposes[].chunks`.
+    chunks.map(chunk => `import ${JSON.stringify(`./${chunk}`)};\n`).join('') +
+      specifiers.map((s, i) => `import * as ${alias(i)} from ${JSON.stringify(s)};`).join('\n') +
       `\nexport const remote = ${JSON.stringify(entry.name)};\n` +
       `export const seen = {\n` +
       specifiers.map((s, i) => `  ${JSON.stringify(s)}: ${alias(i)}.__id,`).join('\n') +
@@ -98,7 +100,6 @@ const exposedModule = (entry: RemoteEntry) => {
 const pathOf = (url: string) => new URL(url).pathname;
 const hostOf = (url: string) => new URL(url).host;
 
-/** Compile declared remote entries into the files a browser needs to run them. */
 export const compile = (entries: RemoteEntry[]): Portfolio => {
   const sites = new Map<string, Site>();
   const site = (host: string) => {
@@ -139,12 +140,21 @@ export const compile = (entries: RemoteEntry[]): Portfolio => {
     }
 
     for (const exposed of entry.exposes ?? [])
-      files.set(`/${exposed.outFileName}`, { kind: 'module', file: exposedModule(entry) });
+      files.set(`/${exposed.outFileName}`, {
+        kind: 'module',
+        file: exposedModule(
+          entry,
+          Object.values(exposed.chunks ?? {}).flatMap(c => (c.initial ? [c.file] : []))
+        ),
+      });
 
     // A chunk carries `__id` like an external does, so `nf.resolve` can report which origin a chunk
     // specifier resolved to — the question the per-origin chunk mapping exists to answer.
     const chunkFiles = new Set([
       ...Object.values(bundles).flat(),
+      ...(entry.exposes ?? []).flatMap(exposed =>
+        Object.values(exposed.chunks ?? {}).map(c => c.file)
+      ),
       ...entry.shared
         .filter(shared => shared.packageName.startsWith(`${CHUNK_PREFIX}/`))
         .flatMap(shared => Object.values(entrypointsOf(shared))),

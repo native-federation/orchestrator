@@ -10,6 +10,8 @@ export type ForRemoteInfoStorage = {
   tryGet: (remoteName: RemoteName) => Optional<RemoteInfo>;
   remove: (remoteName: RemoteName) => ForRemoteInfoStorage;
   tryGetModule: (remoteName: RemoteName, exposedModule: string) => Optional<string>;
+  // Joined like `tryGetModule`, so each URL is the one the module's import requests; empty when unknown.
+  getModuleChunkUrls: (remoteName: RemoteName, exposedModule: string) => string[];
   addOrUpdate: (remoteName: string, remote: RemoteInfo) => ForRemoteInfoStorage;
   getAll: () => Remotes;
   commit: () => ForRemoteInfoStorage;
