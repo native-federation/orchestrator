@@ -753,7 +753,7 @@ are elected by pooling alone; the per-external resolver leaves them untouched (s
 | **pool** | The externals of one share scope that labels connect, a secondary entrypoint joining its package. Named after the label most of its copies declare and stored as `poolName`. |
 | **family** | A pool's members seen as one unit: the coupled packages (`@framework/*`) that must move together. A remote's family is the members it ships; it **serves its own family** when it runs its own build for all of them. "Pool" names the grouping, "family" what it holds. |
 | **member** | An external in a pool. |
-| **copy** | One remote's entry for one member at one version (a `SharedVersionMeta` in the record). |
+| **copy** | One remote's entry for one member at one version (a `SharedVersionMeta` in the record). A build that splits a member across bundles has several copies at that version, one per record. |
 | **row** | One of an external's `versions` in the record: a tag, an action (`share`, `skip` or `scope`) and the copies that take it. Pooling writes one row per `(tag, action)` (see [How the verdicts land](#how-the-verdicts-land-in-the-record-and-the-map)). |
 | **build** | Everything one remote ships in a pool, as *specifier → tag*. Builds are the election's candidates: each remote ends up on the global map, in a subpool, or on its own build. |
 | **global map** | The pool's specifiers in `imports`; a named shareScope has no `imports` of its own, so there each remote's own scope maps those files. A remote **resolves globally** when it runs those files. Not the global *scope* (`__GLOBAL__`): every pooled scope, named ones included, has its own global map. |

@@ -516,3 +516,70 @@ describe('host fill', () => {
     }
   });
 });
+
+describe('a build split across bundles', () => {
+  // mfe ships `@fw/common` at 22.2.3 in two records, its locale planned into another bundle (#133). `members`
+  // writes one record per build, so the locale record is added to mfe's row by hand.
+  const electSplit = (
+    shell: { tag: string; specifiers: string[] },
+    locale: { req: string; strict?: boolean }
+  ) => {
+    const pool = members([
+      { name: 'shell', copies: { '@fw/common': { ...shell, req: '^22.2.0' } } },
+      {
+        name: 'mfe',
+        copies: {
+          '@fw/common': {
+            tag: '22.2.3',
+            req: '^22.2.0',
+            specifiers: ['@fw/common', '@fw/common/http'],
+          },
+        },
+      },
+    ]);
+    const row = pool[0]!.external.versions.find(
+      v => v.tag === '22.2.3' && v.remotes.some(r => r.name === 'mfe')
+    )!;
+    row.remotes.push(
+      mockVersionRemote('mfe', '@fw/common', {
+        requiredVersion: locale.req,
+        strictVersion: locale.strict,
+        entries: { '@fw/common/locales/nl': 'nl.js' },
+      })
+    );
+    return elect({
+      members: hosted(pool, 'shell'),
+      packageOf: npmPackageOf,
+      acceptsTag: createAcceptsTag(versionCheck.isCompatible, versionCheck.compare),
+      compare: versionCheck.compare,
+      latestFirst: false,
+    });
+  };
+
+  // The host wins without the locale, so mfe serves its own family, not a global map that lacks it.
+  it('islands a remote whose second record at the elected tag holds an entrypoint the winner lacks', () => {
+    const election = electSplit(
+      { tag: '22.2.3', specifiers: ['@fw/common', '@fw/common/http'] },
+      { req: '^22.2.0' }
+    );
+
+    expect(election.winner).toBe('shell');
+    expect(election.placements.get('mfe')).toEqual({ kind: 'self', cause: 'uncovered' });
+    expect(election.misses.get('mfe')).toEqual({
+      cause: 'uncovered',
+      gap: '@fw/common/locales/nl',
+    });
+  });
+
+  // Core writes a record per range too, so a locale override can carry its own strict `~22.2.3`. The host's
+  // 22.3.0 ships the locale, so only that record's range keeps mfe off it: each copy is checked on its own.
+  it("islands a remote whose second record's range rejects the elected tag", () => {
+    const election = electSplit(
+      { tag: '22.3.0', specifiers: ['@fw/common', '@fw/common/http', '@fw/common/locales/nl'] },
+      { req: '~22.2.3', strict: true }
+    );
+
+    expect(election.winner).toBe('shell');
+    expect(election.placements.get('mfe')).toMatchObject({ kind: 'self', cause: 'incompatible' });
+  });
+});

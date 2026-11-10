@@ -1759,4 +1759,66 @@ describe('pooling regressions', () => {
         expect(importMap.imports[s]).toBe(`http://m2/${file(s)}`);
     });
   });
+
+  /**
+   * Issue #133. Core's `densifyExternals` writes one dense record per bundle, so mfe's `@fw/common` reaches the
+   * orchestrator as two records at one tag: its locale planned into the default bundle, the root and `http`
+   * into a bundle of their own. Pooling read only the first record, so the locale was invisible: mfe stayed on
+   * the host's map, which lacks it, and failed with `Unable to resolve specifier '@fw/common/locales/nl'`. The
+   * election now reads both, finds the gap and lets mfe serve its own family.
+   */
+  describe('#133: a build split across bundles is read whole', () => {
+    const file = (s: string) => `${s.slice(1).replace(/\//g, '_')}.js`;
+    const shared = (packageName: string, bundle: string, specifiers: string[]): DenseSharedInfo =>
+      ({
+        packageName,
+        version: '22.2.3',
+        requiredVersion: '^22.2.0',
+        singleton: true,
+        strictVersion: true,
+        pool: 'fw',
+        bundle,
+        entries: Object.fromEntries(specifiers.map(s => [s, file(s)])),
+      }) as DenseSharedInfo;
+    const entry = (name: string, ...sharedInfo: DenseSharedInfo[]): RemoteEntry =>
+      ({
+        name,
+        url: `http://${name}/remoteEntry.json`,
+        exposes: [],
+        shared: sharedInfo,
+      }) as unknown as RemoteEntry;
+
+    const COMMON = ['@fw/common', '@fw/common/http'];
+    const LOCALE = '@fw/common/locales/nl';
+    // `@fw/core` too, or the pool has one member and nothing is elected.
+    const host = entry(
+      'host',
+      shared('@fw/core', 'browser-fw_core', ['@fw/core']),
+      shared('@fw/common', 'browser-fw_common', COMMON)
+    );
+    const mfe = entry(
+      'mfe',
+      shared('@fw/core', 'browser-fw_core', ['@fw/core']),
+      shared('@fw/common', 'browser-shared', [LOCALE]),
+      shared('@fw/common', 'browser-fw_common', COMMON)
+    );
+
+    it('serves its own family when the second record holds an entrypoint the winner lacks', async () => {
+      const p = portfolio(
+        {},
+        { storage: 'nf-regression-133', realRepositories: true, hosts: ['host'] }
+      );
+
+      const importMap = await p.runInit([mfe, host]);
+
+      expect(p.islands()).toEqual({ mfe: 'uncovered' });
+      for (const s of ['@fw/core', ...COMMON])
+        expect(importMap.imports[s]).toBe(`http://host/${file(s)}`);
+      for (const s of ['@fw/core', ...COMMON, LOCALE])
+        expect(importMap.scopes?.['http://mfe/']?.[s]).toBe(`http://mfe/${file(s)}`);
+
+      p.reload();
+      expect(await p.runInit([mfe, host])).toEqual(importMap);
+    });
+  });
 });

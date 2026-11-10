@@ -516,4 +516,40 @@ describe('coverFromMap', () => {
     expect(cover('share')).toEqual({ gap: '@ng/core' });
     expect(cover('scope')).toEqual({ gap: '@ng/core' });
   });
+
+  // mfe's `@ng/core` is split across two records at one tag (#133); the map serves both. In a named scope the
+  // cover must override the second record's specifier too, or it maps nowhere once the copy skips.
+  it('covers every row of a member a build split across bundles', () => {
+    const members = [
+      member('@ng/core', [
+        {
+          tag: '22.0.0',
+          action: 'share',
+          copies: [
+            { remote: 'F', entries: { '@ng/core': 'c.js', '@ng/core/x': 'x.js' } },
+            { remote: 'mfe', cached: false, entries: { '@ng/core': 'mc.js' } },
+            { remote: 'mfe', cached: false, entries: { '@ng/core/x': 'mx.js' } },
+          ],
+        },
+      ]),
+    ];
+
+    expect(
+      coverFromMap(
+        'mfe',
+        members,
+        viewOf(members, 'mfe', 'team'),
+        { '@ng/core': { action: 'share' } },
+        { shareScope: 'team', scopeUrlOf: () => 'http://f/' }
+      )
+    ).toEqual({
+      covers: [
+        {
+          name: '@ng/core',
+          toSkip: true,
+          override: { '@ng/core': 'http://f/c.js', '@ng/core/x': 'http://f/x.js' },
+        },
+      ],
+    });
+  });
 });

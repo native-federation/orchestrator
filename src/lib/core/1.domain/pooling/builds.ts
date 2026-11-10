@@ -1,4 +1,11 @@
-import type { ExternalName, RemoteName, VersionName } from 'lib/core/1.domain';
+import type { DeepReadonly } from 'lib/utils/deep-readonly';
+import type {
+  ExternalName,
+  RemoteName,
+  SharedVersion,
+  SharedVersionMeta,
+  VersionName,
+} from 'lib/core/1.domain';
 import {
   type PackageOf,
   type Specifier,
@@ -27,16 +34,11 @@ export type Build = {
 
 export function copiesByRemote(members: readonly PoolMember[]): Map<RemoteName, Copy[]> {
   const shipped = new Map<RemoteName, Copy[]>();
-  for (const member of members) {
-    const seen = new Set<RemoteName>();
-    for (const version of member.external.versions)
-      for (const meta of version.remotes) {
-        // A remote ships one copy per member, so a second row is a record it cannot produce; the first row
-        // wins whole, entries included, so a build never covers a specifier at a tag it does not ship.
-        if (seen.has(meta.name)) continue;
-        seen.add(meta.name);
-        let copies = shipped.get(meta.name);
-        if (!copies) shipped.set(meta.name, (copies = []));
+  for (const member of members)
+    for (const [remote, records] of recordsByRemote(member)) {
+      let copies = shipped.get(remote);
+      if (!copies) shipped.set(remote, (copies = []));
+      for (const { version, meta } of records)
         copies.push({
           member: member.name,
           tag: version.tag,
@@ -45,9 +47,25 @@ export function copiesByRemote(members: readonly PoolMember[]): Map<RemoteName, 
           host: version.host && meta === version.remotes[0],
           specifiers: Object.keys(meta.entries),
         });
-      }
-  }
+    }
   return shipped;
+}
+
+// One record the remote ships for the member, with the row it sits in.
+export type RemoteRecord = DeepReadonly<{ version: SharedVersion; meta: SharedVersionMeta }>;
+
+// A build ships a member at one tag, so a record at a second tag is one it cannot produce; the first tag wins
+// whole, so a build never covers a specifier at a tag it does not ship. Several records at that tag are one
+// build split across bundles, each its own copy (#133).
+export function recordsByRemote(member: PoolMember): Map<RemoteName, RemoteRecord[]> {
+  const records = new Map<RemoteName, RemoteRecord[]>();
+  for (const version of member.external.versions)
+    for (const meta of version.remotes) {
+      const mine = records.get(meta.name);
+      if (!mine) records.set(meta.name, [{ version, meta }]);
+      else if (mine[0]!.version.tag === version.tag) mine.push({ version, meta });
+    }
+  return records;
 }
 
 export const specifierCount = (copies: readonly Copy[]): number =>

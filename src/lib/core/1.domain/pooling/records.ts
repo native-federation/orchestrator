@@ -38,8 +38,7 @@ export function memberRecord(
     const row = { tag, host: false, action, remotes: [meta] };
     placed.push(row);
     if (meta.name !== pool.winner) return;
-    // The winner's copy leads its row: `remotes[0]` is the basis the global map publishes.
-    winnerRow = row;
+    winnerRow ??= row;
     row.host = pool.winnerIsHost;
   };
 
@@ -56,10 +55,11 @@ export function memberRecord(
       else place(version.tag, 'scope', { ...meta, poolCause: placement.cause });
     }
 
+  // The winner's copies lead their row, every record of a split build (#133): `remotes[0]` is the basis, and
+  // the import map publishes the first copy listing a specifier. Stable, so ties keep their stored order.
+  const rank = (name: RemoteName) => (name === pool.winner ? 0 : claimsGlobally(name) ? 1 : 2);
   const rows = mergeRows(placed, winnerRow);
-  // Stable, so the winner still leads; the import map publishes the first copy listing a specifier.
-  for (const row of rows)
-    row.remotes.sort((a, b) => Number(!claimsGlobally(a.name)) - Number(!claimsGlobally(b.name)));
+  for (const row of rows) row.remotes.sort((a, b) => rank(a.name) - rank(b.name));
 
   const order = { share: 0, skip: 1, scope: 2 };
   const newest = byTag(compare);
@@ -101,14 +101,16 @@ function moveCopy(
   const moved: { tag: string; meta: SharedVersionMeta }[] = [];
   const versions = external.versions
     .map(v => {
-      const copy = v.remotes.find(r => r.name === remote);
-      if (!copy) return v;
-      const { servedBy: _servedBy, ...rest } = copy;
-      const meta = { ...rest, cached: true, poolCause: move.cause };
-      if (v.action === 'scope')
-        return { ...v, remotes: v.remotes.map(r => (r === copy ? meta : r)) };
-      moved.push({ tag: v.tag, meta });
-      return { ...v, remotes: v.remotes.filter(r => r !== copy) };
+      const replaced = new Map<SharedVersionMeta, SharedVersionMeta>();
+      for (const copy of v.remotes) {
+        if (copy.name !== remote) continue;
+        const { servedBy: _servedBy, ...rest } = copy;
+        replaced.set(copy, { ...rest, cached: true, poolCause: move.cause });
+      }
+      if (replaced.size === 0) return v;
+      if (v.action === 'scope') return { ...v, remotes: v.remotes.map(r => replaced.get(r) ?? r) };
+      for (const meta of replaced.values()) moved.push({ tag: v.tag, meta });
+      return { ...v, remotes: v.remotes.filter(r => !replaced.has(r)) };
     })
     // A version only the loaded remote held — a `share` it introduced — leaves with it.
     .filter(v => v.remotes.length > 0);
@@ -130,12 +132,12 @@ function recordFromMap(external: SharedExternal, remote: RemoteName): SharedExte
   const opened = external.versions.find(
     v => v.action !== 'skip' && v.remotes.some(r => r.name === remote)
   )!;
-  const meta = { ...opened.remotes.find(r => r.name === remote)!, cached: false };
   const joined = rowAt(external.versions, opened.tag, 'skip');
   const into = joined
     ? { ...joined, remotes: [...joined.remotes] }
     : { ...opened, action: 'skip' as const, remotes: [] };
-  addRemoteToVersion(into, meta);
+  for (const copy of opened.remotes)
+    if (copy.name === remote) addRemoteToVersion(into, { ...copy, cached: false });
 
   const versions = external.versions.flatMap(v => {
     if (v === joined) return [into];

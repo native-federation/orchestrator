@@ -4,8 +4,8 @@ import { createAcceptsTag } from 'lib/core/1.domain/externals/compatibility';
 import { createVersionCheck } from 'lib/core/3.adapters/checks/version.check';
 import { elect } from './election';
 import type { PoolMember } from './membership';
-import { memberRecord, renamedRecords } from './records';
-import { npmPackageOf } from 'lib/core/1.domain/externals/specifier';
+import { memberRecord, movedRecord, renamedRecords } from './records';
+import { npmPackageOf, SpecifierTags } from 'lib/core/1.domain/externals/specifier';
 
 /**
  * The records the init step writes are computed here, before any write, and nothing here may change what it
@@ -150,6 +150,52 @@ describe('memberRecord of a package whose copies ship different entrypoints', ()
   });
 });
 
+describe('memberRecord of a winner split across bundles', () => {
+  // The winner ships `@x/core` at one tag in two records (#133), stored with another global copy between them.
+  // The import map publishes the first copy listing a specifier, so both of the winner's records must lead, or
+  // `other` serves the root while the winner serves only its locale.
+  it('puts every record of the winner in front of the row, in stored order', () => {
+    const member: PoolMember = {
+      name: '@x/core',
+      external: {
+        dirty: true,
+        versions: [
+          {
+            tag: '22.0.0',
+            host: false,
+            action: 'share',
+            remotes: [
+              mockVersionRemote('other', '@x/core', { entries: { '@x/core': 'o.js' } }),
+              mockVersionRemote('w', '@x/core', { entries: { '@x/core': 'c.js' } }),
+              mockVersionRemote('w', '@x/core', { entries: { '@x/core/l': 'l.js' } }),
+            ],
+          },
+        ],
+      },
+    };
+    const placed = {
+      poolName: 'x',
+      winner: 'w',
+      winnerIsHost: false,
+      globalTags: new SpecifierTags(npmPackageOf, [['@x/core', '22.0.0']]),
+      placements: new Map([
+        ['w', { kind: 'global' as const }],
+        ['other', { kind: 'global' as const }],
+      ]),
+      misses: new Map(),
+    };
+
+    const record = memberRecord(member, placed, compare);
+
+    expect(
+      record.versions.map(v => ({
+        at: `${v.tag}:${v.action}`,
+        remotes: v.remotes.map(r => `${r.name}:${Object.keys(r.entries).join(',')}`),
+      }))
+    ).toEqual([{ at: '22.0.0:share', remotes: ['w:@x/core', 'w:@x/core/l', 'other:@x/core'] }]);
+  });
+});
+
 describe('renamedRecords', () => {
   const pooled = (poolName?: string): SharedExternal => ({
     dirty: false,
@@ -260,5 +306,46 @@ describe('a remote that leaves the pool for its family', () => {
       expect(placed.placements.get('r')).toEqual({ kind: 'self', cause: 'uncovered' });
       expect(rows).toEqual([['17.0.0:share:[h]', '17.0.0:scope:[r]'], ['17.0.0:scope:[r]']]);
     }
+  });
+});
+
+describe('movedRecord', () => {
+  // A build split across bundles lists one member twice at one tag (#133): a move takes both rows along.
+  const split = (): SharedExternal => ({
+    dirty: true,
+    versions: [
+      {
+        tag: '22.0.0',
+        host: false,
+        action: 'share',
+        remotes: [
+          mockVersionRemote('team/h', '@x/core', { cached: true }),
+          mockVersionRemote('team/m', '@x/core', { cached: true, entries: { '@x/core': 'c.js' } }),
+          mockVersionRemote('team/m', '@x/core', {
+            cached: true,
+            entries: { '@x/core/l': 'l.js' },
+          }),
+        ],
+      },
+    ],
+  });
+  const rows = (record: SharedExternal) =>
+    record.versions.map(v => ({
+      at: `${v.tag}:${v.action}`,
+      remotes: v.remotes.map(r => `${r.name}:${Object.keys(r.entries).join(',')}`),
+    }));
+
+  it('islands every row of the remote', () => {
+    expect(rows(movedRecord(split(), 'team/m', { cause: 'uncovered' }, compare))).toEqual([
+      { at: '22.0.0:share', remotes: ['team/h:@x/core'] },
+      { at: '22.0.0:scope', remotes: ['team/m:@x/core', 'team/m:@x/core/l'] },
+    ]);
+  });
+
+  it('moves every row of the remote onto the map', () => {
+    expect(rows(movedRecord(split(), 'team/m', { fromMap: true }, compare))).toEqual([
+      { at: '22.0.0:share', remotes: ['team/h:@x/core'] },
+      { at: '22.0.0:skip', remotes: ['team/m:@x/core', 'team/m:@x/core/l'] },
+    ]);
   });
 });
