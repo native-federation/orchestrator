@@ -48,7 +48,7 @@
     "semver": "^7.7.1"
   },
   "peerDependencies": {
-    "@softarc/native-federation": "^4.8.0"
+    "@softarc/native-federation": "^4.10.0"
   },
   "peerDependenciesMeta": {
     "@softarc/native-federation": {

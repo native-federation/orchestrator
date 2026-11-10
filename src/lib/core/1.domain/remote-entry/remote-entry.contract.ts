@@ -1,22 +1,12 @@
 import type { SharedVersionAction } from '../externals/version.contract';
 import type { RemoteEntryUrl } from './manifest.contract';
 import type {
-  DenseSharedInfo as CoreDenseSharedInfo,
-  ExposesInfo as CoreExposesInfo,
-  FederationInfo as CoreFederationInfo,
-  SharedInfo as CoreSharedInfo,
+  ChunkMap,
+  DenseSharedInfo,
+  ExposesInfo,
+  FederationInfo,
+  SharedInfo,
 } from '@softarc/native-federation/domain';
-
-// Core's preload fields from 4.10; drop these once the @softarc/native-federation peer range starts at 4.10.
-// Keyed by the chunk's import name; `initial` marks the module's static closure, written only when true.
-type ChunkMap = Record<string, { file: string; initial?: true }>;
-type ExposesInfo = CoreExposesInfo & { chunks?: ChunkMap };
-type SharedInfo = CoreSharedInfo & { preload?: true };
-type DenseSharedInfo = CoreDenseSharedInfo & { preload?: true };
-type FederationInfo = Omit<CoreFederationInfo, 'exposes' | 'shared'> & {
-  exposes: ExposesInfo[];
-  shared: Array<SharedInfo | DenseSharedInfo>;
-};
 
 type RawRemoteEntry = FederationInfo;
 
