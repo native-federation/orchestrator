@@ -262,7 +262,10 @@ the basis; the strict scope and the claims follow it, the serving build follows 
 - A warm page does not refetch a remote at an unchanged URL, and a cached static copy then keeps serving because it
   costs no download. To pick up the dev build on a reload, set
   [`profile.overrideCachedRemotesIfURLMatches`](./config.md#modeConfig) or keep storage in `globalThis`, which a
-  reload clears, so nothing is cached.
+  reload clears, so nothing is cached. Without that, a dev copy that already serves keeps its stored integrity hash,
+  so with integrity hashes on, an edit to it is blocked by the browser.
+- Turning the flag off does not repoint a dev basis stored while it was on: the copy is cached and keeps serving
+  until its remote is refetched.
 - A dev basis that ships fewer entrypoints than a static sibling leaves the sibling's extra entrypoints served from
   the static build.
 
