@@ -226,6 +226,7 @@ export type ModeOptions = {
     overrideCachedRemotesIfURLMatches?: boolean;
     cacheTag?: string;
     mergeManifests?: boolean;
+    enableDebugging?: boolean;
   };
   feature?: {
     convertFlatSharedInfo?: boolean;
@@ -258,6 +259,7 @@ The strictness part will define how the orchestrator behaves when an unexpected 
 | profile.overrideCachedRemotesIfURLMatches | `false`     | When enabled, the library will override the cached remote, even if the remoteName already exists in cache and the remoteEntry.json URL matches the cached remoteEntry.json url. Without it, a remote redeployed at the same URL keeps its stored remoteEntry on an init over a cache kept across page loads, even with a `cacheTag`; deploy each build at its own URL, or enable this option. Has no effect when `overrideCachedRemotes` is `never`.                                                                                                           |
 | profile.cacheTag                          | `undefined` | When set, the given value is appended as a `?cacheTag=<value>` query param to every remoteEntry.json request, letting you bust HTTP caches across all remotes at once. The host's own `hostRemoteEntry.cacheTag` takes precedence for the host remoteEntry when both are set.                                                                                                                                                                                                                                                                                  |
 | profile.mergeManifests                    | `true`      | `true`: every page's manifest adds to what storage keeps, so remotes from other pages (and ones loaded through `initRemoteEntry`) stay available. Set `false` only when every page passes the same complete manifest: an init then drops the stored remotes that manifest doesn't list, so a remote removed from the manifest stops being served on the next page. With per-page manifests, `false` makes each page drop the others' remotes and fetch them again. See [Remotes a manifest no longer lists](./version-resolver.md#remotes-a-manifest-no-longer-lists). |
+| profile.enableDebugging                   | `false`     | When enabled, `initFederation` prefers a build made in dev mode as the copy that serves a shared version, outranking cached and wider copies but never the host. Meant for development only; a reload picks up the dev build only when its remotes are refetched. See [Preferring a dev build while debugging](./version-resolver.md#preferring-a-dev-build-while-debugging). |
 
 #### Features
 
@@ -273,7 +275,7 @@ import { defaultProfile, cachingProfile } from '@softarc/native-federation-orche
 
 initFederation('http://example.org/manifest.json', {
   strict: true, // All settings to strict: true
-  profile: cachingProfile, // { latestSharedExternal: false, skipInvalidExternalVersions: false, overrideCachedRemotes: 'never', overrideCachedRemotesIfURLMatches: false, mergeManifests: true }
+  profile: cachingProfile, // { latestSharedExternal: false, skipInvalidExternalVersions: false, overrideCachedRemotes: 'never', overrideCachedRemotesIfURLMatches: false, mergeManifests: true, enableDebugging: false }
 });
 ```
 

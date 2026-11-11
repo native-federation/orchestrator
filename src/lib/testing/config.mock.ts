@@ -27,6 +27,7 @@ export const mockConfig = (): ConfigContract => ({
     skipInvalidExternalVersions: false,
     overrideCachedRemotes: 'always',
     overrideCachedRemotesIfURLMatches: false,
+    enableDebugging: false,
   },
   feature: {
     convertFlatSharedInfo: false,

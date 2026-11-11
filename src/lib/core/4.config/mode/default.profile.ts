@@ -6,4 +6,5 @@ export const defaultProfile: ModeProfileConfig = {
   overrideCachedRemotes: 'init-only',
   overrideCachedRemotesIfURLMatches: false,
   mergeManifests: true,
+  enableDebugging: false,
 };

@@ -11,6 +11,7 @@ describe('config.mode', () => {
       overrideCachedRemotes: 'init-only',
       overrideCachedRemotesIfURLMatches: false,
       mergeManifests: true,
+      enableDebugging: false,
     });
   });
   it('should set most optimal caching when caching profile is chosen', () => {
@@ -21,6 +22,7 @@ describe('config.mode', () => {
       overrideCachedRemotes: 'never',
       overrideCachedRemotesIfURLMatches: false,
       mergeManifests: true,
+      enableDebugging: false,
     });
   });
 

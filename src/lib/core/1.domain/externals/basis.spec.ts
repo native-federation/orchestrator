@@ -59,6 +59,73 @@ describe('basis', () => {
     });
   });
 
+  // `preferDev` is passed only by page-load init with `profile.enableDebugging` on (#118).
+  describe('isBetterBasis with preferDev', () => {
+    const dev = (name: string, entries: string[], cached = false): SharedVersionMeta => ({
+      ...remote(name, entries, cached),
+      dev: true,
+    });
+
+    it('should prefer a dev copy over a cached static one', () => {
+      expect(isBetterBasis(dev('b', ['dep-a']), remote('a', ['dep-a'], true), true)).toBe(true);
+      expect(isBetterBasis(remote('a', ['dep-a'], true), dev('b', ['dep-a']), true)).toBe(false);
+    });
+
+    it('should prefer a dev copy over a wider static one', () => {
+      expect(isBetterBasis(dev('b', ['dep-a']), remote('a', ['dep-a', 'dep-a/sub']), true)).toBe(
+        true
+      );
+      expect(isBetterBasis(remote('a', ['dep-a', 'dep-a/sub']), dev('b', ['dep-a']), true)).toBe(
+        false
+      );
+    });
+
+    it('should prefer a dev copy over a static one that wins on name', () => {
+      expect(isBetterBasis(dev('team/mfe1', ['dep-a']), remote('mfe2', ['dep-a']), true)).toBe(
+        true
+      );
+      expect(isBetterBasis(remote('mfe2', ['dep-a']), dev('team/mfe1', ['dep-a']), true)).toBe(
+        false
+      );
+    });
+
+    it('should rank two dev copies, or two static ones, on the usual rules', () => {
+      expect(isBetterBasis(dev('b', ['dep-a']), dev('a', ['dep-a']), true)).toBe(false);
+      expect(isBetterBasis(dev('b', ['dep-a', 'dep-a/sub']), dev('a', ['dep-a']), true)).toBe(true);
+      expect(isBetterBasis(dev('b', ['dep-a']), dev('a', ['dep-a'], true), true)).toBe(false);
+      expect(isBetterBasis(remote('b', ['dep-a']), remote('a', ['dep-a']), true)).toBe(false);
+      expect(isBetterBasis(remote('b', ['dep-a']), remote('a', ['dep-a'], true), true)).toBe(false);
+    });
+
+    it('should ignore dev without preferDev', () => {
+      expect(isBetterBasis(dev('mfe2', ['dep-a']), remote('a', ['dep-a']))).toBe(false);
+      expect(isBetterBasis(dev('b', ['dep-a']), remote('a', ['dep-a'], true))).toBe(false);
+      expect(isBetterBasis(dev('b', ['dep-a']), remote('a', ['dep-a', 'dep-a/sub']))).toBe(false);
+    });
+
+    it.each([
+      ['static first', ['mfe2', 'team/mfe1']],
+      ['dev first', ['team/mfe1', 'mfe2']],
+    ])('should make the dev copy the basis whatever the insertion order (%s)', (_, order) => {
+      const make = (name: string) =>
+        name === 'team/mfe1' ? dev(name, ['dep-a']) : remote(name, ['dep-a', 'dep-a/sub'], true);
+      const [first, second] = order.map(make);
+      const v = version([first!]);
+
+      addRemoteToVersion(v, second!, false, true);
+
+      expect(v.remotes.map(r => r.name)).toEqual(['team/mfe1', 'mfe2']);
+    });
+
+    it('should never displace a host basis', () => {
+      const v = version([remote('host', ['dep-a'])], true);
+
+      addRemoteToVersion(v, dev('a', ['dep-a', 'dep-a/sub']), false, true);
+
+      expect(v.remotes.map(r => r.name)).toEqual(['host', 'a']);
+    });
+  });
+
   describe('addRemoteToVersion', () => {
     it('should promote a wider remote to the basis', () => {
       const v = version([remote('a', ['dep-a'])]);

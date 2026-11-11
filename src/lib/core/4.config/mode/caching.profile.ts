@@ -6,4 +6,5 @@ export const cachingProfile: ModeProfileConfig = {
   overrideCachedRemotes: 'never',
   overrideCachedRemotesIfURLMatches: false,
   mergeManifests: true,
+  enableDebugging: false,
 };

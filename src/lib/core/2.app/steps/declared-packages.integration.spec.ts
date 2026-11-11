@@ -506,3 +506,102 @@ describe('dense records that share a specifier', () => {
     expect(scopeOf(load.merged, 'mfe')).toEqual({ [T]: at('mfe', T), [SORT]: at('mfe', SORT) });
   });
 });
+
+// #118: with `profile.enableDebugging`, page-load init makes a dev build the basis of its version. The #117
+// shape: a single-entry 0.0.0 workspace library the shell doesn't ship, built by both remotes. Equal coverage,
+// so without the flag the name hands it to mfe2.
+describe('enableDebugging', () => {
+  const X = '@s/x';
+  const devLib = (name: string, o: { shareScope?: string } = {}): RemoteSharedInfo => ({
+    ...lib(name, { version: '0.0.0' }),
+    requiredVersion: '0.0.0',
+    ...o,
+    dev: { entryPoint: '/workspace/projects/x/src/public-api.ts' },
+  });
+  const staticLib = (name: string, o: { shareScope?: string } = {}): RemoteSharedInfo => ({
+    ...lib(name, { version: '0.0.0' }),
+    requiredVersion: '0.0.0',
+    ...o,
+  });
+  const entries = (o: { shareScope?: string } = {}) => [
+    entry('shell', lib('@s/fw')),
+    entry('team/mfe1', lib('@s/fw'), devLib(X, o)),
+    entry('mfe2', staticLib(X, o)),
+  ];
+  const debugging = (enableDebugging: boolean) => {
+    const p = fresh(['shell']);
+    p.config.profile.enableDebugging = enableDebugging;
+    return p;
+  };
+
+  it('serves the dev build with the flag on, and the name winner with it off', async () => {
+    expect((await debugging(true).runInit(entries())).imports[X]).toBe(at('team/mfe1', X));
+    expect((await debugging(false).runInit(entries())).imports[X]).toBe(at('mfe2', X));
+  });
+
+  it('stores the dev mark whatever the flag', async () => {
+    const p = debugging(false);
+    await p.runInit(entries());
+
+    expect(p.record(X).versions[0]!.remotes.map(r => [r.name, r.dev])).toEqual([
+      ['mfe2', undefined],
+      ['team/mfe1', true],
+    ]);
+  });
+
+  it('serves the dev build on a reload that refetches the remotes', async () => {
+    const p = debugging(false);
+    await p.runInit(entries());
+
+    p.reload();
+    p.config.profile.enableDebugging = true;
+    p.config.profile.overrideCachedRemotesIfURLMatches = true;
+    expect((await p.runInit(entries())).imports[X]).toBe(at('team/mfe1', X));
+  });
+
+  // Why the docs ask for a refetch: the dev copy takes the basis, but serving prices builds and mfe2's cached
+  // copy costs no download.
+  it('keeps serving a cached static copy that was not refetched', async () => {
+    const p = debugging(false);
+    await p.runInit(entries());
+
+    p.reload();
+    p.config.profile.enableDebugging = true;
+    const [shell, mfe1, mfe2] = entries();
+    const redeployed = { ...mfe1!, url: `${url('team/mfe1')}v2/remoteEntry.json` } as RemoteEntry;
+    const map = await p.runInit([shell!, redeployed, mfe2!]);
+
+    expect(p.record(X).versions[0]!.remotes.map(r => [r.name, r.cached])).toEqual([
+      ['team/mfe1', false],
+      ['mfe2', true],
+    ]);
+    expect(map.imports[X]).toBe(at('mfe2', X));
+  });
+
+  // The map committed at init already serves mfe2's copy, so a runtime load must not repoint it. This shape lands the
+  // dev copy in a skip row; that dynamic init never ranks dev first is structural: update-cache passes no preferDev.
+  it('keeps the committed map when a dev build loads at runtime', async () => {
+    const p = debugging(true);
+    const [shell, mfe1, mfe2] = entries();
+    await p.runInit([shell!, mfe2!]);
+    const { merged } = await p.runDynamic(mfe1!);
+
+    expect(p.record(X).versions.map(v => [v.action, v.remotes.map(r => r.name)])).toEqual([
+      ['share', ['mfe2']],
+      ['skip', ['team/mfe1']],
+    ]);
+    expect(merged.imports[X]).toBe(at('mfe2', X));
+  });
+
+  it('leads the strict scope with the dev build', async () => {
+    const leads = async (enableDebugging: boolean) => {
+      const p = debugging(enableDebugging);
+      await p.runInit(entries({ shareScope: 'strict' }));
+      return p.adapters.sharedExternalsRepo.getFromScope('strict')[X]!.versions[0]!.remotes[0]!
+        .name;
+    };
+
+    expect(await leads(true)).toBe('team/mfe1');
+    expect(await leads(false)).toBe('mfe2');
+  });
+});

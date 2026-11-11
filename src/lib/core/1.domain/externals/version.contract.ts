@@ -39,4 +39,6 @@ export type SharedVersionMeta = {
   servedBy?: RemoteName;
   poolCause?: PoolCause;
   preload?: true;
+  // see docs/version-resolver.md §"Preferring a dev build while debugging"
+  dev?: true;
 };

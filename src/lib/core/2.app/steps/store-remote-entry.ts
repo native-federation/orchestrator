@@ -182,6 +182,7 @@ export function createStoreRemoteEntry(
       ...(sharedInfo.dense ? { dense: true as const } : {}),
       entries: sharedInfo.entries,
       ...(sharedInfo.preload ? { preload: true as const } : {}),
+      ...(sharedInfo.dev ? { dev: true as const } : {}),
     };
 
     // Read on first use: a runtime load stores its copies only after deciding them all, and an entry may list

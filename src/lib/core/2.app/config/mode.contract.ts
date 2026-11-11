@@ -5,6 +5,7 @@ export type ModeProfileConfig = {
   overrideCachedRemotesIfURLMatches: boolean;
   cacheTag?: string;
   mergeManifests?: boolean;
+  enableDebugging?: boolean;
 };
 
 export type ModeFeatureConfig = {
