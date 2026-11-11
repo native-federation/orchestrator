@@ -21,11 +21,6 @@ The simplest approach uses the pre-built runtime script with declarative configu
   <head>
     <title>My Application</title>
 
-    <!-- Enable shim-mode for optimal browser support, this is optional -->
-    <script type="esms-options">
-      { "shimMode": true }
-    </script>
-
     <!-- Define your micro frontends -->
     <script type="application/json" id="mfe-manifest">
       {
@@ -48,7 +43,7 @@ The simplest approach uses the pre-built runtime script with declarative configu
     </script>
 
     <!-- Include the orchestrator -->
-    <script src="https://unpkg.com/@softarc/native-federation-orchestrator@4.7.0/quickstart.mjs"></script>
+    <script src="https://unpkg.com/@softarc/native-federation-orchestrator@4.9.0/quickstart.mjs"></script>
   </head>
   <body>
     <!-- Use your loaded components -->
@@ -131,13 +126,13 @@ This script must be loaded after (so below in the HTML) the manifest and event l
 </html>
 ```
 
-In this example, the micro frontends register themselves as custom elements (part of the [webcomponents](https://developer.mozilla.org/en-US/docs/Web/API/Web_components) spec). When `loadRemoteModule("team/mfe2", "./Button")` is called, the loaded component typically registers a custom element like `<my-button>`. The HTML elements in your page will remain empty until the corresponding micro frontends load and register themselves.
+In this example, the micro frontends register themselves as custom elements (part of the [webcomponents](https://developer.mozilla.org/en-US/docs/Web/API/Web_components) spec). When `loadRemoteModule("team/mfe1", "./Button")` is called, the loaded component typically registers a custom element like `<my-button>`. The HTML elements in your page will remain empty until the corresponding micro frontends load and register themselves.
 
 ### Quickstart (pre-built)
 
 ```html
 <!-- Development and quick testing -->
-<script src="https://unpkg.com/@softarc/native-federation-orchestrator@4.7.0/quickstart.mjs"></script>
+<script src="https://unpkg.com/@softarc/native-federation-orchestrator@4.9.0/quickstart.mjs"></script>
 ```
 
 ## Avoiding race conditions
@@ -151,12 +146,7 @@ Custom browser events are unfortunately vulnerable to unwanted race conditions, 
     <title>My Application</title>
 
     <!-- 1. Init registry -->
-    <script src="https://unpkg.com/@softarc/native-federation-orchestrator@4.7.0/init-registry.mjs"></script>
-
-    <!-- Enable shim-mode for optimal browser support, this is optional -->
-    <script type="esms-options">
-      { "shimMode": true }
-    </script>
+    <script src="https://unpkg.com/@softarc/native-federation-orchestrator@4.9.0/init-registry.mjs"></script>
 
     <!-- 2. Define your micro frontends -->
     <script type="application/json" id="mfe-manifest">
@@ -175,7 +165,7 @@ Custom browser events are unfortunately vulnerable to unwanted race conditions, 
     </script>
 
     <!-- 4. Include the orchestrator runtime -->
-    <script src="https://unpkg.com/@softarc/native-federation-orchestrator@4.7.0/quickstart.mjs"></script>
+    <script src="https://unpkg.com/@softarc/native-federation-orchestrator@4.9.0/quickstart.mjs"></script>
   </head>
   <body>
     <!-- 5. Use your loaded components -->
@@ -230,10 +220,10 @@ import {
       ...useShimImportMap({ shimMode: true }),
     });
 
-    // Load specific modules (only possible in shim-mode)
+    // Load specific modules; with native import maps this needs multiple-import-map support (see Import Map Implementation)
     await Promise.all([
-      loadRemoteModule('team/mfe1', './Button'),
-      loadRemoteModule('team/mfe2', './Header'),
+      loadRemoteModule('team/button', './Button'),
+      loadRemoteModule('team/header', './Header'),
     ]);
 
     console.log('All micro frontends loaded successfully');

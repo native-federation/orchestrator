@@ -134,7 +134,7 @@ The Node entry pre-wires sensible server-side defaults:
 
 Anything in `options` overrides the default. The `NativeFederationResult`
 returned is identical to the browser one — `loadRemoteModule`, `load`,
-`preloadRemoteModule` (a no-op here), `initRemoteEntry`, `as<T>()`, `config`, and `adapters`.
+`preloadRemoteModule` (a no-op unless you pass a `preloadModulesFn`), `initRemoteEntry`, `as<T>()`, `config`, and `adapters`.
 
 ## How the loader works
 
@@ -200,6 +200,15 @@ hostInstances: { include: ['@angular/', 'rxjs', 'zone.js', 'tslib'] },
 hostInstances: { exclude: ['some-dep-you-want-scoped'] },
 ```
 
+Each derived specifier is loaded with `import(specifier)` from this library. Under
+a bundler-driven dev server (e.g. Vite SSR) that may not be the realm holding the
+host's running instance; pass a `load` defined in your own host entry so the import
+resolves through the host's module graph:
+
+```js
+hostInstances: { include: ['@angular/'], load: specifier => import(specifier) },
+```
+
 **Explicit map.** Hand over the namespace objects yourself — useful when an
 instance comes from somewhere other than a plain `import`:
 
@@ -233,15 +242,16 @@ These are deliberately omitted because they make no sense server-side:
 
 - **SSE (`buildNotificationsEndpoint`).** The hook is wired to a no-op; setting
   `sse: true` on the Node entry has no effect.
-- **`localStorageEntry` / `sessionStorageEntry`.** Storage is always
-  in-memory.
+- **`localStorageEntry` / `sessionStorageEntry`.** Storage defaults to
+  in-memory; the browser storages don't exist on Node.
 - **Trusted Types.** Node has no Trusted Types — the import-map config simply
   skips that pipeline.
 - **`es-module-shims` / `useShimImportMap`.** No need; Node loader hooks
   resolve everything.
 
 If you pass a custom `setImportMapFn` or `loadModuleFn` you take over from the
-defaults and the Node loader client will not be exercised.
+defaults. The loader hook is still registered (and `hostInstances` still uses it),
+but with a custom `setImportMapFn` it never receives an import map.
 
 ## Migrating from `@softarc/native-federation-node`
 

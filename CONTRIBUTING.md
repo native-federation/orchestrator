@@ -8,7 +8,7 @@ We love seeing fresh ideas and improvements! Before diving into major architectu
 
 For the smoothest experience, we find that contributions focusing on functionality, bug fixes, and meaningful improvements tend to have the quickest path to merge. Style tweaks are great, but if that's the main focus, consider bundling them with a feature or fix to maximize impact.
 
-To find your way around the codebase, see [Source Code Organization](./docs/architecture.md#source-code-organization) - in short: one folder per published subpath under `src/lib/` (`core/`, `registry/`, `audit/`, `node/`), with the `*.index.ts` barrels at the root of `src/lib/` defining each subpath's public API.
+To find your way around the codebase, see [Source Code Organization](./docs/architecture.md#source-code-organization) - in short: one folder per published subpath under `src/lib/` (`core/`, `registry/`, `audit/`, `node/`, `module-federation/`), with the `*.index.ts` barrels at the root of `src/lib/` defining each subpath's public API.
 
 Every arrow below means "may import" - this direction is enforced by ESLint, so a PR that crosses a flow boundary (or imports a `*.index.ts` barrel from internal code) will fail the lint step:
 
@@ -23,6 +23,7 @@ graph LR
         REGISTRY["registry/<br/>event registry<br/>(/registry)"]
         AUDIT["audit/<br/>externals audit<br/>(/audit)"]
         NODE["node/<br/>fs adapters · loader client<br/>initNodeFederation (/node)"]
+        MF["module-federation/<br/>getShared share infos<br/>(/module-federation)"]
 
         UTILS["utils/<br/>Optional · path · cloneEntry"]
         TESTING["testing/<br/>vitest mocks, used by *.spec.ts only<br/>(not published)"]
@@ -33,13 +34,16 @@ graph LR
     BARRELS --> REGISTRY
     BARRELS --> AUDIT
     BARRELS --> NODE
+    BARRELS --> MF
 
     AUDIT -->|contracts| CORE
     NODE -->|flows, own adapters injected| CORE
+    MF -->|domain, contracts| CORE
 
     CORE --> UTILS
     REGISTRY --> UTILS
     NODE --> UTILS
+    MF --> UTILS
     TESTING -.-> CORE
 
     style CORE fill:#e8f0fe,stroke:#4285f4
@@ -51,12 +55,12 @@ Notably absent arrows: `core` never imports a flow folder, and `registry`, `audi
 ## Quick Start
 
 1. Fork and clone the repo
-2. Install dependencies: `npm install`
-3. Build the library: `npm run build`
+2. Install dependencies: `pnpm install`
+3. Build the library: `pnpm build`
 4. Create a branch: `git checkout -b my-feature`
 5. Make your changes
-6. Lint your code: `npm run lint`
-7. Test your code: `npm run test`
+6. Lint your code: `pnpm lint`
+7. Test your code: `pnpm test`
 8. Push your branch and open a PR
 
 ## Pull Request Guidelines

@@ -1,20 +1,21 @@
 # End-to-end suite
 
 ```
-npm run test-e2e            # the whole suite
-npx playwright test -c e2e/playwright.config.ts symmetric  # one file
-npx playwright test -c e2e/playwright.config.ts --ui       # interactive
+pnpm test-e2e              # the whole suite
+pnpm exec playwright test -c e2e/playwright.config.ts symmetric  # one file
+pnpm exec playwright test -c e2e/playwright.config.ts --ui       # interactive
 ```
 
-Not part of `npm test`, which runs the unit suite under vitest.
+Not part of `pnpm test`, which runs the unit suite under vitest.
 
 ## What "end to end" means here
 
 Every spec runs the **real orchestrator in a real Chromium**, over a real network, and asserts on what
 the browser ended up doing. Nothing is stubbed: `initFederation` is the published entry point, the import
 map is installed by the library's own `replaceInDOM`, modules are loaded by its own `loadModuleFn`, and
-storage is the browser's `sessionStorage`. The only injected option is the logger, so its output can be
-read from Node.
+storage is the browser's `sessionStorage`. The injected options only make a run observable and isolated
+(the logger, so its output can be read from Node, the log level and a storage namespace), or are what a
+test sets on purpose (`profile`, `strict`, a host remoteEntry, shim mode, flat-shared-info conversion).
 
 Concretely, that buys four kinds of assertion the previous jsdom suite could not make:
 
@@ -43,8 +44,9 @@ declared, the static import throws and the test fails.
   so `http://mfe1/` really is a separate origin to the browser — real CORS, real `Referer`, real
   import-map scope matching. The generated externals record themselves in `globalThis.__nfCopies` on
   evaluation, which is how copy counts are measured rather than inferred.
-- **`boot.ts`** — runs in the page, bundled by esbuild straight from `src/lib`. Exposes `initFederation`
-  and a few readers (`maps`, `load`, `resolve`, `copies`, `storage`) on `window.__nfe2e`. Loaded as a
+- **`boot.ts`** — runs in the page, bundled by esbuild straight from `src/lib`. Exposes `init` and
+  `initRemoteEntry`, plus readers and actions (`maps`, `load`, `resolve`, `preload`, `links`, `copies`,
+  `storage`, `session`) on `window.__nfe2e`. Loaded as a
   **classic** script on purpose: a `type="module"` boot would itself be a module load, and a native
   import map has to be installed before the first one.
 - **`federation.ts`** — the Playwright fixture. Server and browser are worker-scoped, `nf` is per test.
@@ -78,7 +80,17 @@ which shape the build emitted them in.
 | `declared-packages` | libraries deeper than their npm name, published dense as packages of their own (core's `.package()`): served apart when every build agrees, so a host importing one no longer scopes the other; grouped by npm name again when an older build ships them together, in either externals shape, and the all-older baseline that scopes them |
 | `vendor-shapes` | **the four shapes a build emits**: externals dense (`entries`) or flat (one element per entrypoint), × chunking dense (a `chunks` property) or flat (`@nf-internal/chunk-*` pseudo-externals). The verdict is shape-invariant; where the shape does show through — `feature.convertFlatSharedInfo`, and chunks mapped per declaring vs serving remote — it is pinned exactly |
 | `lifecycle`     | warm reload, incremental portfolios, the manifest-as-URL form, the dynamic path with both gates mirrored (including that the dynamic verdicts are persisted, so a reload reproduces the delta), and how the browser treats a second import map |
+| `incremental`   | an incremental init re-elects a pool as a unit when any member is dirty, so a joiner that ships only some members never leaves the rest on last run's pooling verdict; a label-formed pool on a warm cache; the stored tag order surviving pooling |
+| `provenance`    | the provenance promise: portfolios in which a remote used to run a coupled family assembled from builds that never shipped it together, on the init and dynamic path, including the second hop and manifest-order dependence — each ending with one build, or every member at its own declared tag |
+| `dynamic-keys`  | a runtime load never re-declares a key the committed map already has: a flat remote follows the page's build for every entrypoint or runs every entrypoint from its own build. Runs on native import maps and in es-module-shims with `mapOverrides` off |
 | `capture`       | the recorded portfolios in `fixtures/` — real entries, 6–37 externals each, a non-global share scope, two in the older flat format — as the check that the rules compose on input nobody designed for them |
+
+## `preload/` — preloading against real requests
+
+Uses the harness. It checks what the library hands `preloadInDOM` against what the browser then requests:
+each preloaded file is downloaded once, never twice, and a file of a copy the map does not serve is never
+downloaded. Runs on native import maps and in es-module-shims shim mode, plus the case of an eager preload
+followed by a later import map.
 
 ## `sse/` — the build-notification stream
 

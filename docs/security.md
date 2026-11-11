@@ -80,6 +80,14 @@ initFederation('http://example.org/manifest.json', {
 Content-Security-Policy: require-trusted-types-for 'script'; trusted-types my-app-nfo
 ```
 
+`trustedTypesPolicyName` only reaches the default import map. The presets take the name as an argument, so a host that spreads one passes it there too:
+
+```javascript
+initFederation('http://example.org/manifest.json', {
+  ...useShimImportMap({ shimMode: true }, 'my-app-nfo'),
+});
+```
+
 #### Opting out
 
 Set the option to `false` when the host already wraps the import map and module URLs through its own policy (for example by overriding `setImportMapFn` and `loadModuleFn`):
