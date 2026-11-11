@@ -345,6 +345,8 @@ await initFederation(manifest, {
 
 **Why Import Map Configuration Matters**: Import maps are a relatively [new browser feature](https://caniuse.com/?search=import%20maps). Older browsers may not support them natively, so you might need a polyfill. The es-module-shims library provides this polyfill, but it adds overhead. If you're only supporting modern browsers, the default configuration is fastest. If you need broader compatibility, use the shim mode.
 
+> **Native import maps need multiple-import-map support.** With `useDefaultImportMap()` the orchestrator usually adds its import map after module loading has started (`initFederation` typically runs from a module), and `initRemoteEntry` adds more maps later. Browsers that accept only one import map reject those. Multiple import maps are supported in Chrome/Edge 133+ and Safari 18.4+; Firefox supports them only behind the `dom.multiple_import_maps.enabled` preference. There is no feature test for this, so the orchestrator can't detect it. For browsers without support, use `useShimImportMap({ shimMode: true })`. See [caniuse](https://caniuse.com/mdn-html_elements_script_type_importmap_multiple_import_maps).
+
 ### Logging Configuration
 
 Logging helps diagnose issues during development and can provide insights into loading performance in production.
