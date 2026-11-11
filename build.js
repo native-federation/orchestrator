@@ -319,6 +319,7 @@ async function updatePackageJson() {
     const distPkg = { ...pkg, ...packageUpdates };
     delete distPkg.scripts;
     delete distPkg.devDependencies;
+    delete distPkg.devEngines;
 
     await fs.writeFile(
       path.join(PATHS.dist, 'package.json'),

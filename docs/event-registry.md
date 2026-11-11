@@ -9,7 +9,7 @@ The orchestrator ships with a small in-page event bus, exposed as `window.__NF_R
 
 The registry distinguishes two concepts:
 
-- **Resources** — fire-and-latch values delivered through `register` / `onReady`. Once registered, every future `onReady` consumer fires immediately. Use these for one-shot readiness signals (the orchestrator itself uses this for `orch.init-ready`).
+- **Resources** — fire-and-latch values delivered through `register` / `onReady`. Once registered, every future `onReady` consumer fires immediately. Use these for one-shot readiness signals (the quickstart script uses this for `orch.init-ready`).
 - **Event streams** — append-only buffers delivered through `emit` / `update` / `on`. Streams are bounded by `maxEvents` and (optionally) `maxStreams`, and subscribers get configurable history replay.
 
 ## Installation
@@ -18,7 +18,7 @@ Include `init-registry.mjs` **before** the rest of your scripts. Optionally tune
 
 ```html
 <script
-  src="https://unpkg.com/@softarc/native-federation-orchestrator@4.7.0/init-registry.mjs"
+  src="https://unpkg.com/@softarc/native-federation-orchestrator@4.9.0/init-registry.mjs"
   data-max-streams="50"
   data-max-events="50"
   data-remove-percentage="50"
@@ -29,11 +29,11 @@ After this script runs, `window.__NF_REGISTRY__` is a frozen `NFEventRegistry` i
 
 ## Configuration
 
-| Attribute             | Default | Effect                                                                                                                                           |
-| --------------------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `data-max-streams`    | `50`    | Maximum number of distinct stream types the registry will retain. When exceeded, the least-recently-emitted stream (and its history) is evicted. |
-| `data-max-events`     | `50`    | Per-stream history depth. When exceeded, the oldest events are dropped — see [Trimming](#trimming) below.                                        |
-| `data-remove-percent` | `50`    | When trimming kicks in, this percentage of the buffer is evicted in one batch (so subsequent emits don't slice on every call). Expressed in %.   |
+| Attribute                | Default   | Effect                                                                                                                                           |
+| ------------------------ | --------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `data-max-streams`       | unbounded | Maximum number of distinct stream types the registry will retain. When exceeded, the least-recently-emitted stream (and its history) is evicted. |
+| `data-max-events`        | `1`       | Per-stream history depth. When exceeded, the oldest events are dropped — see [Trimming](#trimming) below.                                        |
+| `data-remove-percentage` | one event | When trimming kicks in, this percentage of the buffer is evicted in one batch (so subsequent emits don't slice on every call). Expressed in %.   |
 
 If you instantiate the registry yourself via `createRegistry({ ... })` rather than the script, the equivalent options are `maxStreams`, `maxEvents`, and `removePercentage` (as a fraction, e.g. `0.5`).
 
@@ -168,7 +168,7 @@ __NF_REGISTRY__.on('analytics.click', ({ data }) => track(data), { replay: 0 });
 
 ```js
 __NF_REGISTRY__.on(
-  'orch.module-loaded',
+  'app.diagnostics',
   ({ data, timestamp }) => debugPanel.append({ ...data, at: timestamp }),
   { replay: 50 }
 );

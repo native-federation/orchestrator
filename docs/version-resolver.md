@@ -631,7 +631,7 @@ Individual scopes:
 
 ### Step 3: Resolution Algorithm
 
-For each scope (global, shared scopes, strict, individual), the resolver determines one or more versions to share. The first step is to check wether the external should be shared or not:
+Every external lands in the global scope, a named shared scope, the strict scope or an individual scope. The resolver elects one version to share in the global and each named shared scope; the strict scope shares every exact version as stored, and individual scopes need no resolution. The first step is to check whether the external should be shared or not:
 
 ```mermaid
 flowchart TD
@@ -664,15 +664,13 @@ flowchart TD
 
 #### Determine Shared Versions
 
-When the shared externals have been discovered, it is time for the resolver to determine which version to share of each shared external. This processs is partially based on the provided config of the user. There are multiple scopes, 1 global and 1 for each shareScope, the resolver loops through the scopes as follows:
+When the shared externals have been discovered, it is time for the resolver to determine which version to share of each shared external. This processs is partially based on the provided config of the user. There are multiple scopes, 1 global and 1 for each shareScope; the strict scope is skipped (see [Step 1](#step-1-categorize-dependencies-by-scope)). The resolver loops through the scopes as follows:
 
 ```mermaid
 flowchart TD
-    A[For each scope with dirty externals] --> B{Only one version in scope?}
+    A[For each non-strict scope with dirty externals] --> B{Only one version in scope?}
     B -->|Yes| C[Set action: SHARE]
-    B -->|No| D{Scope type?}
-    D -->|Strict scope| E[All versions get action: SHARE<br/>Keep exact requiredVersions]
-    D -->|Other scopes| F[Choose optimal shared version]
+    B -->|No| F[Choose optimal shared version]
 
     F --> F1{Host version exists?}
     F1 -->|Yes| F2[Choose host version]
@@ -694,7 +692,6 @@ flowchart TD
     G5 -->|No| G8[Split the version per copy:<br/>the rejecting ones SCOPE,<br/>the rest SKIP]
 
     C --> H[Resolution complete]
-    E --> H
     G3 --> H
     G6 --> H
     G8 --> H
@@ -1231,7 +1228,7 @@ marked, and the next page keeps the gate's verdicts.
 
 ## Dynamic Init
 
-> **Important!:** This feature currently only works with the `use-import-shim` import-map type.
+> **Important!:** With native import maps (`useDefaultImportMap()`) this needs a browser that supports multiple import maps; see [Import Map Implementation](./getting-started.md#import-map-implementation).
 
 Dynamic init is a runtime feature that allows loading additional micro frontends after the initial federation setup is complete. This is useful for lazy-loading micro frontends on demand or adding micro frontends based on user interactions or application state.
 
@@ -1260,7 +1257,9 @@ flowchart TD
     F -->|Other| G{Does the committed map serve the package?}
     G -->|No| S[Action: SHARE<br/>Open the package, become its serving build]
     G -->|Yes| J{A strictVersion range rejects the map's tag?}
-    J -->|Yes| O{strict mode enabled?}
+    J -->|Yes| Q{Would a cold init keeping<br/>the committed builds refuse it?}
+    Q -->|No| N
+    Q -->|Yes| O{strictExternalCompatibility?}
     O -->|Yes| P[Throw NFError]
     O -->|No| M[Action: SCOPE + WARN<br/>Whole package from its own build]
     J -->|No| H{Map serves every entrypoint it ships,<br/>from one build?}
@@ -1414,7 +1413,7 @@ Dynamic init resolves nothing again, so it writes what it adds clean, with one e
 ports.sharedExternalsRepo.addOrUpdate(packageName, {
   dirty: false, // except a loaded remote's pooled members
   versions: [...existingVersions, newVersion],
-});
+}, shareScope);
 ```
 
 ### Best Practices for Dynamic Init
@@ -1461,7 +1460,7 @@ try {
 
 #### 4. Monitor Compatibility Warnings
 
-Dynamic init warns when a `strictVersion` range rejects the version the committed map serves:
+Dynamic init warns when a `strictVersion` range rejects the version the committed map serves and a cold init keeping the committed builds would refuse it (see [Scope and dynamic init](#scope-and-dynamic-init)):
 
 ```javascript
 // Enable logging to catch compatibility issues
@@ -1536,7 +1535,7 @@ await initRemoteEntry(`http://variant-${variant}.com/remoteEntry.json`, 'test-mf
 
 ## Understanding "dirty" Flag
 
-When processing remoteEntry.json files, shared dependencies are marked as "dirty" when new versions are added or their version list changes. This signals that the dependency needs resolution within its scope.
+When processing remoteEntry.json files, a shared dependency is marked "dirty" whenever a remote adds a copy of it, also at a tag it already has, since the copy can change what that version serves and accepts. The strict scope is never marked dirty. This signals that the dependency needs resolution within its scope.
 
 ```mermaid
 sequenceDiagram
@@ -1675,8 +1674,8 @@ is why it prices copies rather than versions. Pricing the whole version would ch
 dedup for a download they never make, and can prefer a candidate that is dearer once resolved.
 
 > **Consequence.** A large group of remotes sitting on an older tag can win over a smaller group on a newer
-> one — that is what "fewest extra downloads" asks for. Ties break toward the version already shared, then the
-> newest tag, and they are common, since a version costs only its objectors and prices are therefore small. Host
+> one — that is what "fewest extra downloads" asks for. Ties break toward the version already shared, then
+> coverage, then the newest tag, and they are common, since a version costs only its objectors and prices are therefore small. Host
 > precedence (`remoteEntry` of the host) and `profile.latestSharedExternal` are decided before this objective
 > runs and are unaffected.
 >
@@ -1870,11 +1869,16 @@ storage: localStorageEntry
 ### Version Conflicts
 
 ```
-// Error in strict mode for global scope
-NFError: [team/mfe1] dep-a@1.2.3 is not compatible with existing dep-a@2.0.0 requiredRange '^1.0.0'
+// strict.strictExternalCompatibility, at init: a strictVersion copy rejects the elected version
+[team/mfe1][dep-a@1.2.3] Is not compatible with requiredRange '^1.0.0' of shared dep-a@2.0.0.
+NFError: External dep-a@1.2.3 could not be shared.
 
-// Error in strict mode for shared scope
-NFError: [custom-scope.dep-a] ShareScope external has multiple shared versions.
+// strict.strictExternalCompatibility, on initRemoteEntry (logged as a warning without it)
+[__GLOBAL__][team/mfe1] dep-a@1.2.3 Is not compatible with existing dep-a@2.0.0 requiredRange '^1.0.0'
+NFError: Could not process remote 'team/mfe1'
+
+// A share scope ends up with more than one shared version (a warning, unless strict.strictImportMap)
+ShareScope external custom-scope.dep-a has multiple shared versions.
 
 // Solutions:
 // 1. Loosen the version constraints in the remoteEntry.json
@@ -1887,8 +1891,11 @@ NFError: [custom-scope.dep-a] ShareScope external has multiple shared versions.
 ### Shared Scope Issues
 
 ```
-// Warning for shared scope with no shared versions
-Warning: [team-a][dep-a] shareScope has no override version.
+// Debug log for a share scope with no shared version
+[team-a][dep-a] shareScope has no override version, scoping override versions.
+
+// Under strict.strictImportMap this is an error instead, without the suffix, followed by
+NFError: Could not create ImportMap.
 
 // All versions in the shared scope will be individually scoped
 // Consider reviewing version compatibility or shared scope assignments
@@ -1902,13 +1909,8 @@ Warning: [team-a][dep-a] shareScope has no override version.
 
 ### Strict Scope Considerations
 
-```
-// Multiple exact versions in strict scope
-Info: Strict scope external design-tokens has multiple shared versions: 2.1.0, 2.2.0
-
-// This is expected behavior - each exact version gets its own download
-// Consider if version consolidation is possible to reduce bundle size
-```
+Several exact versions of one external in the strict scope are expected and logged by nothing: each exact
+version gets its own download. Consider whether the versions can be consolidated to reduce bundle size.
 
 **Best practices for strict scopes**:
 

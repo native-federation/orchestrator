@@ -14,7 +14,7 @@ The configuration is divided into 5 sections
 
 ## <a id="hostConfig"></a> 1. Host configuration
 
-The `hostRemoteEntry` configuration is meant for adding a host remoteEntry file which receives priority during the determine-shared-versions step. That is, when an external version is defined in the host remoteEntry.json file, it will be guaranteed the shared version. The goal of the cachetag is to avoid caching the remoteEntry.json file.
+The `hostRemoteEntry` configuration is meant for adding a host remoteEntry file which receives priority when the version to share is chosen. That is, when an external version is defined in the host remoteEntry.json file, it will be guaranteed the shared version. The goal of the cachetag is to avoid caching the remoteEntry.json file.
 
 ```javascript
 export type HostOptions = {
@@ -115,7 +115,8 @@ initFederation('http://example.org/manifest.json', {
   loadModuleFn: (url: string) => { return customImport(url); },
   setImportMapFn: replaceInDOM('<importmap-type>'),
 
-  // Option 4: rename the Trusted Types policy to match a stricter CSP allowlist
+  // Option 4: rename the Trusted Types policy to match a stricter CSP allowlist.
+  // This reaches the default import map only; pass it to a preset instead: useShimImportMap(cfg, 'my-app-nfo')
   trustedTypesPolicyName: 'my-app-nfo',
 });
 ```

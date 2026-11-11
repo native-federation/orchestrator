@@ -26,7 +26,7 @@ Paths below are relative to `src/lib/core/`. If a section disagrees with the cod
 | host | The page's own app. Its files are loaded first and can never be repointed. |
 | remote | A micro-frontend described by a `remoteEntry.json`; its **scope URL** is that file's directory with a trailing `/` (`http://mfe1/`). Every file it ships lives under that prefix. |
 | external | A shared package a remote declares. `singleton: false` externals are private to the remote; the rest are shared within a **share scope** (the global one, a named `shareScope`, or `strict`). |
-| entrypoint | A specifier of a package: the root (`@fw/core`) or a secondary (`@fw/core/testing`). The package of a specifier is its npm name (`@scope/name` or `name`). |
+| entrypoint | A specifier of a package: the root (`@fw/core`) or a secondary (`@fw/core/testing`). The package of a specifier is its npm name (`@scope/name` or `name`), unless a dense build declares a deeper library as its own package (core's `.package()`, `1.domain/externals/specifier.ts`). |
 | dense / flat | Two ways to declare secondaries. Dense: one external `@fw/core` whose `entries` list `@fw/core` and `@fw/core/testing`. Flat: `@fw/core/testing` is its own external. Both describe one package. |
 | build | What one remote ships of a package (or of a pool), as specifier → tag. Same tag does not mean same files. |
 | chunk | A build-internal file shared by several entrypoints, keyed `@nf-internal/<chunk-name>`. A **chunked** copy imports its build's chunks, so its files only work beside that build's other files of the package. |
@@ -34,7 +34,7 @@ Paths below are relative to `src/lib/core/`. If a section disagrees with the cod
 | row / copy | A row is one `(tag, action)` of an external; its copies are the remotes that take it. The first copy is the row's basis. |
 | action | `share`: this row's files are published for the scope. `skip`: these copies use another row's files. `scope`: these copies run their own files, mapped only in their own remote's scope. |
 | serving build | The one build that serves a package in a share scope, stored on each of the package's externals. |
-| cached | A copy whose file the committed map serves; rankings price it as free. |
+| cached | A copy whose file the committed map serves; rankings price it as free. With `profile.enableDebugging`, page-load init ranks a dev copy above a cached one as a row's basis (`1.domain/externals/basis.ts`). |
 | pool | Externals tied together by `pool` labels in `remoteEntry.json`; elected as one family. A secondary always joins its package. |
 | subpool | Remotes off the global map that run one other remote's build through their scopes (`servedBy`). |
 | self-served / island | A remote that runs its own build for its whole family (`poolCause`: `uncovered` or `incompatible`). |
@@ -43,7 +43,7 @@ Paths below are relative to `src/lib/core/`. If a section disagrees with the cod
 
 - **Init** reads every manifest remote, stores it, pools, picks versions, picks serving builds, generates the map
   from the stored record and commits. Commit removes every `<script type="importmap">` (or `importmap-shim`) from
-  `document.head` (maps elsewhere stay), appends the new map there, then writes storage. Removing an element does not unregister its rules, so this only
+  `document.head` (maps elsewhere stay), appends the new map there, then writes storage. Preloads (eager `preload` externals) are only added once the map is in, because the browser fixes a preloaded file's resolution when it fetches it. Removing an element does not unregister its rules, so this only
   behaves as a replacement when no map was registered before. Because the map is generated from the record, a reload
   with a warm cache should produce the same map as a cold start.
 - **Dynamic load** (`initRemoteEntry`) decides each package of the newly loaded remote as a whole against the
@@ -69,7 +69,8 @@ Code: `2.app/steps/generate-import-map.ts`. Later writes into the same scope ove
    always resolves through the scope of the URL it was served from.
 
 A bundle's chunks are registered only when one of its copies is actually mapped (the serving build's copy, a
-`scope` row, or a subpool's build); a plain `skip` copy registers none. Integrity is keyed by the final URL and
+`scope` row, or a subpool's build); a plain `skip` copy registers none. Every remote's `mapping-or-exposed` bundle
+(its exposed modules' chunks) is always registered. Integrity is keyed by the final URL and
 taken from the remote that owns the file.
 
 ## The global share scope
@@ -78,7 +79,8 @@ Each package's serving build publishes every specifier it ships into `imports`; 
 specifier of that package there. A share row of the package at another tag is a duplicate: it publishes nothing
 and warns `Singleton external X has multiple shared versions.` (throws `Could not create ImportMap.` under
 `strict.strictImportMap`). Ties in choosing the serving build are broken by remote name (code-unit order), so the
-map does not depend on registration order. Code: `2.app/steps/determine-shared-externals.ts`.
+map does not depend on registration order. Code: `2.app/steps/decide-serving-builds.ts`, ranking in
+`1.domain/externals/serving.ts` (`servingBuildOf`, `byServingRank`).
 
 ## One serving build per package
 
@@ -176,7 +178,7 @@ candidate is judged only on the entrypoints its own build ships; no build borrow
 
 Code: `2.app/steps/update-cache.ts` decides the rows, `2.app/steps/convert-to-import-map.ts` emits the delta.
 
-Per package of the loaded remote (a dense root and its flat secondaries together), per share scope, against what
+Per package of the loaded remote (a dense root and its flat secondaries together, apart from a deeper library a dense build declares as its own package), per share scope, against what
 the committed map serves of it:
 
 | situation | action | delta map |

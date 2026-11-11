@@ -12,6 +12,8 @@ export {
   StorageEntry,
   StorageEntryKey,
   StorageConfig,
+  StorageEntryCreator,
+  StorageEntryHandler,
   StorageType,
   StorageKey,
 } from './storage.contract';

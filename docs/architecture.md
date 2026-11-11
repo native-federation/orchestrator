@@ -155,17 +155,21 @@ The remoteEntry.json file contains comprehensive metadata about a micro frontend
 classDiagram
     FederationInfo *-- ExposesInfo
     FederationInfo *-- SharedInfo
+    FederationInfo *-- DenseSharedInfo
 
     class FederationInfo {
         name: string
         exposes: ExposesInfo[]
-        shared: SharedInfo[]
+        shared: (SharedInfo | DenseSharedInfo)[]
         chunks?: Map<.string, string[]>
         integrity?: Map<.string, string>
+        buildNotificationsEndpoint?: string
     }
     class ExposesInfo{
         key: string
         outFileName: string
+        chunks?: Map<.string, ChunkFile>
+        element?: string
         dev?: object
     }
     class SharedInfo{
@@ -176,8 +180,14 @@ classDiagram
         packageName: string
         outFileName: string
         shareScope?: string
+        pool?: string
         bundle?: string
+        preload?: true
         dev?: object
+    }
+    class DenseSharedInfo{
+        SharedInfo without outFileName
+        entries: Map<.string, string>
     }
 ```
 
@@ -232,6 +242,9 @@ The optional `integrity` map (added by `@softarc/native-federation` when built w
 | shareScope      | Allows for sharing dependencies in a specific group instead of globally, allowing for clusters of shared externals. the `"strict"` shareScope is a special scope. |
 | packageName     | Dependency identifier for resolution                                                                                                                              |
 | outFileName     | File path relative to the micro frontend's scope                                                                                                                  |
+| entries         | Dense form only, instead of `outFileName`: every specifier of the package the build ships, mapped to its file                                                      |
+| pool            | Optional pool label: externals with the same label are resolved as one family (see [Pooling](#pooling))                                                           |
+| preload         | Optional: preload this external's files once the import map is committed (see [Preloading](./config.md#preloading))                                              |
 | bundle          | Optional name of the internal chunk bundle this external belongs to. Resolves via the `chunks` map on the same remoteEntry (see [Shared Chunks](#shared-chunks)). |
 | dev             | Optional development configuration containing entryPoint information                                                                                              |
 
@@ -284,6 +297,7 @@ classDiagram
     class RemoteModule{
         moduleName: string
         file: string
+        chunks?: string[]
     }
 ```
 
@@ -337,7 +351,7 @@ classDiagram
         remotes: SharedVersionMeta[]
     }
     class SharedVersionMeta{
-        file: string
+        entries: Map<.string, string>
         requiredVersion: string
         strictVersion: boolean
         cached: boolean
@@ -347,23 +361,26 @@ classDiagram
         dense?: true
         servedBy?: string
         poolCause?: 'incompatible'|'uncovered'
+        preload?: true
+        dev?: true
     }
     class ScopedExternals {
         Map<.string, ScopedExternal>
     }
     class ScopedExternal {
-        Map<.string, Version>
+        Map<.string, ScopedVersion>
     }
     class ScopedVersion{
         tag: string
-        file: string
+        entries: Map<.string, string>
         bundle?: string
+        preload?: true
     }
 ```
 
 #### Example Cached Externals
 
-The action field is calculated during the dependency resolution phase:
+`entries` maps every specifier a copy ships to its file. Scoped externals are stored per remote name. The action field is calculated during the dependency resolution phase:
 
 ```json
 {
@@ -378,14 +395,14 @@ The action field is calculated during the dependency resolution phase:
             "action": "share",
             "remotes": [
               {
-                "file": "dep-a.js",
+                "entries": { "dep-a": "dep-a.js" },
                 "name": "team/mfe1",
                 "requiredVersion": "~1.2.1",
                 "strictVersion": false,
                 "cached": true
               },
               {
-                "file": "dep-a.js",
+                "entries": { "dep-a": "dep-a.js" },
                 "name": "team/mfe2",
                 "requiredVersion": "~1.2.1",
                 "strictVersion": false,
@@ -399,7 +416,7 @@ The action field is calculated during the dependency resolution phase:
             "action": "skip",
             "remotes": [
               {
-                "file": "dep-a.js",
+                "entries": { "dep-a": "dep-a.js" },
                 "name": "team/mfe2",
                 "requiredVersion": "^1.2.1",
                 "strictVersion": true,
@@ -420,7 +437,7 @@ The action field is calculated during the dependency resolution phase:
             "action": "share",
             "remotes": [
               {
-                "file": "dep-c.js",
+                "entries": { "dep-c": "dep-c.js" },
                 "name": "team/mfe1",
                 "requiredVersion": "~1.2.1",
                 "strictVersion": false,
@@ -434,7 +451,7 @@ The action field is calculated during the dependency resolution phase:
             "action": "skip",
             "remotes": [
               {
-                "file": "dep-c.js",
+                "entries": { "dep-c": "dep-c.js" },
                 "name": "team/mfe2",
                 "requiredVersion": "~1.2.1",
                 "strictVersion": false,
@@ -447,10 +464,10 @@ The action field is calculated during the dependency resolution phase:
     }
   },
   "scoped-externals": {
-    "https://example.org/mfe1/": {
+    "team/mfe1": {
       "dep-b": {
         "tag": "4.5.6",
-        "file": "dep-b.js"
+        "entries": { "dep-b": "dep-b.js" }
       }
     }
   }
@@ -585,6 +602,7 @@ The repository is organized **flow-first**: every published subpath of the packa
 | `…/registry`                                | `src/lib/registry/`              | `src/lib/registry.index.ts` |
 | `…/audit`                                   | `src/lib/audit/`                 | `src/lib/audit.index.ts`    |
 | `…/node`                                    | `src/lib/node/`                  | `src/lib/node.index.ts`     |
+| `…/module-federation`                       | `src/lib/module-federation/`     | `src/lib/module-federation.index.ts` |
 | `…/quickstart.mjs`, `…/init-registry.mjs`, `…/node-loader/loader.mjs` | `src/scripts/` | (standalone script bundles) |
 
 ### Core
@@ -600,8 +618,8 @@ core/
     driver-ports/        Contracts the steps fulfil (composed by the flows, driven by the entry points)
     driving-ports/       Contracts the steps consume (fulfilled by adapters)
     config/              Configuration contracts
-  3.adapters/          Browser, http and storage implementations of the driving ports
-  4.config/            Default config handlers (logging, storage, import-map, mode)
+  3.adapters/          Browser, http, storage, version-check and remote-entry implementations of the driving ports
+  4.config/            Default config handlers (logging, storage, import-map, mode, host)
   5.di/                Wiring: driver/adapter/config factories and the federation result builder
   init-federation.ts   The public initFederation() entry point
 ```
@@ -610,9 +628,10 @@ The dynamic flow is part of core: `initFederation()` always returns an `initRemo
 
 ### Flows and platforms
 
-- `registry/` — the standalone event registry (`/registry`). Depends on nothing but `lib/utils`.
+- `registry/` — the standalone event registry (`/registry`). Imports nothing but `lib/utils` directly.
 - `audit/` — the externals audit (`/audit`). Depends on core's contracts.
 - `node/` — the Node platform (`/node`): fs-based adapters, the node-loader client, and `initNodeFederation()`. Runs core's flows with its own adapters injected.
+- `module-federation/` — the Module Federation bridge (`/module-federation`): `getShared()` reads the stored shared externals into MF share infos. Depends on core's domain and contracts.
 - `utils/` — small shared helpers (`Optional`, path utils, `cloneEntry`).
 - `testing/` — shared vitest mocks (not published).
 
@@ -623,7 +642,7 @@ The dynamic flow is part of core: `initFederation()` always returns an `initRemo
 Enforced by ESLint (`no-restricted-imports` in `eslint.config.js`):
 
 1. Internal code never imports a `*.index.ts` barrel — those are for package consumers only. Import the concrete module instead.
-2. `registry`, `audit` and `node` may depend on `core` and `utils`, never on each other. `core` depends on no flow folder.
+2. `registry`, `audit`, `node` and `module-federation` may depend on `core` and `utils`, never on each other. `core` depends on no flow folder.
 3. `core/1.domain` is pure: it imports nothing from core's outer layers (`2.app`, `3.adapters`, `4.config`, `5.di`). Logging and storage stay with the caller: a domain function returns what the step should log or write (for example `buildPools` returns the externals whose pool label joined nothing, and the pooling step logs them).
 4. Only `core/5.di` imports the pipeline steps (`core/2.app/steps/**`), which it wires into the flows. Everything else, flows and adapters included, reaches a step through its driver port. `src/lib/testing` is exempt, since the test harness runs the real steps.
 5. A step never imports another step, i.e. any module `5.di` wires (`init.factory.ts`). Steps share code through `1.domain`, or through a template that is not itself a step, such as `store-remote-entry` (used by `process-remote-entries` and `update-cache`) or `apply-winner` (used by `determine-shared-externals` and `decide-serving-builds`).
@@ -651,6 +670,6 @@ Enforced by ESLint (`no-restricted-imports` in `eslint.config.js`):
 | Which copy publishes each specifier: the serving build's copy alone, else record order | `1.domain/externals/claims.ts` (`claimTable`, `versionClaims`)                                |
 | Marking a pool's other members dirty when removing a remote empties a member           | `3.adapters/storage/shared-externals.repository.ts`                                           |
 
-The two pipelines stay separate. Init runs `processRemoteEntries → poolSharedExternals → determineSharedExternals → decideServingBuilds → generateImportMap → commitChanges` and re-elects every pool of a scope with a dirty external; pooling runs before `determine`, which leaves pooled externals alone. `decideServingBuilds` then stores one serving build per package in each share scope but `strict`, skipping a scope nothing wrote since it was last decided (see [One build per package](./version-resolver.md#one-build-per-package)). `generateImportMap` publishes each specifier from the copy that claims it: an external with a serving build publishes that build's copy alone, one without publishes its share rows' copies in record order; a skipped copy claims nothing. The `strict` scope has no serving build, so each of its tags publishes its own copies, basis first. `initRemoteEntry` runs `updateCache → poolDynamicExternals → convertToImportMap → commitChanges`, or `rollbackChanges` when a step fails: a committed import map cannot change, so it elects nothing and only judges the loaded remote against the committed record. `updateCache` decides each package the remote shares as a whole from what the committed map serves of it, recording the remote as the serving build of a package it opens, and `poolDynamicExternals` then judges the remote's pools (see [Scope and dynamic init](./version-resolver.md#scope-and-dynamic-init)). Its `commitChanges` marks the share scopes the load wrote as undecided, so the next init decides their serving builds again.
+The two pipelines stay separate. Init runs `getRemoteEntries → processRemoteEntries → poolSharedExternals → determineSharedExternals → decideServingBuilds → generateImportMap → commitChanges → exposeModuleLoader` and re-elects every pool of a scope with a dirty external; pooling runs before `determine`, which leaves pooled externals alone. `decideServingBuilds` then stores one serving build per package in each share scope but `strict`, skipping a scope nothing wrote since it was last decided (see [One build per package](./version-resolver.md#one-build-per-package)). `generateImportMap` publishes each specifier from the copy that claims it: an external with a serving build publishes that build's copy alone, one without publishes its share rows' copies in record order; a skipped copy claims nothing. The `strict` scope has no serving build, so each of its tags publishes its own copies, basis first. `initRemoteEntry` runs `getRemoteEntry → updateCache → poolDynamicExternals → convertToImportMap → commitChanges`, or `rollbackChanges` when a step fails: a committed import map cannot change, so it elects nothing and only judges the loaded remote against the committed record. `updateCache` decides each package the remote shares as a whole from what the committed map serves of it, recording the remote as the serving build of a package it opens, and `poolDynamicExternals` then judges the remote's pools (see [Scope and dynamic init](./version-resolver.md#scope-and-dynamic-init)). Its `commitChanges` marks the share scopes the load wrote as undecided, so the next init decides their serving builds again.
 
 Adding a new flow means adding a new folder under `src/lib/`, a `<name>.index.ts` barrel next to the existing ones, and one bundle entry in `build.js`.

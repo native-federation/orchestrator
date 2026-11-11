@@ -7,8 +7,8 @@ import type { NativeFederationResult } from 'lib/core/init-federation.contract';
 /**
  * Runs in the page. Nothing here substitutes for a part of the library: the import map is applied by
  * the library's own `replaceInDOM`, modules are loaded by its own `loadModuleFn`, storage is real
- * `sessionStorage`. The only injected option is the logger, and only to make its output readable
- * from Node.
+ * `sessionStorage`. The injected options only make a run observable and isolated (logger, log level,
+ * storage namespace) or are set by a test on purpose.
  */
 
 export type BootOptions = {

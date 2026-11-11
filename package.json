@@ -21,7 +21,14 @@
   },
   "license": "MIT",
   "engines": {
-    "node": ">=24.16.0"
+    "node": ">=20.6.0"
+  },
+  "devEngines": {
+    "runtime": {
+      "name": "node",
+      "version": ">=24.16.0",
+      "onFail": "error"
+    }
   },
   "devDependencies": {
     "@playwright/test": "1.64.1",
