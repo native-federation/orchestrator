@@ -13,14 +13,14 @@ const ENTRY_BARRELS = {
     message: 'Entry-point barrels (*.index.ts) are for package consumers only. Import the concrete module instead.',
 };
 
-// Dependency direction between the flow folders: registry, audit and node may
+// Dependency direction between the flow folders: registry, audit, node and module-federation may
 // depend on core (and lib/utils), never on each other; core depends on no flow.
 const noRestrictedImports = (forbidden = []) => ['error', { patterns: [ENTRY_BARRELS, ...forbidden] }];
 const flowBoundary = (folders) => ({
     group: folders.map(f => `lib/${f}/*`),
-    message: 'Crossing a flow boundary: registry/audit/node may depend on core, never on each other; core depends on no flow.',
+    message: 'Crossing a flow boundary: registry/audit/node/module-federation may depend on core, never on each other; core depends on no flow.',
 });
-const CORE_FLOW_BOUNDARY = flowBoundary(['registry', 'audit', 'node', 'testing']);
+const CORE_FLOW_BOUNDARY = flowBoundary(['registry', 'audit', 'node', 'module-federation', 'testing']);
 
 // Core's layers (see docs/architecture.md §"Dependency rules"). The domain is pure: no outer layer of core.
 const DOMAIN_PURITY = {
@@ -141,14 +141,18 @@ module.exports = [
     },
     {
         files: ['src/lib/registry/**/*.ts'],
-        rules: { 'no-restricted-imports': noRestrictedImports([flowBoundary(['core', 'audit', 'node', 'testing']), NO_STEPS]) }
+        rules: { 'no-restricted-imports': noRestrictedImports([flowBoundary(['core', 'audit', 'node', 'module-federation', 'testing']), NO_STEPS]) }
     },
     {
         files: ['src/lib/audit/**/*.ts'],
-        rules: { 'no-restricted-imports': noRestrictedImports([flowBoundary(['registry', 'node', 'testing']), NO_STEPS]) }
+        rules: { 'no-restricted-imports': noRestrictedImports([flowBoundary(['registry', 'node', 'module-federation', 'testing']), NO_STEPS]) }
     },
     {
         files: ['src/lib/node/**/*.ts'],
-        rules: { 'no-restricted-imports': noRestrictedImports([flowBoundary(['registry', 'audit', 'testing']), NO_STEPS]) }
+        rules: { 'no-restricted-imports': noRestrictedImports([flowBoundary(['registry', 'audit', 'module-federation', 'testing']), NO_STEPS]) }
+    },
+    {
+        files: ['src/lib/module-federation/**/*.ts'],
+        rules: { 'no-restricted-imports': noRestrictedImports([flowBoundary(['registry', 'audit', 'node', 'testing']), NO_STEPS]) }
     }
 ];
