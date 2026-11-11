@@ -137,7 +137,7 @@ In this example, the micro frontends register themselves as custom elements (par
 
 ## Avoiding race conditions
 
-Custom browser events are unfortunately vulnerable to unwanted race conditions, therefore it is recommended to use a more robust setup that involves a central event registry. This can resolve promises retroactively even after initialization.
+Custom browser events are unfortunately vulnerable to unwanted race conditions: a listener added after the event was dispatched never hears it. Load the [communication bus](https://github.com/native-federation/communication) first instead: the quickstart announces `orch.init-ready` on it with the loaders, and a listener receives them whether it subscribed before or after initialization finished.
 
 ```html
 <!DOCTYPE html>
@@ -145,8 +145,8 @@ Custom browser events are unfortunately vulnerable to unwanted race conditions, 
   <head>
     <title>My Application</title>
 
-    <!-- 1. Init registry -->
-    <script src="https://unpkg.com/@softarc/native-federation-orchestrator@4.10.0/init-registry.mjs"></script>
+    <!-- 1. The bus, before the orchestrator -->
+    <script src="https://unpkg.com/@softarc/native-federation-communication@4/init-bus.js"></script>
 
     <!-- 2. Define your micro frontends -->
     <script type="application/json" id="mfe-manifest">
@@ -158,7 +158,7 @@ Custom browser events are unfortunately vulnerable to unwanted race conditions, 
 
     <!-- 3. Handle loaded modules -->
     <script>
-      window.__NF_REGISTRY__.onReady('orch.init-ready', ({ loadRemoteModule }) => {
+      window.__NF_BUS__.on('orch.init-ready', ({ loadRemoteModule }) => {
         loadRemoteModule('team/mfe1', './Button');
         loadRemoteModule('team/mfe2', './Header');
       });
@@ -175,7 +175,9 @@ Custom browser events are unfortunately vulnerable to unwanted race conditions, 
 </html>
 ```
 
-> **Note:** the event-registry can also be used for robust communication between micro frontends even after initialization. See the [Event Registry](./event-registry.md) reference for the full API.
+The bus must be on the page before `quickstart.mjs` finishes initializing, so load `init-bus.js` first. The older `init-registry.mjs` with `__NF_REGISTRY__.onReady('orch.init-ready', …)` still works in 4.x, but is deprecated and removed in v5.
+
+> **Note:** the same bus can be used for robust communication between micro frontends even after initialization. See the [communication package](https://github.com/native-federation/communication) for the full API.
 
 ## Custom implementation
 

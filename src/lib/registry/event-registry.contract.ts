@@ -5,6 +5,7 @@ import type {
   NFEventUnsubscribe,
 } from './event.contract';
 
+/** @deprecated Use @softarc/native-federation-communication. Removed in v5. */
 export type NFEventRegistry = {
   register<T>(type: string, resource: T | NFEventProvider<T>): Promise<void>;
   onReady<T>(type: string, callback: NFEventConsumer<T>): NFEventUnsubscribe;
