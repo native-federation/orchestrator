@@ -6,8 +6,14 @@ const coverage = (remote: SharedVersionMeta): number => Object.keys(remote.entri
 
 // `remotes[0]` is the basis: the copy every consumer of the version resolves to. Host and cached
 // outrank coverage because repointing them invalidates a committed import map. An exact tie goes to the
-// name, so the basis does not depend on the order remotes register in.
-export function isBetterBasis(candidate: SharedVersionMeta, basis: SharedVersionMeta): boolean {
+// name, so the basis does not depend on the order remotes register in. `preferDev` (#118) ranks a dev build
+// above cached: only page-load init passes it, where nothing is committed yet, so cached means an earlier page.
+export function isBetterBasis(
+  candidate: SharedVersionMeta,
+  basis: SharedVersionMeta,
+  preferDev = false
+): boolean {
+  if (preferDev && Boolean(basis.dev) !== Boolean(candidate.dev)) return Boolean(candidate.dev);
   if (basis.cached !== candidate.cached) return candidate.cached;
   const byCoverage = coverage(candidate) - coverage(basis);
   return byCoverage === 0 ? compareStrings(candidate.name, basis.name) < 0 : byCoverage > 0;
@@ -16,7 +22,8 @@ export function isBetterBasis(candidate: SharedVersionMeta, basis: SharedVersion
 export function addRemoteToVersion(
   version: SharedVersion,
   remote: SharedVersionMeta,
-  isHost = false
+  isHost = false,
+  preferDev = false
 ): void {
   if (isHost) {
     version.host = true;
@@ -25,7 +32,7 @@ export function addRemoteToVersion(
   }
 
   const basis = version.remotes[0];
-  if (basis && !version.host && isBetterBasis(remote, basis)) {
+  if (basis && !version.host && isBetterBasis(remote, basis, preferDev)) {
     version.remotes.unshift(remote);
     return;
   }

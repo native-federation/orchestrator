@@ -92,7 +92,12 @@ export function createProcessRemoteEntries(
 
     if (matchingVersion) {
       assertSameVersionCompatibility(matchingVersion);
-      addRemoteToVersion(matchingVersion, remote, !matchingVersion.host && !!remoteEntry?.host);
+      addRemoteToVersion(
+        matchingVersion,
+        remote,
+        !matchingVersion.host && !!remoteEntry?.host,
+        config.profile.enableDebugging
+      );
     } else {
       cached.versions.push({
         tag,

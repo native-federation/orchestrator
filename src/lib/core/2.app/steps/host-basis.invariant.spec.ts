@@ -159,6 +159,23 @@ describe('the host stays at remotes[0]', () => {
     expect(violations(page)).toEqual([]);
   });
 
+  // At page-load init the host is appended last and always takes the isHost branch, so the dev copy only meets a host
+  // basis on the next page, where the host's version comes from storage with host: true.
+  it('a dev remote with profile.enableDebugging on', async () => {
+    const page = setup(false);
+    const host = entry('host', [{ pkg: 'dep-a', version: '2.0.0' }]);
+    await page.init([host, entry('team/mfe1', [{ pkg: 'dep-a', version: '2.0.0' }])]);
+
+    const dev = entry('team/mfe1', [{ pkg: 'dep-a', version: '2.0.0' }], { v2: true });
+    (dev.shared[0] as { dev?: { entryPoint: string } }).dev = { entryPoint: '/src/dep-a.ts' };
+    // reload() rewires the config, so the flag goes on after it (hence no page.nextPage).
+    page.p.reload();
+    page.p.config.profile.enableDebugging = true;
+    await page.p.runInit([host, dev]);
+
+    expect(violations(page)).toEqual([]);
+  });
+
   // The shape eviction has to handle: the host leaves a version whose other copies stay.
   it('host moves off a tag it shared with another remote', async () => {
     const page = setup(false);

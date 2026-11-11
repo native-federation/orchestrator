@@ -58,6 +58,7 @@ describe('DefaultConfig', () => {
           overrideCachedRemotes: 'init-only',
           overrideCachedRemotesIfURLMatches: false,
           mergeManifests: true,
+          enableDebugging: false,
         },
         feature: {
           convertFlatSharedInfo: false,

@@ -246,6 +246,29 @@ the third becomes the basis and serves both specifiers from a single build. Rule
 outrank it — stability beats optimality — so a host or already-served basis can lack an entrypoint a sibling
 ships (see [One build per package](#one-build-per-package) for the build that then serves the package).
 
+##### Preferring a dev build while debugging
+
+With [`profile.enableDebugging`](./config.md#modeConfig) on, `initFederation` ranks a **dev** copy right after
+the host: host > dev > cached > widest coverage > name. A copy is dev when its remoteEntry marks the external with
+`dev`, which a build in dev mode does. This lets a remote you are working on serve a package that a static sibling
+of the same version would otherwise serve, for instance on the name. The rule applies to page-load init only:
+nothing is committed on the page yet, so a cached copy can only come from an earlier page. A runtime load
+(`initRemoteEntry`) and pooling keep the usual order, so a committed copy is never displaced. The flag only changes
+the basis; the strict scope and the claims follow it, the serving build follows it unless a cached copy is cheaper
+(below), and the host still always wins.
+
+- Dev means built in dev mode, not served live: an `ng build -c development` served statically counts too. Two dev
+  copies rank on the usual rules.
+- A warm page does not refetch a remote at an unchanged URL, and a cached static copy then keeps serving because it
+  costs no download. To pick up the dev build on a reload, set
+  [`profile.overrideCachedRemotesIfURLMatches`](./config.md#modeConfig) or keep storage in `globalThis`, which a
+  reload clears, so nothing is cached. Without that, a dev copy that already serves keeps its stored integrity hash,
+  so with integrity hashes on, an edit to it is blocked by the browser.
+- Turning the flag off does not repoint a dev basis stored while it was on: the copy is cached and keeps serving
+  until its remote is refetched.
+- A dev basis that ships fewer entrypoints than a static sibling leaves the sibling's extra entrypoints served from
+  the static build.
+
 #### One build per package
 
 A package is its primary external plus any flat secondary externals (`@angular/core/testing` reported as an
