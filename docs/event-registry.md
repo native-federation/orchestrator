@@ -2,6 +2,12 @@
 
 # Event Registry
 
+> **Deprecated.** The event registry is superseded by
+> [@softarc/native-federation-communication](https://github.com/native-federation/communication), a
+> page-wide channel bus that every copy on the page shares. The registry keeps working in 4.x, but gets no new
+> features or fixes, and is removed in v5. See
+> [Migrating from the registry](https://github.com/native-federation/communication/blob/main/docs/migrating-from-registry.md).
+
 The orchestrator ships with a small in-page event bus, exposed as `window.__NF_REGISTRY__`. It is what `init-registry.mjs` boots up before the rest of the orchestrator runtime arrives, and is intended for two jobs:
 
 1. **Resolving init promises retroactively.** A subscriber that arrives after the orchestrator has finished initializing still receives `orch.init-ready` — this avoids the race-condition class that plain `window.addEventListener` events suffer from.

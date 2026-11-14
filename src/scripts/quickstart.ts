@@ -3,7 +3,7 @@ import 'es-module-shims';
 import { initFederation } from 'lib/core/init-federation';
 import { consoleLogger } from 'lib/core/4.config/logging/console.logger';
 import { useShimImportMap } from 'lib/core/4.config/import-map/use-import-shim';
-import type { NFEventRegistry } from 'lib/registry/event-registry.contract';
+import { announceInitReady } from './announce-init-ready';
 
 (async () => {
   let manifest: Record<string, string> | undefined | string = undefined;
@@ -43,11 +43,7 @@ import type { NFEventRegistry } from 'lib/registry/event-registry.contract';
     sse: true,
     ...useShimImportMap({ shimMode: false }),
   }).then(loaders => {
-    if ((window as any).__NF_REGISTRY__ !== undefined) {
-      ((window as any).__NF_REGISTRY__ as NFEventRegistry).register('orch.init-ready', {
-        ...loaders,
-      });
-    }
+    announceInitReady(loaders);
 
     (window as any).loadRemoteModule = loaders.loadRemoteModule;
     window.dispatchEvent(new CustomEvent('mfe-loader-available', { detail: { ...loaders } }));

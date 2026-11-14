@@ -8,6 +8,7 @@ import type { ForManagingEvents } from './for-managing-events.port';
 import type { NFEventRegistryConfig, NFEventRegistryOptions } from './registry.contract';
 import { cloneEntry } from 'lib/utils/clone-entry';
 
+/** @deprecated Use @softarc/native-federation-communication. Removed in v5. */
 export function createRegistry(opts: NFEventRegistryOptions): ForManagingEvents {
   const cfg: NFEventRegistryConfig = {
     maxStreams: opts.maxStreams,

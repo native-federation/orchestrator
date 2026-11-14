@@ -4,6 +4,7 @@ import type { NFEventRegistryOptions } from '../lib/registry/registry.contract';
 
 declare global {
   interface Window {
+    /** @deprecated Use @softarc/native-federation-communication. Removed in v5. */
     __NF_REGISTRY__: NFEventRegistry;
   }
 }
