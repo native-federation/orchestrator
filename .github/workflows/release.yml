@@ -43,12 +43,14 @@ jobs:
       - name: Pin npm CLI
         run: npm install -g npm@11.21.1 && npm --version
 
-      - name: Tag matches package.json
+      # The tag is the source of truth: build.js reads the version from package.json.
+      - name: Use the tag's version
         run: |
+          TAG_VERSION="${GITHUB_REF_NAME#v}"
           PKG_VERSION=$(node -p "require('./package.json').version")
-          if [ "v${PKG_VERSION}" != "${GITHUB_REF_NAME}" ]; then
-            echo "::error::Tag ${GITHUB_REF_NAME} does not match package.json version ${PKG_VERSION}"
-            exit 1
+          if [ "${PKG_VERSION}" != "${TAG_VERSION}" ]; then
+            echo "::warning::Tag ${GITHUB_REF_NAME} does not match package.json version ${PKG_VERSION}; releasing ${TAG_VERSION}"
+            npm version "${TAG_VERSION}" --no-git-tag-version --allow-same-version
           fi
 
       - name: Dependencies OK

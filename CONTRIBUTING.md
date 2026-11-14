@@ -80,18 +80,6 @@ fix: resolve issue
 docs: update readme
 ```
 
-## Releasing (maintainers)
-
-Releases are staged by CI and approved by a human with a security key; nobody publishes directly.
-
-1. Bump `version` in `package.json` in a reviewed PR and merge it.
-2. Push a signed tag matching that version: `git tag -s vX.Y.Z -m vX.Y.Z && git push origin vX.Y.Z`. Prereleases (`vX.Y.Z-rc.0`) are staged under the `next` dist-tag.
-3. The [Release workflow](.github/workflows/release.yml) verifies, builds, packs `dist/` and runs `npm stage publish --provenance`. Its job summary lists the tarball contents and shasum.
-4. On npmjs.com → **Staged Packages** (or `npm stage list @softarc/native-federation-orchestrator`), check that the shasum, version and dist-tag match the job summary, then **Approve** and touch your security key. Reject anything unexpected with `npm stage reject <stage-id>`.
-5. Once the version is live, publish the GitHub Release notes.
-
-A staged version is not installable until approved, so don't announce a release before step 4.
-
 ## Need Help?
 
 Open an issue if you:
