@@ -71,7 +71,8 @@ jobs:
         run: |
           mkdir -p out
           (cd dist && npm pack --json --pack-destination ../out) > out/pack.json
-          TGZ="out/$(node -p "require('./out/pack.json')[0].filename")"
+          # Without ./ npm reads "out/<file>.tgz" as a GitHub user/repo shorthand.
+          TGZ="./out/$(node -p "require('./out/pack.json')[0].filename")"
           SHASUM=$(node -p "require('./out/pack.json')[0].shasum")
           INTEGRITY=$(node -p "require('./out/pack.json')[0].integrity")
           echo "tgz=$TGZ" >> "$GITHUB_OUTPUT"
