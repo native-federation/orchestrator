@@ -43,6 +43,11 @@
       "automerge": true
     },
     {
+      "description": "Never automerge anything in the release path — it can stage npm releases",
+      "matchFileNames": [".github/workflows/release.yml"],
+      "automerge": false
+    },
+    {
       "description": "Never automerge @softarc/native-federation — review compatibility by hand",
       "matchPackageNames": ["@softarc/native-federation"],
       "automerge": false
