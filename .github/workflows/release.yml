@@ -45,13 +45,7 @@ jobs:
 
       # The tag is the source of truth: build.js reads the version from package.json.
       - name: Use the tag's version
-        run: |
-          TAG_VERSION="${GITHUB_REF_NAME#v}"
-          PKG_VERSION=$(node -p "require('./package.json').version")
-          if [ "${PKG_VERSION}" != "${TAG_VERSION}" ]; then
-            echo "::warning::Tag ${GITHUB_REF_NAME} does not match package.json version ${PKG_VERSION}; releasing ${TAG_VERSION}"
-            npm version "${TAG_VERSION}" --no-git-tag-version --allow-same-version
-          fi
+        run: npm version "${GITHUB_REF_NAME#v}" --no-git-tag-version --allow-same-version
 
       - name: Dependencies OK
         run: pnpm install --frozen-lockfile
