@@ -232,6 +232,7 @@ export type ModeOptions = {
   feature?: {
     convertFlatSharedInfo?: boolean;
   };
+  transformRemoteEntryFn?: (entry: RemoteEntry) => RemoteEntry | Promise<RemoteEntry>;
 };
 ```
 
@@ -267,6 +268,28 @@ The strictness part will define how the orchestrator behaves when an unexpected 
 | Option                         | Default | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
 | ------------------------------ | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | feature.convertFlatSharedInfo  | `false` | Opts into runtime densification of remoteEntry shared externals. Core v4.3.0 emits `DenseSharedInfo` (a per-package `entries` map covering primary and secondary entrypoints) natively; those pass through unchanged. For older/flat remote builds that emit one flat `SharedInfo` per entrypoint, enabling this groups secondary entrypoints under their parent package (by npm scope) so they resolve as one shared external.                                                                                                                                                                                                 |
+
+#### Transforming remote entries
+
+`transformRemoteEntryFn` lets the host adjust each fetched remoteEntry before it is resolved, for example to stop sharing packages while debugging.
+
+- It is called once per fetched remoteEntry, in `initFederation` and `initRemoteEntry`, after the fetch and before resolution, including the host's own entry. Mutate the entry or return a spread of it; the returned entry is used.
+- Keep `name`, `url`, `host` and `override`: they are set before the call. `override` only says the entry replaces a stored remote; select remotes by `entry.name`. `url` is the fetched URL and may carry `?cacheTag=`.
+- `shared` holds one record per package (`packageName` and `entries`), but a flat (pre-4.3) remoteEntry may list one record per entry point, so match packages by prefix (`startsWith('@angular/')`). Mutate or spread the records; don't rebuild them.
+- A remote served from storage is not fetched, so it is not transformed again: a host that changes its transform between page loads should clear the storage (or use non-persistent storage).
+- A throwing transform fails `initFederation`. In `initRemoteEntry` it fails like a fetch error (see `strict.strictRemoteEntry`).
+
+```typescript
+import { initFederation } from '@softarc/native-federation-orchestrator';
+import type { TransformRemoteEntry } from '@softarc/native-federation-orchestrator/options';
+
+const unshareAll: TransformRemoteEntry = entry => {
+  entry.shared.forEach(shared => (shared.singleton = false));
+  return entry;
+};
+
+initFederation('http://example.org/manifest.json', { transformRemoteEntryFn: unshareAll });
+```
 
 ### Example
 
