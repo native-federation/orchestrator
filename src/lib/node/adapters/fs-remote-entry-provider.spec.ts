@@ -7,6 +7,8 @@ import { NFError } from 'lib/core/native-federation.error';
 import { readSourceBytes } from 'lib/node/utils/read-source';
 import { createRemoteEntryProvider } from 'lib/core/3.adapters/http/remote-entry-provider';
 import { mockConfig } from 'lib/testing/config.mock';
+import type { RemoteEntry } from 'lib/core/1.domain';
+import type { TransformRemoteEntry } from 'lib/core/2.app/config';
 
 vi.mock('lib/node/utils/read-source', () => ({
   readSourceBytes: vi.fn(),
@@ -174,5 +176,74 @@ describe('createFsRemoteEntryProvider', () => {
         }
       }
     );
+  });
+
+  // Node reads every remote entry here, the host entry for `hostInstances` included, so the transform must run
+  // in this provider as it does in the browser one.
+  describe('transformRemoteEntryFn', () => {
+    const raw = {
+      name: 'r',
+      shared: [
+        {
+          singleton: true,
+          strictVersion: true,
+          requiredVersion: '^1.0.0',
+          version: '1.0.0',
+          packageName: 'rxjs',
+          outFileName: 'rxjs.js',
+        },
+      ],
+    };
+    const serve = () =>
+      readBytes.mockResolvedValue(new TextEncoder().encode(JSON.stringify(raw)).buffer);
+
+    const providerWith = (transformRemoteEntryFn: TransformRemoteEntry) =>
+      createFsRemoteEntryProvider({ ...mockConfig(), transformRemoteEntryFn });
+
+    it('resolves the entry the function returns', async () => {
+      serve();
+
+      // Returns a copy and leaves its argument alone, so only a provider that uses the result passes.
+      const result = await providerWith(async entry => ({
+        ...entry,
+        shared: entry.shared.map(s => ({ ...s, singleton: false })),
+      })).provide('/local/remoteEntry.json');
+
+      expect(result.shared.map(s => s.singleton)).toEqual([false]);
+    });
+
+    it('passes the normalized entry', async () => {
+      serve();
+      const transform = vi.fn((entry: RemoteEntry) => entry);
+
+      await providerWith(transform).provide('/local/remoteEntry.json');
+
+      expect(transform).toHaveBeenCalledWith({
+        name: 'r',
+        url: '/local/remoteEntry.json',
+        exposes: [],
+        shared: [
+          {
+            singleton: true,
+            strictVersion: true,
+            requiredVersion: '^1.0.0',
+            version: '1.0.0',
+            packageName: 'rxjs',
+            entries: { rxjs: 'rxjs.js' },
+          },
+        ],
+      });
+    });
+
+    it("rejects with the function's own error, not as a failed read", async () => {
+      serve();
+      const error = new Error('transform failed');
+
+      await expect(
+        providerWith(() => {
+          throw error;
+        }).provide('/local/remoteEntry.json')
+      ).rejects.toBe(error);
+    });
   });
 });
