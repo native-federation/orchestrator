@@ -1,3 +1,5 @@
+import type { RemoteEntry } from 'lib/core/1.domain';
+
 export type ModeProfileConfig = {
   latestSharedExternal: boolean;
   skipInvalidExternalVersions: boolean;
@@ -24,6 +26,7 @@ export type ModeConfig = {
   strict: ModeStrictnessConfig;
   profile: ModeProfileConfig;
   feature: ModeFeatureConfig;
+  transformRemoteEntryFn?: TransformRemoteEntry;
 };
 
 export type ModeOptions = {
@@ -38,4 +41,7 @@ export type ModeOptions = {
     scopeUncoveredEntrypoints?: boolean;
   };
   feature?: Partial<ModeFeatureConfig>;
+  transformRemoteEntryFn?: TransformRemoteEntry;
 };
+
+export type TransformRemoteEntry = (entry: RemoteEntry) => RemoteEntry | Promise<RemoteEntry>;

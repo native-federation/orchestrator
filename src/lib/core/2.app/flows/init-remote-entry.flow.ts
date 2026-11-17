@@ -5,10 +5,13 @@ import type { InitRemoteEntryFlow } from '../driver-ports/init/flow.contract';
 
 export const createInitRemoteEntryFlow = ({
   flow,
+  config,
 }: FLOW_FACTORY<InitDriversContract>): InitRemoteEntryFlow => {
+  const transform = config.transformRemoteEntryFn;
   const processDynamicRemoteEntry = (remoteEntry: RemoteEntry) =>
-    flow
-      .updateCache(remoteEntry)
+    Promise.resolve(remoteEntry)
+      .then(entry => (transform ? transform(entry) : entry))
+      .then(flow.updateCache)
       .then(flow.poolDynamicExternals)
       .then(flow.convertToImportMap)
       .then(importMap => flow.commitChanges(importMap, { markUndecided: true }));
