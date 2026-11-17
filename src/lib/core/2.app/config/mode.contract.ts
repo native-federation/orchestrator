@@ -14,6 +14,10 @@ export type ModeFeatureConfig = {
   convertFlatSharedInfo: boolean;
 };
 
+export type ModeDevtoolsConfig = {
+  transformRemoteEntryFn?: TransformRemoteEntry;
+};
+
 export type ModeStrictnessConfig = {
   strictRemoteEntry: boolean;
   strictExternalCompatibility: boolean;
@@ -26,7 +30,7 @@ export type ModeConfig = {
   strict: ModeStrictnessConfig;
   profile: ModeProfileConfig;
   feature: ModeFeatureConfig;
-  transformRemoteEntryFn?: TransformRemoteEntry;
+  devtools: ModeDevtoolsConfig;
 };
 
 export type ModeOptions = {
@@ -41,7 +45,7 @@ export type ModeOptions = {
     scopeUncoveredEntrypoints?: boolean;
   };
   feature?: Partial<ModeFeatureConfig>;
-  transformRemoteEntryFn?: TransformRemoteEntry;
+  devtools?: ModeDevtoolsConfig;
 };
 
 export type TransformRemoteEntry = (entry: RemoteEntry) => RemoteEntry | Promise<RemoteEntry>;

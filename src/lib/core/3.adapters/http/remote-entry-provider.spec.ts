@@ -156,7 +156,7 @@ describe('createRemoteEntryProvider', () => {
   });
 
   // The transform runs on what the provider delivers, so every caller (init, dynamic init, node) gets it.
-  describe('transformRemoteEntryFn', () => {
+  describe('devtools.transformRemoteEntryFn', () => {
     const url = 'http://r/remoteEntry.json';
     const raw = {
       name: 'r',
@@ -173,7 +173,7 @@ describe('createRemoteEntryProvider', () => {
     };
 
     const providerWith = (transformRemoteEntryFn: TransformRemoteEntry) =>
-      createRemoteEntryProvider({ ...mockConfig(), transformRemoteEntryFn });
+      createRemoteEntryProvider({ ...mockConfig(), devtools: { transformRemoteEntryFn } });
 
     it('resolves the entry the function returns', async () => {
       mockFetchAPI(raw as Partial<RemoteEntry>, { success: true });

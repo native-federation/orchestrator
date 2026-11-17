@@ -16,13 +16,13 @@ import {
 } from 'lib/testing/domain/scope-url.mock';
 
 /**
- * `transformRemoteEntryFn` runs in the remoteEntry provider, once per fetched remoteEntry, right after the
+ * `devtools.transformRemoteEntryFn` runs in the remoteEntry provider, once per fetched remoteEntry, right after the
  * fetch and before the orchestrator's checks (name, cache/override marking), processing and pooling, in both
  * `initFederation` and `initRemoteEntry`. A remote served from storage is not fetched, so not transformed.
  * The functions below never mutate their argument, so an assertion on the result can only pass when the
  * returned entry is the one used.
  */
-describe('initFederation (transformRemoteEntryFn)', () => {
+describe('initFederation (devtools.transformRemoteEntryFn)', () => {
   let maps: ImportMap[];
 
   const mfe3 = mockRemoteEntry_MFE3({ exposes: [mockExposedModuleA()] });
@@ -50,7 +50,7 @@ describe('initFederation (transformRemoteEntryFn)', () => {
         return importMap;
       },
       loadModuleFn: async () => ({}),
-      ...(transformRemoteEntryFn ? { transformRemoteEntryFn } : {}),
+      ...(transformRemoteEntryFn ? { devtools: { transformRemoteEntryFn } } : {}),
     });
 
   const storageSnapshot = () =>
@@ -144,7 +144,7 @@ describe('initFederation (transformRemoteEntryFn)', () => {
           setImportMapFn: async importMap => importMap,
           loadModuleFn: async () => ({}),
           strict: { strictRemoteEntry: true },
-          transformRemoteEntryFn: throwOnMfe2,
+          devtools: { transformRemoteEntryFn: throwOnMfe2 },
         })
       ).rejects.toThrow("Could not fetch remote 'team/mfe2'");
     });

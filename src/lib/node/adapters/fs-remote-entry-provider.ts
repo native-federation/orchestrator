@@ -27,7 +27,9 @@ const createFsRemoteEntryProvider = (config: ModeConfig): ForProvidingRemoteEntr
   return {
     provide: async function (remoteEntryUrl: string, opts: { integrity?: string } = {}) {
       const entry = await read(remoteEntryUrl, opts.integrity);
-      return config.transformRemoteEntryFn ? config.transformRemoteEntryFn(entry) : entry;
+      return config.devtools.transformRemoteEntryFn
+        ? config.devtools.transformRemoteEntryFn(entry)
+        : entry;
     },
   };
 };

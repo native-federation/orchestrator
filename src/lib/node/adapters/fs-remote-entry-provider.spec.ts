@@ -180,7 +180,7 @@ describe('createFsRemoteEntryProvider', () => {
 
   // Node reads every remote entry here, the host entry for `hostInstances` included, so the transform must run
   // in this provider as it does in the browser one.
-  describe('transformRemoteEntryFn', () => {
+  describe('devtools.transformRemoteEntryFn', () => {
     const raw = {
       name: 'r',
       shared: [
@@ -198,7 +198,7 @@ describe('createFsRemoteEntryProvider', () => {
       readBytes.mockResolvedValue(new TextEncoder().encode(JSON.stringify(raw)).buffer);
 
     const providerWith = (transformRemoteEntryFn: TransformRemoteEntry) =>
-      createFsRemoteEntryProvider({ ...mockConfig(), transformRemoteEntryFn });
+      createFsRemoteEntryProvider({ ...mockConfig(), devtools: { transformRemoteEntryFn } });
 
     it('resolves the entry the function returns', async () => {
       serve();
