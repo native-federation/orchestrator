@@ -273,11 +273,11 @@ The strictness part will define how the orchestrator behaves when an unexpected 
 
 `transformRemoteEntryFn` lets the host adjust each fetched remoteEntry before it is resolved, for example to stop sharing packages while debugging.
 
-- It is called once per fetched remoteEntry, in `initFederation` and `initRemoteEntry`, after the fetch and before resolution, including the host's own entry. Mutate the entry or return a spread of it; the returned entry is used.
-- Keep `name`, `url`, `host` and `override`: they are set before the call. `override` only says the entry replaces a stored remote; select remotes by `entry.name`. `url` is the fetched URL and may carry `?cacheTag=`.
+- It is called each time a remoteEntry is fetched (`initFederation`, `initRemoteEntry`, and on node the host entry read for `hostInstances`), right after the fetch and before the orchestrator checks or resolves it. One entry may be transformed more than once, so keep the transform idempotent. Mutate the entry or return a spread of it; the returned entry is used.
+- Don't change `name` or `url`: the name is checked against the manifest afterwards. `host` and `override` are not set yet; recognize the host's own entry by its `url` or `name`. `url` is the fetched URL and may carry `?cacheTag=`.
 - `shared` holds one record per package (`packageName` and `entries`), but a flat (pre-4.3) remoteEntry may list one record per entry point, so match packages by prefix (`startsWith('@angular/')`). Mutate or spread the records; don't rebuild them.
 - A remote served from storage is not fetched, so it is not transformed again: a host that changes its transform between page loads should clear the storage (or use non-persistent storage).
-- A throwing transform fails `initFederation`. In `initRemoteEntry` it fails like a fetch error (see `strict.strictRemoteEntry`).
+- A throwing transform fails like a failed fetch: the remote is skipped with a warning, or, with `strict.strictRemoteEntry`, `initFederation` and `initRemoteEntry` reject.
 
 ```typescript
 import { initFederation } from '@softarc/native-federation-orchestrator';
