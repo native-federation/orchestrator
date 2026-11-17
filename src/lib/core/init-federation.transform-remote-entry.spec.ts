@@ -16,8 +16,9 @@ import {
 } from 'lib/testing/domain/scope-url.mock';
 
 /**
- * `transformRemoteEntryFn` runs once per fetched remoteEntry, after the fetch (and the cache/override
- * decisions) and before processing and pooling, in both `initFederation` and `initRemoteEntry`.
+ * `transformRemoteEntryFn` runs in the remoteEntry provider, once per fetched remoteEntry, right after the
+ * fetch and before the orchestrator's checks (name, cache/override marking), processing and pooling, in both
+ * `initFederation` and `initRemoteEntry`. A remote served from storage is not fetched, so not transformed.
  * The functions below never mutate their argument, so an assertion on the result can only pass when the
  * returned entry is the one used.
  */
@@ -80,7 +81,7 @@ describe('initFederation (transformRemoteEntryFn)', () => {
     await init('calls', transform);
 
     expect(transform).toHaveBeenCalledTimes(2);
-    // Exact argument lists: `entries.map(transform)` would pass the index and array as well.
+    // Exact argument lists: the provider passes the entry only.
     expect(transform).toHaveBeenCalledWith(
       expect.objectContaining({ name: 'team/mfe1', url: mockRemoteEntry_MFE1().url })
     );
@@ -115,20 +116,44 @@ describe('initFederation (transformRemoteEntryFn)', () => {
     });
   });
 
-  it('rejects initFederation when the function throws', async () => {
-    await expect(
-      init('throws', () => {
-        throw new Error('transform failed');
-      })
-    ).rejects.toThrow('transform failed');
+  describe('when the function throws', () => {
+    const throwOnMfe2: TransformRemoteEntry = entry => {
+      if (entry.name === 'team/mfe2') throw new Error('transform failed');
+      return entry;
+    };
+
+    beforeEach(() => {
+      vi.spyOn(console, 'error').mockImplementation(() => undefined);
+      vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    });
+
+    it('skips that remote like a failed fetch', async () => {
+      const page = await init('throws', throwOnMfe2);
+      const map = maps.pop()!;
+
+      expect(page.adapters.remoteInfoRepo.contains('team/mfe2')).toBe(false);
+      expect(page.adapters.remoteInfoRepo.contains('team/mfe1')).toBe(true);
+      expect(JSON.stringify(map)).not.toContain(mockScopeUrl_MFE2());
+    });
+
+    it('rejects initFederation with strictRemoteEntry', async () => {
+      await expect(
+        initFederation(mockManifest(), {
+          storage: sessionStorageEntry,
+          storageNamespace: 'throws-strict',
+          setImportMapFn: async importMap => importMap,
+          loadModuleFn: async () => ({}),
+          strict: { strictRemoteEntry: true },
+          transformRemoteEntryFn: throwOnMfe2,
+        })
+      ).rejects.toThrow("Could not fetch remote 'team/mfe2'");
+    });
   });
 
   describe('on a later page with the same storage', () => {
     it('does not transform a remote served from storage again', async () => {
       const page1 = vi.fn(unshare);
       await init('cached', page1);
-      // Cold start: nothing in storage, so no entry replaces a stored remote.
-      page1.mock.calls.forEach(([entry]) => expect(entry.override).toBeUndefined());
       const page1Map = maps.pop()!;
       expect(page1Map.scopes?.[mockScopeUrl_MFE1()]).toHaveProperty('dep-a');
 
@@ -141,25 +166,6 @@ describe('initFederation (transformRemoteEntryFn)', () => {
       expect(maps.pop()!.scopes?.[mockScopeUrl_MFE1()]).toEqual(
         page1Map.scopes?.[mockScopeUrl_MFE1()]
       );
-    });
-
-    it('passes an entry that replaces a stored remote with override: true', async () => {
-      await init('override');
-
-      // Copied at call time: the recorded argument is the live entry, which a later step could still mark.
-      const seen: RemoteEntry[] = [];
-      await init(
-        'override',
-        entry => {
-          seen.push({ ...entry });
-          return entry;
-        },
-        { ...mockManifest(), 'team/mfe2': mfe2Moved.url }
-      );
-
-      expect(seen).toEqual([
-        expect.objectContaining({ name: 'team/mfe2', url: mfe2Moved.url, override: true }),
-      ]);
     });
   });
 
