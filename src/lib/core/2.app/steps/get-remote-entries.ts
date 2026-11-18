@@ -173,7 +173,12 @@ export function createGetRemoteEntries(
     } catch (error) {
       if (config.strict.strictRemoteEntry) {
         config.log.error(1, `Could not fetch remote '${remoteName}'.`, error);
-        return Promise.reject(new NFError(`Could not fetch remote '${remoteName}'`));
+        return Promise.reject(
+          new NFError(
+            `Could not fetch remote '${remoteName}'`,
+            error instanceof Error ? error : undefined
+          )
+        );
       }
       config.log.warn(1, `Could not fetch remote '${remoteName}'. skipping init.`, error);
 

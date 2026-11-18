@@ -32,4 +32,5 @@ export const mockConfig = (): ConfigContract => ({
   feature: {
     convertFlatSharedInfo: false,
   },
+  devtools: {},
 });

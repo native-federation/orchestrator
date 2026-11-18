@@ -63,6 +63,7 @@ describe('DefaultConfig', () => {
         feature: {
           convertFlatSharedInfo: false,
         },
+        devtools: {},
       });
     });
   });

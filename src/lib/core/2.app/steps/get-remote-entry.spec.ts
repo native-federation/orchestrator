@@ -43,11 +43,13 @@ describe('createGetRemoteEntry', () => {
     });
 
     it('should throw error if remoteEntryProvider fails', async () => {
-      adapters.remoteEntryProvider.provide = vi.fn().mockRejectedValue(new Error('Fetch error'));
+      const fetchError = new Error('Fetch error');
+      adapters.remoteEntryProvider.provide = vi.fn().mockRejectedValue(fetchError);
 
+      // toEqual compares `cause`: with the default noop logger it is the only place a strict host sees why.
       await expect(
         getRemoteEntry(mockScopeUrl_MFE1({ file: 'remoteEntry.json' }), 'team/mfe1')
-      ).rejects.toThrow('Could not fetch remoteEntry.');
+      ).rejects.toEqual(new NFError('[team/mfe1] Could not fetch remoteEntry.', fetchError));
     });
 
     it('should log a warning if fetched remote name does not match requested name', async () => {

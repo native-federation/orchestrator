@@ -18,7 +18,7 @@ export {
   StorageKey,
 } from './storage.contract';
 export { NFOrchestratorGlobal, NFOrchestratorStorageInfo } from './orchestrator-global.contract';
-export { ModeOptions, ModeConfig } from './mode.contract';
+export { ModeOptions, ModeConfig, TransformRemoteEntry } from './mode.contract';
 export { HostOptions, HostConfig } from './host.contract';
 
 export { NFOptions, ConfigContract } from './config.contract';

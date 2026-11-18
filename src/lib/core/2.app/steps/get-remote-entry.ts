@@ -64,7 +64,10 @@ export function createGetRemoteEntry(
         error
       );
       return Promise.reject(
-        new NFError(`[${remoteName ?? remoteEntryUrl}] Could not fetch remoteEntry.`)
+        new NFError(
+          `[${remoteName ?? remoteEntryUrl}] Could not fetch remoteEntry.`,
+          error instanceof Error ? error : undefined
+        )
       );
     }
   };

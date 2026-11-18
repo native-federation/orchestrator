@@ -26,5 +26,8 @@ export const createModeConfig = (override: ModeOptions): ModeConfig => {
     feature: {
       convertFlatSharedInfo: override.feature?.convertFlatSharedInfo ?? false,
     },
+    devtools: {
+      transformRemoteEntryFn: override.devtools?.transformRemoteEntryFn,
+    },
   };
 };
