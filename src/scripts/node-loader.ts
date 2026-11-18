@@ -95,13 +95,11 @@ export async function resolve(
 
   // Not every relative/absolute specifier has an import-map entry (e.g. a sibling chunk); resolve those directly.
   if (!mapped) {
-    const isRelative =
-      specifier.startsWith('/') || specifier.startsWith('./') || specifier.startsWith('../');
     try {
-      if (isRelative && effectiveParent) {
+      if (isRelativeSpecifier(specifier) && effectiveParent) {
         mapped = new URL(specifier, effectiveParent).href;
         federated ||= federatedURLs.has(effectiveParent);
-      } else if (/^https?:\/\//.test(specifier)) {
+      } else if (isHttpURL(specifier)) {
         mapped = specifier;
       }
     } catch {
@@ -110,11 +108,19 @@ export async function resolve(
   }
 
   // nextResolve() can't handle absolute http(s) URLs (throws ERR_INVALID_URL); short-circuit like load() does.
-  if (mapped && (mapped.startsWith('http://') || mapped.startsWith('https://'))) {
+  if (mapped && isHttpURL(mapped)) {
     return { url: mapped, format: 'module', shortCircuit: true };
   }
 
-  const result = await nextResolve(mapped ?? specifier, context);
+  const result = await nextResolve(mapped ?? specifier, context).catch((e: unknown) => {
+    // Node can't resolve a bare specifier against an http(s) parent and only reports "Invalid URL".
+    if (isHttpURL(effectiveParent) && (e as { code?: string })?.code === 'ERR_INVALID_URL') {
+      throw new Error(
+        `Unable to resolve '${specifier}' imported from ${effectiveParent}: not in the import map`
+      );
+    }
+    throw e;
+  });
   if (!federated) return result;
   federatedURLs.add(result.url);
   return { ...result, format: 'module' };
@@ -142,7 +148,7 @@ export async function load(
       source: synthHostModule(specifier, hostInstanceKeys[specifier]),
     };
   }
-  if (url.startsWith('http://') || url.startsWith('https://')) {
+  if (isHttpURL(url)) {
     lastRemoteBaseURL = url;
     const source = await fetchSource(url);
     return { shortCircuit: true, format: 'module', source, responseURL: url };
@@ -242,11 +248,17 @@ function resolveImportsMatch(normalizedSpecifier: string, specifierMap: Imports)
   return null;
 }
 
+function isHttpURL(url: string | undefined): url is string {
+  return !!url && (url.startsWith('http://') || url.startsWith('https://'));
+}
+
+function isRelativeSpecifier(specifier: string): boolean {
+  return specifier.startsWith('/') || specifier.startsWith('./') || specifier.startsWith('../');
+}
+
 function parseURLLikeSpecifier(specifier: string, base: string): string | null {
-  const useBase =
-    specifier.startsWith('/') || specifier.startsWith('./') || specifier.startsWith('../');
   try {
-    return new URL(specifier, useBase ? base : undefined).href;
+    return new URL(specifier, isRelativeSpecifier(specifier) ? base : undefined).href;
   } catch {
     return null;
   }

@@ -231,6 +231,40 @@ describe('node-loader hooks', () => {
     });
   });
 
+  describe('unresolvable specifiers', () => {
+    const invalidURL = Object.assign(new TypeError('Invalid URL'), { code: 'ERR_INVALID_URL' });
+
+    it('names the specifier and parent when a bare import from an http module is not mapped', async () => {
+      const loader = await freshLoader();
+      const next = vi.fn().mockRejectedValue(invalidURL);
+
+      await expect(
+        loader.resolve('zone.js/plugins/task-tracking', { parentURL: 'https://host/core.js' }, next)
+      ).rejects.toThrow(
+        "Unable to resolve 'zone.js/plugins/task-tracking' imported from https://host/core.js: not in the import map"
+      );
+    });
+
+    it("rethrows nextResolve's error for a file:// parent", async () => {
+      const loader = await freshLoader();
+      const next = vi.fn().mockRejectedValue(invalidURL);
+
+      await expect(loader.resolve('pkg', { parentURL: 'file:///app/main.mjs' }, next)).rejects.toBe(
+        invalidURL
+      );
+    });
+
+    it('rethrows other errors from an http parent unchanged', async () => {
+      const loader = await freshLoader();
+      const notFound = Object.assign(new Error('nope'), { code: 'ERR_MODULE_NOT_FOUND' });
+      const next = vi.fn().mockRejectedValue(notFound);
+
+      await expect(loader.resolve('pkg', { parentURL: 'https://host/a.js' }, next)).rejects.toBe(
+        notFound
+      );
+    });
+  });
+
   // #79: only federated file:// modules are forced to ESM; host dependencies keep Node's format.
   describe('module format', () => {
     it('marks an import-map target as ESM', async () => {

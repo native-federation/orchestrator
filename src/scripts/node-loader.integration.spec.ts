@@ -104,6 +104,41 @@ describe('node-loader in a real Node process', () => {
     expect(JSON.parse(out)).toEqual({ list: 'exposed' });
   });
 
+  // Remote modules are served from a worker thread: the hooks block the child's main thread
+  // while they fetch, so a server on that thread could never answer.
+  it('names the specifier and parent of an unmapped bare import from an http module, and keeps builtins', async () => {
+    const sources = {
+      '/unmapped.js': "import 'not-in-the-map';\nexport const ok = true;\n",
+      '/builtins.js':
+        "import { sep } from 'node:path';\nimport { EOL } from 'os';\nexport const ok = !!sep && !!EOL;\n",
+    };
+    const out = await runHost('host-bare.mjs', {}, [
+      "import { Worker } from 'node:worker_threads';",
+      `const sources = ${JSON.stringify(sources)};`,
+      'const worker = new Worker(`',
+      "  const { createServer } = require('node:http');",
+      "  const { parentPort, workerData } = require('node:worker_threads');",
+      '  const server = createServer((req, res) => {',
+      "    res.writeHead(200, { 'content-type': 'text/javascript' });",
+      '    res.end(workerData[req.url]);',
+      '  });',
+      '  server.listen(0, () => parentPort.postMessage(server.address().port));',
+      '`, { eval: true, workerData: sources });',
+      "const port = await new Promise(r => worker.once('message', r));",
+      'const base = `http://127.0.0.1:${port}`;',
+      "const unmapped = await import(base + '/unmapped.js').then(() => null, e => e.message);",
+      "const { ok: builtins } = await import(base + '/builtins.js');",
+      'await worker.terminate();',
+      'console.log(JSON.stringify({ base, unmapped, builtins }));',
+    ]);
+
+    const { base, unmapped, builtins } = JSON.parse(out);
+    expect(unmapped).toBe(
+      `Unable to resolve 'not-in-the-map' imported from ${base}/unmapped.js: not in the import map`
+    );
+    expect(builtins).toBe(true);
+  });
+
   // The hooks block the child's main thread during the fetch, so its own server can never answer.
   it('rejects an import from a URL that never answers once the fetch timeout passes', async () => {
     const out = await runHost('host-timeout.mjs', { fetchTimeoutMs: 300 }, [
