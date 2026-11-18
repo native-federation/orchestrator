@@ -50,11 +50,13 @@ const federatedURLs = new Set<string>();
 export function initialize(data: InitData = {}): void {
   if (data.initialImportMap) {
     activeMap = normalize(data.initialImportMap);
+    markFederated(activeMap);
   }
   if (data.port) {
     data.port.on('message', (msg: IncomingMessage) => {
       if (msg && msg.type === 'set-import-map') {
         activeMap = normalize(msg.map);
+        markFederated(activeMap);
         data.port!.postMessage({ type: 'import-map-applied' });
       } else if (msg && msg.type === 'set-host-instances') {
         hostInstanceKeys = msg.keys ?? Object.create(null);
@@ -82,7 +84,11 @@ export async function resolve(
   // context.parentURL can be an empty string (not just missing) here; treat it as absent.
   const effectiveParent = context.parentURL || lastRemoteBaseURL;
   let mapped = resolveSpecifier(activeMap, specifier, effectiveParent);
-  let federated = mapped !== null;
+  // Checked before nextResolve, whose URL is the realpath: an exposed module imported by URL must
+  // match its map target as written.
+  let federated =
+    mapped !== null ||
+    federatedURLs.has(parseURLLikeSpecifier(specifier, effectiveParent ?? baseURL) ?? specifier);
 
   // Not every relative/absolute specifier has an import-map entry (e.g. a sibling chunk); resolve those directly.
   if (!mapped) {
@@ -91,7 +97,7 @@ export async function resolve(
     try {
       if (isRelative && effectiveParent) {
         mapped = new URL(specifier, effectiveParent).href;
-        federated = federatedURLs.has(effectiveParent);
+        federated ||= federatedURLs.has(effectiveParent);
       } else if (/^https?:\/\//.test(specifier)) {
         mapped = specifier;
       }
@@ -226,6 +232,14 @@ function parseURLLikeSpecifier(specifier: string, base: string): string | null {
     return new URL(specifier, useBase ? base : undefined).href;
   } catch {
     return null;
+  }
+}
+
+function markFederated(map: ImportMap): void {
+  for (const imports of [map.imports, ...Object.values(map.scopes ?? {})]) {
+    for (const target of Object.values(imports)) {
+      federatedURLs.add(parseURLLikeSpecifier(target, baseURL) ?? target);
+    }
   }
 }
 

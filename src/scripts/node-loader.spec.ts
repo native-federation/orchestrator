@@ -45,7 +45,9 @@ describe('node-loader hooks', () => {
     it('subscribes to port messages and acks set-import-map', async () => {
       const loader = await freshLoader();
       const port = new FakePort();
-      loader.initialize({ port: port as unknown as EventEmitter & { postMessage(m: unknown): void } });
+      loader.initialize({
+        port: port as unknown as EventEmitter & { postMessage(m: unknown): void },
+      });
 
       port.emit({ type: 'set-import-map', map: { imports: { bar: 'file:///bar.mjs' } } });
 
@@ -55,7 +57,9 @@ describe('node-loader hooks', () => {
     it('updates the active import map after a set-import-map message', async () => {
       const loader = await freshLoader();
       const port = new FakePort();
-      loader.initialize({ port: port as unknown as EventEmitter & { postMessage(m: unknown): void } });
+      loader.initialize({
+        port: port as unknown as EventEmitter & { postMessage(m: unknown): void },
+      });
 
       port.emit({ type: 'set-import-map', map: { imports: { live: 'file:///live.mjs' } } });
 
@@ -67,7 +71,9 @@ describe('node-loader hooks', () => {
     it('acks set-host-instances with host-instances-applied', async () => {
       const loader = await freshLoader();
       const port = new FakePort();
-      loader.initialize({ port: port as unknown as EventEmitter & { postMessage(m: unknown): void } });
+      loader.initialize({
+        port: port as unknown as EventEmitter & { postMessage(m: unknown): void },
+      });
 
       port.emit({ type: 'set-host-instances', keys: { '@angular/core': ['Component'] } });
 
@@ -77,7 +83,9 @@ describe('node-loader hooks', () => {
     it('ignores port messages of other types', async () => {
       const loader = await freshLoader();
       const port = new FakePort();
-      loader.initialize({ port: port as unknown as EventEmitter & { postMessage(m: unknown): void } });
+      loader.initialize({
+        port: port as unknown as EventEmitter & { postMessage(m: unknown): void },
+      });
 
       port.emit({ type: 'something-else' });
       port.emit(null);
@@ -88,7 +96,9 @@ describe('node-loader hooks', () => {
     it('unrefs the port if it supports it', async () => {
       const loader = await freshLoader();
       const port = new FakePort();
-      loader.initialize({ port: port as unknown as EventEmitter & { postMessage(m: unknown): void } });
+      loader.initialize({
+        port: port as unknown as EventEmitter & { postMessage(m: unknown): void },
+      });
       expect(port.unref).toHaveBeenCalled();
     });
   });
@@ -236,7 +246,11 @@ describe('node-loader hooks', () => {
     it('marks a relative chunk of a federated module as ESM', async () => {
       const loader = await freshLoader();
       loader.initialize({ initialImportMap: { imports: { mfe: 'file:///dist/mfe/entry.js' } } });
-      await loader.resolve('mfe', {}, vi.fn().mockResolvedValue({ url: 'file:///dist/mfe/entry.js' }));
+      await loader.resolve(
+        'mfe',
+        {},
+        vi.fn().mockResolvedValue({ url: 'file:///dist/mfe/entry.js' })
+      );
       const next = vi.fn().mockResolvedValue({ url: 'file:///dist/mfe/chunk-a.js', format: null });
 
       const result = await loader.resolve(
@@ -246,6 +260,37 @@ describe('node-loader hooks', () => {
       );
 
       expect(result).toEqual({ url: 'file:///dist/mfe/chunk-a.js', format: 'module' });
+    });
+
+    it('marks a map target imported by its URL as ESM, even when Node resolves it elsewhere', async () => {
+      const loader = await freshLoader();
+      loader.initialize({
+        initialImportMap: { imports: { 'mfe/./List': 'file:///deploy/mfe/List.js' } },
+      });
+      // nextResolve returns the realpath of a symlinked deploy dir.
+      const next = vi
+        .fn()
+        .mockResolvedValue({ url: 'file:///releases/7/mfe/List.js', format: null });
+
+      const result = await loader.resolve('file:///deploy/mfe/List.js', {}, next);
+
+      expect(result).toEqual({ url: 'file:///releases/7/mfe/List.js', format: 'module' });
+    });
+
+    it('marks a map target imported relatively from a non-federated parent as ESM', async () => {
+      const loader = await freshLoader();
+      loader.initialize({
+        initialImportMap: { imports: { 'mfe/./List': 'file:///app/dist/mfe/List.js' } },
+      });
+      const next = vi.fn().mockResolvedValue({ url: 'file:///app/dist/mfe/List.js', format: null });
+
+      const result = await loader.resolve(
+        './dist/mfe/List.js',
+        { parentURL: 'file:///app/server.mjs' },
+        next
+      );
+
+      expect(result).toEqual({ url: 'file:///app/dist/mfe/List.js', format: 'module' });
     });
 
     it("keeps nextResolve's format for an unmapped bare specifier", async () => {
@@ -271,7 +316,9 @@ describe('node-loader hooks', () => {
     const withHostInstances = async (keys: Record<string, string[]>): Promise<LoaderModule> => {
       const loader = await freshLoader();
       const port = new FakePort();
-      loader.initialize({ port: port as unknown as EventEmitter & { postMessage(m: unknown): void } });
+      loader.initialize({
+        port: port as unknown as EventEmitter & { postMessage(m: unknown): void },
+      });
       port.emit({ type: 'set-host-instances', keys });
       return loader;
     };
@@ -289,8 +336,13 @@ describe('node-loader hooks', () => {
     it('bridged specifiers win over the import map', async () => {
       const loader = await freshLoader();
       const port = new FakePort();
-      loader.initialize({ port: port as unknown as EventEmitter & { postMessage(m: unknown): void } });
-      port.emit({ type: 'set-import-map', map: { imports: { '@angular/core': 'file:///ng.mjs' } } });
+      loader.initialize({
+        port: port as unknown as EventEmitter & { postMessage(m: unknown): void },
+      });
+      port.emit({
+        type: 'set-import-map',
+        map: { imports: { '@angular/core': 'file:///ng.mjs' } },
+      });
       port.emit({ type: 'set-host-instances', keys: { '@angular/core': ['Component'] } });
       const next = vi.fn();
 
@@ -301,7 +353,9 @@ describe('node-loader hooks', () => {
     });
 
     it('synthesizes a module that re-exports named keys and default from the host instances', async () => {
-      const loader = await withHostInstances({ '@angular/core': ['Component', 'default', 'ɵsetClassMetadata'] });
+      const loader = await withHostInstances({
+        '@angular/core': ['Component', 'default', 'ɵsetClassMetadata'],
+      });
 
       const result = await loader.load('nf-host:%40angular%2Fcore', {}, vi.fn());
 
