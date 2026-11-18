@@ -7,7 +7,6 @@ import { mockRemoteEntry_MFE1 } from 'lib/testing/domain/remote-entry/remote-ent
 import { mockScopeUrl_MFE1 } from 'lib/testing/domain/scope-url.mock';
 import { mockConfig } from 'lib/testing/config.mock';
 import { NFError } from 'lib/core/native-federation.error';
-import type { TransformRemoteEntry } from 'lib/core/2.app/config';
 
 describe('createRemoteEntryProvider', () => {
   let remoteEntryProvider: ForProvidingRemoteEntries;
@@ -153,80 +152,5 @@ describe('createRemoteEntryProvider', () => {
         ]);
       }
     );
-  });
-
-  // The transform runs on what the provider delivers, so every caller (init, dynamic init, node) gets it.
-  describe('devtools.transformRemoteEntryFn', () => {
-    const url = 'http://r/remoteEntry.json';
-    const raw = {
-      name: 'r',
-      shared: [
-        {
-          singleton: true,
-          strictVersion: true,
-          requiredVersion: '^1.0.0',
-          version: '1.0.0',
-          packageName: 'rxjs',
-          outFileName: 'rxjs.js',
-        },
-      ],
-    };
-
-    const providerWith = (transformRemoteEntryFn: TransformRemoteEntry) =>
-      createRemoteEntryProvider({ ...mockConfig(), devtools: { transformRemoteEntryFn } });
-
-    it('resolves the entry the function returns', async () => {
-      mockFetchAPI(raw as Partial<RemoteEntry>, { success: true });
-
-      // Returns a copy and leaves its argument alone, so only a provider that uses the result passes.
-      const result = await providerWith(async entry => ({
-        ...entry,
-        shared: entry.shared.map(s => ({ ...s, singleton: false })),
-      })).provide(url);
-
-      expect(result.shared.map(s => s.singleton)).toEqual([false]);
-    });
-
-    it('passes the normalized entry', async () => {
-      mockFetchAPI(raw as Partial<RemoteEntry>, { success: true });
-      const transform = vi.fn((entry: RemoteEntry) => entry);
-
-      await providerWith(transform).provide(url);
-
-      expect(transform).toHaveBeenCalledWith({
-        name: 'r',
-        url,
-        exposes: [],
-        shared: [
-          {
-            singleton: true,
-            strictVersion: true,
-            requiredVersion: '^1.0.0',
-            version: '1.0.0',
-            packageName: 'rxjs',
-            entries: { rxjs: 'rxjs.js' },
-          },
-        ],
-      });
-    });
-
-    it("rejects with the function's own error, not as a failed fetch", async () => {
-      mockFetchAPI(raw as Partial<RemoteEntry>, { success: true });
-      const error = new Error('transform failed');
-
-      await expect(
-        providerWith(() => {
-          throw error;
-        }).provide(url)
-      ).rejects.toBe(error);
-    });
-
-    it('does not call the function when the fetch fails', async () => {
-      mockFetchAPI(raw as Partial<RemoteEntry>, { success: false });
-      const transform = vi.fn((entry: RemoteEntry) => entry);
-
-      await expect(providerWith(transform).provide(url)).rejects.toBeInstanceOf(NFError);
-      expect(transform).not.toHaveBeenCalled();
-    });
   });
 });

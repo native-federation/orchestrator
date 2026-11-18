@@ -13,23 +13,16 @@ const createFsRemoteEntryProvider = (config: ModeConfig): ForProvidingRemoteEntr
     throw new NFError(`Read of '${remoteEntryUrl}' returned ${msg}`);
   };
 
-  const read = async (remoteEntryUrl: string, integrity?: string) => {
-    try {
-      const bytes = await readSourceBytes(remoteEntryUrl);
-      if (integrity) await verifyIntegrity(bytes, integrity);
-      const raw = JSON.parse(new TextDecoder().decode(bytes)) as RawRemoteEntry;
-      return normalizeRemoteEntry(raw, remoteEntryUrl, config);
-    } catch (err) {
-      return formatError(remoteEntryUrl)(err);
-    }
-  };
-
   return {
     provide: async function (remoteEntryUrl: string, opts: { integrity?: string } = {}) {
-      const entry = await read(remoteEntryUrl, opts.integrity);
-      return config.devtools.transformRemoteEntryFn
-        ? config.devtools.transformRemoteEntryFn(entry)
-        : entry;
+      try {
+        const bytes = await readSourceBytes(remoteEntryUrl);
+        if (opts.integrity) await verifyIntegrity(bytes, opts.integrity);
+        const raw = JSON.parse(new TextDecoder().decode(bytes)) as RawRemoteEntry;
+        return normalizeRemoteEntry(raw, remoteEntryUrl, config);
+      } catch (err) {
+        return formatError(remoteEntryUrl)(err);
+      }
     },
   };
 };

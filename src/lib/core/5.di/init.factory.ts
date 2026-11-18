@@ -15,6 +15,7 @@ import { createPoolDynamicExternals } from '../2.app/steps/pooling/pool-dynamic-
 import { createConvertToImportMap } from '../2.app/steps/convert-to-import-map';
 import type { DrivingContract } from '../2.app/driving-ports/driving.contract';
 import type { ConfigContract } from '../2.app/config/config.contract';
+import { withTransformedRemoteEntries } from '../3.adapters/remote-entry/with-transformed-remote-entries';
 
 export const createInitDrivers = ({
   config,
@@ -45,11 +46,20 @@ export const INIT_FLOW_FACTORY = ({
   config: ConfigContract;
   adapters: DrivingContract;
 }): FLOW_FACTORY<InitDriversContract> => {
-  const flow = createInitDrivers({ config, adapters });
+  const { transformRemoteEntryFn } = config.devtools;
+  const ports = transformRemoteEntryFn
+    ? {
+        ...adapters,
+        remoteEntryProvider: withTransformedRemoteEntries(
+          adapters.remoteEntryProvider,
+          transformRemoteEntryFn
+        ),
+      }
+    : adapters;
 
   return {
-    flow,
-    adapters,
+    flow: createInitDrivers({ config, adapters: ports }),
+    adapters: ports,
     config,
   };
 };

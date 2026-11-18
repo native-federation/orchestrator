@@ -12,9 +12,8 @@ const initFederation = (
   remotesOrManifestUrl: string | FederationManifest,
   options: NFOptions = {}
 ): Promise<NativeFederationResult> => {
-  const { adapters, config } = createDriving(createConfigHandlers(options));
-
-  const factory = INIT_FLOW_FACTORY({ adapters, config });
+  const factory = INIT_FLOW_FACTORY(createDriving(createConfigHandlers(options)));
+  const { adapters, config } = factory;
   const initFlow = createInitFlow(factory);
   const initRemoteEntryFlow = createInitRemoteEntryFlow(factory);
 

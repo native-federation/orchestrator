@@ -30,12 +30,7 @@ const createRemoteEntryProvider = (config: ModeConfig): ForProvidingRemoteEntrie
         .then(ensureOk)
         .then(parse)
         .then(raw => normalizeRemoteEntry(raw, remoteEntryUrl, config))
-        .catch(formatError(remoteEntryUrl))
-        .then(entry =>
-          config.devtools.transformRemoteEntryFn
-            ? config.devtools.transformRemoteEntryFn(entry)
-            : entry
-        );
+        .catch(formatError(remoteEntryUrl));
     },
   };
 };

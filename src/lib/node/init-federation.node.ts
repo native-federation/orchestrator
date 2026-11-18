@@ -80,7 +80,8 @@ const initNodeFederation = (
     sse: false,
   });
 
-  const adapters = buildNodeAdapters(config);
+  const factory = INIT_FLOW_FACTORY({ adapters: buildNodeAdapters(config), config });
+  const { adapters } = factory;
 
   const hostInstancesReady = (async () => {
     const instances = await resolveHostInstances(options.hostInstances, {
@@ -101,7 +102,6 @@ const initNodeFederation = (
     await nodeConfig.setHostInstancesFn(keys);
   })();
 
-  const factory = INIT_FLOW_FACTORY({ adapters, config });
   const initFlow = createInitFlow(factory);
   const initRemoteEntryFlow = createInitRemoteEntryFlow(factory);
 
