@@ -34,6 +34,9 @@ describe('node-loader in a real Node process', () => {
     const { stdout } = await promisify(execFile)(process.execPath, ['--no-warnings', name], {
       cwd: dir,
       encoding: 'utf8',
+      // A deadlocked child never exits on its own; kill it so a regression fails without an orphan.
+      timeout: 8_000,
+      killSignal: 'SIGKILL',
     });
     return stdout;
   };
@@ -99,5 +102,23 @@ describe('node-loader in a real Node process', () => {
     ]);
 
     expect(JSON.parse(out)).toEqual({ list: 'exposed' });
+  });
+
+  // The hooks block the child's main thread during the fetch, so its own server can never answer.
+  it('rejects an import from a URL that never answers once the fetch timeout passes', async () => {
+    const out = await runHost('host-timeout.mjs', { fetchTimeoutMs: 300 }, [
+      "import { createServer } from 'node:http';",
+      'const server = createServer(() => {});',
+      'await new Promise(r => server.listen(0, r));',
+      'const url = `http://127.0.0.1:${server.address().port}/remoteEntry.js`;',
+      'const error = await import(url).then(() => null, e => e.message);',
+      'server.close();',
+      'console.log(JSON.stringify({ url, error }));',
+    ]);
+
+    const { url, error } = JSON.parse(out);
+    expect(error).toBe(
+      `Failed to fetch module from ${url}: no response within 300 ms (if this URL is served by the same Node process, it can never answer)`
+    );
   });
 });

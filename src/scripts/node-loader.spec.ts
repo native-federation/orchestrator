@@ -408,7 +408,9 @@ describe('node-loader hooks', () => {
 
       const result = await loader.load('http://example.com/m.mjs', {}, next);
 
-      expect(fetch).toHaveBeenCalledWith('http://example.com/m.mjs');
+      expect(fetch).toHaveBeenCalledWith('http://example.com/m.mjs', {
+        signal: expect.any(AbortSignal),
+      });
       expect(result).toEqual({
         shortCircuit: true,
         format: 'module',
@@ -441,6 +443,29 @@ describe('node-loader hooks', () => {
 
       await expect(loader.load('http://example.com/m.mjs', {}, vi.fn())).rejects.toThrow(
         'Failed to fetch module from http://example.com/m.mjs: 500 Boom'
+      );
+    });
+
+    // A DOMException thrown in the hooks thread reaches the main thread as an Error with no
+    // message, so the loader rethrows a plain Error that names the URL.
+    it('names the URL and the timeout when the fetch times out', async () => {
+      const loader = await freshLoader();
+      loader.initialize({ fetchTimeoutMs: 250 });
+      global.fetch = vi
+        .fn()
+        .mockRejectedValue(new DOMException('The operation timed out.', 'TimeoutError'));
+
+      await expect(loader.load('http://example.com/m.mjs', {}, vi.fn())).rejects.toThrow(
+        'Failed to fetch module from http://example.com/m.mjs: no response within 250 ms (if this URL is served by the same Node process, it can never answer)'
+      );
+    });
+
+    it('names the URL when the fetch fails otherwise', async () => {
+      const loader = await freshLoader();
+      global.fetch = vi.fn().mockRejectedValue(new TypeError('fetch failed'));
+
+      await expect(loader.load('http://example.com/m.mjs', {}, vi.fn())).rejects.toThrow(
+        'Failed to fetch module from http://example.com/m.mjs: fetch failed'
       );
     });
 

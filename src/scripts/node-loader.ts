@@ -19,6 +19,7 @@ type HostInstanceKeys = Record<string, string[]>;
 type InitData = {
   port?: MessagePort;
   initialImportMap?: ImportMap;
+  fetchTimeoutMs?: number;
 };
 
 type IncomingMessage =
@@ -40,6 +41,7 @@ const baseURL = (() => {
 })();
 
 let activeMap: ImportMap = EMPTY_MAP;
+let fetchTimeoutMs = 30_000;
 let hostInstanceKeys: HostInstanceKeys = Object.create(null);
 // Fallback parent when context.parentURL arrives empty (seen under module.register()'s worker-thread hook).
 let lastRemoteBaseURL: string | undefined;
@@ -48,6 +50,7 @@ let lastRemoteBaseURL: string | undefined;
 const federatedURLs = new Set<string>();
 
 export function initialize(data: InitData = {}): void {
+  if (data.fetchTimeoutMs) fetchTimeoutMs = data.fetchTimeoutMs;
   if (data.initialImportMap) {
     activeMap = normalize(data.initialImportMap);
     markFederated(activeMap);
@@ -141,14 +144,28 @@ export async function load(
   }
   if (url.startsWith('http://') || url.startsWith('https://')) {
     lastRemoteBaseURL = url;
-    const res = await fetch(url);
-    if (!res.ok) {
-      throw new Error(`Failed to fetch module from ${url}: ${res.status} ${res.statusText}`);
-    }
-    const source = await res.text();
+    const source = await fetchSource(url);
     return { shortCircuit: true, format: 'module', source, responseURL: url };
   }
   return nextLoad(url, context);
+}
+
+// Hooks block the main thread until they return, so no main-thread timer (e.g. the client's ack timeout) can end a hanging fetch.
+// Errors are rethrown as plain Errors: a DOMException loses its message crossing to the main thread.
+async function fetchSource(url: string): Promise<string> {
+  const ms = fetchTimeoutMs;
+  let res: Response;
+  try {
+    res = await fetch(url, { signal: AbortSignal.timeout(ms) });
+    if (res.ok) return await res.text();
+  } catch (e) {
+    const reason =
+      (e as Error)?.name === 'TimeoutError'
+        ? `no response within ${ms} ms (if this URL is served by the same Node process, it can never answer)`
+        : ((e as Error)?.message ?? String(e));
+    throw new Error(`Failed to fetch module from ${url}: ${reason}`);
+  }
+  throw new Error(`Failed to fetch module from ${url}: ${res.status} ${res.statusText}`);
 }
 
 // --- host-instance bridge --------------------------------------------------
