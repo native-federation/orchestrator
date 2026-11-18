@@ -36,14 +36,21 @@ export type InitNodeFederationOptions = NFOptions & {
    * instead of resolving it through the import map, so remotes share the host's
    * singletons. Three forms:
    *
-   * - **Explicit map** — `{ '@angular/core': await import('@angular/core') }`.
+   * - **Explicit map** — the namespace your host already runs, e.g.
+   *   `{ '@angular/core': await import('@angular/core') }`.
    * - **`'all'`** — auto-derive every shared singleton from the host remoteEntry
    *   and import each in the host realm. Needs `hostRemoteEntry`.
-   * - **`{ include, exclude }`** — auto-derive, filtered by exact/prefix match,
-   *   e.g. `{ include: ['@angular/', 'rxjs', 'zone.js'] }`.
+   * - **`{ include, exclude, load }`** — auto-derive, filtered by exact/prefix match,
+   *   e.g. `{ include: ['@angular/', 'rxjs', 'zone.js'] }`. A `load` such as
+   *   `s => import(s)` only differs from the default when your host entry is bundled (e.g. Vite).
+   *
+   * An `import()` in an explicit map and the default `load` both run before the import map exists, so
+   * they get whatever `node_modules` holds: use them only when the host itself runs from there
+   * (unbundled dev), never in a production or `--import` preload.
    *
    * Bypasses the version resolver, the import map and integrity checks. Exports are value snapshots, not
-   * live bindings, so not for packages that reassign their exports after init. Omit in production.
+   * live bindings, so not for packages that reassign their exports after init. Omit in production: the
+   * import map already gives one instance of each shared package.
    */
   hostInstances?: HostInstancesOption;
 };
