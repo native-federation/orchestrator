@@ -210,25 +210,30 @@ describe('node-loader hooks', () => {
       expect(next).not.toHaveBeenCalled();
     });
 
-    it('falls back to the last loaded remote URL when parentURL arrives empty', async () => {
-      const loader = await freshLoader();
-      global.fetch = vi.fn().mockResolvedValue({
-        ok: true,
-        text: () => Promise.resolve('export {};'),
-      } as unknown as Response);
-      // Simulate resolve() receiving an empty parentURL after load() recorded the remote base.
-      await loader.load('https://host/remote/entry.js', {}, vi.fn());
-      const next = vi.fn();
+    // #130: the parent used to fall back to the last fetched remote, so a vm script's relative
+    // import (parentURL undefined) landed on whichever remote loaded last. Node resolves it
+    // against cwd instead, so it must reach nextResolve untouched.
+    it.each([
+      ['undefined', undefined],
+      ['empty', ''],
+    ])(
+      'leaves a relative import to Node when parentURL is %s, even after a remote loaded',
+      async (_, parentURL) => {
+        const loader = await freshLoader();
+        global.fetch = vi.fn().mockResolvedValue({
+          ok: true,
+          text: () => Promise.resolve('export {};'),
+        } as unknown as Response);
+        await loader.load('https://host/remote/entry.js', {}, vi.fn());
+        const resolved = { url: 'file:///cwd/chunk-abc.js' };
+        const next = vi.fn().mockResolvedValue(resolved);
 
-      const result = await loader.resolve('./chunk-abc.js', { parentURL: '' }, next);
+        const result = await loader.resolve('./chunk-abc.js', { parentURL }, next);
 
-      expect(result).toEqual({
-        url: 'https://host/remote/chunk-abc.js',
-        format: 'module',
-        shortCircuit: true,
-      });
-      expect(next).not.toHaveBeenCalled();
-    });
+        expect(next).toHaveBeenCalledWith('./chunk-abc.js', { parentURL });
+        expect(result).toBe(resolved);
+      }
+    );
   });
 
   describe('unresolvable specifiers', () => {

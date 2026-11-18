@@ -20,14 +20,15 @@ describe('node-loader in a real Node process', () => {
     writeFileSync(join(dir, path), content);
   };
 
-  // Writes a host script that registers the loader with `data`, then runs `body`. Async on
-  // purpose: a test may hold the child's event loop for seconds.
-  const runHost = async (name: string, data: object, body: string[]): Promise<string> => {
+  // Writes a host script that registers the loader with `data` (unless null: the body registers
+  // it), then runs `body`. Async on purpose: a test may hold the child's event loop for seconds.
+  const runHost = async (name: string, data: object | null, body: string[]): Promise<string> => {
     write(
       name,
       [
         "import { register } from 'node:module';",
-        `register(${JSON.stringify(loaderURL)}, { data: ${JSON.stringify(data)} });`,
+        `const loaderURL = ${JSON.stringify(loaderURL)};`,
+        ...(data ? [`register(loaderURL, { data: ${JSON.stringify(data)} });`] : []),
         ...body,
       ].join('\n')
     );
@@ -105,7 +106,21 @@ describe('node-loader in a real Node process', () => {
   });
 
   // Remote modules are served from a worker thread: the hooks block the child's main thread
-  // while they fetch, so a server on that thread could never answer.
+  // while they fetch, so a server on that thread could never answer. Sets `base` to its origin.
+  const serveFromWorker = (sources: Record<string, string>): string[] => [
+    "import { Worker } from 'node:worker_threads';",
+    'const worker = new Worker(`',
+    "  const { createServer } = require('node:http');",
+    "  const { parentPort, workerData } = require('node:worker_threads');",
+    '  const server = createServer((req, res) => {',
+    "    res.writeHead(200, { 'content-type': 'text/javascript' });",
+    '    res.end(workerData[req.url]);',
+    '  });',
+    '  server.listen(0, () => parentPort.postMessage(server.address().port));',
+    `\`, { eval: true, workerData: ${JSON.stringify(sources)} });`,
+    "const base = `http://127.0.0.1:${await new Promise(r => worker.once('message', r))}`;",
+  ];
+
   it('names the specifier and parent of an unmapped bare import from an http module, and keeps builtins', async () => {
     const sources = {
       '/unmapped.js': "import 'not-in-the-map';\nexport const ok = true;\n",
@@ -113,19 +128,7 @@ describe('node-loader in a real Node process', () => {
         "import { sep } from 'node:path';\nimport { EOL } from 'os';\nexport const ok = !!sep && !!EOL;\n",
     };
     const out = await runHost('host-bare.mjs', {}, [
-      "import { Worker } from 'node:worker_threads';",
-      `const sources = ${JSON.stringify(sources)};`,
-      'const worker = new Worker(`',
-      "  const { createServer } = require('node:http');",
-      "  const { parentPort, workerData } = require('node:worker_threads');",
-      '  const server = createServer((req, res) => {',
-      "    res.writeHead(200, { 'content-type': 'text/javascript' });",
-      '    res.end(workerData[req.url]);',
-      '  });',
-      '  server.listen(0, () => parentPort.postMessage(server.address().port));',
-      '`, { eval: true, workerData: sources });',
-      "const port = await new Promise(r => worker.once('message', r));",
-      'const base = `http://127.0.0.1:${port}`;',
+      ...serveFromWorker(sources),
       "const unmapped = await import(base + '/unmapped.js').then(() => null, e => e.message);",
       "const { ok: builtins } = await import(base + '/builtins.js');",
       'await worker.terminate();',
@@ -137,6 +140,32 @@ describe('node-loader in a real Node process', () => {
       `Unable to resolve 'not-in-the-map' imported from ${base}/unmapped.js: not in the import map`
     );
     expect(builtins).toBe(true);
+  });
+
+  // #77 claimed parentURL could arrive empty for a remote's nested imports, which is why the
+  // loader once fell back to the last fetched remote. On Node 24 the chunk's parentURL is set,
+  // so its relative import and its scoped bare import (scope = the remote's origin) resolve.
+  it("resolves a remote chunk's relative and scoped bare imports through their real parent", async () => {
+    const sources = {
+      '/remote/entry.js': "export { value } from './chunk.js';\n",
+      '/remote/chunk.js': "export { value } from 'scoped-dep';\n",
+      '/remote/scoped-dep.js': "export const value = 'scoped';\n",
+    };
+    const out = await runHost('host-77.mjs', null, [
+      "import { MessageChannel } from 'node:worker_threads';",
+      ...serveFromWorker(sources),
+      'const { port1, port2 } = new MessageChannel();',
+      'register(loaderURL, { data: { port: port2 }, transferList: [port2] });',
+      'const map = { imports: {}, scopes: { [base + "/remote/"]: { "scoped-dep": base + "/remote/scoped-dep.js" } } };',
+      "port1.postMessage({ type: 'set-import-map', map });",
+      "await new Promise(r => port1.once('message', r));",
+      'port1.close();',
+      "const { value } = await import(base + '/remote/entry.js');",
+      'await worker.terminate();',
+      'console.log(JSON.stringify({ value }));',
+    ]);
+
+    expect(JSON.parse(out)).toEqual({ value: 'scoped' });
   });
 
   // The hooks block the child's main thread during the fetch, so its own server can never answer.

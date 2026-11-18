@@ -43,8 +43,6 @@ const baseURL = (() => {
 let activeMap: ImportMap = EMPTY_MAP;
 let fetchTimeoutMs = 30_000;
 let hostInstanceKeys: HostInstanceKeys = Object.create(null);
-// Fallback parent when context.parentURL arrives empty (seen under module.register()'s worker-thread hook).
-let lastRemoteBaseURL: string | undefined;
 // Federated file:// modules (import-map targets and their relative chunks). Only these are forced to
 // ESM; everything else keeps Node's own format detection, since npm packages may resolve to CJS (#79).
 const federatedURLs = new Set<string>();
@@ -85,7 +83,7 @@ export async function resolve(
     return { url: HOST_PREFIX + encodeURIComponent(specifier), shortCircuit: true };
   }
   // context.parentURL can be an empty string (not just missing) here; treat it as absent.
-  const effectiveParent = context.parentURL || lastRemoteBaseURL;
+  const effectiveParent = context.parentURL || undefined;
   let mapped = resolveSpecifier(activeMap, specifier, effectiveParent);
   // Checked before nextResolve, whose URL is the realpath: an exposed module imported by URL must
   // match its map target as written.
@@ -149,7 +147,6 @@ export async function load(
     };
   }
   if (isHttpURL(url)) {
-    lastRemoteBaseURL = url;
     const source = await fetchSource(url);
     return { shortCircuit: true, format: 'module', source, responseURL: url };
   }
