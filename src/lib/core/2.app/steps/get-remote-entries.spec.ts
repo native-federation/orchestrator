@@ -412,16 +412,20 @@ describe('createGetRemoteEntries', () => {
 
     it('should throw error when remote fetch fails in strict mode', async () => {
       config.strict.strictRemoteEntry = true;
+      const fetchError = new NFError(
+        `Failed to fetch remoteEntry from ${mockScopeUrl_MFE1()}remoteEntry.json`
+      );
 
       adapters.remoteEntryProvider.provide = vi.fn(url => {
         if (url === `${mockScopeUrl_MFE2()}remoteEntry.json`) {
           return Promise.resolve(mockRemoteEntry_MFE2());
         }
-        return Promise.reject(new NFError(`Failed to fetch remoteEntry from ${url}`));
+        return Promise.reject(fetchError);
       });
 
+      // toEqual compares `cause`: with the default noop logger it is the only place a strict host sees why.
       await expect(getRemoteEntries(mockManifest())).rejects.toEqual(
-        new NFError("Could not fetch remote 'team/mfe1'")
+        new NFError("Could not fetch remote 'team/mfe1'", fetchError)
       );
 
       expect(config.log.error).toHaveBeenCalledWith(

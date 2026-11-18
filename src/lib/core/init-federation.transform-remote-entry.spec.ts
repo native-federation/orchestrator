@@ -16,7 +16,7 @@ import {
 } from 'lib/testing/domain/scope-url.mock';
 
 /**
- * `devtools.transformRemoteEntryFn` runs in the remoteEntry provider, once per fetched remoteEntry, right after the
+ * `devtools.transformRemoteEntryFn` runs around the remoteEntry provider, once per fetched remoteEntry, right after the
  * fetch and before the orchestrator's checks (name, cache/override marking), processing and pooling, in both
  * `initFederation` and `initRemoteEntry`. A remote served from storage is not fetched, so not transformed.
  * The functions below never mutate their argument, so an assertion on the result can only pass when the

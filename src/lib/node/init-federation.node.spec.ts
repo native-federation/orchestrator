@@ -231,4 +231,18 @@ describe('initNodeFederation', () => {
     const map = mockNodeLoader.setMap.mock.calls.at(-1)![0];
     expect(map.imports['@fw/core']).toMatch(/\/host\/_fw_core\.host\.js$/);
   });
+
+  // The host entry read for hostInstances has no catch and must use the same (transformed) provider as init:
+  // a transform that only mutates then rejects init with the decorator's error, not a TypeError on `undefined.shared`.
+  it('rejects when devtools.transformRemoteEntryFn returns nothing for the hostInstances read', async () => {
+    const error = await initNodeFederation(manifestPath, {
+      hostRemoteEntry: pathToFileURL(hostEntryPath).href,
+      hostInstances: 'all',
+      loadModuleFn: vi.fn(),
+      devtools: { transformRemoteEntryFn: (() => undefined) as never },
+    }).catch((e: unknown) => e);
+
+    // Match a substring: the message also carries the host entry's absolute file URL.
+    expect((error as Error).message).toContain('must return the entry');
+  });
 });
