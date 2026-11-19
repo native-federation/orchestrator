@@ -33,6 +33,8 @@ const HOST_PREFIX = 'nf-host:';
 /** Global key on the main thread holding `{ [specifier]: namespaceObject }`. */
 const HOST_INSTANCES_GLOBAL = '__NF_HOST_INSTANCES__';
 
+const BARE_FROM_HTTP_ERRORS = new Set(['ERR_INVALID_URL', 'ERR_NETWORK_IMPORT_DISALLOWED']);
+
 const baseURL = (() => {
   const cwd = process.cwd();
   const url = new URL('file://');
@@ -111,8 +113,14 @@ export async function resolve(
   }
 
   const result = await nextResolve(mapped ?? specifier, context).catch((e: unknown) => {
-    // Node can't resolve a bare specifier against an http(s) parent and only reports "Invalid URL".
-    if (isHttpURL(effectiveParent) && (e as { code?: string })?.code === 'ERR_INVALID_URL') {
+    // Node can't resolve a bare specifier against an http(s) parent: Node >= 22.x reports "Invalid
+    // URL", older versions ERR_NETWORK_IMPORT_DISALLOWED, neither naming the import map.
+    if (
+      !mapped &&
+      isHttpURL(effectiveParent) &&
+      parseURLLikeSpecifier(specifier, effectiveParent) === null &&
+      BARE_FROM_HTTP_ERRORS.has((e as { code?: string })?.code ?? '')
+    ) {
       throw new Error(
         `Unable to resolve '${specifier}' imported from ${effectiveParent}: not in the import map`
       );

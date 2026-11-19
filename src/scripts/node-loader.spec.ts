@@ -250,6 +250,34 @@ describe('node-loader hooks', () => {
       );
     });
 
+    // Node 20.x and 22.0 (verified on 20.6.0, 20.20.2, 22.0.0) reject the same import with this code.
+    it('names the specifier and parent when an older Node disallows the bare import', async () => {
+      const loader = await freshLoader();
+      const disallowed = Object.assign(new Error('only relative and absolute specifiers'), {
+        code: 'ERR_NETWORK_IMPORT_DISALLOWED',
+      });
+      const next = vi.fn().mockRejectedValue(disallowed);
+
+      await expect(
+        loader.resolve('not-in-the-map', { parentURL: 'https://host/core.js' }, next)
+      ).rejects.toThrow(
+        "Unable to resolve 'not-in-the-map' imported from https://host/core.js: not in the import map"
+      );
+    });
+
+    // Older Node also uses ERR_NETWORK_IMPORT_DISALLOWED for e.g. a file: URL imported from http.
+    it('rethrows a disallowed non-bare import from an http parent unchanged', async () => {
+      const loader = await freshLoader();
+      const disallowed = Object.assign(new Error('nope'), {
+        code: 'ERR_NETWORK_IMPORT_DISALLOWED',
+      });
+      const next = vi.fn().mockRejectedValue(disallowed);
+
+      await expect(
+        loader.resolve('file:///app/secret.js', { parentURL: 'https://host/a.js' }, next)
+      ).rejects.toBe(disallowed);
+    });
+
     it("rethrows nextResolve's error for a file:// parent", async () => {
       const loader = await freshLoader();
       const next = vi.fn().mockRejectedValue(invalidURL);

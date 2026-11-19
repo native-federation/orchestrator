@@ -143,7 +143,8 @@ describe('node-loader in a real Node process', () => {
   });
 
   // #77 claimed parentURL could arrive empty for a remote's nested imports, which is why the
-  // loader once fell back to the last fetched remote. On Node 24 the chunk's parentURL is set,
+  // loader once fell back to the last fetched remote. The chunk's parentURL is set (also checked
+  // by hand on Node 20.6.0, 20.20.2, 22.0.0 and 22.23.5, which can't run this spec as-is),
   // so its relative import and its scoped bare import (scope = the remote's origin) resolve.
   it("resolves a remote chunk's relative and scoped bare imports through their real parent", async () => {
     const sources = {
