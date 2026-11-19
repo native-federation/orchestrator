@@ -163,7 +163,8 @@ The loader hosts a W3C-compatible import-map resolve algorithm. For every
 
 For http/https URLs the `load` hook short-circuits the default loader and
 fetches the source over the wire; for `file://` and `node:` URLs it falls
-through normally.
+through normally. A remote module that doesn't respond within 30 s fails the
+import with an error naming the URL.
 
 The import map can be updated at any time after the initial install — e.g. when
 you add a new remote via `initRemoteEntry(...)` — and the loader picks up the
@@ -179,10 +180,12 @@ in one process**, which breaks singletons (Angular DI, reflection metadata, …)
 
 The `hostInstances` option bridges that gap — it takes three forms:
 
-**Auto-derive from the host remoteEntry (recommended).** Pass `'all'` and the
-orchestrator reads the host's shared singletons straight out of its
-`remoteEntry.json`, imports each in the host realm, and bridges them. Nothing to
-list by hand, and nothing to forget:
+**Auto-derive from the host remoteEntry.** Pass `'all'` and the orchestrator
+reads the host's shared singletons straight out of its `remoteEntry.json`,
+imports each in the host realm, and bridges them. This runs before the import
+map exists, so with the default `load` each `import()` resolves to whatever
+`node_modules` holds. Use it only when the host itself runs from that
+`node_modules` (unbundled dev), never in a production or `--import` preload:
 
 ```js
 await initNodeFederation('./dist/browser/federation.manifest.json', {
@@ -203,14 +206,15 @@ hostInstances: { exclude: ['some-dep-you-want-scoped'] },
 Each derived specifier is loaded with `import(specifier)` from this library. Under
 a bundler-driven dev server (e.g. Vite SSR) that may not be the realm holding the
 host's running instance; pass a `load` defined in your own host entry so the import
-resolves through the host's module graph:
+resolves through the host's module graph. Such a `load` only differs from the
+default when that entry is bundled:
 
 ```js
 hostInstances: { include: ['@angular/'], load: specifier => import(specifier) },
 ```
 
-**Explicit map.** Hand over the namespace objects yourself — useful when an
-instance comes from somewhere other than a plain `import`:
+**Explicit map.** Hand over the namespace your host already runs — useful when
+an instance comes from somewhere other than a plain `import`:
 
 ```js
 hostInstances: {
@@ -232,9 +236,11 @@ skipped with a warning rather than aborting init.
 > packages whose exports are stable references (Angular's classes/functions),
 > not for packages that reassign their exports after init.
 
-Omit it in production: with no `hostInstances`, nothing is published and the
-loader never routes to the bridge — resolution stays import-map only, with full
-version resolution and integrity verification.
+Omit it in production: the host and its remotes resolve shared packages through
+the same import map, which already gives one instance of each. With no
+`hostInstances`, nothing is published and the loader never routes to the bridge —
+resolution stays import-map only, with full version resolution and integrity
+verification.
 
 ## What is _not_ on the Node entry
 

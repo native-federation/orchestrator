@@ -7,6 +7,7 @@
  * accordingly and fetches http(s) modules into the loader as source text.
  */
 
+import { isBuiltin } from 'node:module';
 import type { MessagePort } from 'node:worker_threads';
 
 type Imports = Record<string, string>;
@@ -19,6 +20,7 @@ type HostInstanceKeys = Record<string, string[]>;
 type InitData = {
   port?: MessagePort;
   initialImportMap?: ImportMap;
+  fetchTimeoutMs?: number;
 };
 
 type IncomingMessage =
@@ -32,6 +34,8 @@ const HOST_PREFIX = 'nf-host:';
 /** Global key on the main thread holding `{ [specifier]: namespaceObject }`. */
 const HOST_INSTANCES_GLOBAL = '__NF_HOST_INSTANCES__';
 
+const BARE_FROM_HTTP_ERRORS = new Set(['ERR_INVALID_URL', 'ERR_NETWORK_IMPORT_DISALLOWED']);
+
 const baseURL = (() => {
   const cwd = process.cwd();
   const url = new URL('file://');
@@ -40,21 +44,23 @@ const baseURL = (() => {
 })();
 
 let activeMap: ImportMap = EMPTY_MAP;
+let fetchTimeoutMs = 30_000;
 let hostInstanceKeys: HostInstanceKeys = Object.create(null);
-// Fallback parent when context.parentURL arrives empty (seen under module.register()'s worker-thread hook).
-let lastRemoteBaseURL: string | undefined;
 // Federated file:// modules (import-map targets and their relative chunks). Only these are forced to
 // ESM; everything else keeps Node's own format detection, since npm packages may resolve to CJS (#79).
 const federatedURLs = new Set<string>();
 
 export function initialize(data: InitData = {}): void {
+  if (data.fetchTimeoutMs) fetchTimeoutMs = data.fetchTimeoutMs;
   if (data.initialImportMap) {
     activeMap = normalize(data.initialImportMap);
+    markFederated(activeMap);
   }
   if (data.port) {
     data.port.on('message', (msg: IncomingMessage) => {
       if (msg && msg.type === 'set-import-map') {
         activeMap = normalize(msg.map);
+        markFederated(activeMap);
         data.port!.postMessage({ type: 'import-map-applied' });
       } else if (msg && msg.type === 'set-host-instances') {
         hostInstanceKeys = msg.keys ?? Object.create(null);
@@ -80,19 +86,26 @@ export async function resolve(
     return { url: HOST_PREFIX + encodeURIComponent(specifier), shortCircuit: true };
   }
   // context.parentURL can be an empty string (not just missing) here; treat it as absent.
-  const effectiveParent = context.parentURL || lastRemoteBaseURL;
+  const effectiveParent = context.parentURL || undefined;
   let mapped = resolveSpecifier(activeMap, specifier, effectiveParent);
-  let federated = mapped !== null;
+  // Node < 22.x refuses any non-URL import from an http parent, builtins included.
+  if (!mapped && isHttpURL(effectiveParent) && isBuiltin(specifier)) {
+    const url = specifier.startsWith('node:') ? specifier : 'node:' + specifier;
+    return { url, format: 'builtin', shortCircuit: true };
+  }
+  // Checked before nextResolve, whose URL is the realpath: an exposed module imported by URL must
+  // match its map target as written.
+  let federated =
+    mapped !== null ||
+    federatedURLs.has(parseURLLikeSpecifier(specifier, effectiveParent ?? baseURL) ?? specifier);
 
   // Not every relative/absolute specifier has an import-map entry (e.g. a sibling chunk); resolve those directly.
   if (!mapped) {
-    const isRelative =
-      specifier.startsWith('/') || specifier.startsWith('./') || specifier.startsWith('../');
     try {
-      if (isRelative && effectiveParent) {
+      if (isRelativeSpecifier(specifier) && effectiveParent) {
         mapped = new URL(specifier, effectiveParent).href;
-        federated = federatedURLs.has(effectiveParent);
-      } else if (/^https?:\/\//.test(specifier)) {
+        federated ||= federatedURLs.has(effectiveParent);
+      } else if (isHttpURL(specifier)) {
         mapped = specifier;
       }
     } catch {
@@ -101,11 +114,25 @@ export async function resolve(
   }
 
   // nextResolve() can't handle absolute http(s) URLs (throws ERR_INVALID_URL); short-circuit like load() does.
-  if (mapped && (mapped.startsWith('http://') || mapped.startsWith('https://'))) {
+  if (mapped && isHttpURL(mapped)) {
     return { url: mapped, format: 'module', shortCircuit: true };
   }
 
-  const result = await nextResolve(mapped ?? specifier, context);
+  const result = await nextResolve(mapped ?? specifier, context).catch((e: unknown) => {
+    // Node can't resolve a bare specifier against an http(s) parent: Node >= 22.x reports "Invalid
+    // URL", older versions ERR_NETWORK_IMPORT_DISALLOWED, neither naming the import map.
+    if (
+      !mapped &&
+      isHttpURL(effectiveParent) &&
+      parseURLLikeSpecifier(specifier, effectiveParent) === null &&
+      BARE_FROM_HTTP_ERRORS.has((e as { code?: string })?.code ?? '')
+    ) {
+      throw new Error(
+        `Unable to resolve '${specifier}' imported from ${effectiveParent}: not in the import map`
+      );
+    }
+    throw e;
+  });
   if (!federated) return result;
   federatedURLs.add(result.url);
   return { ...result, format: 'module' };
@@ -133,16 +160,29 @@ export async function load(
       source: synthHostModule(specifier, hostInstanceKeys[specifier]),
     };
   }
-  if (url.startsWith('http://') || url.startsWith('https://')) {
-    lastRemoteBaseURL = url;
-    const res = await fetch(url);
-    if (!res.ok) {
-      throw new Error(`Failed to fetch module from ${url}: ${res.status} ${res.statusText}`);
-    }
-    const source = await res.text();
+  if (isHttpURL(url)) {
+    const source = await fetchSource(url);
     return { shortCircuit: true, format: 'module', source, responseURL: url };
   }
   return nextLoad(url, context);
+}
+
+// Hooks block the main thread until they return, so no main-thread timer (e.g. the client's ack timeout) can end a hanging fetch.
+// Errors are rethrown as plain Errors: a DOMException loses its message crossing to the main thread.
+async function fetchSource(url: string): Promise<string> {
+  const ms = fetchTimeoutMs;
+  let res: Response;
+  try {
+    res = await fetch(url, { signal: AbortSignal.timeout(ms) });
+    if (res.ok) return await res.text();
+  } catch (e) {
+    const reason =
+      (e as Error)?.name === 'TimeoutError'
+        ? `no response within ${ms} ms (if this URL is served by the same Node process, it can never answer)`
+        : ((e as Error)?.message ?? String(e));
+    throw new Error(`Failed to fetch module from ${url}: ${reason}`);
+  }
+  throw new Error(`Failed to fetch module from ${url}: ${res.status} ${res.statusText}`);
 }
 
 // --- host-instance bridge --------------------------------------------------
@@ -219,13 +259,27 @@ function resolveImportsMatch(normalizedSpecifier: string, specifierMap: Imports)
   return null;
 }
 
+function isHttpURL(url: string | undefined): url is string {
+  return !!url && (url.startsWith('http://') || url.startsWith('https://'));
+}
+
+function isRelativeSpecifier(specifier: string): boolean {
+  return specifier.startsWith('/') || specifier.startsWith('./') || specifier.startsWith('../');
+}
+
 function parseURLLikeSpecifier(specifier: string, base: string): string | null {
-  const useBase =
-    specifier.startsWith('/') || specifier.startsWith('./') || specifier.startsWith('../');
   try {
-    return new URL(specifier, useBase ? base : undefined).href;
+    return new URL(specifier, isRelativeSpecifier(specifier) ? base : undefined).href;
   } catch {
     return null;
+  }
+}
+
+function markFederated(map: ImportMap): void {
+  for (const imports of [map.imports, ...Object.values(map.scopes ?? {})]) {
+    for (const target of Object.values(imports)) {
+      federatedURLs.add(parseURLLikeSpecifier(target, baseURL) ?? target);
+    }
   }
 }
 

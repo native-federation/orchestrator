@@ -45,7 +45,9 @@ describe('node-loader hooks', () => {
     it('subscribes to port messages and acks set-import-map', async () => {
       const loader = await freshLoader();
       const port = new FakePort();
-      loader.initialize({ port: port as unknown as EventEmitter & { postMessage(m: unknown): void } });
+      loader.initialize({
+        port: port as unknown as EventEmitter & { postMessage(m: unknown): void },
+      });
 
       port.emit({ type: 'set-import-map', map: { imports: { bar: 'file:///bar.mjs' } } });
 
@@ -55,7 +57,9 @@ describe('node-loader hooks', () => {
     it('updates the active import map after a set-import-map message', async () => {
       const loader = await freshLoader();
       const port = new FakePort();
-      loader.initialize({ port: port as unknown as EventEmitter & { postMessage(m: unknown): void } });
+      loader.initialize({
+        port: port as unknown as EventEmitter & { postMessage(m: unknown): void },
+      });
 
       port.emit({ type: 'set-import-map', map: { imports: { live: 'file:///live.mjs' } } });
 
@@ -67,7 +71,9 @@ describe('node-loader hooks', () => {
     it('acks set-host-instances with host-instances-applied', async () => {
       const loader = await freshLoader();
       const port = new FakePort();
-      loader.initialize({ port: port as unknown as EventEmitter & { postMessage(m: unknown): void } });
+      loader.initialize({
+        port: port as unknown as EventEmitter & { postMessage(m: unknown): void },
+      });
 
       port.emit({ type: 'set-host-instances', keys: { '@angular/core': ['Component'] } });
 
@@ -77,7 +83,9 @@ describe('node-loader hooks', () => {
     it('ignores port messages of other types', async () => {
       const loader = await freshLoader();
       const port = new FakePort();
-      loader.initialize({ port: port as unknown as EventEmitter & { postMessage(m: unknown): void } });
+      loader.initialize({
+        port: port as unknown as EventEmitter & { postMessage(m: unknown): void },
+      });
 
       port.emit({ type: 'something-else' });
       port.emit(null);
@@ -88,7 +96,9 @@ describe('node-loader hooks', () => {
     it('unrefs the port if it supports it', async () => {
       const loader = await freshLoader();
       const port = new FakePort();
-      loader.initialize({ port: port as unknown as EventEmitter & { postMessage(m: unknown): void } });
+      loader.initialize({
+        port: port as unknown as EventEmitter & { postMessage(m: unknown): void },
+      });
       expect(port.unref).toHaveBeenCalled();
     });
   });
@@ -200,24 +210,133 @@ describe('node-loader hooks', () => {
       expect(next).not.toHaveBeenCalled();
     });
 
-    it('falls back to the last loaded remote URL when parentURL arrives empty', async () => {
+    // #130: the parent used to fall back to the last fetched remote, so a vm script's relative
+    // import (parentURL undefined) landed on whichever remote loaded last. Node resolves it
+    // against cwd instead, so it must reach nextResolve untouched.
+    it.each([
+      ['undefined', undefined],
+      ['empty', ''],
+    ])(
+      'leaves a relative import to Node when parentURL is %s, even after a remote loaded',
+      async (_, parentURL) => {
+        const loader = await freshLoader();
+        global.fetch = vi.fn().mockResolvedValue({
+          ok: true,
+          text: () => Promise.resolve('export {};'),
+        } as unknown as Response);
+        await loader.load('https://host/remote/entry.js', {}, vi.fn());
+        const resolved = { url: 'file:///cwd/chunk-abc.js' };
+        const next = vi.fn().mockResolvedValue(resolved);
+
+        const result = await loader.resolve('./chunk-abc.js', { parentURL }, next);
+
+        expect(next).toHaveBeenCalledWith('./chunk-abc.js', { parentURL });
+        expect(result).toBe(resolved);
+      }
+    );
+  });
+
+  // Node 20.x and 22.0 reject builtin imports from an http parent with
+  // ERR_NETWORK_IMPORT_DISALLOWED (verified on 20.6.0, 20.20.2, 22.0.0), so the loader answers them.
+  describe('builtins imported from an http module', () => {
+    it.each([
+      ['os', 'node:os'],
+      ['node:path', 'node:path'],
+      ['fs/promises', 'node:fs/promises'],
+    ])('resolves %s to %s without nextResolve', async (specifier, url) => {
       const loader = await freshLoader();
-      global.fetch = vi.fn().mockResolvedValue({
-        ok: true,
-        text: () => Promise.resolve('export {};'),
-      } as unknown as Response);
-      // Simulate resolve() receiving an empty parentURL after load() recorded the remote base.
-      await loader.load('https://host/remote/entry.js', {}, vi.fn());
       const next = vi.fn();
 
-      const result = await loader.resolve('./chunk-abc.js', { parentURL: '' }, next);
+      const result = await loader.resolve(specifier, { parentURL: 'https://host/a.js' }, next);
+
+      expect(result).toEqual({ url, format: 'builtin', shortCircuit: true });
+      expect(next).not.toHaveBeenCalled();
+    });
+
+    it('leaves a builtin imported from a file:// parent to nextResolve', async () => {
+      const loader = await freshLoader();
+      const resolved = { url: 'node:os', format: 'builtin' };
+      const next = vi.fn().mockResolvedValue(resolved);
+
+      const result = await loader.resolve('os', { parentURL: 'file:///app/main.mjs' }, next);
+
+      expect(next).toHaveBeenCalledWith('os', { parentURL: 'file:///app/main.mjs' });
+      expect(result).toBe(resolved);
+    });
+
+    it('lets an import-map entry for a builtin name win', async () => {
+      const loader = await freshLoader();
+      loader.initialize({ initialImportMap: { imports: { os: 'https://cdn/os-shim.js' } } });
+
+      const result = await loader.resolve('os', { parentURL: 'https://host/a.js' }, vi.fn());
 
       expect(result).toEqual({
-        url: 'https://host/remote/chunk-abc.js',
+        url: 'https://cdn/os-shim.js',
         format: 'module',
         shortCircuit: true,
       });
-      expect(next).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('unresolvable specifiers', () => {
+    const invalidURL = Object.assign(new TypeError('Invalid URL'), { code: 'ERR_INVALID_URL' });
+
+    it('names the specifier and parent when a bare import from an http module is not mapped', async () => {
+      const loader = await freshLoader();
+      const next = vi.fn().mockRejectedValue(invalidURL);
+
+      await expect(
+        loader.resolve('zone.js/plugins/task-tracking', { parentURL: 'https://host/core.js' }, next)
+      ).rejects.toThrow(
+        "Unable to resolve 'zone.js/plugins/task-tracking' imported from https://host/core.js: not in the import map"
+      );
+    });
+
+    // Node 20.x and 22.0 (verified on 20.6.0, 20.20.2, 22.0.0) reject the same import with this code.
+    it('names the specifier and parent when an older Node disallows the bare import', async () => {
+      const loader = await freshLoader();
+      const disallowed = Object.assign(new Error('only relative and absolute specifiers'), {
+        code: 'ERR_NETWORK_IMPORT_DISALLOWED',
+      });
+      const next = vi.fn().mockRejectedValue(disallowed);
+
+      await expect(
+        loader.resolve('not-in-the-map', { parentURL: 'https://host/core.js' }, next)
+      ).rejects.toThrow(
+        "Unable to resolve 'not-in-the-map' imported from https://host/core.js: not in the import map"
+      );
+    });
+
+    // Older Node also uses ERR_NETWORK_IMPORT_DISALLOWED for e.g. a file: URL imported from http.
+    it('rethrows a disallowed non-bare import from an http parent unchanged', async () => {
+      const loader = await freshLoader();
+      const disallowed = Object.assign(new Error('nope'), {
+        code: 'ERR_NETWORK_IMPORT_DISALLOWED',
+      });
+      const next = vi.fn().mockRejectedValue(disallowed);
+
+      await expect(
+        loader.resolve('file:///app/secret.js', { parentURL: 'https://host/a.js' }, next)
+      ).rejects.toBe(disallowed);
+    });
+
+    it("rethrows nextResolve's error for a file:// parent", async () => {
+      const loader = await freshLoader();
+      const next = vi.fn().mockRejectedValue(invalidURL);
+
+      await expect(loader.resolve('pkg', { parentURL: 'file:///app/main.mjs' }, next)).rejects.toBe(
+        invalidURL
+      );
+    });
+
+    it('rethrows other errors from an http parent unchanged', async () => {
+      const loader = await freshLoader();
+      const notFound = Object.assign(new Error('nope'), { code: 'ERR_MODULE_NOT_FOUND' });
+      const next = vi.fn().mockRejectedValue(notFound);
+
+      await expect(loader.resolve('pkg', { parentURL: 'https://host/a.js' }, next)).rejects.toBe(
+        notFound
+      );
     });
   });
 
@@ -236,7 +355,11 @@ describe('node-loader hooks', () => {
     it('marks a relative chunk of a federated module as ESM', async () => {
       const loader = await freshLoader();
       loader.initialize({ initialImportMap: { imports: { mfe: 'file:///dist/mfe/entry.js' } } });
-      await loader.resolve('mfe', {}, vi.fn().mockResolvedValue({ url: 'file:///dist/mfe/entry.js' }));
+      await loader.resolve(
+        'mfe',
+        {},
+        vi.fn().mockResolvedValue({ url: 'file:///dist/mfe/entry.js' })
+      );
       const next = vi.fn().mockResolvedValue({ url: 'file:///dist/mfe/chunk-a.js', format: null });
 
       const result = await loader.resolve(
@@ -246,6 +369,37 @@ describe('node-loader hooks', () => {
       );
 
       expect(result).toEqual({ url: 'file:///dist/mfe/chunk-a.js', format: 'module' });
+    });
+
+    it('marks a map target imported by its URL as ESM, even when Node resolves it elsewhere', async () => {
+      const loader = await freshLoader();
+      loader.initialize({
+        initialImportMap: { imports: { 'mfe/./List': 'file:///deploy/mfe/List.js' } },
+      });
+      // nextResolve returns the realpath of a symlinked deploy dir.
+      const next = vi
+        .fn()
+        .mockResolvedValue({ url: 'file:///releases/7/mfe/List.js', format: null });
+
+      const result = await loader.resolve('file:///deploy/mfe/List.js', {}, next);
+
+      expect(result).toEqual({ url: 'file:///releases/7/mfe/List.js', format: 'module' });
+    });
+
+    it('marks a map target imported relatively from a non-federated parent as ESM', async () => {
+      const loader = await freshLoader();
+      loader.initialize({
+        initialImportMap: { imports: { 'mfe/./List': 'file:///app/dist/mfe/List.js' } },
+      });
+      const next = vi.fn().mockResolvedValue({ url: 'file:///app/dist/mfe/List.js', format: null });
+
+      const result = await loader.resolve(
+        './dist/mfe/List.js',
+        { parentURL: 'file:///app/server.mjs' },
+        next
+      );
+
+      expect(result).toEqual({ url: 'file:///app/dist/mfe/List.js', format: 'module' });
     });
 
     it("keeps nextResolve's format for an unmapped bare specifier", async () => {
@@ -271,7 +425,9 @@ describe('node-loader hooks', () => {
     const withHostInstances = async (keys: Record<string, string[]>): Promise<LoaderModule> => {
       const loader = await freshLoader();
       const port = new FakePort();
-      loader.initialize({ port: port as unknown as EventEmitter & { postMessage(m: unknown): void } });
+      loader.initialize({
+        port: port as unknown as EventEmitter & { postMessage(m: unknown): void },
+      });
       port.emit({ type: 'set-host-instances', keys });
       return loader;
     };
@@ -289,8 +445,13 @@ describe('node-loader hooks', () => {
     it('bridged specifiers win over the import map', async () => {
       const loader = await freshLoader();
       const port = new FakePort();
-      loader.initialize({ port: port as unknown as EventEmitter & { postMessage(m: unknown): void } });
-      port.emit({ type: 'set-import-map', map: { imports: { '@angular/core': 'file:///ng.mjs' } } });
+      loader.initialize({
+        port: port as unknown as EventEmitter & { postMessage(m: unknown): void },
+      });
+      port.emit({
+        type: 'set-import-map',
+        map: { imports: { '@angular/core': 'file:///ng.mjs' } },
+      });
       port.emit({ type: 'set-host-instances', keys: { '@angular/core': ['Component'] } });
       const next = vi.fn();
 
@@ -301,7 +462,9 @@ describe('node-loader hooks', () => {
     });
 
     it('synthesizes a module that re-exports named keys and default from the host instances', async () => {
-      const loader = await withHostInstances({ '@angular/core': ['Component', 'default', 'ɵsetClassMetadata'] });
+      const loader = await withHostInstances({
+        '@angular/core': ['Component', 'default', 'ɵsetClassMetadata'],
+      });
 
       const result = await loader.load('nf-host:%40angular%2Fcore', {}, vi.fn());
 
@@ -354,7 +517,9 @@ describe('node-loader hooks', () => {
 
       const result = await loader.load('http://example.com/m.mjs', {}, next);
 
-      expect(fetch).toHaveBeenCalledWith('http://example.com/m.mjs');
+      expect(fetch).toHaveBeenCalledWith('http://example.com/m.mjs', {
+        signal: expect.any(AbortSignal),
+      });
       expect(result).toEqual({
         shortCircuit: true,
         format: 'module',
@@ -387,6 +552,29 @@ describe('node-loader hooks', () => {
 
       await expect(loader.load('http://example.com/m.mjs', {}, vi.fn())).rejects.toThrow(
         'Failed to fetch module from http://example.com/m.mjs: 500 Boom'
+      );
+    });
+
+    // A DOMException thrown in the hooks thread reaches the main thread as an Error with no
+    // message, so the loader rethrows a plain Error that names the URL.
+    it('names the URL and the timeout when the fetch times out', async () => {
+      const loader = await freshLoader();
+      loader.initialize({ fetchTimeoutMs: 250 });
+      global.fetch = vi
+        .fn()
+        .mockRejectedValue(new DOMException('The operation timed out.', 'TimeoutError'));
+
+      await expect(loader.load('http://example.com/m.mjs', {}, vi.fn())).rejects.toThrow(
+        'Failed to fetch module from http://example.com/m.mjs: no response within 250 ms (if this URL is served by the same Node process, it can never answer)'
+      );
+    });
+
+    it('names the URL when the fetch fails otherwise', async () => {
+      const loader = await freshLoader();
+      global.fetch = vi.fn().mockRejectedValue(new TypeError('fetch failed'));
+
+      await expect(loader.load('http://example.com/m.mjs', {}, vi.fn())).rejects.toThrow(
+        'Failed to fetch module from http://example.com/m.mjs: fetch failed'
       );
     });
 
