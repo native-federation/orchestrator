@@ -7,6 +7,7 @@
  * accordingly and fetches http(s) modules into the loader as source text.
  */
 
+import { isBuiltin } from 'node:module';
 import type { MessagePort } from 'node:worker_threads';
 
 type Imports = Record<string, string>;
@@ -87,6 +88,11 @@ export async function resolve(
   // context.parentURL can be an empty string (not just missing) here; treat it as absent.
   const effectiveParent = context.parentURL || undefined;
   let mapped = resolveSpecifier(activeMap, specifier, effectiveParent);
+  // Node < 22.x refuses any non-URL import from an http parent, builtins included.
+  if (!mapped && isHttpURL(effectiveParent) && isBuiltin(specifier)) {
+    const url = specifier.startsWith('node:') ? specifier : 'node:' + specifier;
+    return { url, format: 'builtin', shortCircuit: true };
+  }
   // Checked before nextResolve, whose URL is the realpath: an exposed module imported by URL must
   // match its map target as written.
   let federated =

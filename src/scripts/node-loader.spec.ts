@@ -236,6 +236,48 @@ describe('node-loader hooks', () => {
     );
   });
 
+  // Node 20.x and 22.0 reject builtin imports from an http parent with
+  // ERR_NETWORK_IMPORT_DISALLOWED (verified on 20.6.0, 20.20.2, 22.0.0), so the loader answers them.
+  describe('builtins imported from an http module', () => {
+    it.each([
+      ['os', 'node:os'],
+      ['node:path', 'node:path'],
+      ['fs/promises', 'node:fs/promises'],
+    ])('resolves %s to %s without nextResolve', async (specifier, url) => {
+      const loader = await freshLoader();
+      const next = vi.fn();
+
+      const result = await loader.resolve(specifier, { parentURL: 'https://host/a.js' }, next);
+
+      expect(result).toEqual({ url, format: 'builtin', shortCircuit: true });
+      expect(next).not.toHaveBeenCalled();
+    });
+
+    it('leaves a builtin imported from a file:// parent to nextResolve', async () => {
+      const loader = await freshLoader();
+      const resolved = { url: 'node:os', format: 'builtin' };
+      const next = vi.fn().mockResolvedValue(resolved);
+
+      const result = await loader.resolve('os', { parentURL: 'file:///app/main.mjs' }, next);
+
+      expect(next).toHaveBeenCalledWith('os', { parentURL: 'file:///app/main.mjs' });
+      expect(result).toBe(resolved);
+    });
+
+    it('lets an import-map entry for a builtin name win', async () => {
+      const loader = await freshLoader();
+      loader.initialize({ initialImportMap: { imports: { os: 'https://cdn/os-shim.js' } } });
+
+      const result = await loader.resolve('os', { parentURL: 'https://host/a.js' }, vi.fn());
+
+      expect(result).toEqual({
+        url: 'https://cdn/os-shim.js',
+        format: 'module',
+        shortCircuit: true,
+      });
+    });
+  });
+
   describe('unresolvable specifiers', () => {
     const invalidURL = Object.assign(new TypeError('Invalid URL'), { code: 'ERR_INVALID_URL' });
 
